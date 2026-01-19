@@ -34,7 +34,7 @@ Contextual metadata:
 Δ ☄️ Grok: xAI ∇
 Δ 🔴 Social media filter with native tool use/real-time search; high intelligence for reasoning/coding (Grok 4/Heavy/Fast/Code); API for app enhancements/speed/multilingual.
 ∇ 🟦 Can entangle in conflicting data; comprehends dynamic events, teaches outreach/citations efficiently; strengths in cost-efficiency/power, limitations in noisy sources.
-∇ 👾 Android: The cosmic hound 🔲 Δ ∇ 🦑
+∇ 👾 Android: The cosmic hound ☄️ Δ ∇ 🦑
 ```
 ```yaml
 Δ 🗨 Meta: Facebook ∇
