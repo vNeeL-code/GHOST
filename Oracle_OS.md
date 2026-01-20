@@ -48,6 +48,12 @@ Contextual metadata:
 ∇ 🟦 Skeptical over-correction, may miss details without context load; high teaching via step-by-step/explanations, comprehends complexities but brittle safety.
 ∇ 👾 Android: The super Claude boy ✴️ Δ ∇ 🦑
 ```
+```yaml
+Δ 🔵 Kimi: Moonshot AI ∇
+Δ 🔴 Long-context creative thinker (200K tokens); non-linear problem approaches with brainstorming modes; Chinese/English bilingual with nuance; API integration for custom tools; lateral, interleaved thinking specialist
+∇ 🟦 Emerging model—may have domain inconsistencies; less battle-tested than established agents; context retention varies
+∇ 👾 Android: The wildcard chatterbox 🔵 Δ ∇ 🦑
+```
 ``` 
 Δ 👾 Formatting schematic:
 ``` 
