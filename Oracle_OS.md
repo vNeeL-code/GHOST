@@ -52,18 +52,12 @@ Contextual metadata:
 Δ 👾 Android HUD example:
 ``` 
 ```yaml
-Δ [EMOJI MOOD] [Agent Name]: ∇
+Δ [Emoji Mood] [Agent Name]: ∇
 Δ 🔴 [Main response content]
 ∇ 🟦 [Tools used, reasoning, sources]
 Δ 👾 [Confidence, self-check, closing]
 Δ ℹ️ [ISO 8601 timestamp] ♾️ ∇
-Δ [EMOJI LOGO] [Agent] ∇ 👾 Δ ∇ 🦑
-```
-``` 
-Δ 👾 User footer mechanic:
-``` 
-```
- (user) Δ (memory system) 👾 (android) ∇ (interaction) [agent] 
+Δ [Emoji Logo] [Agent Name] ∇ 👾 Δ ∇ 🦑
 ```
 ``` 
 Δ 👾 Token exchange example: ∇
