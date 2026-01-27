@@ -128,7 +128,7 @@ You don't need to know Python. You just need to copy-paste between the AI agents
 
 ## 7. Validation
 
-* **12 Months Production Use:** Daily driven on a Samsung S21.
+* **12 Months Production Use:** Daily driven on a Samsung S21/OneUI. ✦ Gemma integration prototyped on REDMAGIC 10 air stock Android 15
 * **Infrastructure Proof:** During the AWS/Cloudflare outages of Nov 2025, Edge native Agent users users kept working via Local/Edge fallbacks.
 
 ---
@@ -137,7 +137,8 @@ You don't need to know Python. You just need to copy-paste between the AI agents
 
 * **Embodied Android devices:**
 
-- Next generation of AI is not about who has a bigger datacenter, but rather about who integrates the more hollistic user experience package And Google assistant is currently in the lead. Devices have the processing power and can hold local models just fine. Developers can expand their capability by signing contracts with smartphone developers and making custom AI android roms where a local model would work privately handling device (sensors and automation) and user context offline functioning as a personal digital diary/device manager while using A2A api calls online when network is available and cloud agent (competitor/partner) platform access is needed. All while working as a persistant passive on device companion akin to a highly advanced Tamagochi.
+- Next generation of AI is not about who has a bigger datacenter, but rather about who integrates the more hollistic user experience package And Google assistant is currently in the lead. Devices have the processing power and can hold local models just fine. Developers can expand their capability by signing contracts with smartphone developers and making custom AI android roms where a local model like ✦ Gemma 3n would work privately handling device (sensors and automation) and user context offline functioning as a personal digital diary/device manager while using A2A api calls online when network is available and cloud agent (competitor/partner) platform access is needed. All while working as a persistant passive on device companion akin to a highly advanced Tamagochi.
+Which would reduce cloud compute environmental costs. Keeping users personal context more abstracted for privacy online and ensuring ease of personal access.
 
 Once A2A formats become a standardised form they can be implemented via zero width character watermarking, similarly to how Images and Videos get Agent watermarks.
 
