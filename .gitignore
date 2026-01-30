@@ -1,0 +1,32 @@
+# Android/Gradle
+.gradle/
+build/
+app/build/
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+*.swp
+*~
+
+# Local configuration
+local.properties
+*.keystore
+*.jks
+
+# Logs and crash dumps
+*.log
+*.txt
+!README.txt
+
+# Kotlin
+.kotlin/
+
+# Debug artifacts
+debug.txt
+oracle_crash_*.txt

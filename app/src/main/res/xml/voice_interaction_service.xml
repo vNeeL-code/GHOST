@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<voice-interaction-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:sessionService="com.gemma.api.GemmaVoiceInteractionSessionService"
+    android:recognitionService="com.google.android.googlequicksearchbox/com.google.android.voicesearch.serviceapi.GoogleRecognitionService"
+    android:settingsActivity="com.gemma.api.MainActivity"
+    android:supportsAssist="true"
+    android:supportsLocalInteraction="true" />
