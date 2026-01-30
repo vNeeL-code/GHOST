@@ -3,10 +3,11 @@ package com.gemma.api.agent
 import android.content.Context
 import com.gemma.api.GemmaEngine
 import com.gemma.api.mcp.MCPServer
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-// import kotlinx.coroutines.GlobalScope // Removed for Kimi K2 Fix
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.File
 import com.google.gson.Gson
@@ -28,7 +29,9 @@ class KoogAgent(
     private val mcpServer: MCPServer,
     private val checkpointDir: File
 ) {
-    
+    // Agent's own coroutine scope for fire-and-forget operations (KV flush, etc.)
+    private val agentScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+
     // ═══════════════════════════════════════════════════════════════
     // STATE MANAGEMENT
     // ═══════════════════════════════════════════════════════════════
@@ -276,18 +279,20 @@ $finalContent
 
 
         Timber.i("✅ KoogAgent: Turn $turnCount complete!")
-        
-        // 10. CRITICAL: Flush KV Cache to prevent NPU corruption
+
+        // 10. CRITICAL: Flush KV Cache to prevent NPU corruption (ASYNC)
         // NPU drivers are unstable - cache gets corrupted after turn 1
-        // This sacrifices speed for reliability
-        try {
-            Timber.d("🔄 Flushing KV cache (NPU corruption prevention)...")
-            llmEngine.softReset(buildSystemPrompt())
-            Timber.i("✓ KV cache flushed")
-        } catch (e: Exception) {
-            Timber.e(e, "KV reset failed - next turn may crash")
+        // Use agentScope so this doesn't block the response returning to user
+        agentScope.launch {
+            try {
+                Timber.d("🔄 Flushing KV cache (NPU corruption prevention)...")
+                llmEngine.softReset(buildSystemPrompt())
+                Timber.i("✓ KV cache flushed")
+            } catch (e: Exception) {
+                Timber.e(e, "KV reset failed - next turn may crash")
+            }
         }
-        
+
         wrappedResponse
     }
     

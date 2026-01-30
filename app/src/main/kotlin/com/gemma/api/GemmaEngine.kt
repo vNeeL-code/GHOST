@@ -282,8 +282,45 @@ class GemmaEngine(private val context: Context) {
     }
 
     private fun shortArrayToByteArray(shorts: ShortArray): ByteArray {
-        val buffer = ByteBuffer.allocate(shorts.size * 2).order(ByteOrder.LITTLE_ENDIAN)
-        buffer.asShortBuffer().put(shorts)
+        // LiteRT's miniaudio expects WAV format, not raw PCM
+        // Wrap PCM samples in a proper WAV header
+        return pcmToWav(shorts, sampleRate = 16000, channels = 1, bitsPerSample = 16)
+    }
+
+    /**
+     * Convert raw PCM samples to WAV format with proper header
+     * miniaudio decoder requires a recognizable audio format
+     */
+    private fun pcmToWav(samples: ShortArray, sampleRate: Int, channels: Int, bitsPerSample: Int): ByteArray {
+        val pcmDataSize = samples.size * 2  // 2 bytes per sample (16-bit)
+        val wavSize = 44 + pcmDataSize  // 44-byte header + PCM data
+
+        val buffer = ByteBuffer.allocate(wavSize).order(ByteOrder.LITTLE_ENDIAN)
+
+        // RIFF header
+        buffer.put("RIFF".toByteArray())
+        buffer.putInt(wavSize - 8)  // File size minus "RIFF" and this field
+        buffer.put("WAVE".toByteArray())
+
+        // fmt subchunk
+        buffer.put("fmt ".toByteArray())
+        buffer.putInt(16)  // Subchunk1 size (16 for PCM)
+        buffer.putShort(1)  // Audio format (1 = PCM)
+        buffer.putShort(channels.toShort())
+        buffer.putInt(sampleRate)
+        buffer.putInt(sampleRate * channels * bitsPerSample / 8)  // Byte rate
+        buffer.putShort((channels * bitsPerSample / 8).toShort())  // Block align
+        buffer.putShort(bitsPerSample.toShort())
+
+        // data subchunk
+        buffer.put("data".toByteArray())
+        buffer.putInt(pcmDataSize)
+
+        // PCM samples
+        for (sample in samples) {
+            buffer.putShort(sample)
+        }
+
         return buffer.array()
     }
 

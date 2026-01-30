@@ -259,6 +259,19 @@ class GemmaService : Service() {
                 try {
                     reportStatus("Init: OverlayManager...")
                     overlayManager = OverlayManager(this@GemmaService)
+
+                    // Wire up audio callback for SparkleBar (audio-first input)
+                    overlayManager.setAudioQueryCallback { audio ->
+                        scope.launch {
+                            Timber.i("SparkleBar: Audio received (${audio.size} samples)")
+                            // Queue audio for next query
+                            pendingAudio.set(audio)
+                            val sessionId = UUID.randomUUID().toString()
+                            // Send with prompt indicating audio is attached
+                            processQuery("[Voice input attached - respond to what you hear]", sessionId)
+                        }
+                    }
+
                     reportStatus("Init: ShakeDetector...")
                     shakeDetector = ShakeDetector(this@GemmaService) {
                         android.os.Handler(android.os.Looper.getMainLooper()).post {
