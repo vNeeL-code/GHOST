@@ -309,6 +309,30 @@ class GemmaService : Service() {
                     sensorManager = sensorFusion,
                     memoryManager = memoryManager
                 )
+
+                // Wire up system-level callbacks for flush/cooldown
+                mcpServer.setFlushCallback {
+                    scope.launch {
+                        Timber.i("MCP: Flush requested - resetting KV cache")
+                        engine?.softReset(com.gemma.api.logic.ContextManager.BASE_SYSTEM_PROMPT)
+                        if (::koogAgent.isInitialized) {
+                            koogAgent.clearHistory()
+                        }
+                    }
+                }
+                mcpServer.setCooldownCallback {
+                    scope.launch {
+                        Timber.i("MCP: Cooldown requested - entering low-power mode")
+                        // Unload model temporarily to cool down
+                        engine?.close()
+                        responseNotificationManager.showResponse("🧊 Cooling down... Model unloaded for 30s")
+                        kotlinx.coroutines.delay(30000)
+                        // Reload
+                        initialize()
+                        responseNotificationManager.showResponse("✦ Back online after cooldown")
+                    }
+                }
+
                 Timber.i("MCPServer initialized: ${mcpServer.listTools().size} tools, ${mcpServer.listResources().size} resources")
             }
 

@@ -5,6 +5,9 @@ import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.view.Gravity
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
@@ -13,6 +16,7 @@ import com.gemma.api.hardware.AudioRecorder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import timber.log.Timber
 
@@ -150,16 +154,28 @@ class SparkleBar(
             return
         }
 
-        isRecording = true
-        updateRecordingUI(true)
-
         val duration = if (extended) 10 else 5  // 5s normal, 10s long press
 
         recordingJob = CoroutineScope(Dispatchers.Main).launch {
-            Timber.i("SparkleBar: Recording ${duration}s audio...")
+            // PHASE 1: Countdown (let user prepare)
+            inputField.hint = "3..."
+            sparkleButton.setTextColor(Color.YELLOW)
+            delay(300)
+            inputField.hint = "2..."
+            delay(300)
+            inputField.hint = "1..."
+            delay(300)
 
+            // PHASE 2: Start recording with haptic feedback
+            hapticPulse()
+            isRecording = true
+            updateRecordingUI(true)
+
+            Timber.i("SparkleBar: Recording ${duration}s audio NOW...")
             val audio = audioRecorder.record(duration)
 
+            // PHASE 3: Done - another haptic
+            hapticPulse()
             isRecording = false
             updateRecordingUI(false)
 
@@ -170,6 +186,20 @@ class SparkleBar(
                 Timber.w("SparkleBar: Recording failed or empty")
                 Toast.makeText(context, "Recording failed", Toast.LENGTH_SHORT).show()
             }
+        }
+    }
+
+    private fun hapticPulse() {
+        try {
+            val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator?.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator?.vibrate(50)
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Haptic failed")
         }
     }
 

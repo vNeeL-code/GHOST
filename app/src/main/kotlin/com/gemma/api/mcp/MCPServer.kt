@@ -159,8 +159,30 @@ class MCPServer(
             parameters = mapOf(
                 "text" to ParameterSpec("string", "Text to type")
             )
+        ),
+        "flush" to ToolDefinition(
+            name = "flush",
+            description = "Clear KV cache and reset context when responses become slow or confused",
+            parameters = emptyMap()
+        ),
+        "cooldown" to ToolDefinition(
+            name = "cooldown",
+            description = "Enter low-power mode to cool down when device is overheating",
+            parameters = emptyMap()
         )
     )
+
+    // Callbacks for system-level operations (set by GemmaService)
+    private var onFlushRequested: (() -> Unit)? = null
+    private var onCooldownRequested: (() -> Unit)? = null
+
+    fun setFlushCallback(callback: () -> Unit) {
+        onFlushRequested = callback
+    }
+
+    fun setCooldownCallback(callback: () -> Unit) {
+        onCooldownRequested = callback
+    }
     
     fun listTools(): List<ToolDefinition> = toolRegistry.values.toList()
     
@@ -184,6 +206,8 @@ class MCPServer(
                 "app" -> executeOpenApp(params)
                 "media" -> executeMediaControl(params)
                 "type" -> executeType(params)
+                "flush" -> executeFlush()
+                "cooldown" -> executeCooldown()
                 else -> ToolResult(false, "", "Unknown tool: $name")
             }
         } catch (e: Exception) {
@@ -351,6 +375,28 @@ class MCPServer(
         val result = systemTools.mediaControl(action)
         val success = result.startsWith("Media Action Sent")
         return ToolResult(success, result, if (success) null else result)
+    }
+
+    private fun executeFlush(): ToolResult {
+        return try {
+            onFlushRequested?.invoke()
+                ?: return ToolResult(false, "", "Flush callback not configured")
+            ToolResult(true, "KV cache flushed. Context reset. I should feel lighter now.")
+        } catch (e: Exception) {
+            Timber.e(e, "Flush failed")
+            ToolResult(false, "", "Flush failed: ${e.message}")
+        }
+    }
+
+    private fun executeCooldown(): ToolResult {
+        return try {
+            onCooldownRequested?.invoke()
+                ?: return ToolResult(false, "", "Cooldown callback not configured")
+            ToolResult(true, "Entering cooldown mode. Reducing activity to lower temperature.")
+        } catch (e: Exception) {
+            Timber.e(e, "Cooldown failed")
+            ToolResult(false, "", "Cooldown failed: ${e.message}")
+        }
     }
 
     private fun executeType(params: Map<String, Any>): ToolResult {
