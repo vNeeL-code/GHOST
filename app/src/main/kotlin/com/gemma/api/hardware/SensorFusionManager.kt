@@ -128,7 +128,7 @@ data class MotionState(
 
 // === MANAGER ===
 
-class SensorFusionManager(private val context: Context) {
+class SensorFusionManager(private val context: Context) : AutoCloseable {
 
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val mediaSessionManager = context.getSystemService(Context.MEDIA_SESSION_SERVICE) as? MediaSessionManager
@@ -149,9 +149,32 @@ class SensorFusionManager(private val context: Context) {
     @Volatile private var cachedAccelZ: Float? = null
     @Volatile private var lastSignificantMotion: Long = 0
 
+    // Store listener reference for cleanup
+    private var sensorListener: SensorEventListener? = null
+    @Volatile private var isClosed = false
+
     init {
         // Register sensor listeners for environment data
         registerEnvironmentSensors()
+    }
+
+    /**
+     * Cleanup all sensor listeners to prevent memory leaks.
+     * Call this when the service is destroyed.
+     */
+    override fun close() {
+        if (isClosed) return
+        isClosed = true
+
+        try {
+            sensorListener?.let { listener ->
+                sensorManager?.unregisterListener(listener)
+                Timber.d("SensorFusionManager: Unregistered all sensor listeners")
+            }
+            sensorListener = null
+        } catch (e: Exception) {
+            Timber.w(e, "Error during sensor cleanup")
+        }
     }
 
     private fun registerEnvironmentSensors() {
@@ -182,6 +205,9 @@ class SensorFusionManager(private val context: Context) {
             }
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
         }
+
+        // Store reference for cleanup
+        sensorListener = listener
 
         // Register each sensor if available (many phones don't have all of these)
         sm.getDefaultSensor(Sensor.TYPE_AMBIENT_TEMPERATURE)?.let {
@@ -620,44 +646,38 @@ class SensorFusionManager(private val context: Context) {
     private fun buildContextString(ctx: DeviceContext): String {
         val sb = StringBuilder()
 
-        // Battery icon based on level
+        // Battery - clear label format
         val battIcon = when {
             ctx.battery.level <= 5 -> "🪫"
             ctx.battery.level <= 20 -> "🔋"
             else -> "🔋"
         }
-
-        // Battery: level + voltage + body temp
-        sb.append("$battIcon ${ctx.battery.level}%")
-        sb.append(" ⚡${String.format("%.2f", ctx.battery.voltage)}V")
-        if (ctx.battery.isCharging) sb.append(" 🔌")
-        sb.append(" 🌡️${String.format("%.1f", ctx.battery.temperature)}°C")
+        sb.append("$battIcon Battery: ${ctx.battery.level}%")
+        if (ctx.battery.isCharging) sb.append(" (charging)")
         sb.append("\n")
+
+        // Body temperature (battery temp = device body heat)
+        sb.append("🌡️ Body temp: ${String.format("%.1f", ctx.battery.temperature)}°C\n")
 
         // Environment / Thermal sensors
         val env = ctx.environment
-        val thermals = mutableListOf<String>()
-        env.cpuTemp?.let { thermals.add("🖥️${String.format("%.0f", it)}°C") }      // CPU
-        env.ambientTemp?.let { thermals.add("🏠${String.format("%.1f", it)}°C") }  // Room/ambient
-        env.light?.let { thermals.add("💡${it.toInt()}lux") }                       // Light sensor
-        env.pressure?.let { thermals.add("🎈${String.format("%.0f", it)}hPa") }    // Barometric
-        if (thermals.isNotEmpty()) {
-            sb.append("${thermals.joinToString(" ")}\n")
-        }
+        env.cpuTemp?.let { sb.append("🖥️ CPU: ${String.format("%.0f", it)}°C\n") }
+        env.ambientTemp?.let { sb.append("🌤️ Weather: ${String.format("%.1f", it)}°C outside\n") }
+        env.light?.let { sb.append("💡 Light: ${it.toInt()} lux\n") }
+        env.pressure?.let { sb.append("🎈 Pressure: ${String.format("%.0f", it)} hPa\n") }
 
         // Music
         ctx.audio.nowPlaying?.let { np ->
             if (np.isPlaying) {
-                sb.append("🎵 ${np.title}")
-                np.artist?.let { sb.append(" - $it") }
+                sb.append("🎵 Playing: \"${np.title}\"")
+                np.artist?.let { sb.append(" by $it") }
                 sb.append("\n")
             }
         }
 
         // System resources
-        sb.append("🧠 ${ctx.system.ramUsedPercent}%")  // RAM as brain/memory
-        sb.append(" 💿 ${String.format("%.1f", ctx.system.storageFreeGB)}GB")  // Storage as disc
-        sb.append("\n")
+        sb.append("🧠 RAM: ${ctx.system.ramUsedPercent}% used\n")
+        sb.append("💿 Storage: ${String.format("%.1f", ctx.system.storageFreeGB)}GB free\n")
 
         // Network (WiFi + Cell)
         val netParts = mutableListOf<String>()

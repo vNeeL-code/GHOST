@@ -478,20 +478,24 @@ class MCPServer(
     
     private suspend fun readCurrentContext(): ResourceContent {
         val now = java.time.LocalDateTime.now()
-        val formatter = java.time.format.DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy - HH:mm")
+        val dateFormatter = java.time.format.DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy")
+        val timeFormatter = java.time.format.DateTimeFormatter.ofPattern("HH:mm")
         val sb = StringBuilder()
 
-        // Time context (human readable)
+        // Time context (clear and explicit)
         val hour = now.hour
         val timeOfDay = when (hour) {
-            in 0..5 -> "🌙 Late Night"
-            in 6..11 -> "🌅 Morning"
-            in 12..17 -> "☀️ Afternoon"
-            in 18..21 -> "🌆 Evening"
-            else -> "🌙 Night"
+            in 0..5 -> "Late Night"
+            in 6..11 -> "Morning"
+            in 12..17 -> "Afternoon"
+            in 18..21 -> "Evening"
+            else -> "Night"
         }
 
-        sb.append("═══ ${now.format(formatter)} $timeOfDay ═══\n")
+        sb.append("═══ CURRENT STATE ═══\n")
+        sb.append("📅 Date: ${now.format(dateFormatter)}\n")
+        sb.append("🕐 Time: ${now.format(timeFormatter)} ($timeOfDay)\n")
+        sb.append("\n")
 
         try {
             // Use the full sensor context string (all the new telemetry!)
@@ -500,7 +504,7 @@ class MCPServer(
             sb.append("⚠️ Sensor data unavailable\n")
         }
 
-        sb.append("\n═══════════════════════════════\n")
+        sb.append("═══════════════════════════════\n")
 
         return ResourceContent("context://current", sb.toString())
     }

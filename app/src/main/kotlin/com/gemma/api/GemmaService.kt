@@ -70,8 +70,9 @@ class GemmaService : Service() {
     
     private val inferenceMutex = kotlinx.coroutines.sync.Mutex()
     
-    // Thermal
+    // Thermal - native listener + fallback to sysfs
     private val thermalPath = Constants.THERMAL_PATH
+    private var nativeThermalAvailable = false
     
     private val CHANNEL_ID = Constants.CHANNEL_ID_SERVICE
     private val NOTIFICATION_ID = Constants.NOTIFICATION_ID_SERVICE
@@ -193,6 +194,7 @@ class GemmaService : Service() {
     private lateinit var shakeDetector: ShakeDetector // Shake to summon
     private lateinit var overlayManager: OverlayManager // Floating input
     private lateinit var audioRecorder: AudioRecorder // Hearing
+    private lateinit var sensorFusionManager: com.gemma.api.hardware.SensorFusionManager // Nervous system
 
     // Current mood state for avatar/wallpaper
     private var currentMoodState: String = "IDLE"
@@ -236,6 +238,32 @@ class GemmaService : Service() {
 
         try {
             reportStatus("Service Created, Initializing...")
+
+            // Native thermal listener (API 29+) - no sysfs polling needed
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                try {
+                    val pm = getSystemService(android.os.PowerManager::class.java)
+                    pm?.addThermalStatusListener { status ->
+                        val newState = when (status) {
+                            android.os.PowerManager.THERMAL_STATUS_CRITICAL,
+                            android.os.PowerManager.THERMAL_STATUS_EMERGENCY,
+                            android.os.PowerManager.THERMAL_STATUS_SHUTDOWN -> ThermalState.CRITICAL
+                            android.os.PowerManager.THERMAL_STATUS_SEVERE -> ThermalState.HOT
+                            android.os.PowerManager.THERMAL_STATUS_MODERATE -> ThermalState.WARM
+                            else -> ThermalState.COOL
+                        }
+                        cachedThermalState = newState
+                        _thermalState.set(newState)
+                        if (newState == ThermalState.CRITICAL) {
+                            Timber.w("🔥 NATIVE THERMAL: CRITICAL - pausing inference")
+                        }
+                    }
+                    nativeThermalAvailable = true
+                    Timber.i("Native thermal listener registered")
+                } catch (e: Exception) {
+                    Timber.w("Native thermal unavailable, using sysfs fallback")
+                }
+            }
 
             reportStatus("Init: TTS...")
             ttsManager = com.gemma.api.services.TTSManager(this)
@@ -293,10 +321,10 @@ class GemmaService : Service() {
             }
             
             reportStatus("Init: SensorFusion...")
-            // Init Sensor Fusion
-            val sensorFusion = com.gemma.api.hardware.SensorFusionManager(this)
+            // Init Sensor Fusion (stored as class member for cleanup)
+            sensorFusionManager = com.gemma.api.hardware.SensorFusionManager(this)
             reportStatus("Init: ContextManager...")
-            contextManager = com.gemma.api.logic.ContextManager(sensorFusion, memoryManager)
+            contextManager = com.gemma.api.logic.ContextManager(sensorFusionManager, memoryManager)
             
             // NEW: Initialize MCP Server - CRITICAL for Context Injection
             if (USE_KOOG_AGENT) {
@@ -306,7 +334,7 @@ class GemmaService : Service() {
                     hardwareTools = hardwareToolSet,
                     networkTools = networkToolSet,
                     systemTools = systemToolSet,
-                    sensorManager = sensorFusion,
+                    sensorManager = sensorFusionManager,
                     memoryManager = memoryManager
                 )
 
@@ -324,7 +352,7 @@ class GemmaService : Service() {
                     scope.launch {
                         Timber.i("MCP: Cooldown requested - entering low-power mode")
                         // Unload model temporarily to cool down
-                        engine?.close()
+                        engine?.cleanup()
                         responseNotificationManager.showResponse("🧊 Cooling down... Model unloaded for 30s")
                         kotlinx.coroutines.delay(30000)
                         // Reload
@@ -619,10 +647,21 @@ class GemmaService : Service() {
                         val snapshotAudio = pendingAudio.get()
                          
                          Timber.i("🧠 KoogAgent: Processing query via new path")
-                         
+
                          // Mark activity to show vitals instead of idle animation
                          if (!isDream) markActivity()
-                     
+
+                    // Thermal throttling - wait if device is warm/hot
+                    val throttleDelay = applyThermalThrottling()
+                    if (throttleDelay < 0) {
+                        // CRITICAL - don't proceed
+                        responseNotificationManager.showResponse("🔥 Too hot - cooling down...")
+                        return "I need to cool down before I can think. Give me a moment."
+                    }
+                    if (throttleDelay > 0) {
+                        updateNotification("🌡️ Cooling... (${throttleDelay}ms)")
+                    }
+
                     // Show progress to user
                     responseNotificationManager.showThinking()
                     updateNotification("🤔 Agent Thinking...")
@@ -633,7 +672,10 @@ class GemmaService : Service() {
                         images = snapshotImages.takeIf { it.isNotEmpty() },
                         audio = snapshotAudio
                     )
-                    
+
+                    // Mark inference complete for rate limiting
+                    markInferenceComplete()
+
                     // SUCCESS: Now safe to clear because Koog consumed them
                     if (snapshotImages.isNotEmpty()) pendingImages.clear()
                     if (snapshotAudio != null) pendingAudio.compareAndSet(snapshotAudio, null)
@@ -713,7 +755,15 @@ $userPrompt
 """
         }
 
-        // 3. Inference (locked) - returns raw response
+        // 3. Thermal throttling before inference
+        val throttleDelay = applyThermalThrottling()
+        if (throttleDelay < 0) {
+            val msg = "🔥 Too hot - cooling down..."
+            if (!isDream) responseNotificationManager.showResponse(msg)
+            return msg
+        }
+
+        // 4. Inference (locked) - returns raw response
         val response = inferenceMutex.withLock {
             // Drain thread-safe queues atomically
             val images = mutableListOf<Bitmap>()
@@ -739,7 +789,10 @@ $userPrompt
             }
         }
 
-        // 4. Cognitive Execution (Sovereign Action)
+        // Mark inference complete for thermal rate limiting
+        markInferenceComplete()
+
+        // 5. Cognitive Execution (Sovereign Action)
         // Parse [[TOOL:ARGS]] tags from response and execute via regex
         val (cleanResponse, toolResults) = if (currentSovereignState.canAct) {
             try {
@@ -846,7 +899,30 @@ $userPrompt
     private val thermalMutex = kotlinx.coroutines.sync.Mutex()
     private val _thermalState = AtomicReference(ThermalState.COOL)
 
+    // Thermal caching to reduce file I/O (temperature doesn't change that fast)
+    @Volatile private var cachedThermalState: ThermalState = ThermalState.COOL
+    @Volatile private var lastThermalReadTime: Long = 0L
+    private val THERMAL_CACHE_TTL_MS = 5000L  // 5 seconds cache
+
+    // Inference rate limiting when warm/hot (more aggressive to prevent thermal runaway)
+    @Volatile private var lastInferenceTime: Long = 0L
+    private val INFERENCE_COOLDOWN_HOT_MS = 8000L    // 8s between inferences when HOT
+    private val INFERENCE_COOLDOWN_WARM_MS = 3000L   // 3s between inferences when WARM
+
     private suspend fun getThermalState(): ThermalState = thermalMutex.withLock {
+        // If native thermal listener is active, just return cached state (updated by listener)
+        if (nativeThermalAvailable) {
+            return cachedThermalState
+        }
+
+        val now = System.currentTimeMillis()
+
+        // Return cached value if still fresh
+        if (now - lastThermalReadTime < THERMAL_CACHE_TTL_MS) {
+            return cachedThermalState
+        }
+
+        // Fallback: sysfs polling for older devices
         try {
             val file = File(thermalPath)
             if (file.exists()) {
@@ -855,12 +931,16 @@ $userPrompt
                 val tempC = temp / 1000
 
                 val newState = when {
-                    tempC > 65 -> ThermalState.CRITICAL
-                    tempC > 55 -> ThermalState.HOT
-                    tempC > 45 -> ThermalState.WARM
+                    tempC > 60 -> ThermalState.CRITICAL  // Was 65 - more conservative
+                    tempC > 50 -> ThermalState.HOT       // Was 55
+                    tempC > 42 -> ThermalState.WARM      // Was 45
                     else -> ThermalState.COOL
                 }
-                
+
+                // Update cache
+                cachedThermalState = newState
+                lastThermalReadTime = now
+
                 // Update atomic ref for fast non-suspended reads if needed elsewhere
                 _thermalState.set(newState)
                 return newState
@@ -869,6 +949,43 @@ $userPrompt
             Timber.w("Thermal sensor unavailable")
         }
         return ThermalState.COOL
+    }
+
+    /**
+     * Enforce thermal-aware rate limiting before inference
+     * Returns delay applied in ms (0 if none needed)
+     */
+    private suspend fun applyThermalThrottling(): Long {
+        val state = getThermalState()
+        val now = System.currentTimeMillis()
+        val timeSinceLastInference = now - lastInferenceTime
+
+        val requiredCooldown = when (state) {
+            ThermalState.CRITICAL -> Long.MAX_VALUE  // Don't infer at all
+            ThermalState.HOT -> INFERENCE_COOLDOWN_HOT_MS
+            ThermalState.WARM -> INFERENCE_COOLDOWN_WARM_MS
+            ThermalState.COOL -> 0L
+        }
+
+        if (requiredCooldown == Long.MAX_VALUE) {
+            Timber.w("Thermal CRITICAL - inference blocked")
+            return -1L  // Signal: do not proceed
+        }
+
+        val delayNeeded = (requiredCooldown - timeSinceLastInference).coerceAtLeast(0L)
+        if (delayNeeded > 0) {
+            Timber.d("Thermal throttle: waiting ${delayNeeded}ms (state=$state)")
+            kotlinx.coroutines.delay(delayNeeded)
+        }
+
+        return delayNeeded
+    }
+
+    /**
+     * Mark that an inference just completed (for rate limiting)
+     */
+    private fun markInferenceComplete() {
+        lastInferenceTime = System.currentTimeMillis()
     }
 
     private suspend fun getThermalWarning(): String? {
@@ -902,11 +1019,26 @@ $userPrompt
             "✦ Gemma 💭"
         }
 
+        // Build expanded telemetry view for notification expansion
+        val expandedText = try {
+            if (::sensorFusionManager.isInitialized) {
+                sensorFusionManager.getContextString()
+            } else {
+                text
+            }
+        } catch (e: Exception) {
+            text
+        }
+
         return Notification.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(text)
             .setSmallIcon(iconRes)
             .setOnlyAlertOnce(true)  // Don't spam sound/vibrate on every update
+            .setStyle(Notification.BigTextStyle()
+                .bigText(expandedText)
+                .setBigContentTitle(title)
+                .setSummaryText("Tap to expand telemetry"))
             .build()
     }
     
@@ -945,48 +1077,66 @@ $userPrompt
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(text))
     }
 
+    /**
+     * Called when user swipes away from recents - guaranteed before SIGKILL
+     * This is the proper place for critical cleanup (Kimi K2 audit fix)
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        Timber.i("GemmaService: onTaskRemoved - performing critical cleanup")
+        performCriticalCleanup()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
-        
         Timber.i("GemmaService: onDestroy called")
-        
-        // 1. IMMEDIATE: Cancel all coroutines to stop ongoing work
+
+        // Cancel coroutines first
         scope.coroutineContext.cancel()
-        
-        // 2. Fire-and-forget async cleanup (with timeout to avoid blocking)
-        // We launch on GlobalScope because 'scope' was just cancelled
-        kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
-            try {
-                kotlinx.coroutines.withTimeout(3000L) { // 3 second max
-                    // Save agent state via KoogAgent
+
+        // Perform synchronous cleanup (no GlobalScope fire-and-forget)
+        performCriticalCleanup()
+
+        Timber.i("GemmaService: onDestroy complete")
+    }
+
+    /**
+     * Synchronous cleanup - called from both onTaskRemoved and onDestroy
+     * Uses runBlocking with timeout to ensure cleanup completes before process death
+     */
+    private fun performCriticalCleanup() {
+        try {
+            // Use runBlocking to ensure cleanup completes (Kimi's fix for GlobalScope leak)
+            kotlinx.coroutines.runBlocking {
+                kotlinx.coroutines.withTimeoutOrNull(5000L) {
+                    // Save agent state
                     if (USE_KOOG_AGENT && ::koogAgent.isInitialized) {
                         try {
                             koogAgent.checkpoint()
-                            Timber.i("Agent state saved on shutdown")
+                            Timber.i("Agent state saved")
                         } catch (e: Exception) {
-                            Timber.w(e, "Shutdown checkpoint failed")
+                            Timber.w(e, "Checkpoint failed")
                         }
                     }
 
-                    // Cleanup engine (can be slow on NPU)
+                    // Cleanup engine synchronously
                     engine?.cleanup()
                     Timber.i("Engine cleaned up")
                 }
-            } catch (e: Exception) {
-                Timber.w(e, "Cleanup timeout or error (non-fatal)")
             }
+        } catch (e: Exception) {
+            Timber.w(e, "Critical cleanup error")
         }
-        
-        // 3. FAST operations (these should complete quickly)
+
+        // Fast cleanup (non-blocking)
         try {
             if (::shakeDetector.isInitialized) shakeDetector.stop()
             if (::overlayManager.isInitialized) overlayManager.hideOverlay()
             if (::apiServer.isInitialized) apiServer.stop()
+            if (::sensorFusionManager.isInitialized) sensorFusionManager.close()
         } catch (e: Exception) {
             Timber.w(e, "Fast cleanup error")
         }
-        
-        Timber.i("GemmaService: onDestroy complete (cleanup async)")
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

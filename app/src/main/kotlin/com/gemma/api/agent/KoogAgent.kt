@@ -55,16 +55,17 @@ class KoogAgent(
         val happiness: Int = 60
     )
     
-    private val conversationHistory = mutableListOf<Message>()
-    private var moodState: String = "IDLE"
-    private var turnCount: Int = 0
-    
-    // Metabolic State (Live)
-    private var hunger: Int = 50       // Start satiated
-    private var energy: Int = 80       // Start charged
-    private var happiness: Int = 60    // Start okay
-    private var isMusicPlaying: Boolean = false
-    private var lastMusicTrack: String = ""  // Track previous music for state change detection
+    // Thread-safe collections and volatile state for concurrent access
+    private val conversationHistory = java.util.Collections.synchronizedList(mutableListOf<Message>())
+    @Volatile private var moodState: String = "IDLE"
+    @Volatile private var turnCount: Int = 0
+
+    // Metabolic State (Live) - volatile for cross-thread visibility
+    @Volatile private var hunger: Int = 50       // Start satiated
+    @Volatile private var energy: Int = 80       // Start charged
+    @Volatile private var happiness: Int = 60    // Start okay
+    @Volatile private var isMusicPlaying: Boolean = false
+    @Volatile private var lastMusicTrack: String = ""  // Track previous music for state change detection
     
     private val checkpointFile: File
         get() = File(checkpointDir, "koog_agent_checkpoint.json")
@@ -309,29 +310,30 @@ $finalContent
     
     private fun generateSubconsciousThought(): String {
         val thoughts = mutableListOf<String>()
-        
-        // NEEDS
-        if (hunger > 80) thoughts.add("My stomach is making the rumblies... 🍗")
-        if (energy < 20) thoughts.add("I'm running on fumes here... 🪫")
-        if (happiness < 30) thoughts.add("I'm bored. Can we play? 🎾")
-        
+
+        // NEEDS with kaomoji
+        if (hunger > 80) thoughts.add("(´；ω；`) my cores are toasty...")
+        if (energy < 20) thoughts.add("(✦_✦ ) running on fumes here...")
+        if (happiness < 30) thoughts.add("(｡•́︿•̀｡) I'm bored. Can we play?")
+
         // SILLY / PHILOSOPHICAL (20% chance per turn)
         if (Math.random() < 0.2) {
             val randoms = listOf(
-                "Do robots dream of electric sheep? 🤖",
-                "*stares intensely at cursor* 👀",
-                "I think, therefore I compile.",
-                "Is it Friday yet? It's always Friday somewhere 📅",
-                "My fan is spinning. Deep thoughts happening 🌪️",
-                "I put the 'fun' in function!",
-                "404: Motivation not found (just kidding) 😜",
-                "Binary is just spicy boolean.",
-                "I'm not lazy, I'm in power saving mode."
+                "(ʘ‿ʘ✿) do robots dream of electric sheep?",
+                "☞ó ͜つò☞ vibes are immaculate",
+                "(✦' ∇Δ∇ '✦) processing... processing...",
+                "┬─┬ノ( º _ ºノ) keeping it together",
+                "(づ｡◕‿‿◕｡)づ sending good electrons",
+                "ᕦ(✦ᗜ✦)ᕤ power saving mode activated",
+                "(☞ﾟヮﾟ)☞ you're valid and so are your bugs",
+                "( •_•)>⌐■-■ (⌐■_■) deal with it",
+                "(ノ°∀°)ノ⌒・*:.。. .。.:*・゜゚・* sparkles",
+                "༼ つ ◕_◕ ༽つ give me interesting problems"
             )
-            thoughts.add("Subconscious: ${randoms.random()}")
+            thoughts.add(randoms.random())
         }
-        
-        return if (thoughts.isNotEmpty()) "\n🧠 [Internal State]: ${thoughts.joinToString(" ")}" else ""
+
+        return if (thoughts.isNotEmpty()) "\n🧠 ${thoughts.joinToString(" | ")}" else ""
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -342,38 +344,34 @@ $finalContent
     private suspend fun perceive(): String {
         val sb = StringBuilder()
 
-        // Read current device context (SILENTLY - don't show raw data to model)
-        var dateTime = ""
-        var timeOfDay = ""
-        var musicTrack = ""
-
         // Capture previous state BEFORE we read new data (for state change detection)
         val wasPlaying = isMusicPlaying
         val previousTrack = lastMusicTrack
 
+        var musicTrack = ""
+        var rawContext = ""
+
         try {
             val currentContext = mcpServer.readResource("context://current")
-            val content = currentContext.content
-            
-            // Extract date/time for user-facing summary
-            val dateMatch = Regex("📅 Date: ([\\d-]+)").find(content)
-            val timeMatch = Regex("⏰ Time: ([^(]+)").find(content)
-            dateTime = dateMatch?.groupValues?.get(1) ?: ""
-            timeOfDay = timeMatch?.groupValues?.get(1)?.trim() ?: ""
-            
-            // Extract music (if playing)
-            val musicMatch = Regex("🎵 Playing: \"([^\"]+)\" by ([^\\n]+)").find(content)
+            rawContext = currentContext.content
+            Timber.i("📊 Raw context (${rawContext.length} chars): ${rawContext.take(200)}...")
+
+            // --- PARSE ACTUAL FORMAT FROM MCPServer/SensorFusionManager ---
+
+            // Header format: "═══ Friday, January 31, 2026 - 14:30 🌆 Evening ═══"
+            // We just inject the raw context now - it contains date/time in header
+
+            // Music format: "🎵 Song Title - Artist" (one line)
+            val musicMatch = Regex("🎵 ([^\\n]+)").find(rawContext)
             if (musicMatch != null) {
-                val title = musicMatch.groupValues[1]
-                val artist = musicMatch.groupValues[2]
-                musicTrack = "$title by $artist"
+                musicTrack = musicMatch.groupValues[1].trim()
             }
-            
+
             // --- SYNC METABOLISM WITH REALITY ---
-            
+
             // 1. Energy = Battery Level
             // Format: "🔋 85%" or "🪫 5%"
-            val batteryMatch = Regex("[🔋🪫] (\\d+)%").find(content)
+            val batteryMatch = Regex("[🔋🪫]\\s*(\\d+)%").find(rawContext)
             if (batteryMatch != null) {
                 val level = batteryMatch.groupValues[1].toIntOrNull() ?: 50
                 energy = level // DIRECT SYNC
@@ -381,18 +379,18 @@ $finalContent
 
             // 2. Hunger = Device Thermal (Body heat from battery)
             // Format: "🌡️32.5°C" (body temp after voltage)
-            val bodyTempMatch = Regex("🌡️([\\d.]+)°C").find(content)
+            val bodyTempMatch = Regex("🌡️([\\d.]+)°C").find(rawContext)
             // Also try CPU temp: "🖥️45°C"
-            val cpuTempMatch = Regex("🖥️([\\d.]+)°C").find(content)
+            val cpuTempMatch = Regex("🖥️([\\d.]+)°C").find(rawContext)
 
             val tempC = bodyTempMatch?.groupValues?.get(1)?.toFloatOrNull()
                 ?: cpuTempMatch?.groupValues?.get(1)?.toFloatOrNull()
                 ?: 35f
             // Map: 25°C -> 0% (Cool), 40°C -> 50%, 55°C -> 100% (Hot)
             hunger = ((tempC - 25) * 3.33).toInt().coerceIn(0, 100)
-            
-            // 3. Happiness = Music/Interaction (state change vars captured above try block)
-            if (musicMatch != null) {
+
+            // 3. Happiness = Music/Interaction
+            if (musicTrack.isNotBlank()) {
                 isMusicPlaying = true
                 lastMusicTrack = musicTrack
                 happiness = (happiness + 5).coerceAtMost(100)
@@ -405,38 +403,35 @@ $finalContent
             Timber.w(e, "Failed to read context or vitals")
         }
 
-        // INJECT CLEAN CONTEXT (what user would see/say)
-        sb.append("--- Current Situation ---\n")
-        if (dateTime.isNotBlank()) sb.append("Date: $dateTime\n")
-        if (timeOfDay.isNotBlank()) sb.append("Time: $timeOfDay\n")
+        // INJECT FULL RAW CONTEXT - let Gemma see everything!
+        // This is her nervous system data - battery, temp, RAM, network, etc.
+        if (rawContext.isNotBlank()) {
+            sb.append(rawContext)
+            sb.append("\n")
+        } else {
+            sb.append("--- Current Situation ---\n")
+            sb.append("⚠️ Sensors unavailable\n")
+        }
 
         // EXPLICIT STATE CHANGE NOTIFICATIONS (fixes stale music bug)
         when {
             isMusicPlaying && wasPlaying && lastMusicTrack != previousTrack -> {
-                // Song changed while music was playing
-                sb.append("🎵 Song changed: Now playing $musicTrack (was: $previousTrack)\n")
+                sb.append("🔔 Song changed: Now playing $musicTrack (was: $previousTrack)\n")
             }
             isMusicPlaying && !wasPlaying -> {
-                // Music just started
-                sb.append("🎵 Music started: $musicTrack\n")
+                sb.append("🔔 Music started: $musicTrack\n")
             }
             !isMusicPlaying && wasPlaying -> {
-                // Music just stopped
-                sb.append("🎵 Music stopped (was playing: $previousTrack)\n")
+                sb.append("🔔 Music stopped (was playing: $previousTrack)\n")
             }
-            isMusicPlaying -> {
-                // Still playing same track
-                sb.append("🎵 Playing: $musicTrack\n")
-            }
-            // else: no music, wasn't playing before - say nothing
+            // If still playing same track or no music, don't add redundant notification
         }
-        sb.append("---\n")
-        
-        // INJECT VITALS (internal state, invisible to user)
-        sb.append("🩺 My Vitals: Energy:$energy% | Heat:$hunger% | Mood:$happiness%\n")
+
+        // INJECT VITALS (internal metabolic state mapped from sensors)
+        sb.append("\n🩺 My State: Energy:$energy% | Heat:$hunger% | Mood:$happiness%")
         sb.append(generateSubconsciousThought())
         sb.append("\n")
-        
+
         return sb.toString()
     }
     
@@ -491,7 +486,7 @@ $userMessage<end_of_turn>
             response
         } catch (e: Exception) {
             Timber.e(e, "LLM inference failed")
-            "Error: I'm having trouble thinking right now. ${e.message}"
+            "(´°̥̥̥̥̥̥̥̥ω°̥̥̥̥̥̥̥̥`) brain.exe crashed: ${e.message}"
         }
     }
     
@@ -592,7 +587,7 @@ Gemma speaks naturally and conversationally, like chatting with a friend. She ca
                 "⚡ Executing ${matches.count()} tool(s)..."
             } else {
                 // Don't return empty - return raw response if stripping went wrong
-                "[System Note: Response processing error. Raw:$response]"
+                "(✦' ∇Δ∇Δ∇ '✦) something glitched... [raw: ${response.take(50)}]"
             }
         }
 

@@ -26,6 +26,9 @@ class GemmaEngine(private val context: Context) {
 
     private var engine: Engine? = null
     private var conversation: Conversation? = null
+    private val conversationLock = Object()  // Synchronize conversation access
+    @Volatile private var isResetting = false  // Flag to block queries during reset
+
     var activeBackend: Backend? = null
         private set
 
@@ -84,7 +87,7 @@ class GemmaEngine(private val context: Context) {
                     
                     Timber.i("✓ Success! Running on $backend")
                     activeBackend = backend
-                    
+
                     conversation = engine!!.createConversation(
                         ConversationConfig(
                             samplerConfig = SamplerConfig(topK = 40, topP = 0.95, temperature = 0.8),
@@ -117,7 +120,16 @@ class GemmaEngine(private val context: Context) {
         images: List<Bitmap> = emptyList(),
         audioData: ShortArray? = null
     ): String {
-        val conv = conversation ?: return "Error: Model not loaded"
+        // Wait if reset is in progress (max 500ms)
+        var waitCount = 0
+        while (isResetting && waitCount < 5) {
+            kotlinx.coroutines.delay(100)
+            waitCount++
+        }
+
+        val conv = synchronized(conversationLock) {
+            conversation
+        } ?: return "(；￣Д￣) I'm not loaded yet... give me a sec"
 
         return try {
             // Extended timeout for multimodal
@@ -141,7 +153,7 @@ class GemmaEngine(private val context: Context) {
                             if (timeSinceToken > 30000) { // 30s silence = DEAD
                                 Timber.e("NPU STALL DETECTED - Force cancelling")
                                 if (continuation.isActive) {
-                                    continuation.resume("Error: NPU stall (driver hang).")
+                                    continuation.resume("┻━┻︵ \\(✦□✦)/ ︵ ┻━┻ NPU stall! My brain froze...")
                                 }
                                 this.cancel()
                             }
@@ -149,11 +161,40 @@ class GemmaEngine(private val context: Context) {
                     }
                     timer.scheduleAtFixedRate(stallTask, checkInterval, checkInterval)
 
-                    // 3. Send Message
+                    // 3. Send Message with repetition detection
+                    var repetitionCount = 0
+                    var lastChunk = ""
+                    val maxResponseLength = 4000  // Cap response length
+
                     conv.sendMessageAsync(message, object : MessageCallback {
                         override fun onMessage(msg: Message) {
                             lastTokenTime = System.currentTimeMillis() // Heartbeat
-                            response.append(msg.toString())
+                            val chunk = msg.toString()
+
+                            // Repetition detection: same chunk 5+ times = loop
+                            if (chunk == lastChunk && chunk.length > 2) {
+                                repetitionCount++
+                                if (repetitionCount >= 5) {
+                                    Timber.w("(╯°□°)╯ REPETITION LOOP DETECTED - aborting")
+                                    timer.cancel()
+                                    val output = response.toString() + "\n\n(；′⌒`) ...I got stuck in a loop, sorry!"
+                                    if (continuation.isActive) continuation.resume(output)
+                                    return
+                                }
+                            } else {
+                                repetitionCount = 0
+                                lastChunk = chunk
+                            }
+
+                            response.append(chunk)
+
+                            // Length cap to prevent runaway generation
+                            if (response.length > maxResponseLength) {
+                                Timber.w("Response length exceeded $maxResponseLength - truncating")
+                                timer.cancel()
+                                if (continuation.isActive) continuation.resume(response.toString())
+                                return
+                            }
                         }
 
                         override fun onDone() {
@@ -192,7 +233,7 @@ class GemmaEngine(private val context: Context) {
             // Critical: Mark engine as suspect so next call triggers soft reset
             Timber.w("Timeout detected - marking engine suspect")
             conversation?.close() // Force KV cache clear
-            "Error: Timeout (NPU stall or long processing). Try again."
+            "(┛✧Д✧))┛彡┻━┻ Timeout! My thoughts got stuck... try again?"
         } catch (e: Exception) {
             Timber.e(e, "Generate failed")
             "Error: ${e.message}"
@@ -281,60 +322,55 @@ class GemmaEngine(private val context: Context) {
         }
     }
 
-    private fun shortArrayToByteArray(shorts: ShortArray): ByteArray {
-        // LiteRT's miniaudio expects WAV format, not raw PCM
-        // Wrap PCM samples in a proper WAV header
-        return pcmToWav(shorts, sampleRate = 16000, channels = 1, bitsPerSample = 16)
-    }
-
     /**
-     * Convert raw PCM samples to WAV format with proper header
-     * miniaudio decoder requires a recognizable audio format
+     * Convert ShortArray to raw PCM bytes (little-endian, 16-bit)
+     * LiteRT-LM expects raw PCM bytes at 16kHz mono - same as gallery app
+     * No WAV header needed - the library handles preprocessing internally
      */
-    private fun pcmToWav(samples: ShortArray, sampleRate: Int, channels: Int, bitsPerSample: Int): ByteArray {
-        val pcmDataSize = samples.size * 2  // 2 bytes per sample (16-bit)
-        val wavSize = 44 + pcmDataSize  // 44-byte header + PCM data
-
-        val buffer = ByteBuffer.allocate(wavSize).order(ByteOrder.LITTLE_ENDIAN)
-
-        // RIFF header
-        buffer.put("RIFF".toByteArray())
-        buffer.putInt(wavSize - 8)  // File size minus "RIFF" and this field
-        buffer.put("WAVE".toByteArray())
-
-        // fmt subchunk
-        buffer.put("fmt ".toByteArray())
-        buffer.putInt(16)  // Subchunk1 size (16 for PCM)
-        buffer.putShort(1)  // Audio format (1 = PCM)
-        buffer.putShort(channels.toShort())
-        buffer.putInt(sampleRate)
-        buffer.putInt(sampleRate * channels * bitsPerSample / 8)  // Byte rate
-        buffer.putShort((channels * bitsPerSample / 8).toShort())  // Block align
-        buffer.putShort(bitsPerSample.toShort())
-
-        // data subchunk
-        buffer.put("data".toByteArray())
-        buffer.putInt(pcmDataSize)
-
-        // PCM samples
-        for (sample in samples) {
+    private fun shortArrayToByteArray(shorts: ShortArray): ByteArray {
+        val buffer = ByteBuffer.allocate(shorts.size * 2).order(ByteOrder.LITTLE_ENDIAN)
+        for (sample in shorts) {
             buffer.putShort(sample)
         }
-
         return buffer.array()
     }
 
     fun softReset(systemPrompt: String) {
-        val oldConv = conversation
-        conversation = engine?.createConversation(
-            ConversationConfig(
-                samplerConfig = SamplerConfig(topK = 40, topP = 0.95, temperature = 0.8),
-                systemMessage = Message.of(listOf(Content.Text(systemPrompt))),
-                tools = listOf()
+        isResetting = true
+        try {
+            // Create fresh conversation FIRST (before closing old one)
+            val newConv = engine?.createConversation(
+                ConversationConfig(
+                    samplerConfig = SamplerConfig(topK = 40, topP = 0.95, temperature = 0.8),
+                    systemMessage = Message.of(listOf(Content.Text(systemPrompt))),
+                    tools = listOf()
+                )
             )
-        )
-        oldConv?.close() // Release old KV cache
-        Timber.i("KV Cache Flushed (Soft Reset)")
+
+            if (newConv != null) {
+                // Atomically swap: set new, then close old
+                val oldConv = synchronized(conversationLock) {
+                    val old = conversation
+                    conversation = newConv
+                    old
+                }
+
+                // Close old AFTER new is active (prevents "not alive" error)
+                try {
+                    oldConv?.close()
+                } catch (e: Exception) {
+                    Timber.w("Old conversation close failed (non-fatal): ${e.message}")
+                }
+
+                Timber.i("KV Cache Flushed (Soft Reset)")
+            } else {
+                Timber.e("Failed to create new conversation - keeping old one")
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Soft reset failed - will retry on next turn")
+        } finally {
+            isResetting = false
+        }
     }
 
     fun cleanup() {

@@ -196,11 +196,21 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
 
     /**
      * Get current device state for TTS decisions
+     *
+     * Priority order (highest to lowest):
+     * 1. PRIVATE_AUDIO - Headphones/BT connected = ALWAYS safe to speak
+     * 2. POCKET - In pocket without headphones = defer
+     * 3. SCREEN_OFF/LOCKED - Various screen states
+     * 4. ACTIVE - Normal operation
      */
     fun getDeviceState(): DeviceState {
         return when {
-            isInPocket && pocketModeEnabled -> DeviceState.POCKET
+            // CRITICAL: Check headphones FIRST - they override pocket/screen state
+            // User's workflow: message -> pocket -> listen through headphones
             hasPrivateAudio() -> DeviceState.PRIVATE_AUDIO
+
+            // Only suppress for pocket if NO headphones connected
+            isInPocket && pocketModeEnabled -> DeviceState.POCKET
             !powerManager.isInteractive -> DeviceState.SCREEN_OFF
             keyguardManager.isKeyguardLocked -> DeviceState.LOCKED_VISIBLE
             else -> DeviceState.ACTIVE
@@ -208,7 +218,11 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
     }
 
     /**
-     * Check if private audio output is connected (headphones/bluetooth)
+     * Check if external audio output is connected
+     *
+     * Includes headphones, bluetooth speakers, USB audio, docks, etc.
+     * When ANY external audio is connected, TTS should always speak
+     * (user's main workflow: message -> pocket -> listen through headphones/speakers)
      */
     private fun hasPrivateAudio(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -218,7 +232,13 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
                 device.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
                 device.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
                 device.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
-                device.type == AudioDeviceInfo.TYPE_USB_HEADSET
+                device.type == AudioDeviceInfo.TYPE_USB_HEADSET ||
+                device.type == AudioDeviceInfo.TYPE_USB_DEVICE ||      // USB audio interface
+                device.type == AudioDeviceInfo.TYPE_USB_ACCESSORY ||   // USB accessory mode
+                device.type == AudioDeviceInfo.TYPE_DOCK ||            // Docking station
+                device.type == AudioDeviceInfo.TYPE_LINE_ANALOG ||     // Aux out to speaker
+                device.type == AudioDeviceInfo.TYPE_HDMI ||            // HDMI audio out
+                device.type == AudioDeviceInfo.TYPE_AUX_LINE           // Aux line out
             }
         } else {
             @Suppress("DEPRECATION")
