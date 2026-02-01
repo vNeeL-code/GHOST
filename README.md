@@ -118,7 +118,7 @@ You don't need to know Python. You just need to copy-paste between the AI agents
 2.  **Set up Keyboard Shortcuts:** [Operator.md](./Operator.md). (This maps repeated agent names to the keyboard buttons).
 3.  **Configure Widgets:** Create your "Dashboard" (Battery, Calendar, Notes) so you can screenshot it for context.
 4.  **(Optional) Install Termux:** For the offline layer on mobile and advanced experimentation with offline models, Gemini CLI and Claude code etc.
-5.  **Download Google Edge Gallery:** A more user friendly way for an offline backup via Omnimodal Gemma 3b that can be finetuned to user needs.
+5.  **Download Google AI Edge Gallery:** A more user friendly way for an offline backup via google sandbox where you can benchmark models on your device.
 6.  **(optional) UI customisation software:** Software like one hand operations, and other android custom UI tools to make the device even more compatible with your workflows, enabling smoother transitions, device navigation and context handoffs
 
 **Total Cost:** $0.00.
@@ -133,7 +133,7 @@ You don't need to know Python. You just need to copy-paste between the AI agents
 
 ---
 
-## 8. Future direction
+## 8. Future direction (current development stage)
 
 * **Embodied Android devices:**
 
