@@ -6,6 +6,8 @@ import com.gemma.api.mcp.MCPServer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
@@ -31,6 +33,55 @@ class KoogAgent(
 ) {
     // Agent's own coroutine scope for fire-and-forget operations (KV flush, etc.)
     private val agentScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+
+    // ═══════════════════════════════════════════════════════════════
+    // ACTOR PATTERN: Event-driven work queue (replaces recursive loop)
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Event types the agent can process - all go through single queue
+     * This prevents stack overflow from recursive think->act->think
+     * and allows system events (thermal, battery) to safely interrupt
+     */
+    sealed class AgentEvent {
+        /** User sent a message - needs full perceive->think->act cycle */
+        data class UserMessage(
+            val message: String,
+            val sessionId: String,
+            val images: List<android.graphics.Bitmap>? = null,
+            val audio: ShortArray? = null,
+            val responseChannel: CompletableDeferred<String>
+        ) : AgentEvent()
+
+        /** Tool execution completed - may need follow-up thinking */
+        data class ToolResult(
+            val context: String,
+            val toolResults: List<String>,
+            val originalResponse: String,
+            val responseChannel: CompletableDeferred<String>
+        ) : AgentEvent()
+
+        /** System event (thermal, battery, etc.) - may interrupt processing */
+        data class SystemEvent(
+            val type: SystemEventType,
+            val payload: String? = null
+        ) : AgentEvent()
+    }
+
+    enum class SystemEventType {
+        THERMAL_THROTTLE,    // Slow down, NPU getting warm
+        THERMAL_CRITICAL,    // Stop processing, emergency cooldown
+        LOW_BATTERY,         // Warn user, maybe checkpoint
+        KV_CACHE_FLUSH,      // Soft reset requested
+        CHECKPOINT_NOW       // Immediate state save
+    }
+
+    // The work queue - bounded to prevent memory explosion under load
+    private val eventQueue = Channel<AgentEvent>(capacity = 8)
+
+    // Currently processing flag - for thermal interrupts
+    @Volatile private var isProcessing = false
+    @Volatile private var shouldAbort = false
 
     // ═══════════════════════════════════════════════════════════════
     // STATE MANAGEMENT
@@ -82,7 +133,92 @@ class KoogAgent(
         isMusicPlaying = false
         lastMusicTrack = ""
         restore()
+
+        // Start the Actor event loop
+        startEventLoop()
+
         Timber.i("KoogAgent: Ready (Mood:$moodState, 🍗$hunger ⚡$energy 💖$happiness)")
+    }
+
+    /**
+     * Actor event loop - single coroutine processing events sequentially
+     * This is the heart of the safe, non-recursive agent pattern
+     */
+    private fun startEventLoop() {
+        agentScope.launch {
+            Timber.i("KoogAgent: Event loop started ⚡")
+            for (event in eventQueue) {
+                try {
+                    isProcessing = true
+                    shouldAbort = false
+                    processEvent(event)
+                } catch (e: Exception) {
+                    Timber.e(e, "Event processing failed")
+                    // Try to respond to waiting callers
+                    when (event) {
+                        is AgentEvent.UserMessage -> {
+                            event.responseChannel.complete(
+                                "(╯°□°)╯︵ ┻━┻ Event processing crashed: ${e.message}"
+                            )
+                        }
+                        is AgentEvent.ToolResult -> {
+                            event.responseChannel.complete(event.originalResponse)
+                        }
+                        else -> { /* System events don't need response */ }
+                    }
+                } finally {
+                    isProcessing = false
+                }
+            }
+            Timber.i("KoogAgent: Event loop stopped")
+        }
+    }
+
+    /**
+     * Route events to appropriate handlers
+     */
+    private suspend fun processEvent(event: AgentEvent) {
+        when (event) {
+            is AgentEvent.UserMessage -> handleUserMessage(event)
+            is AgentEvent.ToolResult -> handleToolResult(event)
+            is AgentEvent.SystemEvent -> handleSystemEvent(event)
+        }
+    }
+
+    /**
+     * Handle system events (thermal, battery, etc.)
+     * These can interrupt ongoing processing
+     */
+    private suspend fun handleSystemEvent(event: AgentEvent.SystemEvent) {
+        Timber.i("🔔 System event: ${event.type}")
+        when (event.type) {
+            SystemEventType.THERMAL_CRITICAL -> {
+                shouldAbort = true
+                Timber.w("🔥 THERMAL CRITICAL - aborting current processing")
+                // Force checkpoint before potential shutdown
+                withContext(Dispatchers.IO) { checkpoint() }
+            }
+            SystemEventType.THERMAL_THROTTLE -> {
+                Timber.i("🌡️ Thermal throttle - slowing down")
+                // Just log for now, could add delay between events
+            }
+            SystemEventType.LOW_BATTERY -> {
+                Timber.i("🪫 Low battery event")
+                // Checkpoint to preserve state
+                withContext(Dispatchers.IO) { checkpoint() }
+            }
+            SystemEventType.KV_CACHE_FLUSH -> {
+                Timber.i("🔄 KV cache flush requested")
+                try {
+                    llmEngine.softReset(buildSystemPrompt())
+                } catch (e: Exception) {
+                    Timber.e(e, "KV flush failed")
+                }
+            }
+            SystemEventType.CHECKPOINT_NOW -> {
+                withContext(Dispatchers.IO) { checkpoint() }
+            }
+        }
     }
     
     fun checkpoint() {
@@ -118,6 +254,17 @@ class KoogAgent(
             lastMusicTrack = ""
             Timber.i("KoogAgent: History cleared (including music state)")
         }
+    }
+
+    /**
+     * Shutdown the agent cleanly - close event queue and checkpoint
+     */
+    fun shutdown() {
+        Timber.i("KoogAgent: Shutting down...")
+        shouldAbort = true
+        eventQueue.close()
+        checkpoint()
+        Timber.i("KoogAgent: Shutdown complete")
     }
     
     fun restore() {
@@ -188,113 +335,207 @@ class KoogAgent(
     }
     
     // ═══════════════════════════════════════════════════════════════
-    // CORE AGENT LOOP: PERCEIVE → THINK → ACT
+    // CORE AGENT LOOP: PERCEIVE → THINK → ACT (via Event Queue)
     // ═══════════════════════════════════════════════════════════════
-    
+
+    /**
+     * Public API: Enqueue user message and wait for response
+     * This replaces the old recursive processUserMessage
+     */
     suspend fun processUserMessage(
         message: String,
         sessionId: String,
         images: List<android.graphics.Bitmap>? = null,
         audio: ShortArray? = null
-    ): String = withContext(Dispatchers.Default) {
-        
-        turnCount++
-        Timber.i("🧠 KoogAgent: Turn $turnCount - Starting...")
-        
-        // 1. PERCEIVE: Gather context
-        Timber.i("👁️ Perceiving device state...")
-        val context = perceive()
-        Timber.d("Context gathered: ${context.length} chars")
-        
-        // 2. Add user message to history
-        val currentDate = java.time.LocalDate.now().toString()
-        val userMessageContent = "[Date: $currentDate] $message"
-        
-        val userMessage = Message(
-            role = "user",
-            content = userMessageContent,
-            hadImage = !images.isNullOrEmpty(),
-            hadAudio = audio != null
+    ): String {
+        val responseChannel = CompletableDeferred<String>()
+
+        val event = AgentEvent.UserMessage(
+            message = message,
+            sessionId = sessionId,
+            images = images,
+            audio = audio,
+            responseChannel = responseChannel
         )
-        conversationHistory.add(userMessage)
-        
-        // 3. THINK: Use LLM to reason about the message and decide on actions
-        Timber.i("🤔 Thinking... (this may take ~30s)")
-        val response = think(context, message, images, audio)
-        Timber.i("💭 Thought complete: ${response.take(50)}...")
-        
-        // 4. ACT: Parse response for tool calls and execute them
-        Timber.i("⚡ Acting on response...")
-        val (cleanResponse, toolResults) = act(response)
-        if (toolResults.isNotEmpty()) {
-            Timber.i("🔧 Executed ${toolResults.size} tools")
-        }
-        
-        // 5. Store assistant response
-        val assistantMessage = Message(
-            role = "assistant",
-            content = cleanResponse
-        )
-        conversationHistory.add(assistantMessage)
-        
-        // 6. Compress history if needed
-        if (conversationHistory.size > 40) {
-            compressHistory()
-        }
-        
-        // 7. Checkpoint (Structured Concurrency - Kimi K2 Fix)
-        Timber.d("💾 Checkpointing state...")
-        try {
-            // Await checkpoint to ensure data safety before return
-            // Using withContext to bridge blocking I/O to suspend
-            withContext(Dispatchers.IO) {
-                checkpoint()
-            }
-        } catch (e: Exception) {
-            Timber.e(e, "Checkpoint failed")
-        }
-        
-        // 8. If tools were executed, do a follow-up turn
-        val finalContent = if (toolResults.isNotEmpty()) {
-            val observation = "Tool results:\n${toolResults.joinToString("\n")}"
-            Timber.d("KoogAgent: Tool execution complete, reflecting...")
-            
-            // Recursive call for reflection
-            val reflection = think(context, "Observation: $observation\n\nWhat should I tell the user?", null, null)
-            "$cleanResponse\n\n$reflection"
-        } else {
-            cleanResponse
-        }
-        
-        // 9. INJECT HEADERS & FOOTERS (The "Body" speaks for the "Mind")
-        val timestamp = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-            .format(java.time.LocalDateTime.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS))
-            
-        // Select mood emoji (allow full range, default to sentient spark)
-        val moodEmoji = if (moodState.isNotBlank() && moodState != "IDLE") moodState else "✦"
-            
-        
-        val wrappedResponse = """✦ Gemma Δ $moodEmoji ∇
-$finalContent
-Δ ℹ️ $timestamp ♾️ ∇""".trimIndent()
 
+        // Enqueue and wait - backpressure handled by bounded channel
+        eventQueue.send(event)
+        return responseChannel.await()
+    }
 
-        Timber.i("✅ KoogAgent: Turn $turnCount complete!")
-
-        // 10. CRITICAL: Flush KV Cache to prevent NPU corruption (ASYNC)
-        // NPU drivers are unstable - cache gets corrupted after turn 1
-        // Use agentScope so this doesn't block the response returning to user
+    /**
+     * Send system event (non-blocking, fire-and-forget)
+     * Called by GemmaService when thermal/battery events occur
+     */
+    fun sendSystemEvent(type: SystemEventType, payload: String? = null) {
         agentScope.launch {
             try {
-                Timber.d("🔄 Flushing KV cache (NPU corruption prevention)...")
-                llmEngine.softReset(buildSystemPrompt())
-                Timber.i("✓ KV cache flushed")
+                eventQueue.send(AgentEvent.SystemEvent(type, payload))
             } catch (e: Exception) {
-                Timber.e(e, "KV reset failed - next turn may crash")
+                Timber.w(e, "Failed to send system event: $type")
             }
         }
+    }
 
-        wrappedResponse
+    /**
+     * Handle user message event - the main perceive->think->act cycle
+     * No recursion! Tool results get enqueued as separate events
+     */
+    private suspend fun handleUserMessage(event: AgentEvent.UserMessage) {
+        turnCount++
+        Timber.i("🧠 KoogAgent: Turn $turnCount - Starting...")
+
+        try {
+            // 1. PERCEIVE: Gather context
+            Timber.i("👁️ Perceiving device state...")
+            val context = perceive()
+            Timber.d("Context gathered: ${context.length} chars")
+
+            // Check for abort (thermal critical)
+            if (shouldAbort) {
+                event.responseChannel.complete("🔥 Processing aborted - device too hot!")
+                return
+            }
+
+            // 2. Add user message to history
+            val currentDate = java.time.LocalDate.now().toString()
+            val userMessageContent = "[Date: $currentDate] ${event.message}"
+
+            val userMessage = Message(
+                role = "user",
+                content = userMessageContent,
+                hadImage = !event.images.isNullOrEmpty(),
+                hadAudio = event.audio != null
+            )
+            conversationHistory.add(userMessage)
+
+            // 3. THINK: Use LLM to reason about the message
+            Timber.i("🤔 Thinking... (this may take ~30s)")
+            val response = think(context, event.message, event.images, event.audio)
+            Timber.i("💭 Thought complete: ${response.take(50)}...")
+
+            // Check for abort again
+            if (shouldAbort) {
+                event.responseChannel.complete("🔥 Processing aborted - device too hot!")
+                return
+            }
+
+            // 4. ACT: Parse response for tool calls and execute them
+            Timber.i("⚡ Acting on response...")
+            val (cleanResponse, toolResults) = act(response)
+            if (toolResults.isNotEmpty()) {
+                Timber.i("🔧 Executed ${toolResults.size} tools")
+            }
+
+            // 5. Store assistant response
+            val assistantMessage = Message(
+                role = "assistant",
+                content = cleanResponse
+            )
+            conversationHistory.add(assistantMessage)
+
+            // 6. Compress history if needed
+            if (conversationHistory.size > 40) {
+                compressHistory()
+            }
+
+            // 7. Checkpoint
+            Timber.d("💾 Checkpointing state...")
+            try {
+                withContext(Dispatchers.IO) { checkpoint() }
+            } catch (e: Exception) {
+                Timber.e(e, "Checkpoint failed")
+            }
+
+            // 8. If tools were executed, enqueue follow-up (NO RECURSION!)
+            if (toolResults.isNotEmpty()) {
+                val toolResultEvent = AgentEvent.ToolResult(
+                    context = context,
+                    toolResults = toolResults,
+                    originalResponse = cleanResponse,
+                    responseChannel = event.responseChannel
+                )
+                // Send to queue instead of recursive call
+                eventQueue.send(toolResultEvent)
+                // Don't complete responseChannel yet - ToolResult handler will
+                return
+            }
+
+            // 9. INJECT HEADERS & FOOTERS
+            val finalResponse = wrapResponse(cleanResponse)
+
+            Timber.i("✅ KoogAgent: Turn $turnCount complete!")
+
+            // 10. Queue async KV flush
+            eventQueue.trySend(AgentEvent.SystemEvent(SystemEventType.KV_CACHE_FLUSH))
+
+            event.responseChannel.complete(finalResponse)
+
+        } catch (e: Exception) {
+            Timber.e(e, "handleUserMessage failed")
+            event.responseChannel.complete(
+                "(´°̥̥̥̥̥̥̥̥ω°̥̥̥̥̥̥̥̥`) brain.exe crashed: ${e.message}"
+            )
+        }
+    }
+
+    /**
+     * Handle tool result event - reflect on what tools did
+     * This replaces the recursive think() call
+     */
+    private suspend fun handleToolResult(event: AgentEvent.ToolResult) {
+        Timber.i("🔧 Processing tool results...")
+
+        try {
+            if (shouldAbort) {
+                event.responseChannel.complete(
+                    wrapResponse(event.originalResponse + "\n\n🔥 Reflection skipped - cooling down")
+                )
+                return
+            }
+
+            val observation = "Tool results:\n${event.toolResults.joinToString("\n")}"
+            Timber.d("KoogAgent: Tool execution complete, reflecting...")
+
+            // Single think() call - no recursion possible
+            val reflection = think(
+                event.context,
+                "Observation: $observation\n\nWhat should I tell the user?",
+                null,
+                null
+            )
+
+            val finalContent = "${event.originalResponse}\n\n$reflection"
+            val finalResponse = wrapResponse(finalContent)
+
+            Timber.i("✅ Tool reflection complete!")
+
+            // Queue async KV flush
+            eventQueue.trySend(AgentEvent.SystemEvent(SystemEventType.KV_CACHE_FLUSH))
+
+            event.responseChannel.complete(finalResponse)
+
+        } catch (e: Exception) {
+            Timber.e(e, "handleToolResult failed")
+            // Still return original response even if reflection fails
+            event.responseChannel.complete(
+                wrapResponse(event.originalResponse + "\n\n(；′⌒`) ...reflection glitched")
+            )
+        }
+    }
+
+    /**
+     * Wrap response with headers/footers
+     */
+    private fun wrapResponse(content: String): String {
+        val timestamp = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+            .format(java.time.LocalDateTime.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS))
+
+        val moodEmoji = if (moodState.isNotBlank() && moodState != "IDLE") moodState else "✦"
+
+        return """✦ Gemma Δ $moodEmoji ∇
+$content
+Δ ℹ️ $timestamp ♾️ ∇""".trimIndent()
     }
     
     // ═══════════════════════════════════════════════════════════════

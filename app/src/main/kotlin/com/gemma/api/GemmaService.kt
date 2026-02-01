@@ -254,8 +254,20 @@ class GemmaService : Service() {
                         }
                         cachedThermalState = newState
                         _thermalState.set(newState)
-                        if (newState == ThermalState.CRITICAL) {
-                            Timber.w("🔥 NATIVE THERMAL: CRITICAL - pausing inference")
+
+                        // Forward thermal events to KoogAgent's event queue
+                        if (USE_KOOG_AGENT && ::koogAgent.isInitialized) {
+                            when (newState) {
+                                ThermalState.CRITICAL -> {
+                                    Timber.w("🔥 NATIVE THERMAL: CRITICAL - notifying agent")
+                                    koogAgent.sendSystemEvent(KoogAgent.SystemEventType.THERMAL_CRITICAL)
+                                }
+                                ThermalState.HOT -> {
+                                    Timber.i("🌡️ NATIVE THERMAL: HOT - notifying agent")
+                                    koogAgent.sendSystemEvent(KoogAgent.SystemEventType.THERMAL_THROTTLE)
+                                }
+                                else -> { /* WARM/COOL don't need agent notification */ }
+                            }
                         }
                     }
                     nativeThermalAvailable = true
@@ -486,15 +498,25 @@ class GemmaService : Service() {
                     val memoryFree = Runtime.getRuntime().freeMemory() / 1024 / 1024
                     val memoryTotal = Runtime.getRuntime().totalMemory() / 1024 / 1024
                     
+                    // 0. Low battery detection - notify agent
+                    if (battery != null && battery.level <= 15 && !battery.isCharging) {
+                        if (USE_KOOG_AGENT && ::koogAgent.isInitialized) {
+                            koogAgent.sendSystemEvent(
+                                KoogAgent.SystemEventType.LOW_BATTERY,
+                                "Battery at ${battery.level}%"
+                            )
+                        }
+                    }
+
                     // 1. Thermal Regulation logic
                     if (thermal == EmotionalState.PANIC) {
                         consecutiveCriticalCount++
                         if (consecutiveCriticalCount >= 2 && isGemmaLoaded() && !modelUnloadedForCooling) {
                             Timber.w("🔥 PANIC: Unloading model for survival")
 
-                            // Checkpoint via KoogAgent before unloading
+                            // Notify agent via event queue (will checkpoint)
                             if (USE_KOOG_AGENT && ::koogAgent.isInitialized) {
-                                try { koogAgent.checkpoint() } catch (e: Exception) { Timber.e(e, "Emergency checkpoint failed") }
+                                koogAgent.sendSystemEvent(KoogAgent.SystemEventType.THERMAL_CRITICAL)
                             }
 
                             // Atomic unload (Kimi K2 Fix)
@@ -1109,13 +1131,13 @@ $userPrompt
             // Use runBlocking to ensure cleanup completes (Kimi's fix for GlobalScope leak)
             kotlinx.coroutines.runBlocking {
                 kotlinx.coroutines.withTimeoutOrNull(5000L) {
-                    // Save agent state
+                    // Shutdown agent (closes event queue and checkpoints)
                     if (USE_KOOG_AGENT && ::koogAgent.isInitialized) {
                         try {
-                            koogAgent.checkpoint()
-                            Timber.i("Agent state saved")
+                            koogAgent.shutdown()
+                            Timber.i("Agent shutdown complete")
                         } catch (e: Exception) {
-                            Timber.w(e, "Checkpoint failed")
+                            Timber.w(e, "Agent shutdown failed")
                         }
                     }
 
