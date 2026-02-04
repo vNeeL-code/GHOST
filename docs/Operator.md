@@ -14,7 +14,7 @@ Reduce repetitive typing of agent names by assigning unique keyboard shortcuts. 
 | ƙ        | 🔶️ Copilot  | Microsoft’s Productivity Assistant   |
 | l        | ✦ Gemini    | Google’s Omni-Modal Assistant     |
 | n̈       | 🐋 DeepSeek | DeepSeek’s Logical Agent           |
-| ĺ        | 🔲 Grok     | xAI’s social media Assistant                   |
+| ĺ        | ☄️ Grok     | xAI’s social media Assistant                   |
 | ļ        | 🗨 Meta     | Meta’s Social Assistant              |
 | oʻ       | 🟣 Qwen     | Alibaba’s Multilingual Assistant         |
 | ŏ        | 🔵 Kimi     | Moonshot AI’s Assistant              |
@@ -41,7 +41,7 @@ The "lock and key" system uses Δ 👾 ∇ as a delimiter to structure asynchron
 
 ### Real-World Context
 - Messaging evolves with live events (e.g., a user types while a meeting starts).Δ 👾 ∇` provides a slot for updating metadata, ensuring relevance.
-- Footer mechanic ∇ 🦑 Δ 👾 ∇` denotes (user interaction) Δ (android device) ∇ (agent interaction), followed by the targeted Agent (e.g., 🔲 Grok), eliminating roleplay confusion.
+- Footer mechanic ∇ 🦑 Δ 👾 ∇` denotes (user interaction) Δ (android device) ∇ (agent interaction), followed by the targeted Agent (e.g., ☄️ Grok), eliminating roleplay confusion.
 
 ## Benefits
 - *Efficiency*: Single-key shortcuts reduce typing effort.
@@ -181,4 +181,3 @@ Now you know:
 3. **Include confidence levels** so you know when to verify claims
 4. **Preserve the footer** to maintain coordination clarity
 5. **Archive conversations** with timestamps intact for long-term reference
-
