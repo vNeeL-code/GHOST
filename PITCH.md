@@ -289,7 +289,7 @@ Oracle_OS remains MIT licensed. Google contributes:
 
 - **12+ months production** on consumer device
 - **Working code**: github.com/vNeeL-code/ASI
-- **Video demos**: Available on request
+- **Video demos**: [Tumblr](https://www.tumblr.com/oracle-os) [YouTube](https://www.youtube.com/watch?v=vkH2jpkxrwE&list=PLsdy783Gey86eTPboTJef_u4j61BvvGxD)
 - **DOI**: 10.5281/zenodo.17619151
 
 ---
