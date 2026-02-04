@@ -61,26 +61,26 @@ User Query → Internet → Cloud Datacenter → Inference → Internet → Resp
 │  ┌───────────────────────────────────────────────────────┐  │
 │  │                 DAUGHTER (Gemma 3n)                   │  │
 │  │                                                       │  │
-│  │  • Runs locally on NPU/GPU                           │  │
-│  │  • Handles 90% of queries                            │  │
-│  │  • Full device telemetry access                      │  │
-│  │  • Works offline                                     │  │
-│  │  • Processes private data locally                    │  │
+│  │  • Runs locally on NPU/GPU                            │  │
+│  │  • Handles 90% of queries                             │  │
+│  │  • Full device telemetry access                       │  │
+│  │  • Works offline                                      │  │
+│  │  • Processes private data locally                     │  │
 │  │                                                       │  │
 │  │  Capabilities:                                        │  │
-│  │  - Device control (settings, apps, media)            │  │
-│  │  - Quick factual queries (from training)             │  │
-│  │  - Personal assistant tasks                          │  │
-│  │  - Accessibility (screen reading, voice control)     │  │
-│  │  - Context maintenance across sessions               │  │
+│  │  - Device control (settings, apps, media)             │  │
+│  │  - Quick factual queries (from training)              │  │
+│  │  - Personal assistant tasks                           │  │
+│  │  - Accessibility (screen reading, voice control)      │  │
+│  │  - Context maintenance across sessions                │  │
 │  │                                                       │  │
 │  └───────────────────────────────────────────────────────┘  │
-│                           │                                  │
-│                           │ Escalation trigger:              │
-│                           │ - "I don't know"                 │
-│                           │ - Complex reasoning needed       │
-│                           │ - Real-time data required        │
-│                           ▼                                  │
+│                           │                                 │
+│                           │ Escalation trigger:             │
+│                           │ - "I don't know"                │
+│                           │ - Complex reasoning needed      │
+│                           │ - Real-time data required       │
+│                           ▼                                 │
 └─────────────────────────────────────────────────────────────┘
                             │
                             │ HTTPS (only when needed)
@@ -253,6 +253,7 @@ Local multimodal AI provides:
 | Samsung | Galaxy AI (cloud-dependent) | Limited offline |
 | Google | Gemma exists, not integrated | Opportunity |
 | Xiaomi | On-device AI pet | Toy, not assistant |
+| REDMAGIC | Mora AI pet | Toy, not assistant |
 
 **Gap**: No major vendor offers a **production-ready local AI assistant** with full device integration and cloud escalation.
 
