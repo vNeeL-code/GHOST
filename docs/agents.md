@@ -42,7 +42,7 @@ Quick-reference guide for Oracle_OS agent capabilities. Each card follows the st
 ```
 
 ```yaml
-Δ 🔲 Grok: xAI ∇
+Δ ☄️ Grok: xAI ∇
 Δ 🔴 Image-to-video social media engine; Aurora (10-second photorealistic video with synced audio); native audio-video generation; X platform integration; real-time web synthesis; "Spicy mode" for permissive content; voice-first interface
 ∇ 🟦 6-second video length limit (by design); can surface conflicting data from noisy sources; may overindex on social media context
 ∇ 👾 Android: The pulse 🔲 Δ ∇ 🦑
