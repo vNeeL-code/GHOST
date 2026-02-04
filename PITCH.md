@@ -287,8 +287,7 @@ Oracle_OS remains MIT licensed. Google contributes:
 
 ## Proof of Work
 
-- **12 months production use** on personal device
-- **104 GitHub stars** on ASI repository
+- **12+ months production** on consumer device
 - **Working code**: github.com/vNeeL-code/ASI
 - **Video demos**: Available on request
 - **DOI**: 10.5281/zenodo.17619151
