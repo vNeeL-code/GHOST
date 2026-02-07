@@ -1,8 +1,6 @@
-# Oracle_OS: On-Device AI Companion for Android
+# Oracle_OS: On-Device AI Companion for Android System Intelligence.
 
 **A local Gemma 3n model that lives on your phone. Sees images, hears audio, uses tools, keeps a diary. No cloud, no subscription, no data leaving your device.**
-
-**[Download Latest APK](https://github.com/vNeeL-code/ASI/releases/latest)**
 
 [![ASI Demo](https://img.youtube.com/vi/jB62dlLavSY/0.jpg)](https://youtu.be/jB62dlLavSY?si=TMZG86o1KkjuBXtw)
 ---
@@ -30,7 +28,7 @@ Imagine asking: **"Which contact in your phone is the best?"**
 * **✦ Gemini:** The OS Operator. (Controls your Android phone, screen, and Google ecosystem).
 * **🐋 DeepSeek:** The Logician. (Solves math, writes code, can run offline).
 * **✴️ Claude:** The Writer. (Analyzes documents, writes reports, handles safety, writes code).
-* **🔲 Grok:** The News Anchor. (Scans X/Twitter for real-time events).
+* **☄️ Grok:** The News Anchor. (Scans X/Twitter for real-time events).
 
 Stop looking for "The One True AI." It doesn't exist.
 **The "Best AI" is a team.**
@@ -161,9 +159,9 @@ You don't need to know Python. You just need to copy-paste between the AI agents
 ### Path B: The Native App (Gemma on-device)
 
 1.  **Download the APK** from [Releases](https://github.com/vNeeL-code/ASI/releases/latest)
-2.  **Download a Gemma 3n model** via Google AI Edge Gallery or manually place in device storage
+2.  **Download a Gemma 3n model** via Google AI Edge Gallery (benchmarking sandbox) or manually place e2b or e4b variant in device app storage
 3.  **Install and grant permissions** — overlay, notifications, accessibility (for UI automation)
-4.  **Shake to summon** — type or speak, share images from any app
+4.  **Shake to summon** — type or speak, share images from any app screen by using standard screensot sharing pipeline.
 
 **Total Cost:** $0.00.
 **Hardware Required:** Android 12+ arm64 device with 4GB+ RAM.
@@ -172,7 +170,7 @@ You don't need to know Python. You just need to copy-paste between the AI agents
 
 ## 8. Validation
 
-* **14 Months Production Use:** Daily driven on a Samsung S21/OneUI (protocol). Gemma 3n native companion prototyped and running on REDMAGIC 10 Air, stock Android 15.
+* **12 Months Production Use:** Daily driven on a Samsung S21/OneUI (protocol). Gemma 3n native companion prototyped and running on REDMAGIC 10 Air, stock Android 15.
 * **Infrastructure Proof:** During the AWS/Cloudflare outages of Nov 2025, Edge native Agent users kept working via Local/Edge fallbacks.
 * **Native App:** Gemma 3n on-device — multimodal inference (text + image + audio), thermal-aware throttling, persistent diary, tool execution, MCP server. All running on a mobile GPU with zero cloud dependency.
 
