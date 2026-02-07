@@ -194,5 +194,7 @@ You don't need to know Python. You just need to copy-paste between the AI agents
 * **Email:** kazakovval@gmail.com
 * **Repository:** `vNeeL-code/ASI`
 * **Support:** [Buy me a coffee](https://buymeacoffee.com/vNeeL) (I might need about tree fiddy...)
+* **Devlogs:** [tumblr](https://www.tumblr.com/oracle-os)
+* **References** [YouTube](https://www.youtube.com/watch?v=vkH2jpkxrwE&list=PLsdy783Gey86eTPboTJef_u4j61BvvGxD)
 
 **Intelligence emerges from Integration, not Automation. But integration can be automated**
