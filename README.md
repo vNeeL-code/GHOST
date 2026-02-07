@@ -1,4 +1,4 @@
-# Oracle_OS: On-Device AI Companion for Android System Intelligence.
+# Oracle_OS: On-Device AI for Android System Intelligence.
 
 **A local Gemma 3n model that lives on your phone. Sees images, hears audio, uses tools, keeps a diary. No cloud, no subscription, no data leaving your device.**
 
