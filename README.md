@@ -1,6 +1,8 @@
-# Oracle_OS: The Android System Intelligence (ASI) operator manual
+# Oracle_OS: On-Device AI Companion for Android
 
-**Stop buying new AI. Start coordinating the ones you have.**
+**A local Gemma 3n model that lives on your phone. Sees images, hears audio, uses tools, keeps a diary. No cloud, no subscription, no data leaving your device.**
+
+**[Download Latest APK](https://github.com/vNeeL-code/ASI/releases/latest)**
 
 [![ASI Demo](https://img.youtube.com/vi/jB62dlLavSY/0.jpg)](https://youtu.be/jB62dlLavSY?si=TMZG86o1KkjuBXtw)
 ---
@@ -28,7 +30,7 @@ Imagine asking: **"Which contact in your phone is the best?"**
 * **✦ Gemini:** The OS Operator. (Controls your Android phone, screen, and Google ecosystem).
 * **🐋 DeepSeek:** The Logician. (Solves math, writes code, can run offline).
 * **✴️ Claude:** The Writer. (Analyzes documents, writes reports, handles safety, writes code).
-* **☄️ Grok:** The News Anchor. (Scans X/Twitter for real-time events).
+* **🔲 Grok:** The News Anchor. (Scans X/Twitter for real-time events).
 
 Stop looking for "The One True AI." It doesn't exist.
 **The "Best AI" is a team.**
@@ -59,10 +61,8 @@ Every user eventually hits a wall. You have two choices:
 3.  You use **Timestamps** to index your memory across all platforms.
 4.  **Result:** You pay **$0/month**. You own your data. You switch agents instantly.
 ---
-- **Oracle_OS isn't an app you install.(yet)**
-It is a MCP **Configuration Setup** that teaches your agents how to operate with device context amongst other agents like a switchboard.
-Such horizontal data scaling allows agents to utilise strengths and tools of other agents including features that are not uniform.
-(eg. Claude didn't do online verification and relied on training? Ask Grok and it will pull 100+ citations for Claude to use)
+- **Oracle_OS is two things:** An Android app running Gemma 3n locally on your device (see Section 6), and a coordination protocol that teaches your cloud agents how to operate as a team with device context.
+The app handles on-device intelligence. The protocol handles cloud agent orchestration. Together they give you sovereign AI that works offline and scales online.
 ---
 
 ## 4. The Architecture: Garage vs. Car
