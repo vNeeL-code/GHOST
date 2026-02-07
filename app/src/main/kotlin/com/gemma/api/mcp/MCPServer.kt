@@ -4,6 +4,7 @@ import android.content.Context
 import com.gemma.api.hardware.HardwareToolSet
 import com.gemma.api.hardware.NetworkToolSet
 import com.gemma.api.hardware.SystemToolSet
+import com.gemma.api.hardware.AudioRecorder
 import com.gemma.api.hardware.SensorFusionManager
 import com.gemma.api.GemmaAccessibilityService
 import com.gemma.api.GemmaNotificationListener
@@ -27,6 +28,8 @@ class MCPServer(
     private val hardwareTools: HardwareToolSet,
     private val networkTools: NetworkToolSet,
     private val systemTools: SystemToolSet,
+
+    private val audioRecorder: AudioRecorder,
     private val sensorManager: SensorFusionManager,
     private val memoryManager: MemoryManager
 ) {
@@ -113,7 +116,7 @@ class MCPServer(
         ),
         "take_screenshot" to ToolDefinition(
             name = "take_screenshot",
-            description = "Capture the current screen (vision input for next turn)",
+            description = "Capture the current screen. Use ONLY when user explicitly asks to 'look at' or 'see' the screen.",
             parameters = emptyMap()
         ),
         "record_audio" to ToolDefinition(
@@ -160,6 +163,32 @@ class MCPServer(
                 "text" to ParameterSpec("string", "Text to type")
             )
         ),
+        "alarm" to ToolDefinition(
+            name = "alarm",
+            description = "Set an alarm at a specific time (24h format)",
+            parameters = mapOf(
+                "hour" to ParameterSpec("number", "Hour (0-23)"),
+                "minutes" to ParameterSpec("number", "Minutes (0-59)"),
+                "label" to ParameterSpec("string", "Alarm label/reason", required = false)
+            )
+        ),
+        "timer" to ToolDefinition(
+            name = "timer",
+            description = "Set a countdown timer",
+            parameters = mapOf(
+                "seconds" to ParameterSpec("number", "Duration in seconds"),
+                "label" to ParameterSpec("string", "Timer label/reason", required = false)
+            )
+        ),
+        "calendar" to ToolDefinition(
+            name = "calendar",
+            description = "Create a calendar event or note. Use for reminders, plans, diary entries, appointments.",
+            parameters = mapOf(
+                "title" to ParameterSpec("string", "Event title"),
+                "description" to ParameterSpec("string", "Event description/details", required = false),
+                "minutes" to ParameterSpec("number", "Duration in minutes (default 30)", required = false)
+            )
+        ),
         "flush" to ToolDefinition(
             name = "flush",
             description = "Clear KV cache and reset context when responses become slow or confused",
@@ -175,6 +204,7 @@ class MCPServer(
     // Callbacks for system-level operations (set by GemmaService)
     private var onFlushRequested: (() -> Unit)? = null
     private var onCooldownRequested: (() -> Unit)? = null
+    private var onAudioRecorded: ((ByteArray) -> Unit)? = null
 
     fun setFlushCallback(callback: () -> Unit) {
         onFlushRequested = callback
@@ -182,6 +212,10 @@ class MCPServer(
 
     fun setCooldownCallback(callback: () -> Unit) {
         onCooldownRequested = callback
+    }
+
+    fun setAudioRecordedCallback(callback: (ByteArray) -> Unit) {
+        onAudioRecorded = callback
     }
     
     fun listTools(): List<ToolDefinition> = toolRegistry.values.toList()
@@ -206,6 +240,9 @@ class MCPServer(
                 "app" -> executeOpenApp(params)
                 "media" -> executeMediaControl(params)
                 "type" -> executeType(params)
+                "alarm" -> executeAlarm(params)
+                "timer" -> executeTimer(params)
+                "calendar" -> executeCalendarEvent(params)
                 "flush" -> executeFlush()
                 "cooldown" -> executeCooldown()
                 else -> ToolResult(false, "", "Unknown tool: $name")
@@ -221,13 +258,13 @@ class MCPServer(
     // ═══════════════════════════════════════════════════════════════
     
     private fun executeFlashlight(params: Map<String, Any>): ToolResult {
-        val state = params["state"]?.toString()?.uppercase() == "ON"
+        val state = (params["state"] ?: params["value"])?.toString()?.uppercase() == "ON"
         hardwareTools.controlFlashlight(state)
         return ToolResult(true, "Flashlight ${if (state) "ON" else "OFF"}")
     }
-    
+
     private fun executeVibrate(params: Map<String, Any>): ToolResult {
-        val pattern = params["pattern"]?.toString()?.uppercase() ?: "SHORT"
+        val pattern = (params["pattern"] ?: params["value"])?.toString()?.uppercase() ?: "SHORT"
         val timing = if (pattern == "SOS") {
             listOf(0L, 200L, 100L, 200L, 100L, 200L, 300L, 500L, 100L, 500L, 100L, 500L, 300L, 200L, 100L, 200L, 100L, 200L)
         } else {
@@ -238,7 +275,7 @@ class MCPServer(
     }
     
     private fun executeClick(params: Map<String, Any>): ToolResult {
-        val target = params["target"]?.toString() ?: return ToolResult(false, "", "Missing target")
+        val target = (params["target"] ?: params["value"])?.toString() ?: return ToolResult(false, "", "Missing target")
         val service = GemmaAccessibilityService.instance
             ?: return ToolResult(false, "", "Accessibility service not active")
         
@@ -251,7 +288,7 @@ class MCPServer(
     }
     
     private fun executeScroll(params: Map<String, Any>): ToolResult {
-        val direction = params["direction"]?.toString()?.uppercase() ?: "DOWN"
+        val direction = (params["direction"] ?: params["value"])?.toString()?.uppercase() ?: "DOWN"
         val service = GemmaAccessibilityService.instance
             ?: return ToolResult(false, "", "Accessibility service not active")
         
@@ -264,7 +301,7 @@ class MCPServer(
     }
     
     private fun executeNavigate(params: Map<String, Any>): ToolResult {
-        val action = params["action"]?.toString()?.uppercase() ?: "HOME"
+        val action = (params["action"] ?: params["value"])?.toString()?.uppercase() ?: "HOME"
         val service = GemmaAccessibilityService.instance
             ?: return ToolResult(false, "", "Accessibility service not active")
         
@@ -273,7 +310,7 @@ class MCPServer(
     }
     
     private suspend fun executeSearch(params: Map<String, Any>): ToolResult {
-        val query = params["query"]?.toString() ?: return ToolResult(false, "", "Missing query")
+        val query = params["query"]?.toString() ?: params["value"]?.toString() ?: return ToolResult(false, "", "Missing query")
         
         return try {
             val results = networkTools.fetchSearchResults(query, 3)
@@ -285,34 +322,52 @@ class MCPServer(
         }
     }
     
-    private fun executeGoogle(params: Map<String, Any>): ToolResult {
-        val query = params["query"]?.toString() ?: return ToolResult(false, "", "Missing query")
+    private suspend fun executeGoogle(params: Map<String, Any>): ToolResult {
+        val query = params["query"]?.toString() ?: params["value"]?.toString() ?: return ToolResult(false, "", "Missing query")
+        // 1. Open browser for user to see the page
         networkTools.googleSearch(query)
-        return ToolResult(true, "Opened Google search for '$query'")
+        // 2. Background fetch so model knows what the user is looking at
+        return try {
+            val results = networkTools.fetchSearchResults(query, 3)
+            ToolResult(true, "Opened Google for user. Here's what they're seeing:\n$results")
+        } catch (e: Exception) {
+            ToolResult(true, "Opened Google search for '$query' (background fetch failed: ${e.message})")
+        }
     }
 
     private fun executeBrowser(params: Map<String, Any>): ToolResult {
-        val url = params["url"]?.toString() ?: return ToolResult(false, "", "Missing URL")
+        val url = params["url"]?.toString() ?: params["value"]?.toString() ?: return ToolResult(false, "", "Missing URL")
         networkTools.openBrowser(url)
         return ToolResult(true, "Opened $url")
     }
     
     private fun executeTakeScreenshot(): ToolResult {
-        // Broadcast request for screenshot to GemmaService
-        val intent = android.content.Intent("com.gemma.api.ACTION_REQUEST_SCREENSHOT")
-        intent.setPackage(context.packageName)
-        context.sendBroadcast(intent)
-        return ToolResult(true, "Screenshot requested. Visual input will be available in next turn.")
+        val result = systemTools.takeScreenshot()
+        return ToolResult(true, result)
     }
     
-    private fun executeRecordAudio(params: Map<String, Any>): ToolResult {
-        val duration = (params["duration"] as? Number)?.toInt() ?: 5
-        // Placeholder - actual implementation would trigger audio recording
-        return ToolResult(true, "Audio recording ($duration seconds) queued for next turn")
+    private suspend fun executeRecordAudio(params: Map<String, Any>): ToolResult {
+        val duration = (params["duration"] as? Number)?.toInt()
+            ?: (params["value"])?.toString()?.toIntOrNull()
+            ?: 5
+
+        if (!audioRecorder.hasPermission()) {
+            return ToolResult(false, "", "No microphone permission")
+        }
+
+        val audioData = audioRecorder.record(duration, rawPcm = false)
+            ?: return ToolResult(false, "", "Audio recording failed")
+
+        // Deliver audio bytes via callback so GemmaService can queue them for next inference
+        onAudioRecorded?.invoke(audioData)
+            ?: Timber.w("MCP: Audio recorded but no callback set — bytes will be lost")
+
+        val durationActual = audioData.size / 32000f // 16kHz * 2 bytes
+        return ToolResult(true, "Audio recorded (${String.format("%.1f", durationActual)}s). Listening to what was captured...")
     }
     
     private suspend fun executeSearchLogs(params: Map<String, Any>): ToolResult {
-        val keyword = params["keyword"]?.toString() ?: return ToolResult(false, "", "Missing keyword")
+        val keyword = (params["keyword"] ?: params["value"])?.toString() ?: return ToolResult(false, "", "Missing keyword")
         val limit = (params["limit"] as? Number)?.toInt() ?: 10
         
         return try {
@@ -336,7 +391,7 @@ class MCPServer(
     }
     
     private suspend fun executeSearchDiary(params: Map<String, Any>): ToolResult {
-        val query = params["query"]?.toString() ?: return ToolResult(false, "", "Missing query")
+        val query = (params["query"] ?: params["value"])?.toString() ?: return ToolResult(false, "", "Missing query")
         val limit = (params["limit"] as? Number)?.toInt() ?: 10
 
         return try {
@@ -364,14 +419,14 @@ class MCPServer(
     }
 
     private fun executeOpenApp(params: Map<String, Any>): ToolResult {
-        val appName = params["name"]?.toString() ?: return ToolResult(false, "", "Missing app name")
+        val appName = (params["name"] ?: params["value"])?.toString() ?: return ToolResult(false, "", "Missing app name")
         val result = systemTools.openApp(appName)
         val success = result.startsWith("Launched")
         return ToolResult(success, result, if (success) null else result)
     }
 
     private fun executeMediaControl(params: Map<String, Any>): ToolResult {
-        val action = params["action"]?.toString()?.uppercase() ?: return ToolResult(false, "", "Missing action")
+        val action = (params["action"] ?: params["value"])?.toString()?.uppercase() ?: return ToolResult(false, "", "Missing action")
         val result = systemTools.mediaControl(action)
         val success = result.startsWith("Media Action Sent")
         return ToolResult(success, result, if (success) null else result)
@@ -399,8 +454,45 @@ class MCPServer(
         }
     }
 
+    private fun executeAlarm(params: Map<String, Any>): ToolResult {
+        // Params arrive as Strings from act() parser — must handle both String and Number
+        val hour = params["hour"]?.toString()?.toIntOrNull()
+            ?: params["value"]?.toString()?.split(":")?.getOrNull(0)?.trim()?.toIntOrNull()
+            ?: return ToolResult(false, "", "Missing hour (0-23)")
+        val minutes = params["minutes"]?.toString()?.toIntOrNull()
+            ?: params["value"]?.toString()?.split(":")?.getOrNull(1)?.trim()?.toIntOrNull()
+            ?: 0
+        val label = params["label"]?.toString() ?: ""
+
+        val result = systemTools.setAlarm(hour, minutes, label)
+        val success = result.startsWith("Alarm set")
+        return ToolResult(success, result, if (success) null else result)
+    }
+
+    private fun executeTimer(params: Map<String, Any>): ToolResult {
+        val seconds = params["seconds"]?.toString()?.toIntOrNull()
+            ?: params["value"]?.toString()?.toIntOrNull()
+            ?: return ToolResult(false, "", "Missing seconds")
+        val label = params["label"]?.toString() ?: ""
+
+        val result = systemTools.setTimer(seconds, label)
+        val success = result.startsWith("Timer set")
+        return ToolResult(success, result, if (success) null else result)
+    }
+
+    private fun executeCalendarEvent(params: Map<String, Any>): ToolResult {
+        val title = params["title"]?.toString() ?: params["value"]?.toString()
+            ?: return ToolResult(false, "", "Missing title")
+        val description = params["description"]?.toString() ?: ""
+        val durationMinutes = params["minutes"]?.toString()?.toIntOrNull() ?: 30
+
+        val result = systemTools.createCalendarEvent(title, description, System.currentTimeMillis(), durationMinutes)
+        val success = result.startsWith("Calendar event created")
+        return ToolResult(success, result, if (success) null else result)
+    }
+
     private fun executeType(params: Map<String, Any>): ToolResult {
-        val text = params["text"]?.toString() ?: return ToolResult(false, "", "Missing text")
+        val text = (params["text"] ?: params["value"])?.toString() ?: return ToolResult(false, "", "Missing text")
         val service = GemmaAccessibilityService.instance
             ?: return ToolResult(false, "", "Accessibility service not active")
 

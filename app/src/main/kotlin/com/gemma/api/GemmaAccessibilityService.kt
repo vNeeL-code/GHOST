@@ -18,8 +18,21 @@ class GemmaAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // We generally don't need to track every event, we pull on demand.
-        // But we might track WINDOW_STATE_CHANGED to invalidate cache.
+        event ?: return
+        
+        // Audit Fix: "Stop the Scraping"
+        // Only wake up for major window state changes (App switching)
+        // Ignoring TYPE_VIEW_SCROLLED, TYPE_VIEW_CLICKED, etc. to save CPU/Battery.
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+             val packageName = event.packageName?.toString()
+             val className = event.className?.toString()
+             
+             if (packageName != null) {
+                 Timber.d("Window Change: $packageName / $className")
+                 // We could push this to context if needed, but for now we just log
+                 // and avoid the heavy DFS traversal.
+             }
+        }
     }
 
     override fun onInterrupt() {
@@ -55,17 +68,19 @@ class GemmaAccessibilityService : AccessibilityService() {
                 Timber.i("Screenshot successful")
                 try {
                     val hardwareBuffer = result.hardwareBuffer
-                    // DO NOT call hardwareBuffer.close() here - Bitmap.wrapHardwareBuffer manages it
-                    // Copy to software bitmap to prevent use-after-free on hardware buffer
-                    val bitmap = Bitmap.wrapHardwareBuffer(hardwareBuffer, result.colorSpace)?.copy(Bitmap.Config.ARGB_8888, false)
-                    
-                    hardwareBuffer.close() // Close original buffer logic
-                    
-                    if (bitmap != null) {
-                        // Feed Visual Cortex
-                        sensoryStream.updateVisual(bitmap)
+                    try {
+                        // DO NOT call hardwareBuffer.close() here - Bitmap.wrapHardwareBuffer manages it? 
+                        // Actually, docs say you MUST close it after wrapping IF you copy it.
+                        // We copy to software bitmap to prevent use-after-free on hardware buffer
+                        val bitmap = Bitmap.wrapHardwareBuffer(hardwareBuffer, result.colorSpace)?.copy(Bitmap.Config.ARGB_8888, false)
+                        
+                        if (bitmap != null) {
+                            sensoryStream.updateVisual(bitmap)
+                        }
+                        callback(bitmap)
+                    } finally {
+                        hardwareBuffer.close() // Close original buffer logic - ALWAYS
                     }
-                    callback(bitmap)
                 } catch (e: Exception) {
                     Timber.e(e, "Error processing screenshot")
                     callback(null)

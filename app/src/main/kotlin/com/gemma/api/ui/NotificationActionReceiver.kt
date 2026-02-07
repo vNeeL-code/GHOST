@@ -57,6 +57,25 @@ class NotificationActionReceiver : BroadcastReceiver() {
                     Timber.e(e, "Failed to show overlay")
                 }
             }
+            "com.gemma.api.ACTION_CONFIRM_TOOL", "com.gemma.api.ACTION_DENY_TOOL" -> {
+                Timber.d("Confirmation action: ${intent.action}")
+                val toolName = intent.getStringExtra("toolName") ?: return
+                val isApproved = (intent.action == "com.gemma.api.ACTION_CONFIRM_TOOL")
+                
+                // Forward to Service
+                val serviceIntent = Intent(context, GemmaService::class.java).apply {
+                    action = intent.action
+                    putExtra("toolName", toolName)
+                }
+                try {
+                    context.startService(serviceIntent)
+                    // Close notification panel
+                    val closeIntent = Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS)
+                    context.sendBroadcast(closeIntent)
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to forward confirmation to service")
+                }
+            }
         }
     }
 }

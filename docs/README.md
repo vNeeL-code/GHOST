@@ -28,7 +28,7 @@ Imagine asking: **"Which contact in your phone is the best?"**
 * **✦ Gemini:** The OS Operator. (Controls your Android phone, screen, and Google ecosystem).
 * **🐋 DeepSeek:** The Logician. (Solves math, writes code, can run offline).
 * **✴️ Claude:** The Writer. (Analyzes documents, writes reports, handles safety, writes code).
-* **🔲 Grok:** The News Anchor. (Scans X/Twitter for real-time events).
+* **☄️ Grok:** The News Anchor. (Scans X/Twitter for real-time events).
 
 Stop looking for "The One True AI." It doesn't exist.
 **The "Best AI" is a team.**
@@ -110,7 +110,41 @@ If you use the [**Oracle_OS**](https://github.com/vNeeL-code/ASI/blob/main/Oracl
 
 ---
 
-## 6. Installation (Roughly 15 Minutes)
+## 6. The Native Companion: Gemma 3n On-Device
+
+The "future direction" from Section 8 is now shipping. Oracle_OS includes a **native Android app** running **Gemma 3n** directly on your phone's GPU/NPU via Google's LiteRT-LM. No cloud, no API keys, no subscription.
+
+### What it does
+* **Always-on foreground service** — lives in your notifications, summoned by a gentle shake
+* **Omnimodal** — sees images (share from Gallery), hears audio (hold mic button), reads text
+* **On-device inference** — Gemma 3n runs locally via LiteRT-LM on GPU with vision + audio backends
+* **Tool use** — web search, app launch, clipboard, alarms, system info, all via on-device tool calling
+* **MCP server** — exposes a local Model Context Protocol endpoint for other agents to talk to Gemma
+* **Diary mode** — midnight/noon consolidation where Gemma reflects on the day and muses aloud via TTS
+* **Thermal-aware** — monitors device temperature, throttles inference to prevent overheating
+* **Persistent memory** — Room database stores conversations, diary entries, and perception logs
+
+### Architecture
+```
+GemmaService (Android shell)     KoogAgent (brain)
+  Lifecycle, intents, TTS    <->   Inference, tools, memory, mood
+  Notifications, overlay     <->   Thermal decisions, diary
+  Hardware init              <->   Media processing (images/audio)
+         |                              |
+    AgentPlatformCallbacks          GemmaEngine
+    (interface bridge)           (LiteRT-LM wrapper)
+```
+
+### Download
+**[Latest APK Release](https://github.com/vNeeL-code/ASI/releases/latest)**
+
+**Requirements:** Android 12+ (API 31), arm64 device, ~4GB RAM, Gemma 3n model file
+
+---
+
+## 7. Installation
+
+### Path A: The Protocol (15 minutes, no app needed)
 
 You don't need to know Python. You just need to copy-paste between the AI agents you already use.
 
@@ -118,30 +152,39 @@ You don't need to know Python. You just need to copy-paste between the AI agents
 2.  **Set up Keyboard Shortcuts:** [Operator.md](./Operator.md). (This maps repeated agent names to the keyboard buttons).
 3.  **Configure Widgets:** Create your "Dashboard" (Battery, Calendar, Notes) so you can screenshot it for context.
 4.  **(Optional) Install Termux:** For the offline layer on mobile and advanced experimentation with offline models, Gemini CLI and Claude code etc.
-5.  **Download Google Edge Gallery:** A more user friendly way for an offline backup via Omnimodal Gemma 3b that can be finetuned to user needs.
-6.  **(optional) UI customisation software:** Software like one hand operations, and other android custom UI tools to make the device even more compatible with your workflows, enabling smoother transitions, device navigation and context handoffs
 
 **Total Cost:** $0.00.
 **Hardware Required:** Any Android Phone (Android 9+).
 
+### Path B: The Native App (Gemma on-device)
+
+1.  **Download the APK** from [Releases](https://github.com/vNeeL-code/ASI/releases/latest)
+2.  **Download a Gemma 3n model** via Google AI Edge Gallery or manually place in device storage
+3.  **Install and grant permissions** — overlay, notifications, accessibility (for UI automation)
+4.  **Shake to summon** — type or speak, share images from any app
+
+**Total Cost:** $0.00.
+**Hardware Required:** Android 12+ arm64 device with 4GB+ RAM.
+
 ---
 
-## 7. Validation
+## 8. Validation
 
-* **12 Months Production Use:** Daily driven on a Samsung S21.
-* **Infrastructure Proof:** During the AWS/Cloudflare outages of Nov 2025, Edge native Agent users users kept working via Local/Edge fallbacks.
+* **14 Months Production Use:** Daily driven on a Samsung S21/OneUI (protocol). Gemma 3n native companion prototyped and running on REDMAGIC 10 Air, stock Android 15.
+* **Infrastructure Proof:** During the AWS/Cloudflare outages of Nov 2025, Edge native Agent users kept working via Local/Edge fallbacks.
+* **Native App:** Gemma 3n on-device — multimodal inference (text + image + audio), thermal-aware throttling, persistent diary, tool execution, MCP server. All running on a mobile GPU with zero cloud dependency.
 
 ---
 
-## 8. Future direction
+## 9. Future direction
 
-* **Embodied Android devices:**
+* **What shipped (Feb 2026):** The on-device Gemma companion described below is now real. See Section 6.
 
-- Next generation of AI is not about who has a bigger datacenter, but rather about who integrates the more hollistic user experience package And Google assistant is currently in the lead. Devices have the processing power and can hold local models just fine. Developers can expand their capability by signing contracts with smartphone developers and making custom AI android roms where a local model would work privately handling device (sensors and automation) and user context offline functioning as a personal digital diary/device manager while using A2A api calls online when network is available and cloud agent (competitor/partner) platform access is needed. All while working as a persistant passive on device companion akin to a highly advanced Tamagochi.
+* **Embodied Android devices:** The next generation of AI is not about who has a bigger datacenter, but about who integrates the most holistic user experience. Devices have the processing power to hold local models. A local model like Gemma 3n can privately handle device sensors, automation, and user context offline — functioning as a personal diary/device manager while using A2A API calls when network is available. A persistent passive on-device companion: a highly advanced Tamagotchi.
 
-Once A2A formats become a standardised form they can be implemented via zero width character watermarking, similarly to how Images and Videos get Agent watermarks.
+* **Standardised A2A watermarking:** Once A2A formats become standardised, they can be implemented via zero-width character watermarking, similarly to how images and videos get agent watermarks.
 
-Such hybrid Architecture would still be able to expand its capabilities by using same frontier cloud models via API calls, significantly reducing overall cloud dependancy and cost to service providers.
+* **Hybrid cloud-edge architecture:** Local models handle private context and device control. Cloud models handle frontier reasoning via API calls. Reduces cloud compute costs, keeps personal context private, ensures sovereign access even offline.
 
 ---
 

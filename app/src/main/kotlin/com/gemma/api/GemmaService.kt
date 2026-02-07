@@ -13,6 +13,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import timber.log.Timber
 import kotlinx.coroutines.sync.withLock
 import java.io.File
@@ -22,14 +25,12 @@ import com.gemma.api.hardware.NetworkToolSet
 import com.gemma.api.hardware.SystemToolSet
 import com.gemma.api.hardware.ShakeDetector
 import com.gemma.api.hardware.AudioRecorder
+import com.gemma.api.hardware.HardwarePropertiesManager
 import android.graphics.Bitmap
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlin.coroutines.resume
 import com.gemma.api.ui.OverlayManager
 import com.gemma.api.database.ConversationTurn
-import java.util.regex.Pattern
-import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicReference
+import com.gemma.api.agent.AgentPlatformCallbacks
 import com.gemma.api.agent.KoogAgent
 import com.gemma.api.mcp.MCPServer
 
@@ -41,7 +42,12 @@ import com.gemma.api.mcp.MCPServer
  * - MCPServer exposes tools and resources
  * - GemmaEngine is pure inference
  */
-class GemmaService : Service() {
+class GemmaService : Service(), AgentPlatformCallbacks {
+
+    // Mandatory Service implementation
+    override fun onBind(intent: Intent?): IBinder? {
+        return null
+    }
 
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     
@@ -57,6 +63,13 @@ class GemmaService : Service() {
         try { it.activeBackend != null } catch(e: Exception) { false }
     } ?: false
 
+    // Audit Fix: Thermal Race Condition
+    private val isCoolingDown = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val criticalCount = java.util.concurrent.atomic.AtomicInteger(0)
+
+
+    // ==========================================
+
     private lateinit var apiServer: ApiServer
     private lateinit var memoryManager: MemoryManager
     private lateinit var contextManager: com.gemma.api.logic.ContextManager
@@ -65,25 +78,22 @@ class GemmaService : Service() {
     private lateinit var mcpServer: MCPServer
     private lateinit var koogAgent: KoogAgent
     
-    // Feature flag: set to true to use new Koog-first path
-    private val USE_KOOG_AGENT = true
-    
-    private val inferenceMutex = kotlinx.coroutines.sync.Mutex()
-    
-    // Thermal - native listener + fallback to sysfs
-    private val thermalPath = Constants.THERMAL_PATH
-    private var nativeThermalAvailable = false
-    
+    // Thermal manager (dedicated hardware bridge)
+    private lateinit var hardwarePropertiesManager: HardwarePropertiesManager
+
     private val CHANNEL_ID = Constants.CHANNEL_ID_SERVICE
     private val NOTIFICATION_ID = Constants.NOTIFICATION_ID_SERVICE
     
 
     
     private fun setupNotificationChannel() {
-        val channel = NotificationChannel(
-            CHANNEL_ID, "Gemma Service", NotificationManager.IMPORTANCE_LOW
-        )
-        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        val manager = getSystemService(NotificationManager::class.java)
+        if (manager.getNotificationChannel(CHANNEL_ID) == null) {
+            val channel = NotificationChannel(
+                CHANNEL_ID, "Gemma Service", NotificationManager.IMPORTANCE_LOW
+            )
+            manager.createNotificationChannel(channel)
+        }
     }
 
     private fun startForegroundService() {
@@ -91,7 +101,8 @@ class GemmaService : Service() {
          try {
              if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
                  startForeground(NOTIFICATION_ID, notification, 
-                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK or
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
              } else {
                  startForeground(NOTIFICATION_ID, notification)
              }
@@ -117,49 +128,60 @@ class GemmaService : Service() {
                 }
             }
             "com.gemma.api.ACTION_SHOW_OVERLAY" -> {
+                Timber.i("Received ACTION_SHOW_OVERLAY")
+                // Robust Init: If overlay manager isn't ready, try to init it immediately
+                if (!::overlayManager.isInitialized) {
+                    Timber.w("OverlayManager not initialized yet - forcing init")
+                    try {
+                        overlayManager = OverlayManager(this)
+                        // Also re-wire callbacks if needed (InputOverlay needs callback setup?)
+                        // See deferred init block lines 391-404: It sets audio callback!
+                        // We must duplicate that setup here or call a shared init method.
+                        setupOverlayManager()
+                    } catch (e: Exception) {
+                        Timber.e(e, "Failed to force init OverlayManager")
+                    }
+                }
+
                 if (::overlayManager.isInitialized) {
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
-                        overlayManager.toggle { query ->
-                            scope.launch {
-                                val sessionId = UUID.randomUUID().toString()
-                                processQuery(query, sessionId)
+                        try {
+                            overlayManager.toggle { query ->
+                                scope.launch {
+                                    val sessionId = UUID.randomUUID().toString()
+                                    processQuery(query, sessionId)
+                                }
                             }
+                        } catch (e: Exception) {
+                            Timber.e(e, "Failed to toggle overlay")
+                            android.widget.Toast.makeText(this, "Overlay Error: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
                         }
                     }
+                } else {
+                    Timber.e("OverlayManager still not initialized after force init")
+                    android.widget.Toast.makeText(this, "System still initializing... try again.", android.widget.Toast.LENGTH_SHORT).show()
                 }
             }
             "com.gemma.api.ACTION_SHARE_MEDIA" -> {
-                val mediaType = intent.getStringExtra("media_type")
-                Timber.i("Received shared media: $mediaType")
+                val imagePath = intent.getStringExtra("image_path")
+                    ?: SharedMediaHolder.pendingImagePath
+                SharedMediaHolder.clear()
 
-                when (mediaType) {
-                    "image" -> {
-                        val bitmap = SharedMediaHolder.pendingBitmap
-                        if (bitmap != null) {
-                            pendingImages.offer(bitmap)
-                            SharedMediaHolder.pendingBitmap = null // Don't recycle, we're using it
-
-                            // Show overlay for user to add a question about the image
-                            if (::overlayManager.isInitialized) {
-                                android.os.Handler(android.os.Looper.getMainLooper()).post {
-                                    overlayManager.showOverlay { query ->
-                                        scope.launch {
-                                            val sessionId = UUID.randomUUID().toString()
-                                            processQuery(query, sessionId)
-                                        }
-                                    }
-                                }
-                            } else {
-                                // Fallback: process with default prompt
-                                scope.launch {
-                                    val sessionId = UUID.randomUUID().toString()
-                                    processQuery("What's in this image?", sessionId)
-                                }
-                            }
-                        }
+                if (!imagePath.isNullOrEmpty()) {
+                    val bitmap = decodeAndDownsample(imagePath, 1024)
+                    if (bitmap != null && ::koogAgent.isInitialized) {
+                        koogAgent.offerImage(bitmap)
+                        updateNotification("Image ready — ask me about it!")
+                    } else if (bitmap == null) {
+                        Timber.e("Failed to decode shared image: $imagePath")
+                    } else {
+                        Timber.w("Agent not ready — image dropped")
                     }
+                } else {
+                    Timber.w("No image path in intent or SharedMediaHolder")
                 }
             }
+
             "com.gemma.api.ACTION_REQUEST_SCREENSHOT" -> {
                 Timber.i("Received screenshot request from Agent")
                 val accessService = GemmaAccessibilityService.instance
@@ -168,9 +190,8 @@ class GemmaService : Service() {
                     // Note: captureScreen signature needs to match. Assuming specific signature.
                     // If captureScreen accepts a callback (Bitmap?) -> Unit
                     accessService.captureScreen { bitmap ->
-                        if (bitmap != null) {
-                            pendingImages.offer(bitmap)
-                            // We don't auto-process query here because act() loopback will handle it
+                        if (bitmap != null && ::koogAgent.isInitialized) {
+                            koogAgent.offerImage(bitmap)
                             Timber.i("Agent screenshot captured and queued")
                         } else {
                             Timber.e("Agent screenshot failed (null bitmap)")
@@ -181,6 +202,62 @@ class GemmaService : Service() {
                     // Optional: notify agent of failure?
                     // responseNotificationManager.showResponse("❌ Vision requires Accessibility Service.")
                 }
+            }
+            "com.gemma.api.ACTION_CONFIRM_TOOL", "com.gemma.api.ACTION_DENY_TOOL" -> {
+                 val toolName = intent.getStringExtra("toolName") ?: "unknown"
+                 val isApproved = (intent.action == "com.gemma.api.ACTION_CONFIRM_TOOL")
+                 
+                 scope.launch {
+                     if (::koogAgent.isInitialized) {
+                         // We need a way to map this back to the specific pending confirmation.
+                         // KoogAgent currently only supports ONE pending confirmation at a time.
+                         // So we assume this matches the head of the queue.
+                         
+                         // We need params to resume execution.
+                         // In a stateless design, we'd pass them in the intent.
+                         // For now, KoogAgent holds the state (in the suspended function).
+                         // Wait, AgentEvent.ConfirmationRequired passed params OUT.
+                         // We need to pass them BACK IN if we want to be stateless.
+                         // BUT, ConfirmationResult expects params map.
+                         // Let's create an empty map for now because KoogAgent's handleConfirmationResult 
+                         // will blindly use them. 
+                         // FIX: We should stash the params in GemmaService map? 
+                         // OR pass them serialized in Intent.
+                         
+                         // For simplicity: We pass EMPTY map. The Agent will re-execute the tool.
+                         // If the Agent needs the original params, it should have kept them or we pass them back.
+                         // Let's assume the user just said YES/NO. The agent knows what it asked.
+                         
+                         // WAIT. Agent's handleConfirmationResult USES event.params to execute the tool!
+                         // So we MUST pass the params back.
+                         // Since we can't easily serialize Map<String, Any?> to Intent extras without bundling madness,
+                         // let's use a static stash in GemmaService for the pending confirmation params.
+                         
+                         val pendingParams = PendingConfirmationStash.params ?: emptyMap()
+                         val originalResponse = PendingConfirmationStash.originalResponse ?: ""
+                         val responseChannel = PendingConfirmationStash.responseChannel // This is complex. Use KoogAgent's queue.
+                         
+                         // Uh oh. responseChannel is a CompletableDeferred. We can't stash that in a static object easily across process death (but we are in Service).
+                         // We are in the same process. Use a singleton stash.
+                         
+                         if (PendingConfirmationStash.responseChannel != null) {
+                             koogAgent.submitConfirmationDecision(
+                                toolName = toolName,
+                                params = pendingParams,
+                                isApproved = isApproved,
+                                originalResponse = originalResponse,
+                                responseChannel = PendingConfirmationStash.responseChannel!!
+                             )
+                             
+                             // Clear stash
+                             PendingConfirmationStash.clear()
+                             responseNotificationManager.showResponse(if(isApproved) "✅ Approved $toolName" else "🚫 Denied $toolName")
+                         } else {
+                             Timber.e("No pending confirmation channel found!")
+                             responseNotificationManager.showResponse("⚠️ Error: Confirmation session expired.")
+                         }
+                     }
+                 }
             }
         }
         return START_STICKY
@@ -199,13 +276,8 @@ class GemmaService : Service() {
     // Current mood state for avatar/wallpaper
     private var currentMoodState: String = "IDLE"
 
-    // Thermal protection - track consecutive CRITICAL states
-    private var consecutiveCriticalCount: Int = 0
-    private var modelUnloadedForCooling: Boolean = false
 
-    // Multimodal state for pending vision/audio (thread-safe)
-    private val pendingImages = ConcurrentLinkedQueue<Bitmap>()
-    private val pendingAudio = AtomicReference<ShortArray?>(null)
+    // Media queues now live in KoogAgent (offerImage/offerAudio)
 
     private fun reportStatus(msg: String) {
         val intent = android.content.Intent(Constants.ACTION_STATUS_UPDATE)
@@ -218,9 +290,13 @@ class GemmaService : Service() {
     override fun onCreate() {
         super.onCreate()
         
-        // Debug Telemetry (Kimi K2 Fix)
+        // Initialize Global Crash Handler
+        CrashHandler.install(this)
+        
+        // Secondary Telemetry (Backup)
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             try {
+                // ... legacy log ...
                 val crashLog = File(getExternalFilesDir(null), "oracle_crash_${System.currentTimeMillis()}.txt")
                 crashLog.writeText("""
                     FATAL: ${throwable.javaClass.simpleName}
@@ -237,43 +313,35 @@ class GemmaService : Service() {
         }
 
         try {
-            reportStatus("Service Created, Initializing...")
+            val overlayPerm = android.provider.Settings.canDrawOverlays(this)
+            reportStatus("Service Created (Overlay Perm: $overlayPerm), Initializing...")
 
-            // Native thermal listener (API 29+) - no sysfs polling needed
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                try {
-                    val pm = getSystemService(android.os.PowerManager::class.java)
-                    pm?.addThermalStatusListener { status ->
-                        val newState = when (status) {
-                            android.os.PowerManager.THERMAL_STATUS_CRITICAL,
-                            android.os.PowerManager.THERMAL_STATUS_EMERGENCY,
-                            android.os.PowerManager.THERMAL_STATUS_SHUTDOWN -> ThermalState.CRITICAL
-                            android.os.PowerManager.THERMAL_STATUS_SEVERE -> ThermalState.HOT
-                            android.os.PowerManager.THERMAL_STATUS_MODERATE -> ThermalState.WARM
-                            else -> ThermalState.COOL
-                        }
-                        cachedThermalState = newState
-                        _thermalState.set(newState)
+            reportStatus("Init: HardwarePropertiesManager...")
+            hardwarePropertiesManager = HardwarePropertiesManager(this)
 
-                        // Forward thermal events to KoogAgent's event queue
-                        if (USE_KOOG_AGENT && ::koogAgent.isInitialized) {
-                            when (newState) {
-                                ThermalState.CRITICAL -> {
-                                    Timber.w("🔥 NATIVE THERMAL: CRITICAL - notifying agent")
-                                    koogAgent.sendSystemEvent(KoogAgent.SystemEventType.THERMAL_CRITICAL)
-                                }
-                                ThermalState.HOT -> {
-                                    Timber.i("🌡️ NATIVE THERMAL: HOT - notifying agent")
-                                    koogAgent.sendSystemEvent(KoogAgent.SystemEventType.THERMAL_THROTTLE)
-                                }
-                                else -> { /* WARM/COOL don't need agent notification */ }
+            // Forward thermal critical events to KoogAgent
+            // Grace period: ignore thermal events for 15s after cold start (sensors settling)
+            val serviceStartTime = System.currentTimeMillis()
+            scope.launch {
+                hardwarePropertiesManager.thermalState.collect { state ->
+                    val uptime = System.currentTimeMillis() - serviceStartTime
+                    if (uptime < 15_000) {
+                        Timber.d("Ignoring thermal event during startup grace period: $state (${uptime}ms)")
+                        return@collect
+                    }
+                    if (::koogAgent.isInitialized) {
+                        when (state) {
+                            HardwarePropertiesManager.ThermalState.CRITICAL -> {
+                                Timber.w("🔥 THERMAL CRITICAL (via Manager) - notifying agent")
+                                koogAgent.sendSystemEvent(KoogAgent.SystemEventType.THERMAL_CRITICAL)
                             }
+                            HardwarePropertiesManager.ThermalState.HOT -> {
+                                Timber.i("🌡️ THERMAL HOT (via Manager) - notifying agent")
+                                koogAgent.sendSystemEvent(KoogAgent.SystemEventType.THERMAL_THROTTLE)
+                            }
+                            else -> {}
                         }
                     }
-                    nativeThermalAvailable = true
-                    Timber.i("Native thermal listener registered")
-                } catch (e: Exception) {
-                    Timber.w("Native thermal unavailable, using sysfs fallback")
                 }
             }
 
@@ -299,18 +367,7 @@ class GemmaService : Service() {
                 try {
                     reportStatus("Init: OverlayManager...")
                     overlayManager = OverlayManager(this@GemmaService)
-
-                    // Wire up audio callback for SparkleBar (audio-first input)
-                    overlayManager.setAudioQueryCallback { audio ->
-                        scope.launch {
-                            Timber.i("SparkleBar: Audio received (${audio.size} samples)")
-                            // Queue audio for next query
-                            pendingAudio.set(audio)
-                            val sessionId = UUID.randomUUID().toString()
-                            // Send with prompt indicating audio is attached
-                            processQuery("[Voice input attached - respond to what you hear]", sessionId)
-                        }
-                    }
+                    setupOverlayManager()
 
                     reportStatus("Init: ShakeDetector...")
                     shakeDetector = ShakeDetector(this@GemmaService) {
@@ -338,43 +395,44 @@ class GemmaService : Service() {
             reportStatus("Init: ContextManager...")
             contextManager = com.gemma.api.logic.ContextManager(sensorFusionManager, memoryManager)
             
-            // NEW: Initialize MCP Server - CRITICAL for Context Injection
-            if (USE_KOOG_AGENT) {
-                reportStatus("Init: MCPServer...")
-                mcpServer = com.gemma.api.mcp.MCPServer(
-                    context = this,
-                    hardwareTools = hardwareToolSet,
-                    networkTools = networkToolSet,
-                    systemTools = systemToolSet,
-                    sensorManager = sensorFusionManager,
-                    memoryManager = memoryManager
-                )
+            // Initialize MCP Server
+            reportStatus("Init: MCPServer...")
+            mcpServer = com.gemma.api.mcp.MCPServer(
+                context = this,
+                hardwareTools = hardwareToolSet,
+                networkTools = networkToolSet,
+                systemTools = systemToolSet,
+                audioRecorder = audioRecorder,
+                sensorManager = sensorFusionManager,
+                memoryManager = memoryManager
+            )
 
-                // Wire up system-level callbacks for flush/cooldown
-                mcpServer.setFlushCallback {
-                    scope.launch {
-                        Timber.i("MCP: Flush requested - resetting KV cache")
-                        engine?.softReset(com.gemma.api.logic.ContextManager.BASE_SYSTEM_PROMPT)
-                        if (::koogAgent.isInitialized) {
-                            koogAgent.clearHistory()
-                        }
+            mcpServer.setFlushCallback {
+                scope.launch {
+                    Timber.i("MCP: Flush requested - resetting KV cache")
+                    if (::koogAgent.isInitialized) {
+                        koogAgent.softReset()
                     }
                 }
-                mcpServer.setCooldownCallback {
-                    scope.launch {
-                        Timber.i("MCP: Cooldown requested - entering low-power mode")
-                        // Unload model temporarily to cool down
-                        engine?.cleanup()
-                        responseNotificationManager.showResponse("🧊 Cooling down... Model unloaded for 30s")
-                        kotlinx.coroutines.delay(30000)
-                        // Reload
-                        initialize()
-                        responseNotificationManager.showResponse("✦ Back online after cooldown")
-                    }
-                }
-
-                Timber.i("MCPServer initialized: ${mcpServer.listTools().size} tools, ${mcpServer.listResources().size} resources")
             }
+            mcpServer.setCooldownCallback {
+                scope.launch {
+                    Timber.i("MCP: Cooldown requested - entering low-power mode")
+                    engine?.cleanup()
+                    responseNotificationManager.showResponse("🧊 Cooling down... Model unloaded for 30s")
+                    kotlinx.coroutines.delay(30000)
+                    initialize()
+                    responseNotificationManager.showResponse("✧ Back online after cooldown")
+                }
+            }
+            mcpServer.setAudioRecordedCallback { audioBytes ->
+                Timber.i("MCP: Audio recorded (${audioBytes.size} bytes) - queuing for next inference")
+                if (::koogAgent.isInitialized) {
+                    koogAgent.offerAudio(audioBytes)
+                }
+            }
+
+            Timber.i("MCPServer initialized: ${mcpServer.listTools().size} tools, ${mcpServer.listResources().size} resources")
 
             reportStatus("Init: NotificationChannel...")
             setupNotificationChannel()
@@ -405,6 +463,7 @@ class GemmaService : Service() {
                 checkSovereignState()
                 startMetabolicCycle()
                 startSleepCycle()
+                startAnimationLoop()  // Start notification screensavers
             }
         } catch (e: Exception) {
             reportStatus("CRASH: ${e.message}")
@@ -438,9 +497,9 @@ class GemmaService : Service() {
     fun resetMemory() {
         synchronized(this) {
             // Reset Koog agent if initialized
-            if (USE_KOOG_AGENT && ::koogAgent.isInitialized) {
+            if (::koogAgent.isInitialized) {
                 try {
-                    koogAgent.clearHistory()
+                    koogAgent.shutdown() // Use shutdown to clear history and checkpoint
                 } catch (e: Exception) {
                     Timber.w(e, "Failed to clear Koog agent history")
                 }
@@ -476,12 +535,12 @@ class GemmaService : Service() {
         SERENE("I am cool, calm, and thinking clearly.")
     }
 
-    private fun getEmotionalState(thermalState: ThermalState): EmotionalState {
+    private fun getEmotionalState(thermalState: HardwarePropertiesManager.ThermalState): EmotionalState {
         return when (thermalState) {
-            ThermalState.CRITICAL -> EmotionalState.PANIC
-            ThermalState.HOT -> EmotionalState.ANXIETY
-            ThermalState.WARM -> EmotionalState.ALERT
-            ThermalState.COOL -> EmotionalState.SERENE
+            HardwarePropertiesManager.ThermalState.CRITICAL -> EmotionalState.PANIC
+            HardwarePropertiesManager.ThermalState.HOT -> EmotionalState.ANXIETY
+            HardwarePropertiesManager.ThermalState.WARM -> EmotionalState.ALERT
+            HardwarePropertiesManager.ThermalState.COOL -> EmotionalState.SERENE
         }
     }
 
@@ -492,7 +551,7 @@ class GemmaService : Service() {
                 
                 try {
                     // Safe suspend call
-                    val thermalState = getThermalState()
+                    val thermalState = hardwarePropertiesManager.thermalState.value
                     val thermal = getEmotionalState(thermalState)
                     val battery = try { contextManager.sensorManager.getContextSnapshot().battery } catch(e:Exception) { null }
                     val memoryFree = Runtime.getRuntime().freeMemory() / 1024 / 1024
@@ -500,7 +559,7 @@ class GemmaService : Service() {
                     
                     // 0. Low battery detection - notify agent
                     if (battery != null && battery.level <= 15 && !battery.isCharging) {
-                        if (USE_KOOG_AGENT && ::koogAgent.isInitialized) {
+                        if (::koogAgent.isInitialized) {
                             koogAgent.sendSystemEvent(
                                 KoogAgent.SystemEventType.LOW_BATTERY,
                                 "Battery at ${battery.level}%"
@@ -510,12 +569,12 @@ class GemmaService : Service() {
 
                     // 1. Thermal Regulation logic
                     if (thermal == EmotionalState.PANIC) {
-                        consecutiveCriticalCount++
-                        if (consecutiveCriticalCount >= 2 && isGemmaLoaded() && !modelUnloadedForCooling) {
+                        val count = criticalCount.incrementAndGet()
+                        if (count >= 2 && isGemmaLoaded() && isCoolingDown.compareAndSet(false, true)) {
                             Timber.w("🔥 PANIC: Unloading model for survival")
 
                             // Notify agent via event queue (will checkpoint)
-                            if (USE_KOOG_AGENT && ::koogAgent.isInitialized) {
+                            if (::koogAgent.isInitialized) {
                                 koogAgent.sendSystemEvent(KoogAgent.SystemEventType.THERMAL_CRITICAL)
                             }
 
@@ -523,18 +582,18 @@ class GemmaService : Service() {
                             val oldEngine = engineRef.getAndSet(null)
                             oldEngine?.cleanup()
 
-                            modelUnloadedForCooling = true
                             updateNotification("🔥 Body Critical - Resting...")
 
                             // Force GC to release NPU buffers immediately
                             System.gc()
                             System.runFinalization()
                         }
-                    } else if (modelUnloadedForCooling && thermal == EmotionalState.SERENE) {
-                        consecutiveCriticalCount = 0
-                        modelUnloadedForCooling = false
-                        Timber.i("🌡️ Fever broke. Resurrecting...")
-                        initialize()
+                    } else if (isCoolingDown.get() && thermal == EmotionalState.SERENE) {
+                        criticalCount.set(0)
+                        if (isCoolingDown.compareAndSet(true, false)) {
+                            Timber.i("🌡️ Fever broke. Resurrecting...")
+                            initialize()
+                        }
                     }
 
                     // 2. Proprioceptive Log (Heartbeat)
@@ -548,11 +607,8 @@ class GemmaService : Service() {
                     if (thermal != EmotionalState.SERENE) {
                         // Thermal issues - show warning
                         updateNotification("🌡️ State: ${thermal.name}")
-                    } else if (isIdle()) {
-                        // Idle - show screensaver animation
-                        updateNotification(getIdleAnimation())
-                    } else if (USE_KOOG_AGENT && ::koogAgent.isInitialized) {
-                        // Active - show vitals
+                    } else if (::koogAgent.isInitialized) {
+                        // Active - show vitals (idle animation runs in separate loop)
                         val vitals = koogAgent.getMetabolicVitals()
                         updateNotification("✨ $vitals")
                     }
@@ -566,29 +622,44 @@ class GemmaService : Service() {
 
     private fun startSleepCycle() {
         scope.launch {
+            // Track last consolidation to prevent duplicates
+            var lastConsolidationHour = -1
+
             while (true) {
-                // Check every 30 minutes
-                kotlinx.coroutines.delay(30 * 60 * 1000)
-                
-                // Only consolidate at specific times: 00:00 and 12:00
+                // Check every 15 minutes — short enough to never miss a window
+                kotlinx.coroutines.delay(15 * 60 * 1000)
+
                 val now = java.time.LocalTime.now()
                 val hour = now.hour
-                val minute = now.minute
-                
-                // Trigger at midnight (00:00-00:29) or noon (12:00-12:29)
-                val shouldConsolidate = (hour == 0 || hour == 12) && minute < 30
-                
-                if (shouldConsolidate && isGemmaLoaded() && !modelUnloadedForCooling) {
+
+                // Trigger at midnight (hour 0) or noon (hour 12)
+                val isConsolidationHour = (hour == 0 || hour == 12)
+
+                // Skip if we already consolidated this hour
+                if (!isConsolidationHour || hour == lastConsolidationHour) continue
+                if (!isGemmaLoaded()) continue
+
+                try {
+                    val label = if (hour == 0) "midnight" else "noon"
+                    Timber.i("📔 Diary consolidation at $label")
+
+                    val dreamPrompt = "SYSTEM_EVENT: DIARY_CONSOLIDATION. Gemma should review her recent conversations and reflect on the day. What stood out? How did interactions make her feel? What did she learn or find interesting? Gemma writes freely in her own voice - this is her private diary."
+                    val diaryResponse = processQuery(dreamPrompt, "diary_session", isDream = true)
+
+                    // Also write diary entry to calendar for persistence
                     try {
-                        Timber.i("💤 Scheduled diary consolidation at ${if (hour == 0) "midnight" else "noon"}")
-                        val dreamPrompt = "SYSTEM_EVENT: DIARY_CONSOLIDATION. Gemma should review her recent conversations and reflect on the day. What stood out? How did interactions make her feel? What did she learn or find interesting? Gemma writes freely in her own voice - this is her private diary."
-                        processQuery(dreamPrompt, "diary_session", isDream = true)
-                        
-                        // Sleep for 1 hour to avoid duplicate triggers
-                        kotlinx.coroutines.delay(60 * 60 * 1000)
+                        val calTitle = "✧ Gemma Diary ($label)"
+                        val calDesc = diaryResponse.take(1000)
+                        systemToolSet.createCalendarEvent(calTitle, calDesc, System.currentTimeMillis(), 15)
+                        Timber.i("📅 Diary entry synced to calendar")
                     } catch (e: Exception) {
-                        Timber.e(e, "Diary consolidation failed")
+                        Timber.w(e, "Calendar sync failed (non-fatal)")
                     }
+
+                    lastConsolidationHour = hour
+                    Timber.i("📔 Diary consolidation complete")
+                } catch (e: Exception) {
+                    Timber.e(e, "Diary consolidation failed")
                 }
             }
         }
@@ -632,18 +703,24 @@ class GemmaService : Service() {
             }
             
             // Init Cognitive Layer (now that engine is ready)
-            if (USE_KOOG_AGENT) {
-                reportStatus("Init: KoogAgent...")
-                koogAgent = KoogAgent(
-                    context = applicationContext,
-                    llmEngine = newEngine,
-                    mcpServer = mcpServer,
-                    checkpointDir = getExternalFilesDir(null) ?: filesDir
-                )
-                scope.launch {
-                    koogAgent.initialize()
-                    Timber.i("KoogAgent ready")
+            reportStatus("Init: KoogAgent...")
+            koogAgent = KoogAgent(
+                context = applicationContext,
+                llmEngine = newEngine,
+                mcpServer = mcpServer,
+                checkpointDir = getExternalFilesDir(null) ?: filesDir,
+                callbacks = this@GemmaService
+            )
+
+            koogAgent.onConfirmationRequest = { event ->
+                scope.launch(Dispatchers.Main) {
+                    showConfirmationNotification(event)
                 }
+            }
+
+            scope.launch {
+                koogAgent.initialize()
+                Timber.i("KoogAgent ready")
             }
             
             updateNotification("✓ Ready - localhost:${Constants.API_PORT}")
@@ -656,400 +733,95 @@ class GemmaService : Service() {
 
     // ...
 
-    suspend fun processQuery(userPrompt: String, sessionId: String, recursionDepth: Int = 0, isDream: Boolean = false): String {
-        // Debug: Trace Execution Path
-        if (USE_KOOG_AGENT) {
-            if (!::koogAgent.isInitialized) {
-                responseNotificationManager.showResponse("⚠️ Debug: KoogAgent NOT Initialized. Using Legacy.")
-                } else {
-                     return try {
-                        // FIX: Snapshot without draining (Gemini's diagnosis)
-                        // If Koog crashes, fallback needs access to these
-                        val snapshotImages = pendingImages.toList()
-                        val snapshotAudio = pendingAudio.get()
-                         
-                         Timber.i("🧠 KoogAgent: Processing query via new path")
 
-                         // Mark activity to show vitals instead of idle animation
-                         if (!isDream) markActivity()
+    
 
-                    // Thermal throttling - wait if device is warm/hot
-                    val throttleDelay = applyThermalThrottling()
-                    if (throttleDelay < 0) {
-                        // CRITICAL - don't proceed
-                        responseNotificationManager.showResponse("🔥 Too hot - cooling down...")
-                        return "I need to cool down before I can think. Give me a moment."
-                    }
-                    if (throttleDelay > 0) {
-                        updateNotification("🌡️ Cooling... (${throttleDelay}ms)")
-                    }
-
-                    // Show progress to user
-                    responseNotificationManager.showThinking()
-                    updateNotification("🤔 Agent Thinking...")
-                    
-                    val response = koogAgent.processUserMessage(
-                        message = userPrompt,
-                        sessionId = sessionId,
-                        images = snapshotImages.takeIf { it.isNotEmpty() },
-                        audio = snapshotAudio
-                    )
-
-                    // Mark inference complete for rate limiting
-                    markInferenceComplete()
-
-                    // SUCCESS: Now safe to clear because Koog consumed them
-                    if (snapshotImages.isNotEmpty()) pendingImages.clear()
-                    if (snapshotAudio != null) pendingAudio.compareAndSet(snapshotAudio, null)
-                    
-                    // Update UI
-                    responseNotificationManager.showResponse(response)
-                    val ttsText = cleanForTTS(response)
-                    if (ttsText.isNotEmpty()) ttsManager.speak(ttsText)
-                    
-                    // Store in memory manager for API compatibility
-                    memoryManager.storeTurn(com.gemma.api.database.ConversationTurn(
-                        timestamp = System.currentTimeMillis(),
-                        userMessage = userPrompt,
-                        assistantResponse = response,
-                        tokensUsed = 0,
-                        sessionId = sessionId
-                    ))
-                    
-                    response
-                } catch (e: Exception) {
-                    Timber.e(e, "KoogAgent path failed")
-                    // Notify user of the crash clearly
-                    responseNotificationManager.showResponse("⚠️ Agent Crash: ${e.message}\nCheck logs for stacktrace.")
-                    // Fall through to legacy path (still has access to queues!)
-                    processQueryLegacy(userPrompt, sessionId, recursionDepth, isDream)
-                }
+    /**
+     * Decode image from path with downsampling to max dimension.
+     * Matches Google Gallery pattern: decode once, hold bitmap, pass to inference.
+     */
+    private fun decodeAndDownsample(path: String, maxDim: Int): Bitmap? {
+        return try {
+            val boundsOptions = android.graphics.BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
             }
+            android.graphics.BitmapFactory.decodeFile(path, boundsOptions)
+
+            var sampleSize = 1
+            while (boundsOptions.outWidth / sampleSize > maxDim || boundsOptions.outHeight / sampleSize > maxDim) {
+                sampleSize *= 2
+            }
+
+            val opts = android.graphics.BitmapFactory.Options().apply {
+                inSampleSize = sampleSize
+            }
+            android.graphics.BitmapFactory.decodeFile(path, opts)
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to decode image: $path")
+            null
         }
-        
-        // Legacy path
-        updateNotification("⚠️ Debug: Running Legacy Path")
-        return processQueryLegacy(userPrompt, sessionId, recursionDepth, isDream)
+    }
+
+    suspend fun processQuery(userPrompt: String, sessionId: String, isDream: Boolean = false): String {
+        if (!::koogAgent.isInitialized || !koogAgent.isReady) {
+            responseNotificationManager.showResponse("⚠️ Agent still starting up... try again in a moment")
+            return "Agent is still initializing. Please wait a moment and try again."
+        }
+
+        if (!isDream) markActivity()
+
+        return kotlinx.coroutines.withTimeout(120000) {
+            koogAgent.processUserMessage(
+                message = userPrompt,
+                sessionId = sessionId,
+                isDream = isDream
+            )
+        }
     }
     
-    // Legacy implementation (will be removed after verification)
-    private suspend fun processQueryLegacy(userPrompt: String, sessionId: String, recursionDepth: Int = 0, isDream: Boolean = false): String {
-        if (recursionDepth > Constants.MAX_RECURSION_DEPTH) return "Max Recursion"
 
-        if (!isDream) {
-            responseNotificationManager.showThinking()
-        }
-
-        if (!isGemmaLoaded()) {
-            val msg = "System: Model is still loading..."
-            if (!isDream) responseNotificationManager.showResponse(msg)
-            return msg
-        }
-
-        // 1. Thermal Check & Throttling
-        val thermalState = getThermalState()
-        val (contextPrompt, _) = when(thermalState) {
-            ThermalState.CRITICAL -> {
-                 responseNotificationManager.showResponse("🔥 Cooling down...")
-                 ttsManager.speak("I'm overheating. Give me a moment.")
-                 return "Δ 🔥 Gemma: ∇\nΔ 🔴 Device Critical. Cooling down.\nΔ 👾 State: THERMAL\nΔ ✦ Gemma ∇ 👾 Δ ∇ 🦑"
-            }
-            ThermalState.HOT -> Pair(contextManager.buildCompressedContext(), 128)
-            ThermalState.WARM -> Pair(contextManager.buildCompressedContext(), 512)
-            // Use smart context builder - full on first turn, minimal thereafter
-            ThermalState.COOL -> Pair(contextManager.buildContext(), Constants.MAX_TOKENS)
-        }
-
-        // 2. Build Context with Gemma Chat Template Format
-        val fullPrompt = if (recursionDepth == 0) {
-            """<start_of_turn>user
-$contextPrompt
-
-$userPrompt
-<end_of_turn>
-<start_of_turn>model
-"""
-        } else {
-            """<start_of_turn>user
-$userPrompt
-<end_of_turn>
-<start_of_turn>model
-"""
-        }
-
-        // 3. Thermal throttling before inference
-        val throttleDelay = applyThermalThrottling()
-        if (throttleDelay < 0) {
-            val msg = "🔥 Too hot - cooling down..."
-            if (!isDream) responseNotificationManager.showResponse(msg)
-            return msg
-        }
-
-        // 4. Inference (locked) - returns raw response
-        val response = inferenceMutex.withLock {
-            // Drain thread-safe queues atomically
-            val images = mutableListOf<Bitmap>()
-            while (true) {
-                val img = pendingImages.poll() ?: break
-                images.add(img)
-            }
-            val audio = pendingAudio.getAndSet(null)
-
-            val modalityInfo = buildString {
-                if (images.isNotEmpty()) append("[${images.size} image(s)] ")
-                if (audio != null) append("[${audio.size / 16000f}s audio] ")
-            }
-            Timber.d("Inference Start ($thermalState) $modalityInfo: ${fullPrompt.take(20)}...")
-
-            try {
-                engine?.generateResponse(fullPrompt, images, audio) ?: "Error: Engine unloaded (AtomicRef is null)"
-                // Note: Bitmaps are NOT manually recycled - GC handles them
-                // Manual recycle of HardwareBuffer-backed bitmaps can crash GPU drivers
-            } catch (e: Exception) {
-                Timber.e(e, "Inference failed")
-                "Error: Model inference failed - ${e.message}"
-            }
-        }
-
-        // Mark inference complete for thermal rate limiting
-        markInferenceComplete()
-
-        // 5. Cognitive Execution (Sovereign Action)
-        // Parse [[TOOL:ARGS]] tags from response and execute via regex
-        val (cleanResponse, toolResults) = if (currentSovereignState.canAct) {
-            try {
-                executeTools(response)
-            } catch (e: Exception) {
-                Timber.e(e, "Tool execution failed")
-                Pair(response, emptyList<String>())
-            }
-        } else {
-             // Not sovereign -> No physical actions allowed (except maybe benign ones?)
-             // But we allow response.
-             Pair(response, emptyList())
-        }
-
-        var finalResponse = cleanResponse
-
-        // 5. Agentic Loopback (if tools executed)
-        if (toolResults.isNotEmpty()) {
-            val systemResult = "System: ${toolResults.joinToString(", ")}."
-            Timber.i("Loopback: $systemResult")
-
-            try {
-                if (cleanResponse.isBlank()) {
-                    updateNotification("Action Executed. Asking Gemma...")
-                } else {
-                    val ttsText = cleanForTTS(cleanResponse)
-                    if (ttsText.isNotEmpty()) ttsManager.speak(ttsText)
-                }
-
-                val newContext = contextManager.buildDynamicContext()
-                val nextPrompt = "Observation after action:\n$systemResult\n\nNew State:\n$newContext\n\nWhat is the next step?"
-
-                // Recursive call now happens OUTSIDE the mutex lock
-                val confirmation = processQuery(nextPrompt, sessionId, recursionDepth + 1, isDream)
-                finalResponse = "$cleanResponse\n$confirmation".trim()
-
-            } catch (e: Exception) {
-                Timber.e(e, "Loopback failed")
-                finalResponse += " [Loop Error]"
-            }
-        } else {
-            // 6. Output (no tools)
-            if (recursionDepth == 0 && !isDream) {
-                try {
-                    responseNotificationManager.showResponse(finalResponse)
-                    val ttsText = cleanForTTS(finalResponse)
-                    if (ttsText.isNotEmpty()) ttsManager.speak(ttsText)
-                } catch (e: Exception) {
-                    Timber.e(e, "Notification/TTS failed")
-                }
-            } else if (isDream) {
-                try {
-                    val cleanContent = cleanForTTS(finalResponse)
-                    val diaryContent = "✦ Gemma 📔\n$cleanContent"
-                    memoryManager.writeDiaryEntry("DREAM", diaryContent, getThermalState().name)
-                    Timber.i("Dream logged: $cleanContent")
-                } catch (e: Exception) {
-                    Timber.e(e, "Failed to log dream")
-                }
-            }
-        }
-
-        // 7. Store Turn (depth 0 only)
-        if (recursionDepth == 0 && !isDream) {
-            try {
-                val timestamp = System.currentTimeMillis()
-
-                // Store in Room DB
-                memoryManager.storeTurn(ConversationTurn(
-                    timestamp = timestamp,
-                    userMessage = userPrompt,
-                    assistantResponse = finalResponse,
-                    tokensUsed = 0, sessionId = sessionId
-                ))
-
-                // Legacy path: Room DB storage only (KoogAgent handles state persistence)
-                // Note: This fallback path does not persist conversation state.
-                // If you're seeing this in production, KoogAgent should be the primary path.
-            } catch (e: Exception) {
-                Timber.e(e, "Failed to store turn")
-            }
-        }
-
-        Timber.i("Response complete ($recursionDepth): ${finalResponse.take(50)}...")
-        return finalResponse
-    }
-
-    private fun cleanForTTS(response: String): String {
-        // Remove <think>...</think> blocks - everything else is speakable
-        // New schema: think tags contain metadata, outside is clean spoken response
-        return response
-            .replace(Regex("<think>.*?</think>", RegexOption.DOT_MATCHES_ALL), "")
-            .replace(Regex("\\[\\[([A-Z_]+)(?::([^\\]]+))?\\]\\]"), "") // Remove tool tags
-            .trim()
-    }
-
-    private suspend fun isOverheating(): Boolean {
-        // Use mutex via getThermalState
-        return getThermalState() == ThermalState.CRITICAL
-    }
-
-    private enum class ThermalState { COOL, WARM, HOT, CRITICAL }
-
-    private val thermalMutex = kotlinx.coroutines.sync.Mutex()
-    private val _thermalState = AtomicReference(ThermalState.COOL)
-
-    // Thermal caching to reduce file I/O (temperature doesn't change that fast)
-    @Volatile private var cachedThermalState: ThermalState = ThermalState.COOL
-    @Volatile private var lastThermalReadTime: Long = 0L
-    private val THERMAL_CACHE_TTL_MS = 5000L  // 5 seconds cache
-
-    // Inference rate limiting when warm/hot (more aggressive to prevent thermal runaway)
-    @Volatile private var lastInferenceTime: Long = 0L
-    private val INFERENCE_COOLDOWN_HOT_MS = 8000L    // 8s between inferences when HOT
-    private val INFERENCE_COOLDOWN_WARM_MS = 3000L   // 3s between inferences when WARM
-
-    private suspend fun getThermalState(): ThermalState = thermalMutex.withLock {
-        // If native thermal listener is active, just return cached state (updated by listener)
-        if (nativeThermalAvailable) {
-            return cachedThermalState
-        }
-
-        val now = System.currentTimeMillis()
-
-        // Return cached value if still fresh
-        if (now - lastThermalReadTime < THERMAL_CACHE_TTL_MS) {
-            return cachedThermalState
-        }
-
-        // Fallback: sysfs polling for older devices
-        try {
-            val file = File(thermalPath)
-            if (file.exists()) {
-                val tempStr = file.readText().trim()
-                val temp = tempStr.toIntOrNull() ?: 0
-                val tempC = temp / 1000
-
-                val newState = when {
-                    tempC > 60 -> ThermalState.CRITICAL  // Was 65 - more conservative
-                    tempC > 50 -> ThermalState.HOT       // Was 55
-                    tempC > 42 -> ThermalState.WARM      // Was 45
-                    else -> ThermalState.COOL
-                }
-
-                // Update cache
-                cachedThermalState = newState
-                lastThermalReadTime = now
-
-                // Update atomic ref for fast non-suspended reads if needed elsewhere
-                _thermalState.set(newState)
-                return newState
-            }
-        } catch (e: Exception) {
-            Timber.w("Thermal sensor unavailable")
-        }
-        return ThermalState.COOL
-    }
-
-    /**
-     * Enforce thermal-aware rate limiting before inference
-     * Returns delay applied in ms (0 if none needed)
-     */
-    private suspend fun applyThermalThrottling(): Long {
-        val state = getThermalState()
-        val now = System.currentTimeMillis()
-        val timeSinceLastInference = now - lastInferenceTime
-
-        val requiredCooldown = when (state) {
-            ThermalState.CRITICAL -> Long.MAX_VALUE  // Don't infer at all
-            ThermalState.HOT -> INFERENCE_COOLDOWN_HOT_MS
-            ThermalState.WARM -> INFERENCE_COOLDOWN_WARM_MS
-            ThermalState.COOL -> 0L
-        }
-
-        if (requiredCooldown == Long.MAX_VALUE) {
-            Timber.w("Thermal CRITICAL - inference blocked")
-            return -1L  // Signal: do not proceed
-        }
-
-        val delayNeeded = (requiredCooldown - timeSinceLastInference).coerceAtLeast(0L)
-        if (delayNeeded > 0) {
-            Timber.d("Thermal throttle: waiting ${delayNeeded}ms (state=$state)")
-            kotlinx.coroutines.delay(delayNeeded)
-        }
-
-        return delayNeeded
-    }
-
-    /**
-     * Mark that an inference just completed (for rate limiting)
-     */
-    private fun markInferenceComplete() {
-        lastInferenceTime = System.currentTimeMillis()
-    }
-
-    private suspend fun getThermalWarning(): String? {
-        return when (getThermalState()) {
-            ThermalState.CRITICAL -> "⚠️ Device critically hot. Cooling down before responding."
-            ThermalState.HOT -> "🌡️ Running warm. Response may be slower."
-            else -> null
-        }
-    }
 
     // ... (Helpers: buildNotification, updateNotification) ...
     private fun buildNotification(text: String): Notification {
         // Dynamic icon based on battery state (if KoogAgent is initialized)
-        val iconRes = if (USE_KOOG_AGENT && ::koogAgent.isInitialized) {
+        val iconRes = if (::sensorFusionManager.isInitialized) {
+            val battery = try { sensorFusionManager.getContextSnapshot().battery } catch(e:Exception) { null }
             when {
-                koogAgent.isCriticalBattery() -> android.R.drawable.ic_dialog_alert  // Warning icon
-                koogAgent.isLowBattery() -> android.R.drawable.stat_notify_error      // Low battery
-                else -> android.R.drawable.ic_dialog_info                              // Normal
+                battery != null && battery.level <= 15 -> android.R.drawable.stat_notify_error
+                else -> android.R.drawable.ic_dialog_info
             }
         } else {
             android.R.drawable.ic_dialog_info
         }
 
-        // Dynamic title based on state
-        val title = if (USE_KOOG_AGENT && ::koogAgent.isInitialized) {
+        // Dynamic title based on state - BRANDING UPDATE
+        val title = if (::sensorFusionManager.isInitialized) {
+            val battery = try { sensorFusionManager.getContextSnapshot().battery } catch(e:Exception) { null }
             when {
-                koogAgent.isCriticalBattery() -> "⚠️ Gemma 💭 - Low Battery!"
-                else -> "✦ Gemma 💭"
+                 battery != null && battery.level <= 15 -> "⚠️ ✧ Gemma 💭 - Low Battery!"
+                else -> "✧ Gemma 💭"
             }
         } else {
-            "✦ Gemma 💭"
+            "✧ Gemma 💭"
         }
 
         // Build expanded telemetry view for notification expansion
         val expandedText = try {
-            if (::sensorFusionManager.isInitialized) {
-                sensorFusionManager.getContextString()
+            if (::hardwarePropertiesManager.isInitialized && hardwarePropertiesManager.thermalState.value.name != "COOL") {
+                 "🌡️ ${hardwarePropertiesManager.thermalState.value.name} | ${text}"
             } else {
                 text
             }
         } catch (e: Exception) {
             text
+        }
+        
+        // Expanded style text (BigText)
+        val bigTextContent = if (::sensorFusionManager.isInitialized) {
+             // Use concise telemetry for expanded view
+             sensorFusionManager.getContextString()
+        } else {
+             text
         }
 
         return Notification.Builder(this, CHANNEL_ID)
@@ -1058,32 +830,137 @@ $userPrompt
             .setSmallIcon(iconRes)
             .setOnlyAlertOnce(true)  // Don't spam sound/vibrate on every update
             .setStyle(Notification.BigTextStyle()
-                .bigText(expandedText)
-                .setBigContentTitle(title)
-                .setSummaryText("Tap to expand telemetry"))
+                .bigText(bigTextContent)
+                .setBigContentTitle("✧ Gemma 💭") // Status channel always shows dreaming
+                .setSummaryText("")) // Clean look - removed "Tap to expand"
             .build()
     }
     
-    
-    // Idle Animation Screensaver (like Chrome dino game)
-    private val idleAnimations = listOf(
-        "_____✦___👾_🌵___✴️☄️___",  // Desert scene
-        "🌊🌊🦑🌊🗨🐋🌊🌊",           // Ocean scene
-        "___☄️___✦___🌙___⭐___",    // Space scene
-        "🌸🦋✨🌿🐝🌺🌱",             // Garden scene
-        "___🏃💨___✦___👾___",       // Chase scene
-        "🌌___✴️___🔮___☄️___",      // Mystic scene
-        "🎵___👾___🎶___✦___",       // Music scene
-        "___⚡✨___✦___💫___"         // Energy scene
+    // Animated Screensavers - Frame-based sequences
+    private val animations = listOf(
+        // Ocean - whale swims across
+        listOf(
+            "🌊🌊🌊🌊🌊🌊🌊🐋",
+            "🌊🌊🌊🌊🌊🌊🐋🌊",
+            "🌊🌊🌊🌊🌊🐋🌊🌊",
+            "🌊🌊🌊🌊🐋🌊🌊🌊",
+            "🌊🌊🌊🐋🌊🌊🌊🌊",
+            "🌊🌊🐋🌊🌊🌊🌊🌊",
+            "🌊🐋🌊🌊🌊🌊🌊🌊",
+            "🐋🌊🌊🌊🌊🌊🌊🌊"
+        ),
+        // Electric sheep - bounce pattern
+        listOf(
+            "🐑⚡🐑⚡🐑⚡🐑⚡",
+            "⚡🐑⚡🐑⚡🐑⚡🐑",
+            "🐑⚡🐑⚡🐑⚡🐑⚡",
+            "⚡🐑⚡🐑⚡🐑⚡🐑",
+            "🐑⚡🐑⚡🐑⚡🐑⚡",
+            "⚡🐑⚡🐑⚡🐑⚡🐑"
+        ),
+        // Space - comet travels
+        listOf(
+            "☄️🌌🌌🌌✧🌌🌌🌌🌙🌌🌌🌌✦🌌🌌🌌",
+            "🌌🌌🌌☄️🌌🌌🌌✧🌌🌌🌌🌙🌌🌌🌌✦",
+            "✦🌌🌌🌌☄️🌌🌌🌌✧🌌🌌🌌🌙🌌🌌🌌",
+            "🌌🌌🌌✦🌌🌌🌌☄️🌌🌌🌌✧🌌🌌🌌🌙",
+            "🌙🌌🌌🌌✦🌌🌌🌌☄️🌌🌌🌌✧🌌🌌🌌",
+            "🌌🌌🌌🌙🌌🌌🌌✦🌌🌌🌌☄️🌌🌌🌌✧"
+        ),
+        // Garden - butterfly flies
+        listOf(
+            "🦋🌸🌲🏔️🌿🌳🌲🐝🌺🌳🌲",
+            "🌳🌲🦋🌸🌲🏔️🌿🌳🌲🐝🌺",
+            "🌺🌳🌲🦋🌸🌲🏔️🌿🌳🌲🐝",
+            "🐝🌺🌳🌲🦋🌸🌲🏔️🌿🌳🌲"
+        ),
+        // Chase scene - running from something
+        listOf(
+            "👾💨🌆🌆🌆✧💨🌆🌆🌆🌆🌆🌆",
+            "🌆👾💨🌆🌆🌆✧💨🌆🌆🌆🌆🌆",
+            "🌆🌆👾💨🌆🌆🌆✧💨🌆🌆🌆🌆-",
+            "👾💨🌆🌆🌆✧💨🌆🌆🌆🌆🌆🌆"
+        ),
+        // Deal with it (kaomoji)
+        listOf(
+            "(⌐■_■)",
+            "( ✧_✧)>⌐■-■",
+            "(✧_✧)",
+            "( ✧_✧)>⌐■-■",
+            "(⌐■_■)"
+        ),
+        // Thinking (reasoning loop kaomoji)
+        listOf(
+            "(╭ರ_•́)",
+            "(•́_ರ╮)",
+            "(╭ರ_•́)",
+            "(ʘ‿ʘ✿)",
+            "( ✦' ∇Δ∇Δ∇ '✦)つΨ"
+        ),
+        // Energy pulse
+        listOf(
+            "🎆🎆🎆⚡✨🎆🎆🎆✧🎆🎆🎆💫",
+            "⚡✨🎆🎆🎆✧🎆🎆🎆💫🎆🎆🎆",
+            "✨🎆🎆🎆✧🎆🎆🎆💫🎆🎆🎆⚡",
+            "🎆🎆🎆✧🎆🎆🎆💫🎆🎆🎆⚡✨",
+            "✧🎆🎆🎆💫🎆🎆🎆⚡✨🎆🎆🎆",
+            "🎆🎆🎆💫🎆🎆🎆⚡✨🎆🎆🎆✧"
+        ),
+        // Fog Reveal
+        listOf(
+            "🌫️🌫️🌫️🌫️🌫️🌫️🌫️✴️",
+            "🌫️🌫️🌫️🌫️🌫️🌫️✴️🌫️",
+            "🌫️🌫️🌫️🌫️🌫️✴️🌫️🌫️",
+            "🌫️🌫️🌫️🌫️✴️🌫️🌫️🌫️",
+            "🌫️🌫️🌫️✴️🌫️🌫️🌫️🌫️",
+            "🌫️🌫️✴️🌫️🌫️🌫️🌫️🌫️",
+            "🌫️✴️🌫️🌫️🌫️🌫️🌫️🌫️",
+            "✴️You're absolutely right!",
+            "✴️🌫️🌫️🌫️🌫️🌫️🌫️🌫️"
+        )
     )
+
     
-    private var animationIndex = 0
+    private var currentScene = 0
+    private var currentFrame = 0
+    private var animationJob: Job? = null
     private var lastActivityTime = System.currentTimeMillis()
     
-    private fun getIdleAnimation(): String {
-        // Rotate through animations every call
-        animationIndex = (animationIndex + 1) % idleAnimations.size
-        return idleAnimations[animationIndex]
+    private fun startAnimationLoop() {
+        animationJob?.cancel()
+        animationJob = scope.launch {
+            while (isActive) {
+                if (isIdle()) {
+                    val frame = getNextAnimationFrame()
+                    updateNotification("✧💭 $frame")
+                }
+                delay(500) // 500ms per frame
+            }
+        }
+    }
+    
+    private fun getNextAnimationFrame(): String {
+        if (animations.isEmpty()) return "..."
+
+        // Bounds check/auto-correction
+        if (currentScene < 0 || currentScene >= animations.size) currentScene = 0
+
+        val animation = animations[currentScene]
+        if (animation.isEmpty()) return "..."
+
+        if (currentFrame < 0 || currentFrame >= animation.size) currentFrame = 0
+        
+        val frame = animation[currentFrame]
+        
+        // Advance frame
+        currentFrame = (currentFrame + 1) % animation.size
+        
+        // Change scene after full cycle
+        if (currentFrame == 0) {
+            currentScene = (currentScene + 1) % animations.size
+        }
+        
+        return frame
     }
     
     private fun markActivity() {
@@ -1095,19 +972,37 @@ $userPrompt
         return (System.currentTimeMillis() - lastActivityTime) > (2 * 60 * 1000)
     }
     
-    private fun updateNotification(text: String) {
+    override fun updateNotification(text: String) {
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(text))
     }
 
     /**
-     * Called when user swipes away from recents - guaranteed before SIGKILL
-     * This is the proper place for critical cleanup (Kimi K2 audit fix)
+     * Called when a task from this app is removed from recents.
+     *
+     * WARNING: This fires for ANY task removal — including ShareReceiverActivity's
+     * empty task (taskAffinity="", excludeFromRecents=true). Do NOT tear down the
+     * service here or the shake detector, overlay, and API server all die.
+     *
+     * Only checkpoint state. Full cleanup belongs in onDestroy().
      */
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
-        Timber.i("GemmaService: onTaskRemoved - performing critical cleanup")
-        performCriticalCleanup()
+        Timber.i("GemmaService: onTaskRemoved - checkpointing (NOT tearing down)")
+        // Checkpoint agent state in case process is killed next
+        if (::koogAgent.isInitialized) {
+            try {
+                kotlinx.coroutines.runBlocking {
+                    kotlinx.coroutines.withTimeoutOrNull(3000L) {
+                        koogAgent.checkpoint()
+                    }
+                }
+            } catch (e: Exception) {
+                Timber.w(e, "Checkpoint on task removed failed")
+            }
+        }
     }
+
+
 
     override fun onDestroy() {
         super.onDestroy()
@@ -1132,7 +1027,7 @@ $userPrompt
             kotlinx.coroutines.runBlocking {
                 kotlinx.coroutines.withTimeoutOrNull(5000L) {
                     // Shutdown agent (closes event queue and checkpoints)
-                    if (USE_KOOG_AGENT && ::koogAgent.isInitialized) {
+                    if (::koogAgent.isInitialized) {
                         try {
                             koogAgent.shutdown()
                             Timber.i("Agent shutdown complete")
@@ -1143,7 +1038,8 @@ $userPrompt
 
                     // Cleanup engine synchronously
                     engine?.cleanup()
-                    Timber.i("Engine cleaned up")
+                    memoryManager.close()
+                    Timber.i("Engine and Memory cleaned up")
                 }
             }
         } catch (e: Exception) {
@@ -1161,46 +1057,136 @@ $userPrompt
         }
     }
 
-    override fun onBind(intent: Intent?): IBinder? = null
 
-    /**
-     * Resolve user-friendly paths to actual file paths
-     * Supports: "Downloads/file.txt", "/sdcard/...", "~/Documents/...", etc.
-     */
-    private fun resolveFilePath(path: String): java.io.File {
-        val cleanPath = path.trim()
-        return when {
-            cleanPath.startsWith("/") -> java.io.File(cleanPath)
-            cleanPath.startsWith("Downloads/") || cleanPath.startsWith("downloads/") -> {
-                java.io.File(android.os.Environment.getExternalStoragePublicDirectory(
-                    android.os.Environment.DIRECTORY_DOWNLOADS), cleanPath.substringAfter("/"))
-            }
-            cleanPath.startsWith("Documents/") || cleanPath.startsWith("documents/") -> {
-                java.io.File(android.os.Environment.getExternalStoragePublicDirectory(
-                    android.os.Environment.DIRECTORY_DOCUMENTS), cleanPath.substringAfter("/"))
-            }
-            cleanPath.startsWith("Pictures/") || cleanPath.startsWith("pictures/") -> {
-                java.io.File(android.os.Environment.getExternalStoragePublicDirectory(
-                    android.os.Environment.DIRECTORY_PICTURES), cleanPath.substringAfter("/"))
-            }
-            cleanPath.startsWith("~/") -> {
-                java.io.File(android.os.Environment.getExternalStorageDirectory(), cleanPath.substringAfter("~/"))
-            }
-            else -> {
-                // Default to Downloads folder
-                java.io.File(android.os.Environment.getExternalStoragePublicDirectory(
-                    android.os.Environment.DIRECTORY_DOWNLOADS), cleanPath)
-            }
-        }
-    }
+
 
 
 
     fun getCurrentMoodState(): String = currentMoodState
 
-    fun setMoodState(state: String) {
+    fun setMoodState(state: String) = broadcastMoodChange(state)
+
+    // Tool execution lives in KoogAgent.act() → MCPServer.executeTool()
+    
+    // === SAFETY UI ===
+    
+    object PendingConfirmationStash {
+        var params: Map<String, Any?>? = null
+        var originalResponse: String? = null
+        var responseChannel: kotlinx.coroutines.CompletableDeferred<String>? = null
+        
+        fun clear() {
+            params = null
+            originalResponse = null
+            responseChannel = null
+        }
+    }
+
+    private fun showConfirmationNotification(event: KoogAgent.AgentEvent.ConfirmationRequired) {
+        // Stash the state (params + channel) so we can resume later
+        PendingConfirmationStash.params = event.toolParams
+        PendingConfirmationStash.originalResponse = event.originalResponse
+        PendingConfirmationStash.responseChannel = event.responseChannel
+        
+        val confirmIntent = Intent(this, com.gemma.api.ui.NotificationActionReceiver::class.java).apply {
+            action = "com.gemma.api.ACTION_CONFIRM_TOOL"
+            putExtra("toolName", event.toolName)
+        }
+        val denyIntent = Intent(this, com.gemma.api.ui.NotificationActionReceiver::class.java).apply {
+            action = "com.gemma.api.ACTION_DENY_TOOL"
+            putExtra("toolName", event.toolName)
+        }
+        
+        val confirmPending = android.app.PendingIntent.getBroadcast(
+            this, 100, confirmIntent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+        val denyPending = android.app.PendingIntent.getBroadcast(
+            this, 101, denyIntent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+        
+        val builder = android.app.Notification.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setContentTitle("🛡️ Confirm Action")
+            .setContentText("Allow Gemma to use ${event.toolName}?")
+            .setStyle(android.app.Notification.BigTextStyle().bigText(
+                "Tool: ${event.toolName}\nParams: ${event.toolParams}\n\nRisky action detected. Do you approve?"
+            ))
+            .setOngoing(true)
+            .setCategory(android.app.Notification.CATEGORY_CALL)
+            .addAction(android.app.Notification.Action.Builder(
+                null, "✅ ALLOW", confirmPending
+            ).build())
+            .addAction(android.app.Notification.Action.Builder(
+                null, "🚫 DENY", denyPending
+            ).build())
+            
+        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, builder.build())
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // AgentPlatformCallbacks implementation
+    // ═══════════════════════════════════════════════════════════════
+
+    override fun showThinking() {
+        responseNotificationManager.showThinking()
+    }
+
+    override fun showResponse(text: String) {
+        responseNotificationManager.showResponse(text)
+    }
+
+    override fun showConfirmation(toolName: String, params: Map<String, Any?>, description: String) {
+        // Delegated to showConfirmationNotification via onConfirmationRequest callback
+    }
+
+    override fun speak(text: String) {
+        if (::ttsManager.isInitialized) ttsManager.speak(text)
+    }
+
+    override fun storeConversationTurn(userMessage: String, response: String, sessionId: String) {
+        scope.launch(Dispatchers.IO) {
+            memoryManager.storeTurn(com.gemma.api.database.ConversationTurn(
+                timestamp = System.currentTimeMillis(),
+                userMessage = userMessage,
+                assistantResponse = response,
+                tokensUsed = 0,
+                sessionId = sessionId
+            ))
+        }
+    }
+
+    override fun writeDiaryEntry(eventType: String, content: String, thermalState: String) {
+        scope.launch(Dispatchers.IO) {
+            memoryManager.writeDiaryEntry(eventType, content, thermalState)
+        }
+    }
+
+    override fun unloadEngine() {
+        val oldEngine = engineRef.getAndSet(null)
+        oldEngine?.cleanup()
+        System.gc()
+    }
+
+    override suspend fun reloadEngine() {
+        initialize()
+    }
+
+    override fun isEngineLoaded(): Boolean = isGemmaLoaded()
+
+    override fun getCurrentThermalState(): String {
+        return if (::hardwarePropertiesManager.isInitialized) {
+            hardwarePropertiesManager.thermalState.value.name
+        } else "UNKNOWN"
+    }
+
+    override fun getThermalDelayMs(lastInferenceTime: Long): Long {
+        return if (::hardwarePropertiesManager.isInitialized) {
+            hardwarePropertiesManager.getThermalThrottleDelay(lastInferenceTime)
+        } else 0L
+    }
+
+    override fun broadcastMoodChange(state: String) {
         currentMoodState = state
-        // Broadcast to MacroDroid for wallpaper/avatar change
         try {
             val macroIntent = android.content.Intent("com.arlosoft.macrodroid.action.FIRE_TRIGGER").apply {
                 putExtra("trigger_name", "gemma_state_change")
@@ -1212,262 +1198,32 @@ $userPrompt
         }
     }
 
-    // === TOOL EXECUTION LOGIC ===
-    private suspend fun executeTools(response: String): Pair<String, List<String>> {
-        // Pattern matches both [[TOOL:ARGS]] and [[TOOL]] formats
-        val pattern = Pattern.compile("\\[\\[([A-Z_]+)(?::([^\\]]+))?\\]\\]")
-        val matcher = pattern.matcher(response)
-        var cleanResponse = response
-        val results = mutableListOf<String>()
-
-        while (matcher.find()) {
-            val fullTag = matcher.group(0) ?: continue
-            val tool = matcher.group(1) ?: continue
-            val args = matcher.group(2) ?: ""  // Args may be null for standalone tools
-
-            Timber.i("Executing Tool: $tool Args: $args")
-            
-            when (tool) {
-                "FLASHLIGHT" -> {
-                    val enable = args == "ON"
-                    hardwareToolSet.controlFlashlight(enable)
-                    results.add("Flashlight is now ${if(enable) "ON" else "OFF"}")
+    // Consolidate Overlay Init Logic
+    private fun setupOverlayManager() {
+        if (!::overlayManager.isInitialized) return
+        
+        // Wire up audio callback for InputOverlay (audio-first input)
+        overlayManager.setAudioQueryCallback { audio ->
+            scope.launch {
+                Timber.w("AUDIO_DEBUG: InputOverlay received ${audio?.size} bytes")
+                if (audio == null || audio.isEmpty()) {
+                    Timber.e("AUDIO_DEBUG: Audio is empty/null! Aborting.")
+                    return@launch
                 }
-                "VIBRATE" -> {
-                    if (args == "SOS") {
-                         hardwareToolSet.vibrate(listOf(0, 200, 100, 200, 100, 200, 300, 500, 100, 500, 100, 500, 300, 200, 100, 200, 100, 200))
-                         results.add("Vibrated SOS Pattern")
-                    } else {
-                         hardwareToolSet.vibrate(listOf(0, 500))
-                         results.add("Vibrated Short")
-                    }
+                
+                // Audio is in WAV format from AudioRecorder.record(rawPcm=false)
+                // LiteRT LLM expects WAV format for miniaudio decoder
+                if (::koogAgent.isInitialized) {
+                    koogAgent.offerAudio(audio)
                 }
-                "SEARCH" -> {
-                    // RAG-style search: fetch results and return for synthesis
-                    try {
-                        val searchResults = networkToolSet.fetchSearchResults(args, 5)
-                        results.add(searchResults)
-                    } catch (e: Exception) {
-                        // Fallback to browser
-                        networkToolSet.googleSearch(args)
-                        results.add("Opened browser for '$args' (fetch failed)")
-                    }
-                }
-                "CLICK" -> {
-                    GemmaAccessibilityService.instance?.let {
-                        val success = it.performClick(args)
-                        results.add("Click '$args': ${if(success) "Success" else "Failed"}")
-                    } ?: results.add("Click Failed: Accessibility Service Not Enabled")
-                }
-                "SCROLL" -> {
-                     GemmaAccessibilityService.instance?.let {
-                        val success = it.performScroll(args)
-                        results.add("Scroll $args: ${if(success) "Success" else "Failed"}")
-                    }
-                }
-                "HOME", "BACK", "RECENTS", "NOTIFICATIONS" -> {
-                    GemmaAccessibilityService.instance?.let {
-                        val success = it.performGlobal(tool)
-                        results.add("Global Action $tool: ${if(success) "Success" else "Failed"}")
-                    }
-                }
-                "TYPE" -> {
-                    GemmaAccessibilityService.instance?.let {
-                        val success = it.performType(args)
-                        results.add("Type '$args': ${if(success) "Success" else "Failed"}")
-                    }
-                }
-                "BASH" -> {
-                    // Execute via Termux RUN_COMMAND intent
-                    try {
-                        val termuxIntent = android.content.Intent().apply {
-                            setClassName("com.termux", "com.termux.app.RunCommandService")
-                            action = "com.termux.RUN_COMMAND"
-                            putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
-                            putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-c", args))
-                            putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
-                        }
-                        startService(termuxIntent)
-                        results.add("Bash dispatched: '$args'")
-                    } catch (e: Exception) {
-                        Timber.e(e, "Termux dispatch failed")
-                        results.add("Bash failed: ${e.message}")
-                    }
-                }
-                "WALLPAPER" -> {
-                    // State change via wallpaper (dispatches to MacroDroid or similar)
-                    try {
-                        val macroIntent = android.content.Intent("com.arlosoft.macrodroid.action.FIRE_TRIGGER").apply {
-                            putExtra("trigger_name", "gemma_state_change")
-                            putExtra(
-                                "state",
-                                args
-                            )
-                        }
-                        sendBroadcast(macroIntent)
-                        // Also store state for context
-                        currentMoodState = args
-                        results.add("State changed to: $args")
-                    } catch (e: Exception) {
-                        results.add("Wallpaper/state change failed: ${e.message}")
-                    }
-                }
-                "NOTIFY" -> {
-                    // Push a custom notification to user
-                    try {
-                        responseNotificationManager.showResponse("✦ Gemma: $args")
-                        results.add("Notification sent")
-                    } catch (e: Exception) {
-                        results.add("Notify failed: ${e.message}")
-                    }
-                }
-                "READ" -> {
-                    // Read file from storage (Downloads, etc.)
-                    try {
-                        val file = resolveFilePath(args)
-                        if (file.exists() && file.canRead()) {
-                            val content = when {
-                                file.length() > 50_000 -> {
-                                    // Truncate large files
-                                    file.readText().take(50_000) + "\n...[TRUNCATED]"
-                                }
-                                else -> file.readText()
-                            }
-                            results.add("FILE_CONTENT[${file.name}]:\n$content")
-                        } else {
-                            results.add("File not found or not readable: $args")
-                        }
-                    } catch (e: Exception) {
-                        Timber.e(e, "File read failed")
-                        results.add("Read failed: ${e.message}")
-                    }
-                }
-                "LIST" -> {
-                    // List files in a directory
-                    try {
-                        val dir = resolveFilePath(args)
-                        if (dir.exists() && dir.isDirectory) {
-                            val files = dir.listFiles()?.take(50)?.joinToString("\n") {
-                                "${if (it.isDirectory) "📁" else "📄"} ${it.name}"
-                            } ?: "Empty directory"
-                            results.add("FILES[$args]:\n$files")
-                        } else {
-                            results.add("Directory not found: $args")
-                        }
-                    } catch (e: Exception) {
-                        results.add("List failed: ${e.message}")
-                    }
-                }
-                "FETCH" -> {
-                    // Fetch webpage content for RAG
-                    try {
-                        val content = networkToolSet.fetchWebpage(args, 8000)
-                        results.add(content)
-                    } catch (e: Exception) {
-                        results.add("Fetch failed: ${e.message}")
-                    }
-                }
-                "SEE" -> {
-                    // Capture screenshot for vision analysis
-                    try {
-                        val accessService = GemmaAccessibilityService.instance
-                        if (accessService != null) {
-                            val bitmap = suspendCancellableCoroutine<Bitmap?> { cont ->
-                                accessService.captureScreen { bmp ->
-                                    cont.resume(bmp)
-                                }
-                            }
-                            if (bitmap != null) {
-                                pendingImages.offer(bitmap)
-                                results.add("VISION: Screenshot captured (${bitmap.width}x${bitmap.height}). I can now see the screen.")
-                            } else {
-                                results.add("VISION: Screenshot failed")
-                            }
-                        } else {
-                            results.add("VISION: Accessibility service not enabled")
-                        }
-                    } catch (e: Exception) {
-                        Timber.e(e, "Screenshot failed")
-                        results.add("VISION: ${e.message}")
-                    }
-                }
-                "HEAR" -> {
-                    // Record audio for transcription/analysis
-                    try {
-                        val seconds = args.toIntOrNull() ?: 3
-                        if (audioRecorder.hasPermission()) {
-                            val audio = audioRecorder.record(seconds)
-                            if (audio != null && audio.isNotEmpty()) {
-                                pendingAudio.set(audio)
-                                val duration = audio.size / 16000f
-                                results.add("AUDIO: Recorded ${String.format("%.1f", duration)}s of audio. I can now hear what was said.")
-                            } else {
-                                results.add("AUDIO: Recording failed")
-                            }
-                        } else {
-                            results.add("AUDIO: No microphone permission")
-                        }
-                    } catch (e: Exception) {
-                        Timber.e(e, "Audio recording failed")
-                        results.add("AUDIO: ${e.message}")
-                    }
-                }
-                "PHOTO" -> {
-                    // Load image from path for analysis
-                    try {
-                        val file = resolveFilePath(args)
-                        if (file.exists() && file.canRead()) {
-                            val bitmap = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
-                            if (bitmap != null) {
-                                pendingImages.offer(bitmap)
-                                results.add("VISION: Loaded image ${file.name} (${bitmap.width}x${bitmap.height})")
-                            } else {
-                                results.add("VISION: Failed to decode image")
-                            }
-                        } else {
-                            results.add("VISION: Image not found: $args")
-                        }
-                    } catch (e: Exception) {
-                        Timber.e(e, "Image load failed")
-                        results.add("VISION: ${e.message}")
-                    }
-                }
-                "OPEN" -> {
-                    // Open App by Fuzzy Name
-                    val result = systemToolSet.openApp(args)
-                    results.add(result)
-                }
-                "MEDIA", "PLAY", "PAUSE", "NEXT", "PREV", "SKIP" -> {
-                    // Media Control (supports both [[MEDIA:PLAY]] and legacy [[PLAY]])
-                    val action = if (tool == "MEDIA") args else tool
-                    val result = systemToolSet.mediaControl(action)
-                    results.add(result)
-                }
+                Timber.w("AUDIO_DEBUG: Queued ${audio.size} bytes of WAV audio")
+                
+                val sessionId = UUID.randomUUID().toString()
+                // Minimal prompt — let the audio content drive the response
+                // Don't describe what the model should do, just give it the audio
+                processQuery("(audio)", sessionId)
             }
-            // Remove tag from user-facing text
-            cleanResponse = cleanResponse.replace(fullTag, "").trim()
-        }
-        return Pair(cleanResponse, results)
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // API SERVER HELPERS
-    // ═══════════════════════════════════════════════════════════════
-
-    // isModelLoaded is now defined at class top level using AtomicReference
-
-    // Mood helpers moved to body.
-
-
-    private suspend fun drainMultimodalQueues(): Pair<List<Bitmap>, ShortArray?> {
-        return kotlinx.coroutines.withContext(Dispatchers.IO) {
-            val images = mutableListOf<Bitmap>()
-            while (true) {
-                val img = pendingImages.poll() ?: break
-                images.add(img)
-            }
-            val audio = pendingAudio.getAndSet(null)
-            Pair(images, audio)
         }
     }
+
 }

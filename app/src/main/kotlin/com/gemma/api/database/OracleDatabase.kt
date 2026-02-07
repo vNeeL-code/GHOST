@@ -17,7 +17,7 @@ import timber.log.Timber
         DiaryEntry::class
     ],
     version = 3,
-    exportSchema = true  // Enable for migration debugging
+    exportSchema = false  // Disable schema export to fix build warning
 )
 abstract class OracleDatabase : RoomDatabase() {
 

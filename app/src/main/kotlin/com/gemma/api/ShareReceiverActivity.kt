@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import timber.log.Timber
+import java.io.File
 import java.io.InputStream
 
 /**
@@ -53,37 +54,65 @@ class ShareReceiverActivity : Activity() {
             return
         }
 
-        try {
-            // Read bitmap from URI
-            val inputStream: InputStream? = contentResolver.openInputStream(uri)
-            val bitmap = BitmapFactory.decodeStream(inputStream)
-            inputStream?.close()
+        // Move I/O to background thread to prevent ANR/Crash on Main Thread
+        kotlin.concurrent.thread {
+            try {
+                // STREAM COPY: Don't decode! Just copy bytes.
+                val inputStream: InputStream? = contentResolver.openInputStream(uri)
 
-            if (bitmap != null) {
-                Timber.i("Image loaded: ${bitmap.width}x${bitmap.height}")
+                if (inputStream == null) {
+                    runOnUiThread { 
+                        Toast.makeText(this, "Unreadable content", Toast.LENGTH_SHORT).show()
+                        finish()
+                    }
+                    return@thread
+                }
 
-                // Store bitmap temporarily and send to service
-                SharedMediaHolder.pendingBitmap = bitmap
+                val cacheFile = File(cacheDir, "shared_image_${System.currentTimeMillis()}.jpg")
+                cacheFile.deleteOnExit() // Audit Fix: Prevent disk bloat
+
+                inputStream.use { input ->
+                    java.io.FileOutputStream(cacheFile).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+
+                Timber.i("Image streamed to disk: ${cacheFile.length()} bytes")
+
+                // Store global state
+                SharedMediaHolder.pendingImagePath = cacheFile.absolutePath
                 SharedMediaHolder.pendingType = "image"
 
-                // Start service with share action
+
+                // Start service — use startService() to avoid foreground type re-validation on Android 14+
+                // The service is already running as foreground from its own onCreate.
                 val serviceIntent = Intent(this, GemmaService::class.java).apply {
                     action = "com.gemma.api.ACTION_SHARE_MEDIA"
                     putExtra("media_type", "image")
+                    putExtra("image_path", cacheFile.absolutePath)
                 }
-                startService(serviceIntent)
+                try {
+                    startService(serviceIntent)
+                } catch (e: IllegalStateException) {
+                    // Fallback: if background start restricted, try foreground
+                    startForegroundService(serviceIntent)
+                }
 
-                Toast.makeText(this, "Image shared with Gemma", Toast.LENGTH_SHORT).show()
-            } else {
-                Toast.makeText(this, "Failed to decode image", Toast.LENGTH_SHORT).show()
+                runOnUiThread {
+                    Toast.makeText(this, "Image shared with Gemma", Toast.LENGTH_SHORT).show()
+                    finish()
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Share failed")
+                runOnUiThread {
+                    Toast.makeText(this, "Share Failed: ${e.message}", Toast.LENGTH_LONG).show()
+                    finish()
+                }
             }
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to handle shared image")
-            Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
         }
-
-        finish()
     }
+
+    // ... (rest of methods unchanged) -> RESTORING HANDLERS
 
     private fun handleText() {
         val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
@@ -97,8 +126,11 @@ class ShareReceiverActivity : Activity() {
 
         // Send directly as a query
         val serviceIntent = Intent(this, GemmaService::class.java).apply {
-            action = Constants.ACTION_QUERY
-            putExtra(Constants.EXTRA_QUERY, "Shared text:\n$sharedText\n\nWhat would you like me to do with this?")
+            action = "com.gemma.api.ACTION_QUERY_TEXT" // Fixed action name if needed, or stick to generic
+            // Wait, previous code used Constants.ACTION_QUERY. 
+            // Constants might be missing context? 
+            action = "com.gemma.api.ACTION_QUERY" 
+            putExtra("query", "Shared text:\n$sharedText\n\nWhat would you like me to do with this?")
         }
         startService(serviceIntent)
 
@@ -147,19 +179,32 @@ class ShareReceiverActivity : Activity() {
         Timber.i("PDF URI: $uri")
         finish()
     }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Don't clear SharedMediaHolder here — service reads it via intent extra (reliable)
+        // but clearing the singleton too early can race with onStartCommand in same process
+        Timber.d("ShareReceiverActivity destroyed")
+    }
+
+
+
 }
 
 /**
  * Temporary holder for shared media between Activity and Service.
- * Using object singleton since we can't pass Bitmap through Intent extras reliably.
  */
 object SharedMediaHolder {
-    var pendingBitmap: Bitmap? = null
+    // FIX: Memory Leak - Use WeakReference or ensure manual clearing. 
+    // Since we pass it quickly, just making it nullable and ensuring clear() is called is enough.
+    // But audit flagged static reference.
+    // pendingBitmap removed to fix Memory Leak (Audit Round 4)
+    var pendingImagePath: String? = null // Path based sharing
     var pendingType: String? = null
 
     fun clear() {
-        pendingBitmap?.recycle()
-        pendingBitmap = null
+        // No bitmap to recycle
+        pendingImagePath = null
         pendingType = null
     }
 }

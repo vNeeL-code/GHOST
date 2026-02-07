@@ -30,3 +30,5 @@ local.properties
 # Debug artifacts
 debug.txt
 oracle_crash_*.txt
+CODEBASE_DUMP.md
+chat.html

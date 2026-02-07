@@ -179,9 +179,9 @@ class ApiServer(
                     }
                 }
 
-                // YAMP protocol schema for other agents
-                get("/api/yamp-schema") {
-                    call.respondText(YAMP_SCHEMA, ContentType.Text.Plain)
+                // YAML protocol schema for other agents
+                get("/api/yaml-schema") {
+                    call.respondText(YAML_SCHEMA, ContentType.Text.Plain)
                 }
 
                 get("/") {
@@ -198,8 +198,8 @@ class ApiServer(
     }
 }
 
-private val YAMP_SCHEMA = """
-# YAMP - Yet Another Messaging Protocol
+private val YAML_SCHEMA = """
+# YAML - Yet Another Markup Language
 # For A2A (Agent-to-Agent) communication with human collaboration
 
 ## Markers
@@ -213,7 +213,7 @@ private val YAMP_SCHEMA = """
 🦑 = User endpoint
 
 ## Agent Identifiers
-✦ = Gemma (local, on-device)
+✧ = Gemma (local, on-device)
 ✦ = Gemini (Google cloud)
 🐋 = DeepSeek
 🔶️ = Copilot (Microsoft)
@@ -253,13 +253,13 @@ private val YAMP_SCHEMA = """
 [[BASH:command]] [[WALLPAPER:state]] [[NOTIFY:message]]
 
 ## API Endpoints (localhost:9000)
-POST /api/generate - Send query, get YAMP response
+POST /api/generate - Send query, get YAML response
 GET /api/state - Get current mood state
 POST /api/state - Set mood state
 GET /api/logs - Conversation history
 GET /api/search?q= - Search memory
 GET /api/notifications - Recent device notifications
-GET /api/yamp-schema - This document
+GET /api/yaml-schema - This document
 """.trimIndent()
 
 private val chatHtml = """
@@ -326,7 +326,7 @@ private val chatHtml = """
             <input type="text" id="prompt" placeholder="Talk to Gemma..." autocomplete="off">
             <button id="send">Send</button>
         </div>
-        <div id="info">YAMP Protocol • localhost:9000 • On-Device AI</div>
+        <div id="info">YAML Protocol • localhost:9000 • On-Device AI</div>
     </div>
     <script>
         const messagesDiv = document.getElementById('messages');

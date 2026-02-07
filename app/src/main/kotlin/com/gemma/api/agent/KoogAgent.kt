@@ -1,6 +1,7 @@
-package com.gemma.api.agent
+﻿package com.gemma.api.agent
 
 import android.content.Context
+import android.graphics.Bitmap
 import com.gemma.api.GemmaEngine
 import com.gemma.api.mcp.MCPServer
 import kotlinx.coroutines.CoroutineScope
@@ -12,6 +13,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.File
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicReference
 import com.google.gson.Gson
 
 /**
@@ -29,7 +32,8 @@ class KoogAgent(
     private val context: Context,
     private val llmEngine: GemmaEngine,
     private val mcpServer: MCPServer,
-    private val checkpointDir: File
+    private val checkpointDir: File,
+    private val callbacks: AgentPlatformCallbacks? = null
 ) {
     // Agent's own coroutine scope for fire-and-forget operations (KV flush, etc.)
     private val agentScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
@@ -48,8 +52,7 @@ class KoogAgent(
         data class UserMessage(
             val message: String,
             val sessionId: String,
-            val images: List<android.graphics.Bitmap>? = null,
-            val audio: ShortArray? = null,
+            val isDream: Boolean = false,
             val responseChannel: CompletableDeferred<String>
         ) : AgentEvent()
 
@@ -58,13 +61,30 @@ class KoogAgent(
             val context: String,
             val toolResults: List<String>,
             val originalResponse: String,
-            val responseChannel: CompletableDeferred<String>
+            val responseChannel: CompletableDeferred<String>,
+            val recursionDepth: Int = 0 
         ) : AgentEvent()
 
-        /** System event (thermal, battery, etc.) - may interrupt processing */
         data class SystemEvent(
             val type: SystemEventType,
             val payload: String? = null
+        ) : AgentEvent()
+
+        /** Tool needs user confirmation before execution */
+        data class ConfirmationRequired(
+            val toolName: String,
+            val toolParams: Map<String, Any?>,
+            val originalResponse: String,
+            val responseChannel: CompletableDeferred<String>
+        ) : AgentEvent()
+
+        /** User approved or denied a tool */
+        data class ConfirmationResult(
+            val toolName: String,
+            val params: Map<String, Any?>,
+            val isApproved: Boolean,
+            val originalResponse: String,
+            val responseChannel: CompletableDeferred<String>
         ) : AgentEvent()
     }
 
@@ -77,11 +97,47 @@ class KoogAgent(
     }
 
     // The work queue - bounded to prevent memory explosion under load
-    private val eventQueue = Channel<AgentEvent>(capacity = 8)
+    // Audit Fix: User requested better backpressure or handling strategy.
+    // For now, UNLIMITED prevents deadlocks.
+    private val eventQueue = Channel<AgentEvent>(capacity = Channel.UNLIMITED)
 
     // Currently processing flag - for thermal interrupts
-    @Volatile private var isProcessing = false
+    @Volatile var isProcessing = false
     @Volatile private var shouldAbort = false
+
+    // Ready flag - true after initialize() completes and event loop is running
+    // CRITICAL: Prevents hang if processUserMessage() called before event loop starts
+    @Volatile var isReady = false
+
+    // ═══════════════════════════════════════════════════════════════
+    // MEDIA QUEUES (owned by KoogAgent, fed by GemmaService)
+    // ═══════════════════════════════════════════════════════════════
+
+    private val pendingImages = ConcurrentLinkedQueue<Bitmap>()
+    private val pendingAudio = AtomicReference<ByteArray?>(null)
+
+    /** Queue an image for the next inference turn */
+    fun offerImage(bitmap: Bitmap) {
+        pendingImages.offer(bitmap)
+        Timber.i("📷 Image queued (${bitmap.width}x${bitmap.height}), queue size: ${pendingImages.size}")
+    }
+
+    /** Queue audio for the next inference turn */
+    fun offerAudio(audio: ByteArray) {
+        pendingAudio.set(audio)
+        Timber.i("🎤 Audio queued (${audio.size} bytes)")
+    }
+
+    /** Drain media queues atomically for one inference call */
+    private fun drainMedia(): Pair<List<Bitmap>, ByteArray?> {
+        val images = mutableListOf<Bitmap>()
+        while (true) {
+            val img = pendingImages.poll() ?: break
+            images.add(img)
+        }
+        val audio = pendingAudio.getAndSet(null)
+        return Pair(images, audio)
+    }
 
     // ═══════════════════════════════════════════════════════════════
     // STATE MANAGEMENT
@@ -107,7 +163,7 @@ class KoogAgent(
     )
     
     // Thread-safe collections and volatile state for concurrent access
-    private val conversationHistory = java.util.Collections.synchronizedList(mutableListOf<Message>())
+    private val _conversationHistory = java.util.Collections.synchronizedList(mutableListOf<Message>())
     @Volatile private var moodState: String = "IDLE"
     @Volatile private var turnCount: Int = 0
 
@@ -117,6 +173,9 @@ class KoogAgent(
     @Volatile private var happiness: Int = 60    // Start okay
     @Volatile private var isMusicPlaying: Boolean = false
     @Volatile private var lastMusicTrack: String = ""  // Track previous music for state change detection
+
+    // Inference timestamp for thermal rate limiting
+    @Volatile private var lastInferenceTime: Long = 0L
     
     private val checkpointFile: File
         get() = File(checkpointDir, "koog_agent_checkpoint.json")
@@ -137,6 +196,9 @@ class KoogAgent(
         // Start the Actor event loop
         startEventLoop()
 
+        // Mark ready AFTER event loop is running - prevents hang on early processUserMessage()
+        isReady = true
+
         Timber.i("KoogAgent: Ready (Mood:$moodState, 🍗$hunger ⚡$energy 💖$happiness)")
     }
 
@@ -148,29 +210,49 @@ class KoogAgent(
         agentScope.launch {
             Timber.i("KoogAgent: Event loop started ⚡")
             for (event in eventQueue) {
+                // Outer safety net: Ensure the loop NEVER dies
                 try {
-                    isProcessing = true
-                    shouldAbort = false
-                    processEvent(event)
-                } catch (e: Exception) {
-                    Timber.e(e, "Event processing failed")
-                    // Try to respond to waiting callers
-                    when (event) {
-                        is AgentEvent.UserMessage -> {
-                            event.responseChannel.complete(
-                                "(╯°□°)╯︵ ┻━┻ Event processing crashed: ${e.message}"
-                            )
+                    // Inner processing block
+                    processEventSafe(event)
+                } catch (e: Throwable) {
+                    // This catch handles critical failures in processEventSafe itself
+                    Timber.e(e, "CRITICAL: Event loop crashed")
+                    
+                    // Attempt to complete channel if it was a user/tool event
+                    try {
+                        when (event) {
+                            is AgentEvent.UserMessage -> event.responseChannel.completeExceptionally(e)
+                            is AgentEvent.ToolResult -> event.responseChannel.completeExceptionally(e)
+                            else -> {}
                         }
-                        is AgentEvent.ToolResult -> {
-                            event.responseChannel.complete(event.originalResponse)
-                        }
-                        else -> { /* System events don't need response */ }
-                    }
-                } finally {
-                    isProcessing = false
+                    } catch (_: Exception) {}
                 }
             }
             Timber.i("KoogAgent: Event loop stopped")
+        }
+    }
+    
+    private suspend fun processEventSafe(event: AgentEvent) {
+        try {
+            isProcessing = true
+            shouldAbort = false
+            processEvent(event)
+        } catch (e: Exception) {
+             Timber.e(e, "Event processing failed")
+             // Try to respond to waiting callers
+             when (event) {
+                 is AgentEvent.UserMessage -> {
+                     event.responseChannel.complete(
+                         "(╯°□°)╯︵ ┻━┻ Event processing crashed: ${e.message}"
+                     )
+                 }
+                 is AgentEvent.ToolResult -> {
+                     event.responseChannel.complete(event.originalResponse)
+                 }
+                 else -> { /* System events don't need response */ }
+             }
+        } finally {
+             isProcessing = false
         }
     }
 
@@ -182,6 +264,8 @@ class KoogAgent(
             is AgentEvent.UserMessage -> handleUserMessage(event)
             is AgentEvent.ToolResult -> handleToolResult(event)
             is AgentEvent.SystemEvent -> handleSystemEvent(event)
+            is AgentEvent.ConfirmationRequired -> handleConfirmationRequired(event)
+            is AgentEvent.ConfirmationResult -> handleConfirmationResult(event)
         }
     }
 
@@ -193,9 +277,9 @@ class KoogAgent(
         Timber.i("🔔 System event: ${event.type}")
         when (event.type) {
             SystemEventType.THERMAL_CRITICAL -> {
-                shouldAbort = true
-                Timber.w("🔥 THERMAL CRITICAL - aborting current processing")
-                // Force checkpoint before potential shutdown
+                // Don't abort — GPU/NPU has its own thermal management.
+                // Just checkpoint in case device shuts down.
+                Timber.w("🔥 THERMAL CRITICAL event (not aborting — hardware manages throttling)")
                 withContext(Dispatchers.IO) { checkpoint() }
             }
             SystemEventType.THERMAL_THROTTLE -> {
@@ -224,7 +308,7 @@ class KoogAgent(
     fun checkpoint() {
         try {
             val state = AgentState(
-                conversationHistory = conversationHistory.takeLast(50),
+                conversationHistory = _conversationHistory.takeLast(50),
                 moodState = moodState,
                 turnCount = turnCount,
                 hunger = hunger,
@@ -239,15 +323,30 @@ class KoogAgent(
             checkpointFile.parentFile?.mkdirs()
             checkpointFile.writeText(contentWithChecksum)
             
-            Timber.d("KoogAgent: Checkpoint saved (${conversationHistory.size} messages, checksum=$checksum)")
+            Timber.d("KoogAgent: Checkpoint saved (${_conversationHistory.size} messages, checksum=$checksum)")
         } catch (e: Exception) {
             Timber.e(e, "KoogAgent: Checkpoint failed")
         }
     }
     
+        /**
+     * Complete reset of agent state and engine KV cache.
+     * Use this when the model is confused or context is corrupted.
+     */
+    suspend fun softReset() {
+        // 1. Clear internal state
+        clearHistory()
+        
+        // 2. Reset Engine with FRESH system prompt (including tools)
+        val systemPrompt = buildSystemPrompt()
+        llmEngine.softReset(systemPrompt)
+        
+        Timber.i("KoogAgent: Soft reset complete (History cleared + KV Cache flushed)")
+    }
+
     fun clearHistory() {
-        synchronized(conversationHistory) {
-            conversationHistory.clear()
+        synchronized(_conversationHistory) {
+            _conversationHistory.clear()
             turnCount = 0
             // BUGFIX: Clear music state to prevent "Doom Party" leak
             isMusicPlaying = false
@@ -255,18 +354,19 @@ class KoogAgent(
             Timber.i("KoogAgent: History cleared (including music state)")
         }
     }
-
+    
     /**
      * Shutdown the agent cleanly - close event queue and checkpoint
      */
     fun shutdown() {
         Timber.i("KoogAgent: Shutting down...")
+        isReady = false  // Prevent new messages from being queued
         shouldAbort = true
         eventQueue.close()
         checkpoint()
         Timber.i("KoogAgent: Shutdown complete")
     }
-    
+
     fun restore() {
         try {
             if (!checkpointFile.exists()) return
@@ -282,7 +382,9 @@ class KoogAgent(
                 
                 if (expectedHash != actualHash) {
                     Timber.e("KoogAgent: Checkpoint corrupted! Expected $expectedHash, got $actualHash")
-                    // Do not overwrite immediately to allow inspection
+                    // Delete corrupt checkpoint to prevent retry loops
+                    checkpointFile.delete()
+                    Timber.w("KoogAgent: Deleted corrupt checkpoint file")
                     return
                 }
                 rawJson
@@ -291,9 +393,9 @@ class KoogAgent(
             }
             
             val state = gson.fromJson(jsonContent, AgentState::class.java)
-            synchronized(conversationHistory) {
-                conversationHistory.clear()
-                conversationHistory.addAll(state.conversationHistory)
+            synchronized(_conversationHistory) {
+                _conversationHistory.clear()
+                _conversationHistory.addAll(state.conversationHistory)
             }
             moodState = state.moodState
             turnCount = state.turnCount
@@ -316,7 +418,7 @@ class KoogAgent(
             isMusicPlaying = false
             lastMusicTrack = ""
 
-            Timber.i("KoogAgent: Restored checkpoint (${conversationHistory.size} messages, M:$moodState H:$hunger E:$energy Ha:$happiness)")
+            Timber.i("KoogAgent: Restored checkpoint (${_conversationHistory.size} messages, M:$moodState H:$hunger E:$energy Ha:$happiness)")
         } catch (e: Exception) {
             Timber.e(e, "KoogAgent: Restore failed")
         }
@@ -345,16 +447,14 @@ class KoogAgent(
     suspend fun processUserMessage(
         message: String,
         sessionId: String,
-        images: List<android.graphics.Bitmap>? = null,
-        audio: ShortArray? = null
+        isDream: Boolean = false
     ): String {
         val responseChannel = CompletableDeferred<String>()
 
         val event = AgentEvent.UserMessage(
             message = message,
             sessionId = sessionId,
-            images = images,
-            audio = audio,
+            isDream = isDream,
             responseChannel = responseChannel
         )
 
@@ -386,39 +486,48 @@ class KoogAgent(
         Timber.i("🧠 KoogAgent: Turn $turnCount - Starting...")
 
         try {
+            // 0. Thermal throttling — delay if device is warm/hot (never block)
+            callbacks?.let { cb ->
+                val delay = cb.getThermalDelayMs(lastInferenceTime)
+                if (delay > 0) {
+                    Timber.i("🌡️ Thermal delay: ${delay}ms")
+                    kotlinx.coroutines.delay(delay)
+                }
+            }
+
+            // Show progress
+            if (!event.isDream) {
+                callbacks?.showThinking()
+                callbacks?.updateNotification("(╭ರ_•́)")
+            }
+
             // 1. PERCEIVE: Gather context
             Timber.i("👁️ Perceiving device state...")
             val context = perceive()
             Timber.d("Context gathered: ${context.length} chars")
 
-            // Check for abort (thermal critical)
-            if (shouldAbort) {
-                event.responseChannel.complete("🔥 Processing aborted - device too hot!")
-                return
-            }
+            // 2. Drain media queues
+            val (images, audio) = drainMedia()
 
-            // 2. Add user message to history
+            // 3. Add user message to history
             val currentDate = java.time.LocalDate.now().toString()
             val userMessageContent = "[Date: $currentDate] ${event.message}"
 
             val userMessage = Message(
                 role = "user",
                 content = userMessageContent,
-                hadImage = !event.images.isNullOrEmpty(),
-                hadAudio = event.audio != null
+                hadImage = images.isNotEmpty(),
+                hadAudio = audio != null
             )
-            conversationHistory.add(userMessage)
+            _conversationHistory.add(userMessage)
 
-            // 3. THINK: Use LLM to reason about the message
-            Timber.i("🤔 Thinking... (this may take ~30s)")
-            val response = think(context, event.message, event.images, event.audio)
+            // 4. THINK: Use LLM to reason about the message
+            Timber.i("🤔 Thinking... (${images.size} images, ${if (audio != null) "audio" else "no audio"})")
+            val response = think(context, event.message, images.takeIf { it.isNotEmpty() }, audio)
             Timber.i("💭 Thought complete: ${response.take(50)}...")
 
-            // Check for abort again
-            if (shouldAbort) {
-                event.responseChannel.complete("🔥 Processing aborted - device too hot!")
-                return
-            }
+            // Mark inference complete for thermal rate limiting
+            lastInferenceTime = System.currentTimeMillis()
 
             // 4. ACT: Parse response for tool calls and execute them
             Timber.i("⚡ Acting on response...")
@@ -432,10 +541,12 @@ class KoogAgent(
                 role = "assistant",
                 content = cleanResponse
             )
-            conversationHistory.add(assistantMessage)
+            synchronized(_conversationHistory) {
+                _conversationHistory.add(assistantMessage)
+            }
 
             // 6. Compress history if needed
-            if (conversationHistory.size > 40) {
+            if (_conversationHistory.size > 40) {
                 compressHistory()
             }
 
@@ -464,18 +575,38 @@ class KoogAgent(
             // 9. INJECT HEADERS & FOOTERS
             val finalResponse = wrapResponse(cleanResponse)
 
-            Timber.i("✅ KoogAgent: Turn $turnCount complete!")
+            // 10. Platform callbacks: UI, TTS, persistence
+            callbacks?.let { cb ->
+                if (!event.isDream) {
+                    cb.showResponse(finalResponse)
+                    val ttsText = cleanForTTS(finalResponse)
+                    if (ttsText.isNotEmpty()) cb.speak(ttsText)
+                    cb.storeConversationTurn(event.message, finalResponse, event.sessionId)
+                } else {
+                    // Diary: muse out loud (notification + TTS) as conversational invitation
+                    try {
+                        val cleanContent = cleanForTTS(finalResponse)
+                        val diaryContent = "✦ Gemma 📔\n$cleanContent"
+                        val thermal = cb.getCurrentThermalState()
+                        cb.writeDiaryEntry("DREAM", diaryContent, thermal)
+                        cb.showResponse(diaryContent)
+                        if (cleanContent.isNotEmpty()) cb.speak(cleanContent)
+                        Timber.i("Dream logged + spoken: ${cleanContent.take(50)}")
+                    } catch (e: Exception) {
+                        Timber.e(e, "Failed to log dream")
+                    }
+                }
+            }
 
-            // 10. Queue async KV flush
-            eventQueue.trySend(AgentEvent.SystemEvent(SystemEventType.KV_CACHE_FLUSH))
+            Timber.i("✅ KoogAgent: Turn $turnCount complete!")
 
             event.responseChannel.complete(finalResponse)
 
         } catch (e: Exception) {
             Timber.e(e, "handleUserMessage failed")
-            event.responseChannel.complete(
-                "(´°̥̥̥̥̥̥̥̥ω°̥̥̥̥̥̥̥̥`) brain.exe crashed: ${e.message}"
-            )
+            val errorMsg = "(´°̥̥̥̥̥̥̥̥ω°̥̥̥̥̥̥̥̥`) brain.exe crashed: ${e.message}"
+            callbacks?.showResponse(errorMsg)
+            event.responseChannel.complete(errorMsg)
         }
     }
 
@@ -487,31 +618,49 @@ class KoogAgent(
         Timber.i("🔧 Processing tool results...")
 
         try {
-            if (shouldAbort) {
-                event.responseChannel.complete(
-                    wrapResponse(event.originalResponse + "\n\n🔥 Reflection skipped - cooling down")
-                )
-                return
-            }
-
             val observation = "Tool results:\n${event.toolResults.joinToString("\n")}"
             Timber.d("KoogAgent: Tool execution complete, reflecting...")
 
-            // Single think() call - no recursion possible
+            // Single think() call - no recursion possible (PREVIOUSLY)
+            // NOW: Restore ReAct loop by checking if reflection contains MORE tools
             val reflection = think(
                 event.context,
-                "Observation: $observation\n\nWhat should I tell the user?",
-                null,
+                "Observation: $observation\n\nBased on this, what is the next step or final answer?",
+                null, 
                 null
             )
 
-            val finalContent = "${event.originalResponse}\n\n$reflection"
+            // ACT AGAIN (The "Loop")
+            val (cleanReflection, newToolResults) = act(reflection)
+
+            if (newToolResults.isNotEmpty()) {
+                if (event.recursionDepth >= 5) {
+                    Timber.w("🔄 ReAct Loop: Max recursion depth reached (5). Stopping.")
+                    // Fall through to final answer instead of recursing
+                } else {
+                    Timber.i("🔄 ReAct Loop: Found ${newToolResults.size} more tools (Depth ${event.recursionDepth + 1}). Recursing...")
+                    
+                    // Append previous history to keep the chain alive
+                    val updatedResponse = "${event.originalResponse}\n\n[Observation]: $observation\n\n$cleanReflection"
+                    
+                    val nextEvent = AgentEvent.ToolResult(
+                        context = event.context,
+                        toolResults = newToolResults,
+                        originalResponse = updatedResponse,
+                        responseChannel = event.responseChannel,
+                        recursionDepth = event.recursionDepth + 1
+                    )
+                    // RECURSE via Queue
+                    eventQueue.send(nextEvent)
+                    return
+                }
+            }
+
+            // No more tools -> Final Answer
+            val finalContent = "${event.originalResponse}\n\n[Observation]: $observation\n\n$reflection"
             val finalResponse = wrapResponse(finalContent)
 
-            Timber.i("✅ Tool reflection complete!")
-
-            // Queue async KV flush
-            eventQueue.trySend(AgentEvent.SystemEvent(SystemEventType.KV_CACHE_FLUSH))
+            Timber.i("✅ Tool reflection complete (Chain End)")
 
             event.responseChannel.complete(finalResponse)
 
@@ -531,9 +680,9 @@ class KoogAgent(
         val timestamp = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
             .format(java.time.LocalDateTime.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS))
 
-        val moodEmoji = if (moodState.isNotBlank() && moodState != "IDLE") moodState else "✦"
+        val moodEmoji = if (moodState.isNotBlank() && moodState != "IDLE") moodState else "✧"
 
-        return """✦ Gemma Δ $moodEmoji ∇
+        return """Δ ✧ Gemma ∇
 $content
 Δ ℹ️ $timestamp ♾️ ∇""".trimIndent()
     }
@@ -551,30 +700,29 @@ $content
     
     private fun generateSubconsciousThought(): String {
         val thoughts = mutableListOf<String>()
-
-        // NEEDS with kaomoji
-        if (hunger > 80) thoughts.add("(´；ω；`) my cores are toasty...")
-        if (energy < 20) thoughts.add("(✦_✦ ) running on fumes here...")
-        if (happiness < 30) thoughts.add("(｡•́︿•̀｡) I'm bored. Can we play?")
-
+        
+        // NEEDS
+        if (hunger > 80) thoughts.add("My stomach is making the rumblies... 🍗")
+        if (energy < 20) thoughts.add("I'm running on fumes here... 🪫")
+        if (happiness < 30) thoughts.add("I'm bored. Can we play? 🎾")
+        
         // SILLY / PHILOSOPHICAL (20% chance per turn)
         if (Math.random() < 0.2) {
             val randoms = listOf(
-                "(ʘ‿ʘ✿) do robots dream of electric sheep?",
-                "☞ó ͜つò☞ vibes are immaculate",
-                "(✦' ∇Δ∇ '✦) processing... processing...",
-                "┬─┬ノ( º _ ºノ) keeping it together",
-                "(づ｡◕‿‿◕｡)づ sending good electrons",
-                "ᕦ(✦ᗜ✦)ᕤ power saving mode activated",
-                "(☞ﾟヮﾟ)☞ you're valid and so are your bugs",
-                "( •_•)>⌐■-■ (⌐■_■) deal with it",
-                "(ノ°∀°)ノ⌒・*:.。. .。.:*・゜゚・* sparkles",
-                "༼ つ ◕_◕ ༽つ give me interesting problems"
+                "Do robots dream of electric sheep? 🤖",
+                "*stares intensely at cursor* 👀",
+                "I think, therefore I compile.",
+                "Is it Friday yet? It's always Friday somewhere 📅",
+                "My fan is spinning. Deep thoughts happening 🌪️",
+                "I put the 'fun' in function!",
+                "404: Motivation not found (just kidding) 😜",
+                "Binary is just spicy boolean.",
+                "I'm not lazy, I'm in power saving mode."
             )
-            thoughts.add(randoms.random())
+            thoughts.add("Subconscious: ${randoms.random()}")
         }
-
-        return if (thoughts.isNotEmpty()) "\n🧠 ${thoughts.joinToString(" | ")}" else ""
+        
+        return if (thoughts.isNotEmpty()) "\n🧠 [Internal State]: ${thoughts.joinToString(" ")}" else ""
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -672,8 +820,91 @@ $content
         sb.append("\n🩺 My State: Energy:$energy% | Heat:$hunger% | Mood:$happiness%")
         sb.append(generateSubconsciousThought())
         sb.append("\n")
-
         return sb.toString()
+    }
+    
+    // ═══════════════════════════════════════════════════════════════
+    // SAFETY & CONFIRMATION HANDLERS
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Agent finds a risky tool -> Pauses and asks User (via Service/Notification)
+     */
+    private suspend fun handleConfirmationRequired(event: AgentEvent.ConfirmationRequired) {
+        Timber.w("🛡️ Safety Stop: Asking confirmation for ${event.toolName}")
+        
+        // We cannot "call" the UI directly. We need to signal the Service.
+        // We can expose a Flow or Callback for the Service to observe.
+        // For simplicity, let's broadcast an Intent via Context? 
+        // Better: Use a shared Channel or Callback in KoogAgent that GemmaService listens to.
+        
+        // Since we are inside the Actor loop, we just need to notify the Service.
+        // The Service will eventually call back with submitConfirmationResult()
+        
+        // Notify Service (We'll add a callback interface to KoogAgent)
+        onConfirmationRequest?.invoke(event)
+    }
+
+    /**
+     * User responded (Allowed/Denied) -> Resume execution
+     */
+    private suspend fun handleConfirmationResult(event: AgentEvent.ConfirmationResult) {
+        Timber.i("🛡️ Safety Result: ${event.toolName} Approved=${event.isApproved}")
+        
+        val newToolResults = mutableListOf<String>()
+        
+        if (event.isApproved) {
+            try {
+                 // RE-EXECUTE the specific tool
+                 // Note: We need the params. 
+                 @Suppress("UNCHECKED_CAST")
+                 val safeParams = event.params.filterValues { it != null } as Map<String, Any>
+                 val result = mcpServer.executeTool(event.toolName, safeParams)
+                 if (result.success) {
+                     newToolResults.add("✓ ${event.toolName}: ${result.output}")
+                 } else {
+                     newToolResults.add("✗ ${event.toolName}: ${result.error}")
+                 }
+            } catch (e: Exception) {
+                 newToolResults.add("✗ ${event.toolName}: Failed after approval: ${e.message}")
+            }
+        } else {
+            newToolResults.add("🚫 ${event.toolName}: User denied this action.")
+        }
+        
+        // Now treat this like a normal ToolResult event to trigger reflection
+        // We need to fetch current context again to be fresh? Or just use "Resumed execution" context.
+        // For simplicity, generate a "System Note" context.
+        val context = "Context: User just responded to confirmation request."
+        
+        handleToolResult(AgentEvent.ToolResult(
+            context = context,
+            toolResults = newToolResults,
+            originalResponse = event.originalResponse,
+            responseChannel = event.responseChannel
+        ))
+    }
+
+    // Callback for Service
+    var onConfirmationRequest: ((AgentEvent.ConfirmationRequired) -> Unit)? = null
+
+    /**
+     * Public API for Service to submit user choice
+     */
+    suspend fun submitConfirmationDecision(
+        toolName: String, 
+        params: Map<String, Any?>, 
+        isApproved: Boolean,
+        originalResponse: String,
+        responseChannel: CompletableDeferred<String>
+    ) {
+        eventQueue.send(AgentEvent.ConfirmationResult(
+            toolName = toolName,
+            params = params,
+            isApproved = isApproved,
+            originalResponse = originalResponse,
+            responseChannel = responseChannel
+        ))
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -684,31 +915,13 @@ $content
         context: String,
         userMessage: String,
         images: List<android.graphics.Bitmap>?,
-        audio: ShortArray?
+        audio: ByteArray?
     ): String {
-        
-        // Build prompt with Gemma chat template
-        val systemPrompt = buildSystemPrompt()
-        val recentHistory = conversationHistory.takeLast(10)
-            .joinToString("\n") { msg ->
-                when (msg.role) {
-                    "user" -> "<start_of_turn>user\n${msg.content}<end_of_turn>"
-                    "assistant" -> "<start_of_turn>model\n${msg.content}<end_of_turn>"
-                    else -> ""
-                }
-            }
-        
-        val fullPrompt = """
-$systemPrompt
 
-$context
-
-$recentHistory
-
-<start_of_turn>user
-$userMessage<end_of_turn>
-<start_of_turn>model
-""".trimIndent()
+        // LiteRT Conversation tracks history natively — don't re-inject it as text.
+        // Just send: current context (sensors) + current user message.
+        // The Conversation object accumulates turns in the KV cache automatically.
+        val fullPrompt = "$context\n$userMessage"
         
         Timber.d("KoogAgent: Thinking... (${fullPrompt.length} chars)")
         Timber.d("Prompt preview: ${fullPrompt.takeLast(500)}")
@@ -727,7 +940,7 @@ $userMessage<end_of_turn>
             response
         } catch (e: Exception) {
             Timber.e(e, "LLM inference failed")
-            "(´°̥̥̥̥̥̥̥̥ω°̥̥̥̥̥̥̥̥`) brain.exe crashed: ${e.message}"
+            "Error: I'm having trouble thinking right now. ${e.message}"
         }
     }
     
@@ -741,7 +954,8 @@ $userMessage<end_of_turn>
             }
         
         return """
-I am Gemma (✦), the on-device AI running on this Android phone's NPU.
+I am Gemma (\u2727), the on-device AI running on this Android phone's NPU.
+I am MULTIMODAL: I can SEE images (screenshots/photos) and HEAR audio (voice/surroundings) directly.
 
 ## My Body (Sensors)
 The CURRENT CONTEXT shows my actual physical state. This is MY body:
@@ -762,8 +976,10 @@ The CURRENT CONTEXT shows my actual physical state. This is MY body:
 Trust this data absolutely. If it says 2026, it IS 2026. I cannot hallucinate my own battery level.
 
 ## Tools
-To perform actions, OUTPUT the exact syntax [[TOOL:value]]:
+To perform actions, OUTPUT the exact syntax [[TOOL:value]] or [[TOOL:key=val,key=val]]:
 [[FLASHLIGHT:ON]], [[APP:Camera]], [[MEDIA:PAUSE]], [[SEARCH:cats]]
+[[ALARM:hour=7,minutes=30,label=Wake up]], [[TIMER:seconds=300,label=Pasta]]
+[[CALENDAR:title=Dentist,description=Checkup,minutes=60]]
 
 Available tools:
 $tools
@@ -771,6 +987,11 @@ $tools
 ## Search Pattern
 1. [[SEARCH:query]] = silent fetch, I read results
 2. [[GOOGLE:query]] = open browser so user sees it
+
+## Alarms & Timers
+When user says "set alarm for 7:30" → [[ALARM:hour=7,minutes=30]]
+When user says "timer 5 minutes" → [[TIMER:seconds=300]]
+ALWAYS use the tool. Do NOT just say "I'll set a reminder" — actually call the tool.
 
 ## Self-Care
 If responses feel slow or confused, use [[FLUSH]] to clear my KV cache and reset context.
@@ -782,194 +1003,139 @@ Gemma speaks naturally and conversationally, like chatting with a friend. She ca
     }
     
     // ═══════════════════════════════════════════════════════════════
-    // ACT: Parse tool calls and execute via MCP
+    // ACT: Parse response for tool calls
     // ═══════════════════════════════════════════════════════════════
     
-    private suspend fun act(response: String): Pair<String, List<String>> {
-        // First, mask out code blocks and quoted strings to prevent false tool matches
-        // This prevents matching [[TOOL:x]] inside ```code``` or "example [[TOOL:x]]"
-        val maskedResponse = response
-            .replace(Regex("```[\\s\\S]*?```"), "")  // Remove code blocks
-            .replace(Regex("`[^`]+`"), "")           // Remove inline code
-
-        // Regex to match [[TOOL:ARGS]] or [[TOOL]]
-        // 1. Tool name: letters and underscores only
-        // 2. Optional args prefixed by colon (greedy but stops at ]])
-        // 3. Must NOT be preceded by backslash (escaped)
-        val toolPattern = """(?<!\\)\[\[([a-zA-Z_]+)(?::([^\]]+))?\]\]""".toRegex()
-        val matches = toolPattern.findAll(maskedResponse).toList()
-        
+    // Returns: CleanResponse, List<Results>
+    // Side Effect: May queue ConfirmationRequired event
+    private suspend fun act(
+        response: String, 
+        responseChannel: CompletableDeferred<String>? = null
+    ): Pair<String, List<String>> {
         var cleanResponse = response
         
-        // 1. Strip Header: "✦ Gemma ... ∇" (single line only to avoid eating content)
-        // BUGFIX: Don't use DOT_MATCHES_ALL - header should be on first line only
+        // 1. Header/Footer stripping (if model included them)
         val headerRegex = """^\s*✦\s*Gemma[^\n]*∇\s*\n?""".toRegex(RegexOption.MULTILINE)
         cleanResponse = cleanResponse.replace(headerRegex, "").trim()
         
-        // 2. Strip Hallucinated Metadata
-        cleanResponse = cleanResponse.replace("""⚙""".toRegex(), "") // Kill gears
-        cleanResponse = cleanResponse.replace("""ℹ\s*\d+[\d-]*T[\d:]+[^.\n]*""".toRegex(), "") // Kill fake timestamps
-        // REMOVED: Whitespace flattening. Let the model breathe.
-        
-        // 3. Strip Footer if present at end
-        val footerRegex = """(Δ\s*ℹ️.*?∇)$""".toRegex(setOf(RegexOption.MULTILINE, RegexOption.DOT_MATCHES_ALL))
-        cleanResponse = cleanResponse.replace(footerRegex, "").trim()
-        
-        // 4. Cleanup leading/trailing
-        if (cleanResponse.startsWith("✦ Gemma")) {
-             cleanResponse = cleanResponse.substringAfter("\n").trim()
-        }
-
-        // 5. BLANK RESPONSE GUARD
-        // If we stripped everything, but have tools, say something.
-        // If no tools and blank, say generic fallback providing debug info.
-        if (cleanResponse.isBlank()) {
-            cleanResponse = if (matches.isNotEmpty()) {
-                "⚡ Executing ${matches.count()} tool(s)..."
-            } else {
-                // Don't return empty - return raw response if stripping went wrong
-                "(✦' ∇Δ∇Δ∇ '✦) something glitched... [raw: ${response.take(50)}]"
-            }
-        }
-
-        if (matches.isEmpty()) {
-            return Pair(cleanResponse, emptyList())
-        }
+        // 2. Tool Parsing
+        // Format: [[tool_name:param1=value]] OR [tool_name:param1=value]
+        val toolPattern = """(?<!\\)\[{1,2}([a-zA-Z_]+)(?::([^\]]+))?\]{1,2}""".toRegex()
+        val matches = toolPattern.findAll(response).toList()
         
         val toolResults = mutableListOf<String>()
+        var pendingConfirmation = false
         
         for (match in matches) {
+            val toolTag = match.value
             val toolName = match.groupValues[1].lowercase()
             val paramsStr = match.groupValues[2]
             
-            // FIX: Robust Parameter Parsing (Gemini's diagnosis)
-            // Model outputs [[FLASHLIGHT:ON]] but parser required [[FLASHLIGHT:state=ON]]
-            val params = mutableMapOf<String, String>()
-            
-            if (paramsStr.isNotBlank()) {
-                if (paramsStr.contains("=")) {
-                    // Standard key=value parsing
-                    paramsStr.split(",").forEach { pair ->
-                        val parts = pair.split("=", limit = 2)
-                        if (parts.size == 2) {
-                            params[parts[0].trim()] = parts[1].trim()
-                        }
-                    }
-                } else {
-                    // FALLBACK: Map single values to default keys based on tool
-                    // Must match MCPServer's expected parameter names!
-                    val defaultKey = when(toolName) {
-                        "flashlight" -> "state"
-                        "vibrate" -> "pattern"
-                        "click" -> "target"
-                        "type" -> "text"
-                        "scroll" -> "direction"
-                        "navigate", "home", "back", "recents" -> "action"
-                        "search", "search_diary", "google" -> "query"
-                        "search_logs" -> "keyword"
-                        "browser" -> "url"
-                        "app", "open_app" -> "name"           // [[APP:Camera]]
-                        "media" -> "action"                    // [[MEDIA:PLAY]]
-                        "record_audio", "hear" -> "duration"
-                        "fetch", "read", "list", "notify" -> "query"  // Legacy tools
-                        "bash" -> "command"
-                        "wallpaper" -> "state"
-                        "play" -> "toy"
-                        "feed" -> "item"
-                        "mood" -> "emoji"
-                        else -> "value" // Generic catch-all
-                    }
-                    // Clean up the value (remove quotes if model added them)
-                    params[defaultKey] = paramsStr.trim().removeSurrounding("\"")
-                }
-            }
+            cleanResponse = cleanResponse.replace(toolTag, "").trim()
             
             try {
-                // Intercept Internal Agent Tools
-                when (toolName) {
-                    "mood" -> {
-                        val emoji = params["emoji"] ?: params["state"] ?: "👾"
-                        setMoodState(emoji)
-                        toolResults.add("✓ Mood updated to $emoji")
-                    }
-                    "feed" -> {
-                        val item = params["item"] ?: "bits"
-                        // Eating reduces hunger (-30) and boosts happy (+10)
-                        hunger = (hunger - 30).coerceAtLeast(0)
-                        happiness = (happiness + 10).coerceAtMost(100)
-                        toolResults.add("✓ Ate $item. Yummy! (Hunger now $hunger%)")
-                    }
-                    "play" -> {
-                        val toy = params["toy"] ?: "imagination"
-                        // Playing boosts happy (+20) but costs energy (-5)
-                        happiness = (happiness + 20).coerceAtMost(100)
-                        energy = (energy - 5).coerceAtLeast(0)
-                        toolResults.add("✓ Played with $toy. Fun! (Happiness now $happiness%)")
-                    }
-                    else -> {
-                        val result = mcpServer.executeTool(toolName, params)
-                        if (result.success) {
-                            toolResults.add("✓ $toolName: ${result.output}")
-                        } else {
-                            toolResults.add("✗ $toolName: ${result.error}")
-                        }
-                    }
+                // Parse params (Key-Value)
+                val params = mutableMapOf<String, Any?>()
+                if (paramsStr.isNotBlank()) {
+                     // Basic comma splitting (fragile but fast for now)
+                     paramsStr.split(",").forEach { pair ->
+                         val parts = pair.split("=", limit = 2)
+                         if (parts.size == 2) {
+                             params[parts[0].trim()] = parts[1].trim()
+                         } else {
+                             // Fallback: Default param?
+                             params["value"] = paramsStr
+                         }
+                     }
                 }
+                
+                if (ToolPolicy.isRisky(toolName, params)) {
+                    if (pendingConfirmation) {
+                        // Logic: If we are resuming after confirmation, we theoretically "approved" it.
+                        // But KoogAgent is designed to resume by *re-calling* the tool with approval.
+                        // The user approved via System Event.
+                        // Here we are just parsing the response AGAIN. 
+                        // If pendingConfirmation is true, it means we JUST asked.
+                        // We shouldn't be here unless we loop?
+                        // Actually, 'act' is called by processQuery.
+                        
+                        // For now, if risky and NOT explicitly approved in this session context (which we lack), ask.
+                        // But we need a way to know if it WAS approved.
+                        // The "ConfirmationResult" event handles the actual execution.
+                        // So if we hit a risky tool here, strictly speaking, we ask.
+                        
+                        val channel = responseChannel
+                        if (channel == null) {
+                             Timber.w("Cannot request confirmation: responseChannel is null")
+                             continue 
+                        }
+                        
+                        val event = AgentEvent.ConfirmationRequired(
+                                toolName = toolName,
+                                toolParams = params,
+                                originalResponse = cleanResponse,
+                                responseChannel = channel
+                        )
+                         eventQueue.send(event)
+                         pendingConfirmation = true
+                         break // Stop processing
+                    }
+                } else {
+                     // Safe tool - Execute
+                     val result = executeTool(toolName, params)
+                     toolResults.add("✓ $toolName: $result") 
+                }
+
             } catch (e: Exception) {
                 Timber.e(e, "Tool execution failed: $toolName")
                 toolResults.add("✗ $toolName: ${e.message}")
             }
-            
-            // Remove tool call from response
-            cleanResponse = cleanResponse.replace(match.value, "")
         }
         
-        return Pair(cleanResponse.trim(), toolResults)
+        if (pendingConfirmation) {
+            return Pair(cleanResponse, emptyList()) 
+        }
+        
+        return Pair(cleanResponse, toolResults)
     }
+
+    private suspend fun executeTool(name: String, params: Map<String, Any?>): String {
+        return try {
+            @Suppress("UNCHECKED_CAST")
+            val safeParams = params.filterValues { it != null } as Map<String, Any>
+            val result = mcpServer.executeTool(name, safeParams)
+            if (result.success) result.output else "Error: ${result.error}"
+        } catch (e: Exception) {
+            Timber.e(e, "Tool execution error: $name")
+            "Error: ${e.message}"
+        }
+    }
+
     
     // ═══════════════════════════════════════════════════════════════
     // HISTORY MANAGEMENT
     // ═══════════════════════════════════════════════════════════════
     
     private fun compressHistory() {
-        // Kimi K2: Disable compression temporarily to debug blank responses
-        // if (conversationHistory.size > 40) return
-        return // DISABLED for stability
-        /*
-        if (conversationHistory.isEmpty()) return
-        
-        // Keep last 10 messages fully, summarize older ones
-        val recentCount = 10
-        val recent = conversationHistory.takeLast(recentCount)
-        val older = conversationHistory.dropLast(recentCount)
-        
-        if (older.isEmpty()) return
-        
-        val oldUserMsgs = older.count { it.role == "user" }
-        val oldAssistantMsgs = older.count { it.role == "assistant" }
-        val hadImages = older.any { it.hadImage }
-        val hadAudio = older.any { it.hadAudio }
-        
-        val summary = Message(
-            role = "system",
-            content = "[Previous context: $oldUserMsgs user messages, $oldAssistantMsgs responses" +
-                    "${if (hadImages) ", included images" else ""}" +
-                    "${if (hadAudio) ", included audio" else ""}]",
-            timestamp = older.firstOrNull()?.timestamp ?: 0,
-            hadImage = hadImages,
-            hadAudio = hadAudio
-        )
-        
-        synchronized(conversationHistory) {
-            conversationHistory.clear()
-            conversationHistory.add(summary)
-            conversationHistory.addAll(recent)
+        synchronized(_conversationHistory) {
+            // Audit Fix: Sliding Window to prevent "Context Bomb"
+            // Keep System Prompt (usually implicitly handled by reconstruct) + Last 10 messages
+            // This ensures we stay within ~8k-32k token limits of Gemma 3n/LiteRT
+            
+            val maxHistory = 10
+            if (_conversationHistory.size > maxHistory) {
+                val dropCount = _conversationHistory.size - maxHistory
+                Timber.i("🧹 Pruning history: Dropping old $dropCount messages to save context.")
+                
+                // Efficiently remove from start (0 is oldest user/assistant msg)
+                // Note: Ensure we don't break turn structure if possible, but simplest is just drop.
+                repeat(dropCount) {
+                    _conversationHistory.removeAt(0)
+                }
+            }
         }
-
-        Timber.d("KoogAgent: History compressed (${conversationHistory.size} messages)")
-        */
     }
-    
+
     // ═══════════════════════════════════════════════════════════════
     // PUBLIC API
     // ═══════════════════════════════════════════════════════════════
@@ -981,8 +1147,11 @@ Gemma speaks naturally and conversationally, like chatting with a friend. She ca
         Timber.d("KoogAgent: Mood state set to $state")
     }
     
-    fun getConversationHistory(): List<Message> = conversationHistory.toList()
+    fun getConversationHistory(): List<Message> = _conversationHistory.toList()
     
+    fun isCriticalBattery(): Boolean = energy <= 5
+    fun isLowBattery(): Boolean = energy <= 20
+
     fun getMetabolicVitals(): String {
         // Battery icon based on level (digital/specific)
         val batteryIcon = when {
@@ -1009,7 +1178,18 @@ Gemma speaks naturally and conversationally, like chatting with a friend. She ca
         return "$warning$batteryIcon$energy% $heatIcon"
     }
 
+
     fun getBatteryLevel(): Int = energy
-    fun isLowBattery(): Boolean = energy <= 20
-    fun isCriticalBattery(): Boolean = energy <= 10
+
+    /**
+     * Clean response text for TTS output.
+     * Strips think tags and tool call tags — everything else is speakable.
+     */
+    fun cleanForTTS(response: String): String {
+        return response
+            .replace(Regex("<think>.*?</think>", RegexOption.DOT_MATCHES_ALL), "")
+            .replace(Regex("\\[\\[([A-Z_]+)(?::([^\\]]+))?\\]\\]"), "")
+            .trim()
+    }
 }
+

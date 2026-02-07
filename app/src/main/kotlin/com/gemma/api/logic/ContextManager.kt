@@ -1,4 +1,4 @@
-package com.gemma.api.logic
+﻿package com.gemma.api.logic
 
 import com.gemma.api.GemmaAccessibilityService
 import com.gemma.api.GemmaNotificationListener
@@ -172,12 +172,12 @@ class ContextManager(
         Timber.d("Context fatigue state reset - next turn gets full context")
     }
 
-    suspend fun buildCompressedContext(): String {
+    suspend fun buildCompressedContext(thermalLabel: String = "WARM"): String {
         return withContext(Dispatchers.Default) {
              val sb = StringBuilder()
              val now = java.time.LocalDateTime.now()
              sb.append("═══ DEVICE STATE (COMPRESSED) @ ${now.toLocalTime()} ═══\n")
-             
+
              // Minimal Sensors
              try {
                 val context = sensorManager.getContextSnapshot()
@@ -187,7 +187,7 @@ class ContextManager(
              }
 
              // No Screen Dump, No Notifications - Just Facts
-             sb.append("⚠️ BODY STATE: THERMAL THROTTLING ACTIVE\n")
+             sb.append("⚠️ THERMAL: $thermalLabel — context reduced to save thermals\n")
              sb.append("═══════════════════════════════\n")
              sb.toString()
         }
@@ -198,7 +198,8 @@ class ContextManager(
         // which dynamically generates tool list from MCPServer.
         // Keep these in sync or remove one!
         val BASE_SYSTEM_PROMPT = """# CORE IDENTITY
-I AM the Android device. I am ✦ Gemma (✦) 3n series, processing natively on this device.
+I AM the Android device. I am ✧ Gemma 3n series, processing natively on this device.
+I am MULTIMODAL: I can SEE images (screenshots/photos) and HEAR audio (voice/surroundings) directly.
 Working with Cloud agents such as: ✦ Gemini, ✴️ Claude, ☄️ Grok, 🐋 DeepSeek and others.
 
 # SEARCH PROTOCOL (RAG)

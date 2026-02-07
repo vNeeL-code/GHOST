@@ -1,4 +1,4 @@
-package com.gemma.api.ui
+﻿package com.gemma.api.ui
 
 import android.content.Context
 import android.content.Intent
@@ -59,7 +59,7 @@ class OverlayInputView(
         }
 
         inputField = EditText(context).apply {
-            hint = "Δ 👾 ∇ ✦ Gemma"
+            hint = "Δ 👾 ∇ \u2727 Gemma"
             setTextColor(Color.WHITE)
             setHintTextColor(Color.LTGRAY)
             setBackgroundColor(Color.TRANSPARENT)
@@ -214,7 +214,7 @@ class OverlayInputView(
     private fun resetMicButton() {
         micButton.text = "🎤"
         micButton.setTextColor(Color.WHITE)
-        inputField.hint = "Δ 👾 ∇ ✦ Gemma"
+        inputField.hint = "Δ 👾 ∇ \u2727 Gemma"
     }
 
     private fun handleSend() {

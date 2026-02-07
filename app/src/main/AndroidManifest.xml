@@ -17,12 +17,21 @@
     <!-- ASSISTANT ROLE (Android 15+) -->
     <uses-permission android:name="android.permission.BIND_ASSISTANT_SERVICE" />
     
+    <!-- ALARM / TIMER -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+
+    <!-- CALENDAR (diary + scheduling) -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
+
     <!-- FOR GROUNDED ACTION -->
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 
     <!-- ADVANCED DEBUG (ADB shell only - ignored without root) -->
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" xmlns:tools="http://schemas.android.com/tools" tools:ignore="ProtectedPermissions"/>
@@ -43,7 +52,9 @@
     <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
 
     <application
-        android:name=".GemmaApp"
+        android:label="Oracle_OS"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:allowBackup="true"
         android:hardwareAccelerated="true"
         android:largeHeap="true"
@@ -95,8 +106,14 @@
         <service
             android:name=".GemmaService"
             android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="dataSync|connectedDevice" />
+            android:exported="true"
+            android:foregroundServiceType="microphone|mediaPlayback|dataSync|connectedDevice">
+            <intent-filter>
+                <action android:name="com.gemma.api.ACTION_START_SERVICE" />
+                <action android:name="com.gemma.api.ACTION_SHARE_MEDIA" />
+                <action android:name="com.gemma.api.ACTION_QUERY" />
+            </intent-filter>
+        </service>
 
         <!-- NOTIFICATION LISTENER (context awareness) -->
         <service
@@ -155,6 +172,8 @@
                 <data android:mimeType="application/pdf" />
             </intent-filter>
         </activity>
+
+
 
         <!-- Notification Action Handler -->
         <receiver

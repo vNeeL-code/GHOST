@@ -1,4 +1,4 @@
-package com.gemma.api.ui
+﻿package com.gemma.api.ui
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -27,7 +27,7 @@ class GemmaNotificationManager(private val context: Context) {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "✦ Gemma Responses",
+                "\u2727 Gemma Responses",
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "On-device AI assistant responses"
@@ -41,16 +41,16 @@ class GemmaNotificationManager(private val context: Context) {
         try {
             val notification = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                 Notification.Builder(context, CHANNEL_ID)
-                    .setContentTitle("✦ Gemma")
-                    .setContentText("Processing...")
+                    .setContentTitle("Δ 👾 ∇")
+                    .setContentText("(╭ರ_•́)")
                     .setSmallIcon(android.R.drawable.ic_popup_sync)
                     .setProgress(0, 0, true)
                     .setOngoing(true)  // Can't swipe away while thinking
                     .build()
             } else {
                 Notification.Builder(context)
-                    .setContentTitle("✦ Gemma")
-                    .setContentText("Processing...")
+                    .setContentTitle("Δ 👾 ∇")
+                    .setContentText("(╭ರ_•́)")
                     .setSmallIcon(android.R.drawable.ic_popup_sync)
                     .setProgress(0, 0, true)
                     .setOngoing(true)
@@ -81,11 +81,11 @@ class GemmaNotificationManager(private val context: Context) {
 
             // Build notification with action buttons
             val notification = builder
-                .setContentTitle("✦ Gemma")
+                .setContentTitle("Δ 👾 ∇")
                 .setContentText(shortResponse)
                 .setStyle(Notification.BigTextStyle()
                     .bigText(response)
-                    .setBigContentTitle("Δ 👾 ∇"))
+                    .setBigContentTitle("✧ Gemma 💭"))
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setAutoCancel(false)  // Don't auto-dismiss
                 .setOngoing(false)     // Can swipe away now

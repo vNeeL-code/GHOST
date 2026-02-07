@@ -1,4 +1,4 @@
-package com.gemma.api.ui
+﻿package com.gemma.api.ui
 
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
@@ -18,21 +18,21 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 
 /**
- * SparkleBar - Minimal input overlay
- *
+ * InputOverlay - Minimal voice/text input overlay for agent queries
  * Just an input bar with the ✦ Gemma sparkle button.
  * Tap ✦ to record audio → sends raw audio directly to Gemma (no STT middleman)
  * Type text → sends text query
  *
  * Audio-first design: Gemma 3n is multimodal, so raw audio is more efficient than STT→text→LLM
  */
-class SparkleBar(
+class InputOverlay(
     context: Context,
     private val onTextQuery: (String) -> Unit,
-    private val onAudioQuery: (ShortArray) -> Unit,
+    private val onAudioQuery: (ByteArray) -> Unit,
     private val onDismiss: () -> Unit
 ) : FrameLayout(context) {
 
@@ -71,7 +71,7 @@ class SparkleBar(
 
         // ✦ Sparkle button (tap to record audio)
         sparkleButton = TextView(context).apply {
-            text = "✦"
+            text = "\u2727"
             textSize = 28f
             setTextColor(colorAccent)
             gravity = Gravity.CENTER
@@ -133,13 +133,17 @@ class SparkleBar(
         bar.addView(inputField)
         bar.addView(sendButton)
 
-        // Tap outside to dismiss (optional - shake also dismisses)
-        setOnClickListener { /* absorb clicks */ }
+        // Tap outside to dismiss (Escape Hatch)
+        setOnClickListener { 
+            Timber.i("InputOverlay: Outside tap detected - dismissing")
+            onDismiss() 
+        }
 
         addView(bar)
     }
 
     private fun toggleRecording() {
+        Timber.i("InputOverlay: Audio button clicked, isRecording=$isRecording")
         if (isRecording) {
             stopRecording()
         } else {
@@ -148,11 +152,13 @@ class SparkleBar(
     }
 
     private fun startRecording(extended: Boolean) {
+        Timber.i("InputOverlay: startRecording called, extended=$extended")
         if (!audioRecorder.hasPermission()) {
-            Timber.w("No audio permission")
+            Timber.w("InputOverlay: No audio permission")
             Toast.makeText(context, "Microphone permission required", Toast.LENGTH_SHORT).show()
             return
         }
+        Timber.i("InputOverlay: Permission granted, starting countdown")
 
         val duration = if (extended) 10 else 5  // 5s normal, 10s long press
 
@@ -171,8 +177,11 @@ class SparkleBar(
             isRecording = true
             updateRecordingUI(true)
 
-            Timber.i("SparkleBar: Recording ${duration}s audio NOW...")
-            val audio = audioRecorder.record(duration)
+            Timber.i("InputOverlay: Recording ${duration}s audio NOW...")
+            // Fix: Use rawPcm=false to get WAV format (LiteRT-LM expects WAV with header)
+            val audio: ByteArray? = withContext(Dispatchers.IO) {
+                 audioRecorder.record(duration, false)
+            }
 
             // PHASE 3: Done - another haptic
             hapticPulse()
@@ -180,10 +189,14 @@ class SparkleBar(
             updateRecordingUI(false)
 
             if (audio != null && audio.isNotEmpty()) {
-                Timber.i("SparkleBar: Got ${audio.size} samples, sending to Gemma")
+                // Debug: Check WAV header
+                val header = audio.take(4).map { it.toInt().toChar() }.joinToString("")
+                Timber.i("InputOverlay: Got ${audio.size} bytes, header='$header' (should be RIFF)")
+                val wavCheck = audio.size >= 44 && header == "RIFF"
+                Timber.i("InputOverlay: WAV format check: $wavCheck")
                 onAudioQuery(audio)
             } else {
-                Timber.w("SparkleBar: Recording failed or empty")
+                Timber.w("InputOverlay: Recording failed or empty")
                 Toast.makeText(context, "Recording failed", Toast.LENGTH_SHORT).show()
             }
         }
@@ -204,7 +217,7 @@ class SparkleBar(
     }
 
     private fun stopRecording() {
-        audioRecorder.stopRecording()
+        // audioRecorder runs via coroutine which we added cancellation for
         recordingJob?.cancel()
         isRecording = false
         updateRecordingUI(false)
@@ -275,5 +288,23 @@ class SparkleBar(
 
     private fun dpToPx(dp: Int): Int {
         return (dp * context.resources.displayMetrics.density).toInt()
+    }
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+        super.onWindowFocusChanged(hasWindowFocus)
+        if (hasWindowFocus) {
+            Timber.d("InputOverlay: Window gained focus, enforcing keyboard")
+            inputField.requestFocus()
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
+            
+            // Use flags that force the keyboard even if system thinks it's transitioning
+            imm?.showSoftInput(inputField, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+            
+            // Backup: Retry if it failed (common on Samsung/Pixel transitions)
+            postDelayed({
+                if (isAttachedToWindow) {
+                    imm?.showSoftInput(inputField, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+                }
+            }, 200)
+        }
     }
 }

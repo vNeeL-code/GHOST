@@ -19,7 +19,8 @@ class TokenLedger {
         // English average: 1 token ~= 4 chars.
         // For code/logs, it might be denser. 
         // Kimi suggested split(" ") lookups, but we'll use a robust heuristic for now.
-        return (text.length / 3.5).toInt().coerceAtLeast(1)
+        // Audit Fix: 3.5 was under-counting. 3.2 is safer (approx 0.31 tokens/char).
+        return (text.length / 3.2).toInt().coerceAtLeast(1)
     }
     
     // Singleton for app-wide access

@@ -62,4 +62,10 @@ class MemoryManager(context: Context) {
         )
         diaryDao.insertEntry(entry)
     }
+
+    fun close() {
+        if (db.isOpen) {
+            db.close()
+        }
+    }
 }

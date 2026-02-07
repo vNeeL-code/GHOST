@@ -14,8 +14,8 @@ android {
         applicationId = "com.gemma.api"
         minSdk = 31
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "2.0.0"
 
         ndk {
             abiFilters.add("arm64-v8a")
@@ -67,6 +67,8 @@ ksp {
 }
 
 dependencies {
+    // LiteRT-LM: The CORRECT library for Gemma 3n multimodal inference
+    // (NOT mediapipe:tasks-genai - that's a different/older API)
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.9.0-alpha01")
     
     // TFLite GPU delegate - Use Google Play Services versions (like Gallery app)

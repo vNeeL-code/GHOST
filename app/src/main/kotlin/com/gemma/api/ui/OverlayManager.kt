@@ -32,12 +32,12 @@ class OverlayManager(private val context: Context) {
     private var windowManager: WindowManager? = null
     private var overlayView: OverlayInputView? = null
     private var pillView: PillOverlayView? = null
-    private var sparkleBar: SparkleBar? = null
+    private var inputOverlay: InputOverlay? = null
     private var currentStyle: OverlayStyle = OverlayStyle.SPARKLE  // Default to sparkle (audio-first)
     private var isShowing = false
 
     // Callbacks
-    private var audioQueryCallback: ((ShortArray) -> Unit)? = null
+    private var audioQueryCallback: ((ByteArray) -> Unit)? = null
 
     init {
         windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -55,7 +55,7 @@ class OverlayManager(private val context: Context) {
     /**
      * Set callback for audio queries (used by SPARKLE style)
      */
-    fun setAudioQueryCallback(callback: (ShortArray) -> Unit) {
+    fun setAudioQueryCallback(callback: (ByteArray) -> Unit) {
         audioQueryCallback = callback
     }
 
@@ -78,21 +78,27 @@ class OverlayManager(private val context: Context) {
             when (currentStyle) {
                 OverlayStyle.CLASSIC -> showClassicOverlay(onQuery)
                 OverlayStyle.PILL -> showPillOverlay(onQuery)
-                OverlayStyle.SPARKLE -> showSparkleBar(onQuery)
+                OverlayStyle.SPARKLE -> showInputOverlay(onQuery)
             }
         } catch (e: Exception) {
             Timber.e(e, "Failed to show overlay")
+            // CRITICAL: Reset state if show*() failed, preventing stuck isShowing flag
+            isShowing = false
+            overlayView = null
+            pillView = null
+            inputOverlay = null // Renamed from sparkleBar
         }
     }
 
-    private fun showSparkleBar(onTextQuery: (String) -> Unit) {
-        sparkleBar = SparkleBar(
+    private fun showInputOverlay(onTextQuery: (String) -> Unit) {
+        inputOverlay = InputOverlay(
             context = context,
             onTextQuery = { query ->
                 onTextQuery(query)
                 hideOverlay()
             },
             onAudioQuery = { audio ->
+                // Relay audio directly to GemmaService via callback
                 audioQueryCallback?.invoke(audio)
                 hideOverlay()
             },
@@ -101,32 +107,21 @@ class OverlayManager(private val context: Context) {
             }
         )
 
-        val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else
-                WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.CENTER  // Center of screen, above keyboard
+        val params = getInteractiveLayoutParams().apply {
+            gravity = Gravity.CENTER
             y = dpToPx(-100)  // Offset upward from center
         }
 
-        windowManager?.addView(sparkleBar, params)
+        windowManager?.addView(inputOverlay, params)
         isShowing = true
 
-        sparkleBar?.post {
-            sparkleBar?.focusInput()
+        inputOverlay?.post {
+            inputOverlay?.focusInput()
             val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-            imm.showSoftInput(sparkleBar, InputMethodManager.SHOW_IMPLICIT)
+            imm.showSoftInput(inputOverlay, InputMethodManager.SHOW_IMPLICIT)
         }
 
-        Timber.i("SparkleBar overlay shown")
+        Timber.i("Input overlay shown")
     }
 
     private fun showClassicOverlay(onQuery: (String) -> Unit) {
@@ -135,20 +130,9 @@ class OverlayManager(private val context: Context) {
             hideOverlay()
         }
 
-        val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else
-                WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSLUCENT
-        ).apply {
+        val params = getBaseLayoutParams().apply {
             gravity = Gravity.CENTER
-            y = -200
+            this.y = -200
         }
 
         windowManager?.addView(overlayView, params)
@@ -175,20 +159,10 @@ class OverlayManager(private val context: Context) {
             }
         )
 
-        val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else
-                WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            y = dpToPx(100)  // Offset from bottom
+        val params = getPassiveLayoutParams().apply {
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            this.y = 100 // Top margin
+            width = WindowManager.LayoutParams.WRAP_CONTENT
         }
 
         windowManager?.addView(pillView, params)
@@ -237,18 +211,23 @@ class OverlayManager(private val context: Context) {
             }
             pillView = null
 
-            // Hide sparkle bar
-            sparkleBar?.let { view ->
+            // Hide input overlay
+            inputOverlay?.let { view ->
                 imm.hideSoftInputFromWindow(view.windowToken, 0)
                 view.cleanup()
                 windowManager?.removeView(view)
             }
-            sparkleBar = null
+            inputOverlay = null
 
             isShowing = false
             Timber.i("Overlay hidden")
         } catch (e: Exception) {
             Timber.e(e, "Failed to hide overlay")
+            // CRITICAL: Force reset state even on error to allow recovery
+            isShowing = false
+            overlayView = null
+            pillView = null
+            inputOverlay = null
         }
     }
 
@@ -267,5 +246,78 @@ class OverlayManager(private val context: Context) {
         }
     }
 
+private fun getPassiveLayoutParams(): WindowManager.LayoutParams {
+    val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+    } else {
+        @Suppress("DEPRECATION")
+        WindowManager.LayoutParams.TYPE_PHONE
+    }
+    
+    // Key flags for "Visible Sovereignty":
+    // FLAG_NOT_FOCUSABLE: Don't steal keyboard
+    // FLAG_NOT_TOUCHABLE: Let clicks pass through (Pill/Sparkle idle state)
+    // FLAG_LAYOUT_IN_SCREEN: Draw full screen
+    val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+    
+    return WindowManager.LayoutParams(
+        WindowManager.LayoutParams.MATCH_PARENT,
+        WindowManager.LayoutParams.WRAP_CONTENT,
+        type,
+        flags,
+        android.graphics.PixelFormat.TRANSLUCENT
+    ).apply {
+        gravity = Gravity.BOTTOM
+    }
+}
+
+    private fun getInteractiveLayoutParams(): WindowManager.LayoutParams {
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        } else {
+            @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+        }
+        
+        // Interactive overlay - must capture touch and keyboard
+        val flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+        
+        return WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            type,
+            flags,
+            android.graphics.PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.CENTER
+            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
+        }
+    }
+
+
     fun isVisible(): Boolean = isShowing
+
+    private fun getBaseLayoutParams(): WindowManager.LayoutParams {
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        } else {
+            @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+        }
+        
+        // Interactive flags: Allow focus and touch
+        val flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or 
+                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
+        
+        return WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            type,
+            flags,
+            android.graphics.PixelFormat.TRANSLUCENT
+        )
+    }
 }
