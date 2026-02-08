@@ -222,7 +222,7 @@ Parser regex: `(?<!\)\[{1,2}([a-zA-Z_]+)(?::([^\]]+))?\]{1,2}` (handles single o
 - **Notification sender**: "Oracle_OS" in shade
 - **Expanded title**: "Δ 👾 ∇"
 - **Response header**: "✦ Gemma Δ {mood} ∇"
-- **Diary header**: "✦ Gemma 📔"
+- **Diary header**: "✧ Gemma 📔"
 
 ---
 

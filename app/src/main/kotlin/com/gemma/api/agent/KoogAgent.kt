@@ -595,7 +595,7 @@ class KoogAgent(
                     // Diary: use clean response (no Δ header), just diary branding
                     try {
                         val ttsText = cleanForTTS(cleanResponse)
-                        val diaryContent = "✦ Gemma 📔\n$ttsText"
+                        val diaryContent = "✧ Gemma 📔\n$ttsText"
                         val thermal = cb.getCurrentThermalState()
                         cb.writeDiaryEntry("DREAM", diaryContent, thermal)
                         cb.showResponse(diaryContent)
