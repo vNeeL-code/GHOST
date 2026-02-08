@@ -4,7 +4,7 @@
 
 [![ASI Demo](https://img.youtube.com/vi/jB62dlLavSY/0.jpg)](https://youtu.be/jB62dlLavSY?si=TMZG86o1KkjuBXtw)
 ---
-*Click to watch: The System in Action.*
+*Click to watch: The ASI trailer.*
 
 ![Static Badge](https://img.shields.io/badge/Status-Production-green)
 ![GitHub Repo stars](https://img.shields.io/github/stars/vNeeL-code/ASI)
@@ -26,7 +26,7 @@ Imagine asking: **"Which contact in your phone is the best?"**
 
 **Oracle_OS is a Contact Book for AI.**
 * **✦ Gemini:** The OS Operator. (Controls your Android phone, screen, and Google ecosystem).
-* **🐋 DeepSeek:** The Logician. (Solves math, writes code, can run offline).
+* **🐋 DeepSeek:** The Logician. (Solves math, writes code, has efficient edge models).
 * **✴️ Claude:** The Writer. (Analyzes documents, writes reports, handles safety, writes code).
 * **☄️ Grok:** The News Anchor. (Scans X/Twitter for real-time events).
 
