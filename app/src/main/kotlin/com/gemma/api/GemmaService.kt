@@ -681,17 +681,33 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             val downloadDir = android.os.Environment.getExternalStoragePublicDirectory(
                 android.os.Environment.DIRECTORY_DOWNLOADS
             )
-            val modelFile = listOf(
-                // Check app storage first (survives Downloads cleanup)
-                File(getExternalFilesDir(null), "gemma-3n-E4B-it-int4.litertlm"),
-                File(getExternalFilesDir(null), "gemma.litertlm"),
-                // Fallback to Downloads
-                File(downloadDir, "gemma-3n-E4B-it-int4.litertlm"),
-                File(downloadDir, "gemma.litertlm")
-            ).firstOrNull { it.exists() }
+            // Search for any Gemma model variant (E4B preferred, E2B fallback, generic last)
+            val modelNames = listOf(
+                "gemma-3n-E4B-it-int4.litertlm",
+                "gemma-3n-E2B-it-int4.litertlm",
+                "gemma.litertlm"
+            )
+            val searchDirs = listOf(
+                getExternalFilesDir(null),  // App storage (survives Downloads cleanup)
+                downloadDir                  // Downloads folder
+            )
+            val modelFile = searchDirs.flatMap { dir ->
+                modelNames.map { name -> File(dir, name) }
+            }.firstOrNull { it.exists() }
+
+            if (modelFile != null) {
+                val variant = when {
+                    modelFile.name.contains("E4B") -> "E4B (full)"
+                    modelFile.name.contains("E2B") -> "E2B (lite)"
+                    else -> "unknown variant"
+                }
+                Timber.i("📦 Found model: ${modelFile.name} ($variant) in ${modelFile.parent}")
+            }
 
             if (modelFile == null) {
-                updateNotification("ERROR: No model found")
+                val searchedPaths = searchDirs.mapNotNull { it?.absolutePath }
+                Timber.e("No model found! Searched: $searchedPaths for: $modelNames")
+                updateNotification("ERROR: No model found. Place .litertlm in app folder or Downloads")
                 return
             }
 
@@ -700,7 +716,15 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             // Inject Identity Prompt (Static)
             val error = newEngine.initialize(modelFile.absolutePath, com.gemma.api.logic.ContextManager.BASE_SYSTEM_PROMPT)
             if (error != null) {
-                updateNotification("Load Error: $error")
+                val hint = when {
+                    error.contains("memory", ignoreCase = true) || error.contains("OOM", ignoreCase = true) ->
+                        " (Try E2B model on this device)"
+                    error.contains("GPU", ignoreCase = true) ->
+                        " (GPU init failed — device may not support this model)"
+                    else -> ""
+                }
+                Timber.e("Model load failed: $error")
+                updateNotification("Load Error: ${error.take(80)}$hint")
                 return
             }
             
