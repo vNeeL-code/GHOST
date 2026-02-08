@@ -92,11 +92,20 @@ class MainActivity : Activity() {
             return
         }
         
-        // 3. Accessibility - REMOVED BROKEN CHECK
+        // 3. Calendar (for diary sync)
+        if (checkSelfPermission(android.Manifest.permission.WRITE_CALENDAR) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(
+                android.Manifest.permission.READ_CALENDAR,
+                android.Manifest.permission.WRITE_CALENDAR
+            ), 103)
+            // Non-blocking — diary works without calendar, just won't sync
+        }
+
+        // 4. Accessibility - REMOVED BROKEN CHECK
         // Service will fail gracefully if accessibility isn't enabled
         // No more annoying toggle dance
 
-        // 4. Overlay
+        // 5. Overlay
         if (!Settings.canDrawOverlays(this)) {
             showState(
                 "❌ Presence Inactive\n\nI need 'Draw over other apps' permission.",

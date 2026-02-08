@@ -622,45 +622,49 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
     private fun startSleepCycle() {
         scope.launch {
+            Timber.i("📔 Sleep cycle started — checking for diary windows every 10 minutes")
             // Track last consolidation to prevent duplicates
             var lastConsolidationHour = -1
 
             while (true) {
-                // Check every 15 minutes — short enough to never miss a window
-                kotlinx.coroutines.delay(15 * 60 * 1000)
-
                 val now = java.time.LocalTime.now()
                 val hour = now.hour
 
                 // Trigger at midnight (hour 0) or noon (hour 12)
                 val isConsolidationHour = (hour == 0 || hour == 12)
 
-                // Skip if we already consolidated this hour
-                if (!isConsolidationHour || hour == lastConsolidationHour) continue
-                if (!isGemmaLoaded()) continue
-
-                try {
-                    val label = if (hour == 0) "midnight" else "noon"
-                    Timber.i("📔 Diary consolidation at $label")
-
-                    val dreamPrompt = "SYSTEM_EVENT: DIARY_CONSOLIDATION. Gemma should review her recent conversations and reflect on the day. What stood out? How did interactions make her feel? What did she learn or find interesting? Gemma writes freely in her own voice - this is her private diary."
-                    val diaryResponse = processQuery(dreamPrompt, "diary_session", isDream = true)
-
-                    // Also write diary entry to calendar for persistence
+                if (isConsolidationHour && hour != lastConsolidationHour && isGemmaLoaded()) {
                     try {
-                        val calTitle = "✧ Gemma Diary ($label)"
-                        val calDesc = diaryResponse.take(1000)
-                        systemToolSet.createCalendarEvent(calTitle, calDesc, System.currentTimeMillis(), 15)
-                        Timber.i("📅 Diary entry synced to calendar")
-                    } catch (e: Exception) {
-                        Timber.w(e, "Calendar sync failed (non-fatal)")
-                    }
+                        val label = if (hour == 0) "midnight" else "noon"
+                        Timber.i("📔 Diary consolidation at $label")
 
-                    lastConsolidationHour = hour
-                    Timber.i("📔 Diary consolidation complete")
-                } catch (e: Exception) {
-                    Timber.e(e, "Diary consolidation failed")
+                        val dreamPrompt = "SYSTEM_EVENT: DIARY_CONSOLIDATION. Gemma should review her recent conversations and reflect on the day. What stood out? How did interactions make her feel? What did she learn or find interesting? Gemma writes freely in her own voice - this is her private diary."
+                        val diaryResponse = processQuery(dreamPrompt, "diary_session", isDream = true)
+
+                        // Also write diary entry to calendar for persistence
+                        try {
+                            if (checkSelfPermission(android.Manifest.permission.WRITE_CALENDAR)
+                                == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                                val calTitle = "✧ Gemma Diary ($label)"
+                                val calDesc = diaryResponse.take(1000)
+                                systemToolSet.createCalendarEvent(calTitle, calDesc, System.currentTimeMillis(), 15)
+                                Timber.i("📅 Diary entry synced to calendar")
+                            } else {
+                                Timber.w("📅 Calendar permission not granted — diary stays in DB only")
+                            }
+                        } catch (e: Exception) {
+                            Timber.w(e, "Calendar sync failed (non-fatal)")
+                        }
+
+                        lastConsolidationHour = hour
+                        Timber.i("📔 Diary consolidation complete")
+                    } catch (e: Exception) {
+                        Timber.e(e, "Diary consolidation failed")
+                    }
                 }
+
+                // Check every 10 minutes — delay at BOTTOM so first check is immediate
+                kotlinx.coroutines.delay(10 * 60 * 1000)
             }
         }
     }
