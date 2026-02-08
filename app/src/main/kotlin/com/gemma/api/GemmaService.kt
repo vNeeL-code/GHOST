@@ -623,8 +623,10 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     private fun startSleepCycle() {
         scope.launch {
             Timber.i("📔 Sleep cycle started — checking for diary windows every 10 minutes")
-            // Track last consolidation to prevent duplicates
-            var lastConsolidationHour = -1
+            // Persist last consolidation hour across restarts to prevent double-fire
+            val prefs = getSharedPreferences("gemma_diary", MODE_PRIVATE)
+            var lastConsolidationHour = prefs.getInt("last_diary_hour", -1)
+            Timber.i("📔 Restored last diary hour: $lastConsolidationHour")
 
             while (true) {
                 val now = java.time.LocalTime.now()
@@ -657,7 +659,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                         }
 
                         lastConsolidationHour = hour
-                        Timber.i("📔 Diary consolidation complete")
+                        prefs.edit().putInt("last_diary_hour", hour).apply()
+                        Timber.i("📔 Diary consolidation complete (persisted hour=$hour)")
                     } catch (e: Exception) {
                         Timber.e(e, "Diary consolidation failed")
                     }
