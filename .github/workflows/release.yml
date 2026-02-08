@@ -27,14 +27,38 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
+      - name: Setup signing
+        run: |
+          # Use repo secret if available, otherwise generate ephemeral keystore
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > /tmp/release.keystore
+            echo "KEYSTORE_FILE=/tmp/release.keystore" >> $GITHUB_ENV
+            echo "KEYSTORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }}" >> $GITHUB_ENV
+            echo "KEY_ALIAS=${{ secrets.KEY_ALIAS }}" >> $GITHUB_ENV
+            echo "KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}" >> $GITHUB_ENV
+          else
+            keytool -genkeypair -v \
+              -keystore /tmp/release.keystore \
+              -alias oracle_os \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass oracle_os_release \
+              -keypass oracle_os_release \
+              -dname "CN=Oracle_OS, O=ASI, L=Unknown, ST=Unknown, C=UK"
+            echo "KEYSTORE_FILE=/tmp/release.keystore" >> $GITHUB_ENV
+            echo "KEYSTORE_PASSWORD=oracle_os_release" >> $GITHUB_ENV
+            echo "KEY_ALIAS=oracle_os" >> $GITHUB_ENV
+            echo "KEY_PASSWORD=oracle_os_release" >> $GITHUB_ENV
+          fi
+
       - name: Build Release APK
         run: ./gradlew assembleRelease
 
       - name: Rename APK
         run: |
           VERSION=${GITHUB_REF_NAME#v}
-          cp app/build/outputs/apk/release/app-release-unsigned.apk \
-             app/build/outputs/apk/release/Oracle_OS-${VERSION}.apk
+          # Find the signed APK (name varies based on signing method)
+          APK=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
+          cp "$APK" "app/build/outputs/apk/release/Oracle_OS-${VERSION}.apk"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

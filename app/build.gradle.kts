@@ -22,9 +22,30 @@ android {
         }
     }
 
+    signingConfigs {
+        create("release") {
+            // CI provides these via environment variables
+            // Local builds fall back to debug signing
+            val ksFile = System.getenv("KEYSTORE_FILE")
+            if (ksFile != null && File(ksFile).exists()) {
+                storeFile = File(ksFile)
+                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
+                keyAlias = System.getenv("KEY_ALIAS") ?: "oracle_os"
+                keyPassword = System.getenv("KEY_PASSWORD") ?: ""
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            val ksFile = System.getenv("KEYSTORE_FILE")
+            if (ksFile != null && File(ksFile).exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            } else {
+                // Fall back to debug signing so APK always installs
+                signingConfig = signingConfigs.getByName("debug")
+            }
         }
     }
 
