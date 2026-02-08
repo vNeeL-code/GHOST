@@ -825,8 +825,6 @@ $content
             // If still playing same track or no music, don't add redundant notification
         }
 
-        // INJECT VITALS (internal metabolic state mapped from sensors)
-        sb.append("\n🩺 My State: Energy:$energy% | Heat:$hunger% | Mood:$happiness%")
         sb.append(generateSubconsciousThought())
         sb.append("\n")
         return sb.toString()
