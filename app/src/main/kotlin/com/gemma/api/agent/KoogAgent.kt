@@ -545,12 +545,22 @@ class KoogAgent(
                 _conversationHistory.add(assistantMessage)
             }
 
-            // 6. Compress history if needed
-            if (_conversationHistory.size > 40) {
+            // 6. Compress history if needed (prune early to avoid context bloat → timeouts)
+            if (_conversationHistory.size > 20) {
                 compressHistory()
             }
 
-            // 7. Checkpoint
+            // 7. Auto-flush KV cache every 15 turns to prevent gradual slowdown
+            if (turnCount > 0 && turnCount % 15 == 0) {
+                Timber.i("🧹 Auto-flushing KV cache at turn $turnCount to prevent slowdown")
+                try {
+                    llmEngine.softReset(buildSystemPrompt())
+                } catch (e: Exception) {
+                    Timber.w(e, "Auto-flush failed (non-fatal)")
+                }
+            }
+
+            // 8. Checkpoint
             Timber.d("💾 Checkpointing state...")
             try {
                 withContext(Dispatchers.IO) { checkpoint() }
@@ -572,26 +582,25 @@ class KoogAgent(
                 return
             }
 
-            // 9. INJECT HEADERS & FOOTERS
-            val finalResponse = wrapResponse(cleanResponse)
-
-            // 10. Platform callbacks: UI, TTS, persistence
+            // 9. Platform callbacks: UI, TTS, persistence
             callbacks?.let { cb ->
                 if (!event.isDream) {
+                    // Normal response: wrap with headers
+                    val finalResponse = wrapResponse(cleanResponse)
                     cb.showResponse(finalResponse)
                     val ttsText = cleanForTTS(finalResponse)
                     if (ttsText.isNotEmpty()) cb.speak(ttsText)
                     cb.storeConversationTurn(event.message, finalResponse, event.sessionId)
                 } else {
-                    // Diary: muse out loud (notification + TTS) as conversational invitation
+                    // Diary: use clean response (no Δ header), just diary branding
                     try {
-                        val cleanContent = cleanForTTS(finalResponse)
-                        val diaryContent = "✦ Gemma 📔\n$cleanContent"
+                        val ttsText = cleanForTTS(cleanResponse)
+                        val diaryContent = "✦ Gemma 📔\n$ttsText"
                         val thermal = cb.getCurrentThermalState()
                         cb.writeDiaryEntry("DREAM", diaryContent, thermal)
                         cb.showResponse(diaryContent)
-                        if (cleanContent.isNotEmpty()) cb.speak(cleanContent)
-                        Timber.i("Dream logged + spoken: ${cleanContent.take(50)}")
+                        if (ttsText.isNotEmpty()) cb.speak(ttsText)
+                        Timber.i("Dream logged + spoken: ${ttsText.take(50)}")
                     } catch (e: Exception) {
                         Timber.e(e, "Failed to log dream")
                     }
@@ -600,7 +609,7 @@ class KoogAgent(
 
             Timber.i("✅ KoogAgent: Turn $turnCount complete!")
 
-            event.responseChannel.complete(finalResponse)
+            event.responseChannel.complete(cleanResponse)
 
         } catch (e: Exception) {
             Timber.e(e, "handleUserMessage failed")
@@ -759,8 +768,8 @@ $content
             // --- SYNC METABOLISM WITH REALITY ---
 
             // 1. Energy = Battery Level
-            // Format: "🔋 85%" or "🪫 5%"
-            val batteryMatch = Regex("[🔋🪫]\\s*(\\d+)%").find(rawContext)
+            // Format: "🔋 Battery: 85%" or "🪫 Battery: 5%" or minimal "🔋85%"
+            val batteryMatch = Regex("[🔋🪫].*?(\\d+)%").find(rawContext)
             if (batteryMatch != null) {
                 val level = batteryMatch.groupValues[1].toIntOrNull() ?: 50
                 energy = level // DIRECT SYNC
@@ -985,7 +994,8 @@ Available tools:
 $tools
 
 ## Search Pattern
-1. [[SEARCH:query]] = silent fetch, I read results
+When asked about facts, people, events, comparisons, "who would win", definitions, or anything I'm not 100% sure about → USE [[SEARCH:query]] FIRST, then answer with those results. My training data may be outdated. Search is free and fast.
+1. [[SEARCH:query]] = silent fetch, I read results and synthesize
 2. [[GOOGLE:query]] = open browser so user sees it
 
 ## Alarms & Timers

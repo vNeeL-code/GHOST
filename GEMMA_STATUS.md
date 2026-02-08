@@ -1,5 +1,5 @@
 # Gemma Status Tracker
-*Last updated: 2026-02-07 (v2.0.0)*
+*Last updated: 2026-02-08 (v2.0.1)*
 
 ---
 
@@ -152,7 +152,7 @@ Parser regex: `(?<!\)\[{1,2}([a-zA-Z_]+)(?::([^\]]+))?\]{1,2}` (handles single o
 
 ---
 
-## Confirmed Working (2026-02-07)
+## Confirmed Working (2026-02-08)
 - [x] Text query -> response in notification + TTS
 - [x] Image sharing from Gallery -> model sees and describes image
 - [x] Shake to summon overlay (survives image sharing!)
@@ -160,13 +160,15 @@ Parser regex: `(?<!\)\[{1,2}([a-zA-Z_]+)(?::([^\]]+))?\]{1,2}` (handles single o
 - [x] Sensor telemetry injected into context
 - [x] Music detection (now playing in context)
 - [x] Tool execution (flashlight, search, app launch confirmed)
+- [x] Diary consolidation fires at midnight (confirmed 00:05 entry)
+- [x] Diary speaks via TTS + shows notification
 
 ## Needs Testing
-- [ ] Diary at noon — fixed timing (delay moved to bottom), verify on next cycle
-- [ ] Calendar sync — added runtime permission request, verify popup appears
+- [ ] Calendar sync — runtime permission request added, verify popup + calendar entry
 - [ ] Audio recording via sparkle button (WAV -> model)
 - [ ] Media control (play/pause/next)
 - [ ] Click/scroll/type accessibility tools
+- [ ] Auto KV cache flush every 15 turns (new)
 
 ---
 
@@ -180,16 +182,24 @@ Parser regex: `(?<!\)\[{1,2}([a-zA-Z_]+)(?::([^\]]+))?\]{1,2}` (handles single o
 - [x] Channel-based Actor pattern (no recursive stack overflow)
 - [x] KoogBridge removed
 - [x] CognitiveToolDispatcher removed
-- [x] History sliding window (last 10 messages)
+- [x] History sliding window (last 10 messages, prune at 20)
 - [x] Dead code removed (~500 lines)
 - [x] USE_KOOG_AGENT flag removed
 - [x] SensorFusionManager split fast/slow polling
 - [x] Sensor listeners on background HandlerThread
 
+## Fixes (v2.0.1)
+- [x] Diary double header — diary path now uses cleanResponse (no Δ wrapper), only "✦ Gemma 📔" header
+- [x] Energy != Battery — regex `[🔋🪫]\s*(\d+)%` didn't match `🔋 Battery: 65%`, fixed to `[🔋🪫].*?(\d+)%`
+- [x] Model ignoring SEARCH tool — added explicit instruction: "When asked about facts, use [[SEARCH:query]] FIRST"
+- [x] Timeout in long conversations — auto-flush KV cache every 15 turns, history prunes at 20 (was 40)
+- [x] Diary timing — delay moved to bottom of loop (first check immediate), interval 10min (was 15)
+- [x] Calendar permission — runtime request added to onboarding
+
 ## TODO
 | Item | Priority | Notes |
 |------|----------|-------|
-| KV cache flush every turn | P1 | Investigate if LiteRT-LM conversation API handles this |
+| ~~KV cache flush~~ | ~~P1~~ | DONE: Auto-flush every 15 turns via `llmEngine.softReset()` |
 | Token tracking | P2 | Currently always reports 0 |
 | Empty response handling | P2 | Should retry or show error, not silence |
 | Session restore after process death | P2 | Checkpoint exists but restore is fragile |
