@@ -204,12 +204,12 @@ class AudioRecorder(private val context: Context) {
     }
 
     /**
-     * Quick listen - record 3 seconds (WAV)
+     * Quick listen - record 5 seconds (WAV)
      */
-    suspend fun quickListen(): ByteArray? = record(3)
+    suspend fun quickListen(): ByteArray? = record(5)
 
     /**
-     * Extended listen - record up to 10 seconds (WAV)
+     * Extended listen - record up to 30 seconds (WAV, Gemma 3n cap, ~132 tokens)
      */
-    suspend fun extendedListen(): ByteArray? = record(10)
+    suspend fun extendedListen(): ByteArray? = record(30)
 }

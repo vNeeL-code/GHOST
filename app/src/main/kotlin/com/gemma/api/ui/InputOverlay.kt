@@ -69,7 +69,7 @@ class InputOverlay(
             setPadding(dpToPx(8), dpToPx(4), dpToPx(12), dpToPx(4))
         }
 
-        // ✦ Sparkle button (tap to record audio)
+        // ✧ Sparkle button — HOLD to record audio, release to send
         sparkleButton = TextView(context).apply {
             text = "\u2727"
             textSize = 28f
@@ -77,13 +77,18 @@ class InputOverlay(
             gravity = Gravity.CENTER
             layoutParams = LinearLayout.LayoutParams(dpToPx(44), dpToPx(44))
             background = createCircleBackground(Color.TRANSPARENT)
-            setOnClickListener { toggleRecording() }
-            setOnLongClickListener {
-                // Long press = extended recording (10s)
-                if (!isRecording) {
-                    startRecording(extended = true)
+            setOnTouchListener { _, event ->
+                when (event.action) {
+                    android.view.MotionEvent.ACTION_DOWN -> {
+                        if (!isRecording) startRecording()
+                        true
+                    }
+                    android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                        if (isRecording) stopRecording()
+                        true
+                    }
+                    else -> false
                 }
-                true
             }
         }
 
@@ -142,58 +147,33 @@ class InputOverlay(
         addView(bar)
     }
 
-    private fun toggleRecording() {
-        Timber.i("InputOverlay: Audio button clicked, isRecording=$isRecording")
-        if (isRecording) {
-            stopRecording()
-        } else {
-            startRecording(extended = false)
-        }
-    }
-
-    private fun startRecording(extended: Boolean) {
-        Timber.i("InputOverlay: startRecording called, extended=$extended")
+    private fun startRecording() {
+        Timber.i("InputOverlay: Hold-to-record started")
         if (!audioRecorder.hasPermission()) {
             Timber.w("InputOverlay: No audio permission")
             Toast.makeText(context, "Microphone permission required", Toast.LENGTH_SHORT).show()
             return
         }
-        Timber.i("InputOverlay: Permission granted, starting countdown")
 
-        val duration = if (extended) 10 else 5  // 5s normal, 10s long press
+        // Immediate start — no countdown. 30s max (Gemma 3n audio cap, only ~132 tokens)
+        hapticPulse()
+        isRecording = true
+        updateRecordingUI(true)
 
         recordingJob = CoroutineScope(Dispatchers.Main).launch {
-            // PHASE 1: Countdown (let user prepare)
-            inputField.hint = "3..."
-            sparkleButton.setTextColor(Color.YELLOW)
-            delay(300)
-            inputField.hint = "2..."
-            delay(300)
-            inputField.hint = "1..."
-            delay(300)
-
-            // PHASE 2: Start recording with haptic feedback
-            hapticPulse()
-            isRecording = true
-            updateRecordingUI(true)
-
-            Timber.i("InputOverlay: Recording ${duration}s audio NOW...")
-            // Fix: Use rawPcm=false to get WAV format (LiteRT-LM expects WAV with header)
+            Timber.i("InputOverlay: Recording up to 30s audio...")
             val audio: ByteArray? = withContext(Dispatchers.IO) {
-                 audioRecorder.record(duration, false)
+                audioRecorder.record(30, false)
             }
 
-            // PHASE 3: Done - another haptic
+            // Recording finished (either released or hit 30s cap)
             hapticPulse()
             isRecording = false
             updateRecordingUI(false)
 
             if (audio != null && audio.isNotEmpty()) {
-                // Debug: Check WAV header
                 val header = audio.take(4).map { it.toInt().toChar() }.joinToString("")
-                Timber.i("InputOverlay: Got ${audio.size} bytes, header='$header' (should be RIFF)")
-                val wavCheck = audio.size >= 44 && header == "RIFF"
-                Timber.i("InputOverlay: WAV format check: $wavCheck")
+                Timber.i("InputOverlay: Got ${audio.size} bytes (${audio.size / 32000}s), header='$header'")
                 onAudioQuery(audio)
             } else {
                 Timber.w("InputOverlay: Recording failed or empty")
@@ -217,10 +197,9 @@ class InputOverlay(
     }
 
     private fun stopRecording() {
-        // audioRecorder runs via coroutine which we added cancellation for
-        recordingJob?.cancel()
-        isRecording = false
-        updateRecordingUI(false)
+        // Stop the AudioRecorder mid-recording (triggers early return with what was captured)
+        audioRecorder.stopRecording()
+        // The coroutine in startRecording will pick up the partial audio and send it
     }
 
     private fun updateRecordingUI(recording: Boolean) {

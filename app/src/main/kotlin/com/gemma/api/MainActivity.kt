@@ -74,7 +74,17 @@ class MainActivity : Activity() {
     }
 
     private fun checkSystemState() {
-        // 1. Camera
+        // 1. Notifications (Android 13+ requires POST_NOTIFICATIONS)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            showState(
+                "❌ Voice Offline\n\nI need notification permission to talk to you.",
+                "Grant Notifications"
+            ) { requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 100) }
+            return
+        }
+
+        // 2. Camera
         if (checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             showState(
                 "❌ Vision Offline\n\nI need camera access to see.",
@@ -83,7 +93,7 @@ class MainActivity : Activity() {
             return
         }
 
-        // 2. Audio
+        // 3. Audio
         if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
              showState(
                 "❌ Hearing Offline\n\nI need microphone access to hear.",
@@ -91,21 +101,22 @@ class MainActivity : Activity() {
             ) { requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 102) }
             return
         }
-        
-        // 3. Calendar (for diary sync)
+
+        // 4. Calendar (for diary sync — non-blocking)
         if (checkSelfPermission(android.Manifest.permission.WRITE_CALENDAR) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(
                 android.Manifest.permission.READ_CALENDAR,
                 android.Manifest.permission.WRITE_CALENDAR
             ), 103)
-            // Non-blocking — diary works without calendar, just won't sync
         }
 
-        // 4. Accessibility - REMOVED BROKEN CHECK
-        // Service will fail gracefully if accessibility isn't enabled
-        // No more annoying toggle dance
+        // 5. Accessibility (non-blocking — guide user but don't require)
+        if (!isAccessibilityEnabled()) {
+            Timber.i("Accessibility not enabled — click/scroll/type tools will be unavailable")
+            // Don't block, just log. Tools fail gracefully.
+        }
 
-        // 5. Overlay
+        // 6. Overlay
         if (!Settings.canDrawOverlays(this)) {
             showState(
                 "❌ Presence Inactive\n\nI need 'Draw over other apps' permission.",
@@ -120,14 +131,12 @@ class MainActivity : Activity() {
             return
         }
         
-        // 5. ADB / Sovereign (OPTIONAL - NO LONGER BLOCKING)
+        // 7. ADB / Sovereign (OPTIONAL - NO LONGER BLOCKING)
         if (!hasSovereignPermissions()) {
             Timber.w("Sovereign permissions missing. Proceeding in Lite Mode.")
-            // We just fall through to completeRitual()
-            // No UI blockage.
         }
 
-        // 6. Complete
+        // 8. Complete
         showState("✅ SYSTEM GREEN\n\nSovereignty Achieved.", "LAUNCHING...") { }
         completeRitual()
     }

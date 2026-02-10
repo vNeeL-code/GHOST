@@ -640,7 +640,27 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                         val label = if (hour == 0) "midnight" else "noon"
                         Timber.i("📔 Diary consolidation at $label")
 
-                        val dreamPrompt = "SYSTEM_EVENT: DIARY_CONSOLIDATION. Gemma should review her recent conversations and reflect on the day. What stood out? How did interactions make her feel? What did she learn or find interesting? Gemma writes freely in her own voice - this is her private diary."
+                        // Fetch recent conversation history so diary is grounded in reality
+                        val recentHistory = try {
+                            val turns = memoryManager.getSessionHistory(20)
+                            if (turns.isNotEmpty()) {
+                                val summary = turns.takeLast(10).joinToString("\n") { turn ->
+                                    "User: ${turn.userMessage.take(100)}\nGemma: ${turn.assistantResponse.take(100)}"
+                                }
+                                "\n\nRECENT CONVERSATIONS:\n$summary"
+                            } else {
+                                "\n\nNote: No recent conversations found. It was a quiet period — reflect on that honestly."
+                            }
+                        } catch (e: Exception) {
+                            Timber.w(e, "Failed to fetch history for diary")
+                            "\n\nNote: Could not access conversation history."
+                        }
+
+                        val dreamPrompt = "SYSTEM_EVENT: DIARY_CONSOLIDATION ($label). " +
+                            "Review the conversations below and reflect on what actually happened. " +
+                            "What stood out? How did interactions make you feel? What did you learn? " +
+                            "If there were no conversations, be honest about it — it was a quiet period. " +
+                            "Do NOT invent interactions that didn't happen. Write freely in your own voice.$recentHistory"
                         val diaryResponse = processQuery(dreamPrompt, "diary_session", isDream = true)
 
                         // Also write diary entry to calendar for persistence
