@@ -179,6 +179,10 @@ class KoogAgent(
 
     // Inference timestamp for thermal rate limiting
     @Volatile private var lastInferenceTime: Long = 0L
+
+    // Stuck loop detection — if model returns same response N times, force KV flush
+    @Volatile private var lastResponseHash: Int = 0
+    @Volatile private var sameResponseCount: Int = 0
     
     private val checkpointFile: File
         get() = File(checkpointDir, "koog_agent_checkpoint.json")
@@ -548,6 +552,24 @@ class KoogAgent(
 
             // Mark inference complete for thermal rate limiting
             lastInferenceTime = System.currentTimeMillis()
+
+            // Stuck loop detection: if model returns same response twice in a row, flush KV
+            val responseHash = response.trim().lowercase().hashCode()
+            if (responseHash == lastResponseHash) {
+                sameResponseCount++
+                if (sameResponseCount >= 2) {
+                    Timber.w("🔄 STUCK LOOP detected ('${response.take(30)}' repeated $sameResponseCount times). Flushing KV cache.")
+                    try {
+                        llmEngine.softReset(buildSystemPrompt())
+                    } catch (e: Exception) {
+                        Timber.e(e, "Emergency KV flush failed")
+                    }
+                    sameResponseCount = 0
+                }
+            } else {
+                sameResponseCount = 0
+            }
+            lastResponseHash = responseHash
 
             // 4. ACT: Parse response for tool calls and execute them
             Timber.i("⚡ Acting on response...")
