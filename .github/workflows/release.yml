@@ -13,19 +13,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # actions/checkout@v4.2.2 (Pinned for security)
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@v4
 
-      # actions/setup-java@v5.2.0 (Latest 2026 stable)
       - name: Set up JDK 17
-        uses: actions/setup-java@be666c2d398991f855e37f8f121d5c219485b0d0
+        uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      # gradle/actions/setup-gradle@v4.3.0 (Official Gradle build tool)
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@417ae30571c208c1d5683939634f669d45a052d0
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Make gradlew executable
         run: chmod +x ./gradlew
@@ -62,9 +59,8 @@ jobs:
           APK=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
           cp "$APK" "app/build/outputs/apk/release/Oracle_OS-${VERSION}.apk"
 
-      # softprops/action-gh-release@v2.5.0 (The delivery truck driver)
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@a06a81af2036c6416629e46a5827725925cf1564
+        uses: softprops/action-gh-release@v2
         with:
           files: app/build/outputs/apk/release/Oracle_OS-*.apk
           generate_release_notes: true
