@@ -355,7 +355,7 @@ class MCPServer(
             return ToolResult(false, "", "No microphone permission")
         }
 
-        val audioData = audioRecorder.record(duration, rawPcm = true)  // Raw PCM for LiteRT-LM
+        val audioData = audioRecorder.record(duration, rawPcm = false)
             ?: return ToolResult(false, "", "Audio recording failed")
 
         // Deliver audio bytes via callback so GemmaService can queue them for next inference

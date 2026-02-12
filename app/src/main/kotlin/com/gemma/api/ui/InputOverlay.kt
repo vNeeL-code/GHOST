@@ -163,7 +163,7 @@ class InputOverlay(
         recordingJob = CoroutineScope(Dispatchers.Main).launch {
             Timber.i("InputOverlay: Recording up to 30s audio...")
             val audio: ByteArray? = withContext(Dispatchers.IO) {
-                audioRecorder.record(30, true)  // Raw PCM for LiteRT-LM (no WAV header)
+                audioRecorder.record(30, false)
             }
 
             // Recording finished (either released or hit 30s cap)
