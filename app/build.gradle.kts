@@ -4,6 +4,7 @@ plugins {
     id("com.google.devtools.ksp")
     id("kotlin-parcelize")
     id("org.jetbrains.kotlin.plugin.serialization") version "1.9.22"
+    id("com.chaquo.python")
 }
 
 android {
@@ -60,6 +61,17 @@ android {
 
     buildFeatures {
         viewBinding = true
+    }
+
+    // Chaquopy: Python runtime for RLM (Recursive Language Models)
+    chaquopy {
+        defaultConfig {
+            version = "3.12"
+            pip {
+                // RLM minimal has no heavy deps — just needs these for the REPL
+                install("rich")
+            }
+        }
     }
 
     packaging {

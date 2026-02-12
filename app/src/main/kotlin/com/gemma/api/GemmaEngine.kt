@@ -320,6 +320,73 @@ class GemmaEngine(private val context: Context) {
         return response
     }
 
+    /**
+     * One-shot inference with isolated conversation.
+     * Creates a temporary conversation, runs inference, cleans up.
+     * Used by RLM for recursive sub-calls that shouldn't pollute the main conversation.
+     */
+    suspend fun generateOneShot(prompt: String): String {
+        val currentEngine = synchronized(sessionLock) { engine }
+            ?: return "Error: Engine not initialized"
+
+        return try {
+            withTimeout(60_000L) {
+                suspendCancellableCoroutine { continuation ->
+                    try {
+                        val config = ConversationConfig(
+                            samplerConfig = SamplerConfig(
+                                topK = 40,
+                                topP = 0.95,
+                                temperature = 0.7
+                            ),
+                            systemMessage = null
+                        )
+                        val tempConv = currentEngine.createConversation(config)
+
+                        val responseBuilder = StringBuilder()
+
+                        tempConv.sendMessageAsync(
+                            Message.of(listOf(Content.Text(prompt))),
+                            object : MessageCallback {
+                                override fun onMessage(message: Message) {
+                                    responseBuilder.append(message.toString())
+                                }
+
+                                override fun onDone() {
+                                    val response = responseBuilder.toString()
+                                    try { tempConv.close() } catch (_: Exception) {}
+                                    if (continuation.isActive) {
+                                        continuation.resume(
+                                            if (response.isBlank()) "(empty response)"
+                                            else truncateRepetition(response)
+                                        )
+                                    }
+                                }
+
+                                override fun onError(throwable: Throwable) {
+                                    try { tempConv.close() } catch (_: Exception) {}
+                                    if (continuation.isActive) {
+                                        continuation.resumeWithException(throwable)
+                                    }
+                                }
+                            }
+                        )
+                    } catch (e: Exception) {
+                        if (continuation.isActive) {
+                            continuation.resumeWithException(e)
+                        }
+                    }
+                }
+            }
+        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+            Timber.w("One-shot inference timeout")
+            "(timeout)"
+        } catch (e: Exception) {
+            Timber.e(e, "One-shot inference failed")
+            "Error: ${e.message}"
+        }
+    }
+
     fun cleanup() {
         runCatching {
             synchronized(sessionLock) {

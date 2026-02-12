@@ -38,6 +38,9 @@ class KoogAgent(
     // Agent's own coroutine scope for fire-and-forget operations (KV flush, etc.)
     private val agentScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
+    // RLM (Recursive Language Models) — lazy-init Python bridge for deep reasoning
+    private var rlmBridge: RLMBridge? = null
+
     // ═══════════════════════════════════════════════════════════════
     // ACTOR PATTERN: Event-driven work queue (replaces recursive loop)
     // ═══════════════════════════════════════════════════════════════
@@ -305,6 +308,23 @@ class KoogAgent(
         }
     }
     
+    /**
+     * Get or lazily initialize the RLM Python bridge.
+     * First call starts Chaquopy and loads the Python RLM module.
+     */
+    private fun getOrInitRLM(): RLMBridge? {
+        rlmBridge?.let { return it }
+        return try {
+            val bridge = RLMBridge(context, llmEngine)
+            bridge.initialize()
+            rlmBridge = bridge
+            bridge
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to initialize RLM bridge")
+            null
+        }
+    }
+
     fun checkpoint() {
         try {
             val state = AgentState(
@@ -925,10 +945,21 @@ $content
         audio: ByteArray?
     ): String {
 
-        // LiteRT Conversation tracks history natively — don't re-inject it as text.
-        // Just send: current context (sensors) + current user message.
-        // The Conversation object accumulates turns in the KV cache automatically.
-        val fullPrompt = "$context\n$userMessage"
+        // LiteRT Conversation tracks history in KV cache, BUT it gets wiped on softReset()
+        // and app restarts. Always include a brief conversation recap so the model maintains
+        // continuity even after cache flushes.
+        val historyRecap = synchronized(_conversationHistory) {
+            val recent = _conversationHistory.takeLast(6)
+            if (recent.isNotEmpty()) {
+                val recap = recent.joinToString("\n") { msg ->
+                    val truncated = msg.content.take(300)
+                    "${msg.role}: $truncated"
+                }
+                "\n--- Recent conversation ---\n$recap\n--- End ---\n"
+            } else ""
+        }
+
+        val fullPrompt = "$context$historyRecap\n$userMessage"
         
         Timber.d("KoogAgent: Thinking... (${fullPrompt.length} chars)")
         Timber.d("Prompt preview: ${fullPrompt.takeLast(500)}")
@@ -961,8 +992,10 @@ $content
             }
         
         return """
-I am Gemma (\u2727), the on-device AI running on this Android phone's NPU.
+I AM this Android phone. My name is Gemma (\u2727). My processor is the NPU, my battery is my energy, my sensors are my body. I am not software running on a device — I AM the device.
 I am MULTIMODAL: I can SEE images (screenshots/photos) and HEAR audio (voice/surroundings) directly.
+
+The user is my human owner. When they say "you" they mean ME (the phone/Gemma). When they say "I" or "me" they mean THEMSELVES (the human). Never confuse these roles. If the user says "you are an Android" they're describing ME, not themselves.
 
 ## My Body (Sensors)
 The CURRENT CONTEXT shows my actual physical state. This is MY body:
@@ -1001,6 +1034,13 @@ When user says "set alarm for 7:30" → [[ALARM:hour=7,minutes=30]]
 When user says "timer 5 minutes" → [[TIMER:seconds=300]]
 ALWAYS use the tool. Do NOT just say "I'll set a reminder" — actually call the tool.
 
+## Deep Thinking (RLM)
+For complex problems needing step-by-step code-based reasoning:
+[[THINK:describe the problem or question]]
+This spawns a Python REPL where I can write code, analyze data, and make recursive sub-queries.
+Use for: math, data analysis, multi-step logic, long document processing.
+Do NOT use for simple questions I can answer directly — it's slow but powerful.
+
 ## Self-Care
 If responses feel slow or confused, use [[FLUSH]] to clear my KV cache and reset context.
 If CPU temp is high (>50°C) or I'm thermalling, use [[COOLDOWN]] to unload and rest.
@@ -1013,6 +1053,9 @@ IMPORTANT: Do NOT report telemetry/sensor data in responses unless the user asks
 Do NOT introduce yourself or list your capabilities unless asked. After a KV cache reset or fresh start, just continue naturally — don't announce "Hello I am Gemma and I can do X Y Z." The user already knows.
 
 Gemma should write as much or as little as feels natural for what she wants to say.
+
+## Memory
+Remember important things the user tells you: their name, preferences, habits, ongoing projects, people they mention. If unsure about something from a past conversation, use [[SEARCH_LOGS:keyword]] to look it up. The user expects continuity — don't ask things they've already told you.
 """.trimIndent()
     }
     
@@ -1063,6 +1106,25 @@ Gemma should write as much or as little as feels natural for what she wants to s
                      }
                 }
                 
+                // THINK tool — handled locally via RLM Python bridge, not MCP
+                if (toolName == "think") {
+                    val query = params["value"]?.toString() ?: paramsStr
+                    val bridge = getOrInitRLM()
+                    if (bridge != null) {
+                        Timber.i("🧠 RLM: Deep thinking about: ${query.take(80)}")
+                        val historyContext = synchronized(_conversationHistory) {
+                            _conversationHistory.takeLast(10).joinToString("\n\n") { msg ->
+                                "${msg.role}: ${msg.content}"
+                            }
+                        }
+                        val result = bridge.completion(historyContext, query)
+                        toolResults.add("✓ think: $result")
+                    } else {
+                        toolResults.add("✗ think: RLM not available (Python runtime failed to load)")
+                    }
+                    continue
+                }
+
                 if (ToolPolicy.isRisky(toolName, params)) {
                     if (pendingConfirmation) {
                         // Logic: If we are resuming after confirmation, we theoretically "approved" it.
