@@ -15,8 +15,8 @@ android {
         applicationId = "com.gemma.api"
         minSdk = 31
         targetSdk = 35
-        versionCode = 4
-        versionName = "2.0.2"
+        versionCode = 5
+        versionName = "2.1.0"
 
         ndk {
             abiFilters.add("arm64-v8a")
