@@ -553,18 +553,36 @@ class KoogAgent(
             // Mark inference complete for thermal rate limiting
             lastInferenceTime = System.currentTimeMillis()
 
-            // Stuck loop detection: if model returns same response twice in a row, flush KV
+            // Stuck loop detection: same response OR suspiciously fast response = KV corruption
             val responseHash = response.trim().lowercase().hashCode()
-            if (responseHash == lastResponseHash) {
+            val inferenceMs = System.currentTimeMillis() - lastInferenceTime.coerceAtLeast(1)
+            val isSuspiciouslyFast = inferenceMs < 4000 && response.length > 20  // Real inference takes 5-20s
+
+            if (responseHash == lastResponseHash || isSuspiciouslyFast) {
                 sameResponseCount++
+                val reason = if (isSuspiciouslyFast) "instant response (${inferenceMs}ms)" else "same response"
+                Timber.w("🔄 Loop signal: $reason (count=$sameResponseCount, '${response.take(40)}')")
+
                 if (sameResponseCount >= 2) {
-                    Timber.w("🔄 STUCK LOOP detected ('${response.take(30)}' repeated $sameResponseCount times). Flushing KV cache.")
+                    Timber.w("🔄 STUCK LOOP confirmed. Nuking KV cache + poisoned history.")
                     try {
+                        // 1. Purge the last N history entries that are part of the loop
+                        synchronized(_conversationHistory) {
+                            val purgeCount = (sameResponseCount * 2).coerceAtMost(_conversationHistory.size)
+                            repeat(purgeCount) {
+                                if (_conversationHistory.isNotEmpty()) {
+                                    _conversationHistory.removeAt(_conversationHistory.size - 1)
+                                }
+                            }
+                            Timber.i("🧹 Purged $purgeCount poisoned history entries")
+                        }
+                        // 2. Flush KV cache with fresh system prompt
                         llmEngine.softReset(buildSystemPrompt())
                     } catch (e: Exception) {
-                        Timber.e(e, "Emergency KV flush failed")
+                        Timber.e(e, "Emergency loop recovery failed")
                     }
                     sameResponseCount = 0
+                    lastResponseHash = 0
                 }
             } else {
                 sameResponseCount = 0
