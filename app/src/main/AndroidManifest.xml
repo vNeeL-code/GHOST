@@ -52,6 +52,7 @@
     <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
 
     <application
+        android:name=".GemmaApp"
         android:label="Oracle_OS"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -123,9 +124,9 @@
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
-            <meta-data
-                android:name="android.service.notification.default_filter_types"
-                android:value="conversations|alerting" />
+            <!-- No default_filter_types: receive ALL notification types including
+                 ongoing/silent media player notifications (music, video, podcasts).
+                 Filtering to conversations|alerting was blocking all media notifications. -->
         </service>
 
         <!-- Launcher Activity (starts service and exits) -->
