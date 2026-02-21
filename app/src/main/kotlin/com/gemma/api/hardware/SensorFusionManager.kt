@@ -657,8 +657,11 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
             val controllers: List<MediaController> = try {
                 msm.getActiveSessions(listenerComponent)
             } catch (e: SecurityException) {
-                Timber.w("MediaSession access denied - NotificationListener not enabled?")
-                return NowPlayingInfo("Unknown", "No Permission", null, "System", false)
+                // Notification Listener permission revoked (happens after clean reinstall).
+                // Fall through to null — buildContextString will use isMusicActive instead.
+                // User must re-enable: Settings → Apps → Special app access → Notification access
+                Timber.w("getActiveSessions denied — Notification Listener not enabled. Falling back to isMusicActive=${audioManager.isMusicActive}")
+                return null
             }
 
             // DIAGNOSTIC: log what Android actually gave us
