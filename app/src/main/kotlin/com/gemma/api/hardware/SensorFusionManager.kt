@@ -726,6 +726,25 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
                 } catch (e: Exception) { /* stale token, ignore */ }
             }
 
+            // Last resort: use notification title/text captured from transport-action
+            // notifications — works even when the app omits EXTRA_MEDIA_SESSION entirely.
+            // isPlaying comes from isMusicActive (audio routing), not MediaSession state.
+            val notifTitle = GemmaNotificationListener.lastMediaNotifTitle
+            if (notifTitle != null) {
+                val pkg = GemmaNotificationListener.lastMediaPkg ?: ""
+                val appName = try {
+                    val pm = context.packageManager
+                    pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
+                } catch (e: Exception) { pkg.split('.').lastOrNull() ?: "Media" }
+                return NowPlayingInfo(
+                    title    = notifTitle,
+                    artist   = GemmaNotificationListener.lastMediaNotifText,
+                    album    = null,
+                    app      = appName,
+                    isPlaying = audioManager.isMusicActive
+                )
+            }
+
             null
         } catch (e: Exception) {
             Timber.w(e, "getNowPlaying failed")

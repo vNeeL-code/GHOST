@@ -86,26 +86,51 @@ class GemmaNotificationListener : NotificationListenerService() {
         val pkg = sbn.packageName
         if (pkg == packageName || pkg in IGNORED_PACKAGES) return
 
-        val extras = sbn.notification.extras
+        val notif   = sbn.notification
+        val extras  = notif.extras
+
         @Suppress("DEPRECATION")
         val token = extras.getParcelable<MediaSession.Token>(Notification.EXTRA_MEDIA_SESSION)
-        if (token != null) {
-            lastMediaToken = token
-            lastMediaPkg = pkg
-            // Also stash the notification title/text as a fallback for when
-            // MediaController.metadata is null (some apps set session before metadata).
-            val notifTitle = extras.getCharSequence("android.title")?.toString()
-            val notifText  = extras.getCharSequence("android.text")?.toString()
-            if (notifTitle?.isNotBlank() == true) {
-                lastMediaNotifTitle = notifTitle
-                lastMediaNotifText  = notifText
-            }
-            Timber.d("Captured media token from $pkg — notifTitle=$notifTitle")
+
+        // Detect media notifications even without a session token:
+        // many players post Notification.CATEGORY_TRANSPORT or include
+        // play/pause/next actions without embedding EXTRA_MEDIA_SESSION.
+        val hasTransportActions = notif.actions?.any { action ->
+            val t = action.title?.toString() ?: ""
+            t.equals("Play",     ignoreCase = true) ||
+            t.equals("Pause",    ignoreCase = true) ||
+            t.equals("Next",     ignoreCase = true) ||
+            t.equals("Previous", ignoreCase = true) ||
+            t.contains("play",   ignoreCase = true) ||
+            t.contains("pause",  ignoreCase = true)
+        } == true
+        val isMediaNotif = token != null
+                || notif.category == Notification.CATEGORY_TRANSPORT
+                || hasTransportActions
+
+        if (!isMediaNotif) return
+
+        if (token != null) lastMediaToken = token
+        lastMediaPkg = pkg
+
+        val notifTitle = extras.getCharSequence("android.title")?.toString()
+        val notifText  = extras.getCharSequence("android.text")?.toString()
+        if (notifTitle?.isNotBlank() == true) {
+            lastMediaNotifTitle = notifTitle
+            lastMediaNotifText  = notifText
+            Timber.d("Media notif from $pkg — title=$notifTitle token=${token != null}")
         }
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
-        // Could track dismissals if useful
+        sbn ?: return
+        // Clear stale media info when the music app's notification is dismissed
+        if (sbn.packageName == lastMediaPkg) {
+            lastMediaToken       = null
+            lastMediaPkg         = null
+            lastMediaNotifTitle  = null
+            lastMediaNotifText   = null
+        }
     }
 
     data class NotificationEntry(
