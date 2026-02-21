@@ -354,7 +354,9 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
             // TEMPERATURE - This is HER body temperature, not ambient!
             // Returns tenths of a degree Celsius (e.g., 295 = 29.5°C)
             val tempRaw = batteryIntent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 250) ?: 250
-            val temperature = tempRaw / 10f
+            val tempCandidate = tempRaw / 10f
+            // Sanity clamp: valid battery temps are 15–60°C; outside = bad read
+            val temperature = if (tempCandidate in 15f..60f) tempCandidate else 25f
 
             // Voltage in millivolts, convert to volts
             val voltageRaw = batteryIntent?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 3700) ?: 3700
@@ -659,6 +661,17 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
                 return NowPlayingInfo("Unknown", "No Permission", null, "System", false)
             }
 
+            // DIAGNOSTIC: log what Android actually gave us
+            Timber.d("getNowPlaying: getActiveSessions returned ${controllers.size} controllers (isMusicActive=${audioManager.isMusicActive})")
+            controllers.forEachIndexed { idx, ctrl ->
+                val ps = ctrl.playbackState
+                val meta = ctrl.metadata
+                Timber.d("  controller[$idx] pkg=${ctrl.packageName} state=${ps?.state} pos=${ps?.position} title=${meta?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE)} hasMetadata=${meta != null}")
+            }
+
+            // Two-pass: prefer actively playing session, fall back to paused
+            var fallback: NowPlayingInfo? = null
+
             for (controller in controllers) {
                 val metadata = controller.metadata ?: continue
                 val playbackState = controller.playbackState
@@ -673,7 +686,23 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
 
                 val album = metadata.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM)
 
-                val isPlaying = playbackState?.state == PlaybackState.STATE_PLAYING
+                // playbackState is null on some apps — fall back to audioManager
+                // STATE_BUFFERING/CONNECTING = actively playing (track loading between songs)
+                // STATE_PAUSED: trust our ears (isMusicActive) over the session state —
+                //   Spotify/streaming apps report PAUSED during song transitions, seek scrubbing,
+                //   crossfade, and briefly after unlock. If audio is routing to speaker, it's playing.
+                // STATE_STOPPED / ERROR / NONE: these are definitive — don't override.
+                val isPlaying = when (playbackState?.state) {
+                    PlaybackState.STATE_PLAYING,
+                    PlaybackState.STATE_BUFFERING,
+                    PlaybackState.STATE_CONNECTING -> true
+                    PlaybackState.STATE_PAUSED -> audioManager.isMusicActive // ears > state
+                    PlaybackState.STATE_STOPPED,
+                    PlaybackState.STATE_ERROR,
+                    PlaybackState.STATE_NONE -> false
+                    null -> audioManager.isMusicActive
+                    else -> audioManager.isMusicActive // unknown state — trust audio focus
+                }
 
                 val appName = try {
                     val pm = context.packageManager
@@ -683,15 +712,27 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
                     controller.packageName.split('.').lastOrNull() ?: "Unknown"
                 }
 
-                return NowPlayingInfo(
+                val info = NowPlayingInfo(
                     title = title,
                     artist = artist,
                     album = album,
                     app = appName,
                     isPlaying = isPlaying
                 )
+
+                // Return immediately on active session — don't settle for paused
+                if (isPlaying) {
+                    Timber.d("getNowPlaying: returning PLAYING session — ${info.title} by ${info.artist} (${info.app})")
+                    return info
+                }
+                if (fallback == null) fallback = info
             }
-            null
+            if (fallback != null) {
+                Timber.d("getNowPlaying: returning PAUSED fallback — ${fallback?.title} by ${fallback?.artist} (${fallback?.app})")
+            } else {
+                Timber.d("getNowPlaying: returning NULL — no sessions with metadata found (isMusicActive=${audioManager.isMusicActive})")
+            }
+            fallback
         } catch (e: Exception) {
             Timber.w(e, "Failed to get now playing info")
             NowPlayingInfo("Error", e.message, null, "System", false)
@@ -734,22 +775,33 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
 
         // Environment / Thermal sensors
         val env = ctx.environment
-        env.cpuTemp?.let { sb.append("🧠 CPU Themal: ${String.format("%.0f", it)}°C\n") }
+        env.cpuTemp?.let { sb.append("🧠 CPU Thermal: ${String.format("%.0f", it)}°C\n") }
         env.ambientTemp?.let { sb.append("🌤️ Weather Sensor: ${String.format("%.1f", it)}°C\n") }
         env.pressure?.let { sb.append("🎈 Pressure: ${String.format("%.0f", it)} hPa\n") }
         env.light?.let { sb.append("💡 Light: ${it.toInt()} lux\n") }
 
-        // Music
+        // Audio / Music
+        val volPercent = if (ctx.audio.maxVolumeMedia > 0) (ctx.audio.volumeMedia * 100 / ctx.audio.maxVolumeMedia) else 0
         ctx.audio.nowPlaying?.let { np ->
             if (np.isPlaying) {
-                sb.append("🎵 Now Playing: \"${np.title}\"")
-                np.artist?.let { sb.append(" by $it") }
-                sb.append("\n")
+                sb.append("🎵 Playing: \"${np.title}\"")
+                np.artist?.let { sb.append(" - $it") }
+                sb.append(" (${np.app}) 🔊${volPercent}%\n")
+            } else {
+                // Still show the track name when paused — agent can reference it contextually
+                sb.append("⏸ Paused: \"${np.title}\"")
+                np.artist?.let { sb.append(" - $it") }
+                sb.append(" (${np.app}) 🔊${volPercent}%\n")
             }
+        } ?: if (ctx.audio.isMusicActive) {
+            sb.append("🎵 Music active 🔊${volPercent}% (no session metadata)\n")
+        } else {
+            sb.append("🔇 Media: idle 🔊${volPercent}%\n")
         }
 
         // System resources (With Totals)
-        sb.append("🧠 RAM: ${ctx.system.ramAvailableMB}MB free / ${ctx.system.ramTotalMB}MB total (${ctx.system.ramUsedPercent}% used)\n")
+        val ramTotalGB = ctx.system.ramTotalMB / 1024f
+        sb.append("🧠 RAM: ${ctx.system.ramAvailableMB}MB free / ${String.format("%.1f", ramTotalGB)}GB total (${ctx.system.ramUsedPercent}% used)\n")
         sb.append("💿 Storage: ${String.format("%.1f", ctx.system.storageFreeGB)}GB free / ${String.format("%.1f", ctx.system.storageTotalGB)}GB total\n")
 
         // Network (WiFi + Cell)
