@@ -16,14 +16,15 @@ class GemmaNotificationListener : NotificationListenerService() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this  // Set early so SensorFusion can attempt getActiveSessions
         Timber.d("NotificationListener created")
     }
 
     override fun onListenerConnected() {
         super.onListenerConnected()
-        instance = this
+        instance = this  // Confirm instance once fully connected
         // onNotificationPosted only fires for NEW notifications — scan what's already there
-        // so we catch media that was playing before we connected.
+        // so we catch media tokens from apps already playing when we connected.
         try {
             activeNotifications?.forEach { sbn -> extractMediaToken(sbn) }
         } catch (e: Exception) {

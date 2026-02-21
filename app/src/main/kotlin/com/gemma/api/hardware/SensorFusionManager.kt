@@ -654,21 +654,12 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
         return try {
             val msm = mediaSessionManager ?: return null
 
-            // getActiveSessions() requires the NotificationListenerService to be actively
-            // bound by Android — not just toggled on in settings. The OS binds it
-            // asynchronously, so the first few polls after launch will find instance == null.
-            // Skip the call entirely until the service is live to avoid SecurityException.
-            if (GemmaNotificationListener.instance == null) {
-                Timber.d("getNowPlaying: NotificationListener not yet bound — skipping getActiveSessions (isMusicActive=${audioManager.isMusicActive})")
-                return null
-            }
-
             val listenerComponent = ComponentName(context, GemmaNotificationListener::class.java)
             val controllers: List<MediaController> = try {
                 msm.getActiveSessions(listenerComponent)
             } catch (e: SecurityException) {
-                // Shouldn't happen if instance != null, but guard anyway
-                Timber.w("getActiveSessions denied despite listener running — SecurityException: ${e.message}")
+                // Listener not yet connected or permission revoked — return null gracefully
+                Timber.w("getActiveSessions denied — ${e.message}")
                 return null
             }
 
