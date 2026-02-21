@@ -653,91 +653,47 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
     private fun getNowPlaying(): NowPlayingInfo? {
         return try {
             val msm = mediaSessionManager ?: return null
-
             val listenerComponent = ComponentName(context, GemmaNotificationListener::class.java)
             val controllers: List<MediaController> = try {
                 msm.getActiveSessions(listenerComponent)
             } catch (e: SecurityException) {
-                // Listener not yet connected or permission revoked — return null gracefully
-                Timber.w("getActiveSessions denied — ${e.message}")
+                Timber.w("getActiveSessions denied — listener not bound yet")
                 return null
             }
 
-            // DIAGNOSTIC: log what Android actually gave us
-            Timber.d("getNowPlaying: getActiveSessions returned ${controllers.size} controllers (isMusicActive=${audioManager.isMusicActive})")
-            controllers.forEachIndexed { idx, ctrl ->
-                val ps = ctrl.playbackState
-                val meta = ctrl.metadata
-                Timber.d("  controller[$idx] pkg=${ctrl.packageName} state=${ps?.state} pos=${ps?.position} title=${meta?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE)} hasMetadata=${meta != null}")
-            }
-
-            // Two-pass: prefer actively playing session, fall back to paused
-            var fallback: NowPlayingInfo? = null
-
+            // Primary path: first controller with metadata from getActiveSessions()
             for (controller in controllers) {
                 val metadata = controller.metadata ?: continue
                 val playbackState = controller.playbackState
-
                 val title = metadata.getString(android.media.MediaMetadata.METADATA_KEY_TITLE)
                     ?: metadata.getString(android.media.MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
                     ?: continue
-
                 val artist = metadata.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST)
                     ?: metadata.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
                     ?: metadata.getString(android.media.MediaMetadata.METADATA_KEY_AUTHOR)
-
                 val album = metadata.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM)
-
-                // playbackState is null on some apps — fall back to audioManager
-                // STATE_BUFFERING/CONNECTING = actively playing (track loading between songs)
-                // STATE_PAUSED: trust our ears (isMusicActive) over the session state —
-                //   Spotify/streaming apps report PAUSED during song transitions, seek scrubbing,
-                //   crossfade, and briefly after unlock. If audio is routing to speaker, it's playing.
-                // STATE_STOPPED / ERROR / NONE: these are definitive — don't override.
                 val isPlaying = when (playbackState?.state) {
                     PlaybackState.STATE_PLAYING,
                     PlaybackState.STATE_BUFFERING,
                     PlaybackState.STATE_CONNECTING -> true
-                    PlaybackState.STATE_PAUSED -> audioManager.isMusicActive // ears > state
+                    PlaybackState.STATE_PAUSED -> audioManager.isMusicActive
                     PlaybackState.STATE_STOPPED,
                     PlaybackState.STATE_ERROR,
                     PlaybackState.STATE_NONE -> false
                     null -> audioManager.isMusicActive
-                    else -> audioManager.isMusicActive // unknown state — trust audio focus
+                    else -> false
                 }
-
                 val appName = try {
                     val pm = context.packageManager
-                    val appInfo = pm.getApplicationInfo(controller.packageName, 0)
-                    pm.getApplicationLabel(appInfo).toString()
+                    pm.getApplicationLabel(pm.getApplicationInfo(controller.packageName, 0)).toString()
                 } catch (e: Exception) {
                     controller.packageName.split('.').lastOrNull() ?: "Unknown"
                 }
-
-                val info = NowPlayingInfo(
-                    title = title,
-                    artist = artist,
-                    album = album,
-                    app = appName,
-                    isPlaying = isPlaying
-                )
-
-                // Return immediately on active session — don't settle for paused
-                if (isPlaying) {
-                    Timber.d("getNowPlaying: returning PLAYING session — ${info.title} by ${info.artist} (${info.app})")
-                    return info
-                }
-                if (fallback == null) fallback = info
-            }
-            if (fallback != null) {
-                Timber.d("getNowPlaying: returning PAUSED fallback — ${fallback?.title} by ${fallback?.artist} (${fallback?.app})")
-                return fallback
+                return NowPlayingInfo(title, artist, album, appName, isPlaying)
             }
 
-            // getActiveSessions() returned nothing — try the MediaSession token that
-            // GemmaNotificationListener captured directly from notification extras.
-            // This covers apps whose sessions don't appear in getActiveSessions() because
-            // they started playing before the listener connected.
+            // Fallback: token captured from notification extras (covers apps whose sessions
+            // don't appear in getActiveSessions() — e.g. started before listener connected)
             val token = GemmaNotificationListener.lastMediaToken
             if (token != null) {
                 try {
@@ -745,45 +701,35 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
                     val metadata = ctrl.metadata
                     val title = metadata?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE)
                         ?: metadata?.getString(android.media.MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
-                    val resolvedTitle = title
-                        ?: GemmaNotificationListener.lastMediaNotifTitle  // notification text fallback
-                    if (resolvedTitle != null) {
+                        ?: GemmaNotificationListener.lastMediaNotifTitle
+                    if (title != null) {
                         val artist = metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST)
                             ?: metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
-                            ?: metadata?.getString(android.media.MediaMetadata.METADATA_KEY_AUTHOR)
-                            ?: GemmaNotificationListener.lastMediaNotifText  // notif subtext often = artist
-                        val album = metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM)
-                        val ps = ctrl.playbackState
-                        val isPlaying = when (ps?.state) {
+                            ?: GemmaNotificationListener.lastMediaNotifText
+                        val isPlaying = when (ctrl.playbackState?.state) {
                             PlaybackState.STATE_PLAYING,
                             PlaybackState.STATE_BUFFERING,
                             PlaybackState.STATE_CONNECTING -> true
                             PlaybackState.STATE_PAUSED -> audioManager.isMusicActive
-                            PlaybackState.STATE_STOPPED,
-                            PlaybackState.STATE_ERROR,
-                            PlaybackState.STATE_NONE -> false
-                            else -> audioManager.isMusicActive
+                            null -> audioManager.isMusicActive
+                            else -> false
                         }
                         val pkg = GemmaNotificationListener.lastMediaPkg ?: ""
                         val appName = try {
                             val pm = context.packageManager
                             pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
-                        } catch (e: Exception) {
-                            pkg.split('.').lastOrNull() ?: "Media"
-                        }
-                        Timber.d("getNowPlaying: token fallback — $resolvedTitle by $artist ($appName) isPlaying=$isPlaying")
-                        return NowPlayingInfo(resolvedTitle, artist, album, appName, isPlaying)
+                        } catch (e: Exception) { pkg.split('.').lastOrNull() ?: "Media" }
+                        return NowPlayingInfo(title, artist,
+                            metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM),
+                            appName, isPlaying)
                     }
-                } catch (e: Exception) {
-                    Timber.w("getNowPlaying: token fallback failed — ${e.message}")
-                }
+                } catch (e: Exception) { /* stale token, ignore */ }
             }
 
-            Timber.d("getNowPlaying: returning NULL — no sessions found (isMusicActive=${audioManager.isMusicActive})")
             null
         } catch (e: Exception) {
-            Timber.w(e, "Failed to get now playing info")
-            NowPlayingInfo("Error", e.message, null, "System", false)
+            Timber.w(e, "getNowPlaying failed")
+            null
         }
     }
 
