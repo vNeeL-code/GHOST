@@ -740,10 +740,53 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
             }
             if (fallback != null) {
                 Timber.d("getNowPlaying: returning PAUSED fallback — ${fallback?.title} by ${fallback?.artist} (${fallback?.app})")
-            } else {
-                Timber.d("getNowPlaying: returning NULL — no sessions with metadata found (isMusicActive=${audioManager.isMusicActive})")
+                return fallback
             }
-            fallback
+
+            // getActiveSessions() returned nothing — try the MediaSession token that
+            // GemmaNotificationListener captured directly from notification extras.
+            // This covers apps whose sessions don't appear in getActiveSessions() because
+            // they started playing before the listener connected.
+            val token = GemmaNotificationListener.lastMediaToken
+            if (token != null) {
+                try {
+                    val ctrl = MediaController(context, token)
+                    val metadata = ctrl.metadata
+                    val title = metadata?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE)
+                        ?: metadata?.getString(android.media.MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
+                    if (title != null) {
+                        val artist = metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST)
+                            ?: metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
+                            ?: metadata?.getString(android.media.MediaMetadata.METADATA_KEY_AUTHOR)
+                        val album = metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM)
+                        val ps = ctrl.playbackState
+                        val isPlaying = when (ps?.state) {
+                            PlaybackState.STATE_PLAYING,
+                            PlaybackState.STATE_BUFFERING,
+                            PlaybackState.STATE_CONNECTING -> true
+                            PlaybackState.STATE_PAUSED -> audioManager.isMusicActive
+                            PlaybackState.STATE_STOPPED,
+                            PlaybackState.STATE_ERROR,
+                            PlaybackState.STATE_NONE -> false
+                            else -> audioManager.isMusicActive
+                        }
+                        val pkg = GemmaNotificationListener.lastMediaPkg ?: ""
+                        val appName = try {
+                            val pm = context.packageManager
+                            pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
+                        } catch (e: Exception) {
+                            pkg.split('.').lastOrNull() ?: "Media"
+                        }
+                        Timber.d("getNowPlaying: token fallback — $title by $artist ($appName) isPlaying=$isPlaying")
+                        return NowPlayingInfo(title, artist, album, appName, isPlaying)
+                    }
+                } catch (e: Exception) {
+                    Timber.w("getNowPlaying: token fallback failed — ${e.message}")
+                }
+            }
+
+            Timber.d("getNowPlaying: returning NULL — no sessions found (isMusicActive=${audioManager.isMusicActive})")
+            null
         } catch (e: Exception) {
             Timber.w(e, "Failed to get now playing info")
             NowPlayingInfo("Error", e.message, null, "System", false)

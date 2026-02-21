@@ -1,5 +1,7 @@
 package com.gemma.api
 
+import android.app.Notification
+import android.media.session.MediaSession
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import timber.log.Timber
@@ -67,6 +69,18 @@ class GemmaNotificationListener : NotificationListenerService() {
 
         Timber.d("Notification: $pkg - $title")
 
+        // Capture MediaSession token for media metadata fallback.
+        // getActiveSessions() misses apps that started before the listener connected —
+        // but the token is always in the notification extras if the app has a session.
+        @Suppress("DEPRECATION")
+        val token = sbn.notification.extras
+            .getParcelable<MediaSession.Token>(Notification.EXTRA_MEDIA_SESSION)
+        if (token != null) {
+            lastMediaToken = token
+            lastMediaPkg = pkg
+            Timber.d("Captured MediaSession token from notification: $pkg")
+        }
+
         // TODO: Trigger proactive Gemma response for interesting notifications
         // Could check if Gemma is idle and inject commentary
     }
@@ -91,6 +105,8 @@ class GemmaNotificationListener : NotificationListenerService() {
 
     companion object {
         var instance: GemmaNotificationListener? = null
+        @Volatile var lastMediaToken: MediaSession.Token? = null
+        @Volatile var lastMediaPkg: String? = null
         private val recentNotifications = ConcurrentLinkedDeque<NotificationEntry>()
 
         // Packages to ignore (system noise)
