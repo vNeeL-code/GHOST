@@ -754,10 +754,13 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
                     val metadata = ctrl.metadata
                     val title = metadata?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE)
                         ?: metadata?.getString(android.media.MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
-                    if (title != null) {
+                    val resolvedTitle = title
+                        ?: GemmaNotificationListener.lastMediaNotifTitle  // notification text fallback
+                    if (resolvedTitle != null) {
                         val artist = metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST)
                             ?: metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
                             ?: metadata?.getString(android.media.MediaMetadata.METADATA_KEY_AUTHOR)
+                            ?: GemmaNotificationListener.lastMediaNotifText  // notif subtext often = artist
                         val album = metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM)
                         val ps = ctrl.playbackState
                         val isPlaying = when (ps?.state) {
@@ -777,8 +780,8 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
                         } catch (e: Exception) {
                             pkg.split('.').lastOrNull() ?: "Media"
                         }
-                        Timber.d("getNowPlaying: token fallback — $title by $artist ($appName) isPlaying=$isPlaying")
-                        return NowPlayingInfo(title, artist, album, appName, isPlaying)
+                        Timber.d("getNowPlaying: token fallback — $resolvedTitle by $artist ($appName) isPlaying=$isPlaying")
+                        return NowPlayingInfo(resolvedTitle, artist, album, appName, isPlaying)
                     }
                 } catch (e: Exception) {
                     Timber.w("getNowPlaying: token fallback failed — ${e.message}")
