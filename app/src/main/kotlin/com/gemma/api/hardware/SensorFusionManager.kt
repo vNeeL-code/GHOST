@@ -521,6 +521,7 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
             val file = File("/sys/class/thermal/$zoneName/temp")
             if (file.exists() && file.canRead()) {
                 val raw = file.readText().trim().toIntOrNull() ?: return null
+                if (raw <= 0) return null  // Invalid/uninitialized sensor read
                 // Most zones report in millidegrees Celsius
                 if (raw > 1000) raw / 1000f else raw.toFloat()
             } else null

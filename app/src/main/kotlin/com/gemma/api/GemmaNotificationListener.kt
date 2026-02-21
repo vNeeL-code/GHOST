@@ -14,8 +14,19 @@ class GemmaNotificationListener : NotificationListenerService() {
 
     override fun onCreate() {
         super.onCreate()
-        instance = this
         Timber.d("NotificationListener created")
+    }
+
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        instance = this
+        Timber.d("NotificationListener connected — getActiveSessions now available")
+    }
+
+    override fun onListenerDisconnected() {
+        super.onListenerDisconnected()
+        instance = null
+        Timber.d("NotificationListener disconnected")
     }
 
     override fun onDestroy() {
