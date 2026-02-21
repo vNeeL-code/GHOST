@@ -657,8 +657,9 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
             val controllers: List<MediaController> = try {
                 msm.getActiveSessions(listenerComponent)
             } catch (e: SecurityException) {
-                Timber.w("getActiveSessions denied — listener not bound yet")
-                return null
+                // Don't return null — fall through to notification fallbacks below
+                Timber.w("getActiveSessions denied — falling back to notification data")
+                emptyList()
             }
 
             // Primary path: first controller with metadata from getActiveSessions()

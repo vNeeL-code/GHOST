@@ -48,6 +48,10 @@
     <!-- NOTIFICATION ACCESS (for context awareness) -->
     <uses-permission android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" />
 
+    <!-- Package visibility (Android 11+): needed to resolve app names from
+         media session / notification package names via getApplicationInfo() -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
 
