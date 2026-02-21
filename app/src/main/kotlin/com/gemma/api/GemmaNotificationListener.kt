@@ -123,14 +123,12 @@ class GemmaNotificationListener : NotificationListenerService() {
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
-        sbn ?: return
-        // Clear stale media info when the music app's notification is dismissed
-        if (sbn.packageName == lastMediaPkg) {
-            lastMediaToken       = null
-            lastMediaPkg         = null
-            lastMediaNotifTitle  = null
-            lastMediaNotifText   = null
-        }
+        // Intentionally not clearing lastMediaNotifTitle/Token here.
+        // Race condition: on track change the app fires onNotificationRemoved (old)
+        // *after* onNotificationPosted (new) has already written fresh metadata —
+        // clearing here would wipe valid data for the incoming track.
+        // isPlaying is driven by audioManager.isMusicActive, so a stale title
+        // just shows as ⏸ Paused which is correct when music genuinely stops.
     }
 
     data class NotificationEntry(
