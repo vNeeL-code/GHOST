@@ -36,6 +36,12 @@ class GemmaEngine(private val context: Context) {
     var activeBackend: String? = null
         private set
 
+    // Phase 12: Cache initialization params for hardReset
+    private var lastModelPath: String = ""
+    private var lastSystemPrompt: String = ""
+    private var lastVisionEnabled: Boolean = true
+    private var lastAudioEnabled: Boolean = true
+
     fun initialize(
         modelPath: String,
         systemPrompt: String,
@@ -46,6 +52,11 @@ class GemmaEngine(private val context: Context) {
             Timber.i("Initializing Gemma with LiteRT-LM Engine...")
             Timber.i("Model: $modelPath")
             Timber.i("Vision: $enableVision, Audio: $enableAudio")
+
+            lastModelPath = modelPath
+            lastSystemPrompt = systemPrompt
+            lastVisionEnabled = enableVision
+            lastAudioEnabled = enableAudio
 
             // Configure engine with multimodal backends
             val engineConfig = EngineConfig(
@@ -282,6 +293,42 @@ class GemmaEngine(private val context: Context) {
             Timber.i("KV Cache Flushed (Soft Reset)")
         } catch (e: Exception) {
             Timber.e(e, "Soft reset failed")
+        } finally {
+            isResetting = false
+        }
+    }
+
+    // Phase 12: Implement hardReset to cure Hexagon DSP NPU hardware timeouts.
+    fun hardReset() {
+        if (lastModelPath.isBlank()) {
+            Timber.e("Cannot hard reset: Engine was never initialized")
+            return
+        }
+
+        isResetting = true
+        Timber.w("🚨 Initiating HARD RESET of GemmaEngine (Purging NPU state) 🚨")
+        try {
+            synchronized(sessionLock) {
+                // 1. Fully destroy native objects
+                conversation?.close()
+                engine?.close()
+                conversation = null
+                engine = null
+            }
+            // 2. Re-initialize from scratch using cached params
+            val err = initialize(
+                modelPath = lastModelPath,
+                systemPrompt = lastSystemPrompt,
+                enableVision = lastVisionEnabled,
+                enableAudio = lastAudioEnabled
+            )
+            if (err != null) {
+                Timber.e("Hard reset initialization throw: $err")
+            } else {
+                Timber.i("✅ Hard reset complete. Engine fully rebuilt.")
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Fatal failure during hard reset")
         } finally {
             isResetting = false
         }

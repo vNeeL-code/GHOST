@@ -845,8 +845,11 @@ class KoogAgent(
                     _conversationHistory.add(toolReflectionMsg)
                 }
 
-                if (event.recursionDepth >= 5) {
-                    Timber.w("🔄 ReAct Loop: Max recursion depth reached (5). Stopping.")
+                // Phase 12: Loop Pruning. Hard cap at 2 tool chains. 
+                // If the user's intent isn't satisfied in 2 tries, the agent is hallucinating
+                // the same failed query. Fall through to final answer gracefully.
+                if (event.recursionDepth >= 2) {
+                    Timber.w("🔄 ReAct Loop: Max recursion depth reached (2). Stopping to prevent hallucination aggregation.")
                     // Fall through to final answer instead of recursing
                 } else {
                     Timber.i("🔄 ReAct Loop: Found ${newToolResults.size} more tools (Depth ${event.recursionDepth + 1}). Recursing...")
@@ -1240,8 +1243,9 @@ $content
                 // Phase 5: Error-Triggered Flush
                 // Blank response often means the mathematical KV sequence has gone psychotic/corrupted.
                 if (retryCount == 0) {
-                    Timber.w("🔄 Auto-retrying inference after synchronous soft reset...")
-                    llmEngine.softReset(buildSystemPrompt())
+                    Timber.w("🚨 Auto-retrying inference after HARD RESET (Purging NPU state)...")
+                    // Phase 12: Use hardReset to clear Hexagon DSP hardware hangs, softReset isn't enough
+                    llmEngine.hardReset()
                     skipNextRecap = true
                     turnsSinceKvFlush = 0
                     return think(context, userMessage, images, audio, retryCount = 1)
@@ -1258,9 +1262,10 @@ $content
         } catch (e: Exception) {
             Timber.e(e, "LLM inference failed (try $retryCount)")
             if (retryCount == 0) {
-                Timber.w("🔄 Auto-retrying inference after exception synchronous soft reset...")
+                Timber.w("🚨 Auto-retrying inference after exception via HARD RESET...")
                 try {
-                    llmEngine.softReset(buildSystemPrompt())
+                    // Phase 12: Ensure absolute native teardown on exceptions
+                    llmEngine.hardReset()
                     skipNextRecap = true
                     turnsSinceKvFlush = 0
                     return think(context, userMessage, images, audio, retryCount = 1)
