@@ -851,8 +851,8 @@ class KoogAgent(
                 } else {
                     Timber.i("🔄 ReAct Loop: Found ${newToolResults.size} more tools (Depth ${event.recursionDepth + 1}). Recursing...")
                     
-                    // Append previous history to keep the chain alive for UI string aggregation
-                    val updatedResponse = "${event.originalResponse}\n\n[Observation]: $observation\n\n$cleanReflection"
+                    // Append previous history to keep the chain alive for UI string aggregation (omit observation for silent tool execution)
+                    val updatedResponse = "${event.originalResponse}\n\n$cleanReflection".trim()
                     
                     val nextEvent = AgentEvent.ToolResult(
                         context = event.context,
@@ -871,7 +871,7 @@ class KoogAgent(
             }
 
             // No more tools -> Final Answer
-            val finalContent = "${event.originalResponse}\n\n[Observation]: $observation\n\n$reflection"
+            val finalContent = "${event.originalResponse}\n\n$cleanReflection".trim()
             val safeCleanResponse = if (finalContent.isBlank()) {
                 Timber.w("⚠️ Blank reflection, using fallback")
                 "..."
@@ -1228,7 +1228,8 @@ $content
             // instead of throwing exceptions. We must catch them here to trigger the flush.
             val isErrorResponse = response.isBlank() || 
                                   response.contains("Timeout! My thoughts got stuck") || 
-                                  response.startsWith("Error:")
+                                  response.startsWith("Error:") ||
+                                  response.contains("I... have no words")
 
             if (isErrorResponse) {
                 Timber.e("⚠️ KoogAgent: LLM returned Error/Empty response! (try $retryCount)")
