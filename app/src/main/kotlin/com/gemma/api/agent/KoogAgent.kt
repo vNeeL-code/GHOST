@@ -727,6 +727,22 @@ class KoogAgent(
 
             // 8. If tools were executed, enqueue follow-up (NO RECURSION!)
             if (toolResults.isNotEmpty()) {
+                // Phase 9: Incremental History (Original Thought)
+                // Add the agent's initial thought to memory so it doesn't double-generate it during reflection.
+                val assistantMsg = Message(
+                    role = "assistant",
+                    content = cleanResponse.ifBlank { "..." }
+                )
+                synchronized(_conversationHistory) {
+                    _conversationHistory.add(assistantMsg)
+                }
+
+                // Phase 9 UX Improvement: Speak the initial thought immediately before executing tools!
+                callbacks?.let { cb ->
+                    val initialTts = cleanForTTS(cleanResponse)
+                    if (initialTts.isNotEmpty()) cb.speak(initialTts)
+                }
+
                 val toolResultEvent = AgentEvent.ToolResult(
                     context = context,
                     toolResults = toolResults,
@@ -796,11 +812,22 @@ class KoogAgent(
             val observation = "Tool results:\n${event.toolResults.joinToString("\n")}"
             Timber.d("KoogAgent: Tool execution complete, reflecting...")
 
+            // Phase 9: Incremental History (Observation)
+            // Inject the observation strictly as a 'user' message so the model sees it as external reality,
+            // NOT as its own hallucinated Assistant generation.
+            val observationMsg = Message(
+                role = "user",
+                content = "[System Observation]\n$observation"
+            )
+            synchronized(_conversationHistory) {
+                _conversationHistory.add(observationMsg)
+            }
+
             // Single think() call - no recursion possible (PREVIOUSLY)
             // NOW: Restore ReAct loop by checking if reflection contains MORE tools
             val reflection = think(
                 event.context,
-                "Observation: $observation\n\nBased on this, what is the next step or final answer?",
+                "Observation: $observation\n\nProvide the final answer to the user. Do NOT use any more tools unless strictly necessary.",
                 null, 
                 null
             )
@@ -809,13 +836,22 @@ class KoogAgent(
             val (cleanReflection, newToolResults) = act(reflection)
 
             if (newToolResults.isNotEmpty()) {
+                // Phase 9: Incremental History (Reflection with MORE tools)
+                val toolReflectionMsg = Message(
+                    role = "assistant",
+                    content = cleanReflection.ifBlank { "..." }
+                )
+                synchronized(_conversationHistory) {
+                    _conversationHistory.add(toolReflectionMsg)
+                }
+
                 if (event.recursionDepth >= 5) {
                     Timber.w("🔄 ReAct Loop: Max recursion depth reached (5). Stopping.")
                     // Fall through to final answer instead of recursing
                 } else {
                     Timber.i("🔄 ReAct Loop: Found ${newToolResults.size} more tools (Depth ${event.recursionDepth + 1}). Recursing...")
                     
-                    // Append previous history to keep the chain alive
+                    // Append previous history to keep the chain alive for UI string aggregation
                     val updatedResponse = "${event.originalResponse}\n\n[Observation]: $observation\n\n$cleanReflection"
                     
                     val nextEvent = AgentEvent.ToolResult(
@@ -843,9 +879,10 @@ class KoogAgent(
 
             Timber.i("✅ Tool reflection complete (Chain End)")
 
+            // Phase 9: Incremental History (Final Reflection)
             val assistantMessage = Message(
                 role = "assistant",
-                content = safeCleanResponse
+                content = cleanReflection.ifBlank { "..." }
             )
             synchronized(_conversationHistory) {
                 _conversationHistory.add(assistantMessage)
@@ -855,12 +892,14 @@ class KoogAgent(
                 if (!event.isDream) {
                     val finalResponse = wrapResponse(safeCleanResponse)
                     cb.showResponse(finalResponse)
-                    val ttsText = cleanForTTS(finalResponse)
+                    // Phase 9: Only speak the final reflection, not the aggregated original response + observation
+                    val ttsText = cleanForTTS(cleanReflection.ifBlank { "..." })
                     if (ttsText.isNotEmpty()) cb.speak(ttsText)
                     cb.storeConversationTurn(event.userMessage, finalResponse, event.sessionId)
                 } else {
                     try {
-                        val ttsText = cleanForTTS(safeCleanResponse)
+                        // Phase 9: Dream TTS
+                        val ttsText = cleanForTTS(cleanReflection.ifBlank { "..." })
                         val diaryContent = "✧ Gemma 📔\n$ttsText"
                         val thermal = cb.getCurrentThermalState()
                         cb.writeDiaryEntry("DREAM", diaryContent, thermal)
@@ -1278,6 +1317,8 @@ When asked about facts, events, comparisons, or anything I'm not 100% sure about
 1. [[SEARCH:query]] = silent fetch, I synthesize results
 2. [[GOOGLE:query]] = opens browser so user sees it
 
+NEVER hallucinate or write '[Observation]' blocks yourself. When you output a [[TOOL]], STOP generating immediately. The system will provide the observation for you on the next turn.
+
 ## Deep Thinking
 [[THINK:describe the problem]] — spawns Python REPL for complex multi-step reasoning.
 Use for: math, data analysis, multi-step logic. Slow but powerful. Don't use for simple questions.
@@ -1311,6 +1352,12 @@ Use [[SEARCH_LOGS:keyword]] if unsure about past conversations. Expect continuit
     ): Pair<String, List<String>> {
         var cleanResponse = response
         
+        // Phase 7: Hallucinated Observation Stripping
+        // If the model ignores the prompt and tries to write its own "[Observation]" to match 
+        // the injection pattern, forcefully delete it to prevent loop buildup.
+        val hallucinatedObsRegex = """(?s)\n\s*\[Observation\].*""".toRegex()
+        cleanResponse = cleanResponse.replace(hallucinatedObsRegex, "")
+
         // 1. Header/Footer stripping (if model included them)
         val headerRegex = """^\s*✦\s*Gemma[^\n]*∇\s*\n?""".toRegex(RegexOption.MULTILINE)
         cleanResponse = cleanResponse.replace(headerRegex, "").trim()
@@ -1360,7 +1407,13 @@ Use [[SEARCH_LOGS:keyword]] if unsure about past conversations. Expect continuit
                         val historyContext = synchronized(_conversationHistory) {
                             _conversationHistory.takeLast(6).joinToString("\n") { msg ->
                                 // Strip role labels to avoid reinforcing role confusion
-                                msg.content.take(300)
+                                val rawSnippet = msg.content.take(300)
+                                // Phase 8: Prevent splitting UTF-16 surrogate pairs (emojis) which crashes Python Native
+                                if (rawSnippet.isNotEmpty() && Character.isHighSurrogate(rawSnippet.last())) {
+                                    rawSnippet.dropLast(1)
+                                } else {
+                                    rawSnippet
+                                }
                             }
                         }
                         val result = bridge.completion(historyContext, query)

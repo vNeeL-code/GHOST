@@ -235,6 +235,13 @@ class NetworkToolSet(private val context: Context) {
     private fun parseGoogleResults(html: String, maxResults: Int, query: String = ""): List<SearchResult> {
         val results = mutableListOf<SearchResult>()
 
+        // Phase 7: Anti-Bot Redirect Detection
+        if (html.contains("redirected within a few seconds", ignoreCase = true) || 
+            html.contains("having trouble accessing Google Search", ignoreCase = true)) {
+            Timber.w("Google anti-bot redirect detected. Failing to trigger DuckDuckGo fallback.")
+            return emptyList() // Returning empty forces fetchSearchResults() to use DuckDuckGo
+        }
+
         // Strategy: Find <a> tags with /url?q= (Google's redirect links) as anchors for result blocks
         // Then extract nearby text as title/snippet
         val linkPattern = Regex("""<a[^>]*href="/url\?q=([^&"]+)[^"]*"[^>]*>(.*?)</a>""",
