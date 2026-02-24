@@ -14,6 +14,7 @@ import timber.log.Timber
  */
 class NotificationActionReceiver : BroadcastReceiver() {
 
+    @android.annotation.SuppressLint("MissingPermission")
     override fun onReceive(context: Context?, intent: Intent?) {
         context ?: return
         intent ?: return

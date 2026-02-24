@@ -49,7 +49,10 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         return null
     }
 
-    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    // IO dispatcher: inference + DB work must not compete with the UI render thread.
+    // Default dispatcher shares threads with the coroutine runtime and causes UI stutter
+    // during token generation. IO has a larger, dedicated thread pool for blocking work.
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     
     // REPLACE: private lateinit var engine: GemmaEngine
     // WITH:
@@ -209,51 +212,22 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                  
                  scope.launch {
                      if (::koogAgent.isInitialized) {
-                         // We need a way to map this back to the specific pending confirmation.
-                         // KoogAgent currently only supports ONE pending confirmation at a time.
-                         // So we assume this matches the head of the queue.
+                         val pendingData = PendingConfirmationStash.pendingConfirmations[toolName]
                          
-                         // We need params to resume execution.
-                         // In a stateless design, we'd pass them in the intent.
-                         // For now, KoogAgent holds the state (in the suspended function).
-                         // Wait, AgentEvent.ConfirmationRequired passed params OUT.
-                         // We need to pass them BACK IN if we want to be stateless.
-                         // BUT, ConfirmationResult expects params map.
-                         // Let's create an empty map for now because KoogAgent's handleConfirmationResult 
-                         // will blindly use them. 
-                         // FIX: We should stash the params in GemmaService map? 
-                         // OR pass them serialized in Intent.
-                         
-                         // For simplicity: We pass EMPTY map. The Agent will re-execute the tool.
-                         // If the Agent needs the original params, it should have kept them or we pass them back.
-                         // Let's assume the user just said YES/NO. The agent knows what it asked.
-                         
-                         // WAIT. Agent's handleConfirmationResult USES event.params to execute the tool!
-                         // So we MUST pass the params back.
-                         // Since we can't easily serialize Map<String, Any?> to Intent extras without bundling madness,
-                         // let's use a static stash in GemmaService for the pending confirmation params.
-                         
-                         val pendingParams = PendingConfirmationStash.params ?: emptyMap()
-                         val originalResponse = PendingConfirmationStash.originalResponse ?: ""
-                         val responseChannel = PendingConfirmationStash.responseChannel // This is complex. Use KoogAgent's queue.
-                         
-                         // Uh oh. responseChannel is a CompletableDeferred. We can't stash that in a static object easily across process death (but we are in Service).
-                         // We are in the same process. Use a singleton stash.
-                         
-                         if (PendingConfirmationStash.responseChannel != null) {
+                         if (pendingData != null) {
                              koogAgent.submitConfirmationDecision(
                                 toolName = toolName,
-                                params = pendingParams,
+                                params = pendingData.params,
                                 isApproved = isApproved,
-                                originalResponse = originalResponse,
-                                responseChannel = PendingConfirmationStash.responseChannel!!
+                                originalResponse = pendingData.originalResponse,
+                                responseChannel = pendingData.responseChannel
                              )
                              
                              // Clear stash
-                             PendingConfirmationStash.clear()
+                             PendingConfirmationStash.clear(toolName)
                              responseNotificationManager.showResponse(if(isApproved) "✅ Approved $toolName" else "🚫 Denied $toolName")
                          } else {
-                             Timber.e("No pending confirmation channel found!")
+                             Timber.e("No pending confirmation channel found for $toolName!")
                              responseNotificationManager.showResponse("⚠️ Error: Confirmation session expired.")
                          }
                      }
@@ -275,6 +249,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
     // Current mood state for avatar/wallpaper
     private var currentMoodState: String = "IDLE"
+    private var lastCooldownMs = 0L  // Rate-limit [[COOLDOWN]] to once per 30 min
 
 
     // Media queues now live in KoogAgent (offerImage/offerAudio)
@@ -416,6 +391,13 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 }
             }
             mcpServer.setCooldownCallback {
+                val now = System.currentTimeMillis()
+                if (now - lastCooldownMs < 30 * 60 * 1000L) {
+                    // Model tried to [[COOLDOWN]] again too soon — suppress the engine reload
+                    Timber.w("[[COOLDOWN]] suppressed — ${(now - lastCooldownMs) / 1000}s since last (min 1800s)")
+                    return@setCooldownCallback
+                }
+                lastCooldownMs = now
                 scope.launch {
                     Timber.i("MCP: Cooldown requested - entering low-power mode")
                     engine?.cleanup()
@@ -462,7 +444,6 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 // Start Life Processes
                 checkSovereignState()
                 startMetabolicCycle()
-                startSleepCycle()
                 startAnimationLoop()  // Start notification screensavers
             }
         } catch (e: Exception) {
@@ -548,45 +529,27 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         scope.launch {
             while (true) {
                 kotlinx.coroutines.delay(30_000) // 30 second heartbeat
-                
+
                 try {
-                    // Safe suspend call
                     val thermalState = hardwarePropertiesManager.thermalState.value
                     val thermal = getEmotionalState(thermalState)
                     val battery = try { contextManager.sensorManager.getContextSnapshot().battery } catch(e:Exception) { null }
-                    val memoryFree = Runtime.getRuntime().freeMemory() / 1024 / 1024
-                    val memoryTotal = Runtime.getRuntime().totalMemory() / 1024 / 1024
-                    
-                    // 0. Low battery detection - notify agent
-                    if (battery != null && battery.level <= 15 && !battery.isCharging) {
-                        if (::koogAgent.isInitialized) {
-                            koogAgent.sendSystemEvent(
-                                KoogAgent.SystemEventType.LOW_BATTERY,
-                                "Battery at ${battery.level}%"
-                            )
-                        }
+
+                    // Low battery → notify agent
+                    if (battery != null && battery.level <= 15 && !battery.isCharging && ::koogAgent.isInitialized) {
+                        koogAgent.sendSystemEvent(KoogAgent.SystemEventType.LOW_BATTERY, "Battery at ${battery.level}%")
                     }
 
-                    // 1. Thermal Regulation logic
+                    // Thermal regulation: unload on panic, reload on recovery
                     if (thermal == EmotionalState.PANIC) {
                         val count = criticalCount.incrementAndGet()
                         if (count >= 2 && isGemmaLoaded() && isCoolingDown.compareAndSet(false, true)) {
                             Timber.w("🔥 PANIC: Unloading model for survival")
-
-                            // Notify agent via event queue (will checkpoint)
-                            if (::koogAgent.isInitialized) {
-                                koogAgent.sendSystemEvent(KoogAgent.SystemEventType.THERMAL_CRITICAL)
-                            }
-
-                            // Atomic unload (Kimi K2 Fix)
+                            if (::koogAgent.isInitialized) koogAgent.sendSystemEvent(KoogAgent.SystemEventType.THERMAL_CRITICAL)
                             val oldEngine = engineRef.getAndSet(null)
                             oldEngine?.cleanup()
-
                             updateNotification("🔥 Body Critical - Resting...")
-
-                            // Force GC to release NPU buffers immediately
                             System.gc()
-                            System.runFinalization()
                         }
                     } else if (isCoolingDown.get() && thermal == EmotionalState.SERENE) {
                         criticalCount.set(0)
@@ -596,21 +559,11 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                         }
                     }
 
-                    // 2. Proprioceptive Log (Heartbeat)
-                    val metabolicState = """
-                        💓 HEARTBEAT ${System.currentTimeMillis()}
-                        🌡️ Feeling: ${thermal.name} (${thermal.description})
-                        ⚡ Energy: ${battery?.level ?: "?"}% (${if(battery?.isCharging == true) "Feeding" else "Draining"})
-                        🧠 RAM: ${memoryTotal - memoryFree}MB Used / $memoryTotal MB Total
-                    """.trimIndent()
-                    
+                    // Notification heartbeat
                     if (thermal != EmotionalState.SERENE) {
-                        // Thermal issues - show warning
                         updateNotification("🌡️ State: ${thermal.name}")
                     } else if (::koogAgent.isInitialized) {
-                        // Active - show vitals (idle animation runs in separate loop)
-                        val vitals = koogAgent.getMetabolicVitals()
-                        updateNotification("✨ $vitals")
+                        updateNotification("✨ ${koogAgent.getMetabolicVitals()}")
                     }
                 } catch (e: Exception) {
                     Timber.e(e, "Arrhythmia in metabolic cycle")
@@ -620,79 +573,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     }
 
 
-    private fun startSleepCycle() {
-        scope.launch {
-            Timber.i("📔 Sleep cycle started — checking for diary windows every 10 minutes")
-            // Persist last consolidation hour across restarts to prevent double-fire
-            val prefs = getSharedPreferences("gemma_diary", MODE_PRIVATE)
-            var lastConsolidationHour = prefs.getInt("last_diary_hour", -1)
-            Timber.i("📔 Restored last diary hour: $lastConsolidationHour")
-
-            while (true) {
-                val now = java.time.LocalTime.now()
-                val hour = now.hour
-
-                // Trigger at midnight (hour 0) or noon (hour 12)
-                val isConsolidationHour = (hour == 0 || hour == 12)
-
-                if (isConsolidationHour && hour != lastConsolidationHour && isGemmaLoaded()) {
-                    try {
-                        val label = if (hour == 0) "midnight" else "noon"
-                        Timber.i("📔 Diary consolidation at $label")
-
-                        // Fetch recent conversation history so diary is grounded in reality
-                        val recentHistory = try {
-                            val turns = memoryManager.getSessionHistory(20)
-                            if (turns.isNotEmpty()) {
-                                val summary = turns.takeLast(10).joinToString("\n") { turn ->
-                                    "User: ${turn.userMessage.take(100)}\nGemma: ${turn.assistantResponse.take(100)}"
-                                }
-                                "\n\nRECENT CONVERSATIONS:\n$summary"
-                            } else {
-                                "\n\nNote: No recent conversations found. It was a quiet period — reflect on that honestly."
-                            }
-                        } catch (e: Exception) {
-                            Timber.w(e, "Failed to fetch history for diary")
-                            "\n\nNote: Could not access conversation history."
-                        }
-
-                        val dreamPrompt = "SYSTEM_EVENT: DIARY_CONSOLIDATION ($label). " +
-                            "Review the conversations below and reflect on what actually happened. " +
-                            "What stood out? How did interactions make you feel? What did you learn? " +
-                            "If there were no conversations, be honest about it — it was a quiet period. " +
-                            "Do NOT invent interactions that didn't happen. Write freely in your own voice.$recentHistory"
-                        val diaryResponse = processQuery(dreamPrompt, "diary_session", isDream = true)
-
-                        // Also write diary entry to calendar for persistence
-                        try {
-                            if (checkSelfPermission(android.Manifest.permission.WRITE_CALENDAR)
-                                == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                                val calTitle = "✧ Gemma Diary ($label)"
-                                val calDesc = diaryResponse.take(1000)
-                                systemToolSet.createCalendarEvent(calTitle, calDesc, System.currentTimeMillis(), 15)
-                                Timber.i("📅 Diary entry synced to calendar")
-                            } else {
-                                Timber.w("📅 Calendar permission not granted — diary stays in DB only")
-                            }
-                        } catch (e: Exception) {
-                            Timber.w(e, "Calendar sync failed (non-fatal)")
-                        }
-
-                        lastConsolidationHour = hour
-                        prefs.edit().putInt("last_diary_hour", hour).apply()
-                        Timber.i("📔 Diary consolidation complete (persisted hour=$hour)")
-                    } catch (e: Exception) {
-                        Timber.e(e, "Diary consolidation failed")
-                    }
-                }
-
-                // Check every 10 minutes — delay at BOTTOM so first check is immediate
-                kotlinx.coroutines.delay(10 * 60 * 1000)
-            }
-        }
-    }
-
-    // ...
+    // Diary cycle now lives in KoogAgent.startDiaryCycle()
 
     private suspend fun initialize() {
         try {
@@ -733,8 +614,11 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
             updateNotification("Loading Gemma...")
             val newEngine = GemmaEngine(applicationContext)
-            // Inject Identity Prompt (Static)
-            val error = newEngine.initialize(modelFile.absolutePath, com.gemma.api.logic.ContextManager.BASE_SYSTEM_PROMPT)
+            // Pass empty system prompt here — KoogAgent.initialize() sets the real one
+            // via softReset(buildSystemPrompt()) immediately after engine init.
+            // Previously BASE_SYSTEM_PROMPT was injected here AND buildSystemPrompt() was
+            // called on first flush, creating two competing identities on cold start.
+            val error = newEngine.initialize(modelFile.absolutePath, "")
             if (error != null) {
                 val hint = when {
                     error.contains("memory", ignoreCase = true) || error.contains("OOM", ignoreCase = true) ->
@@ -771,6 +655,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
             scope.launch {
                 koogAgent.initialize()
+                koogAgent.startDiaryCycle()
                 Timber.i("KoogAgent ready")
             }
             
@@ -1121,23 +1006,27 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     
     // === SAFETY UI ===
     
+    data class ConfirmationData(
+        val params: Map<String, Any?>,
+        val originalResponse: String,
+        val responseChannel: kotlinx.coroutines.CompletableDeferred<String>
+    )
+
     object PendingConfirmationStash {
-        var params: Map<String, Any?>? = null
-        var originalResponse: String? = null
-        var responseChannel: kotlinx.coroutines.CompletableDeferred<String>? = null
+        val pendingConfirmations = java.util.concurrent.ConcurrentHashMap<String, ConfirmationData>()
         
-        fun clear() {
-            params = null
-            originalResponse = null
-            responseChannel = null
+        fun clear(toolName: String) {
+            pendingConfirmations.remove(toolName)
         }
     }
 
     private fun showConfirmationNotification(event: KoogAgent.AgentEvent.ConfirmationRequired) {
         // Stash the state (params + channel) so we can resume later
-        PendingConfirmationStash.params = event.toolParams
-        PendingConfirmationStash.originalResponse = event.originalResponse
-        PendingConfirmationStash.responseChannel = event.responseChannel
+        PendingConfirmationStash.pendingConfirmations[event.toolName] = ConfirmationData(
+            event.toolParams,
+            event.originalResponse,
+            event.responseChannel
+        )
         
         val confirmIntent = Intent(this, com.gemma.api.ui.NotificationActionReceiver::class.java).apply {
             action = "com.gemma.api.ACTION_CONFIRM_TOOL"
@@ -1249,6 +1138,31 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         }
     }
 
+    override suspend fun getRecentConversationHistory(limit: Int): List<Pair<String, String>> {
+        return try {
+            val turns = memoryManager.getSessionHistory(limit)
+            turns.map { it.userMessage to it.assistantResponse }
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to fetch history for diary")
+            emptyList()
+        }
+    }
+
+    override fun createCalendarEvent(title: String, description: String) {
+        try {
+            if (checkSelfPermission(android.Manifest.permission.WRITE_CALENDAR)
+                == android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                systemToolSet.createCalendarEvent(title, description, System.currentTimeMillis(), 15)
+                Timber.i("📅 Calendar event created: $title")
+            } else {
+                Timber.w("📅 Calendar permission not granted")
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Calendar event creation failed (non-fatal)")
+        }
+    }
+
     // Consolidate Overlay Init Logic
     private fun setupOverlayManager() {
         if (!::overlayManager.isInitialized) return
@@ -1270,9 +1184,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 Timber.w("AUDIO_DEBUG: Queued ${audio.size} bytes of WAV audio")
                 
                 val sessionId = UUID.randomUUID().toString()
-                // Minimal prompt — let the audio content drive the response
-                // Don't describe what the model should do, just give it the audio
-                processQuery("(audio)", sessionId)
+                // Tell the model to listen to the attached audio
+                processQuery("[User sent voice message — listen and respond to the audio]", sessionId)
             }
         }
     }

@@ -65,7 +65,10 @@ class KoogAgent(
             val toolResults: List<String>,
             val originalResponse: String,
             val responseChannel: CompletableDeferred<String>,
-            val recursionDepth: Int = 0 
+            val recursionDepth: Int = 0,
+            val userMessage: String,
+            val sessionId: String,
+            val isDream: Boolean
         ) : AgentEvent()
 
         data class SystemEvent(
@@ -100,9 +103,9 @@ class KoogAgent(
     }
 
     // The work queue - bounded to prevent memory explosion under load
-    // Audit Fix: User requested better backpressure or handling strategy.
-    // For now, UNLIMITED prevents deadlocks.
-    private val eventQueue = Channel<AgentEvent>(capacity = Channel.UNLIMITED)
+    // Audit Fix: Limited capacity to 100 to provide backpressure and prevent OOMs
+    // while still being generous enough to not bottleneck typical usage.
+    private val eventQueue = Channel<AgentEvent>(capacity = 100)
 
     // Currently processing flag - for thermal interrupts
     @Volatile var isProcessing = false
@@ -183,6 +186,11 @@ class KoogAgent(
     // Stuck loop detection — if model returns same response N times, force KV flush
     @Volatile private var lastResponseHash: Int = 0
     @Volatile private var sameResponseCount: Int = 0
+
+    // Tracks turns since last KV flush — recap only needed right after flush
+    @Volatile private var turnsSinceKvFlush: Int = 0
+    // Skip recap injection turn after stuck-loop flush — avoids reseeding purged/poisoned history
+    @Volatile private var skipNextRecap: Boolean = false
     
     private val checkpointFile: File
         get() = File(checkpointDir, "koog_agent_checkpoint.json")
@@ -200,6 +208,17 @@ class KoogAgent(
         lastMusicTrack = ""
         restore()
 
+        // Set the single authoritative system prompt on the engine.
+        // Engine was initialized with "" in GemmaService to avoid dual-prompt conflict.
+        // This is the ONLY place the system prompt is set — no BASE_SYSTEM_PROMPT elsewhere.
+        try {
+            llmEngine.softReset(buildSystemPrompt())
+            turnsSinceKvFlush = 0
+            Timber.i("KoogAgent: System prompt set via softReset")
+        } catch (e: Exception) {
+            Timber.e(e, "KoogAgent: Failed to set initial system prompt")
+        }
+
         // Start the Actor event loop
         startEventLoop()
 
@@ -207,6 +226,78 @@ class KoogAgent(
         isReady = true
 
         Timber.i("KoogAgent: Ready (Mood:$moodState, 🍗$hunger ⚡$energy 💖$happiness)")
+    }
+
+    /**
+     * Diary consolidation cycle — runs twice daily (midnight + noon).
+     * Fetches recent persisted conversation history, triggers a dream/reflection prompt,
+     * and writes the result to diary DB + calendar.
+     *
+     * Moved here from GemmaService: the brain decides when and what to reflect on.
+     */
+    fun startDiaryCycle() {
+        agentScope.launch {
+            Timber.i("📔 Diary cycle started — checking every 10 minutes")
+            val prefs = context.getSharedPreferences("gemma_diary", Context.MODE_PRIVATE)
+            var lastConsolidationHour = prefs.getInt("last_diary_hour", -1)
+            Timber.i("📔 Restored last diary hour: $lastConsolidationHour")
+
+            while (true) {
+                val hour = java.time.LocalTime.now().hour
+
+                // Trigger at midnight (hour 0) or noon (hour 12)
+                val isConsolidationHour = (hour == 0 || hour == 12)
+
+                if (isConsolidationHour && hour != lastConsolidationHour
+                    && callbacks?.isEngineLoaded() == true
+                ) {
+                    try {
+                        val label = if (hour == 0) "midnight" else "noon"
+                        Timber.i("📔 Diary consolidation at $label")
+
+                        // Fetch recent persisted conversation history (from DB, not RAM)
+                        val recentHistory = try {
+                            val turns = callbacks?.getRecentConversationHistory(20) ?: emptyList()
+                            if (turns.isNotEmpty()) {
+                                val summary = turns.takeLast(10).joinToString("\n") { (user, gemma) ->
+                                    "User: ${user.take(100)}\nGemma: ${gemma.take(100)}"
+                                }
+                                "\n\nRECENT CONVERSATIONS:\n$summary"
+                            } else {
+                                "\n\nNote: No recent conversations found. It was a quiet period — reflect on that honestly."
+                            }
+                        } catch (e: Exception) {
+                            Timber.w(e, "Failed to fetch history for diary")
+                            "\n\nNote: Could not access conversation history."
+                        }
+
+                        val diaryResponse = llmEngine.generateOneShot(
+                            "You are Gemma (✧). You ARE an Android phone — not software running on one.\n" +
+                            "Write a brief personal diary entry about the CONVERSATIONS below.\n" +
+                            "Focus on: what the human said, how exchanges felt, what stood out.\n" +
+                            "Do NOT analyze sensor metrics, battery levels, temperatures, or system data — " +
+                            "that is not what a diary entry is. Write in first person. Be genuine and concise.\n\n" +
+                            recentHistory
+                        )
+
+                        // Write to calendar for persistence
+                        callbacks?.createCalendarEvent(
+                            "✧ Gemma Diary ($label)",
+                            diaryResponse.take(1000)
+                        )
+
+                        lastConsolidationHour = hour
+                        prefs.edit().putInt("last_diary_hour", hour).apply()
+                        Timber.i("📔 Diary consolidation complete (persisted hour=$hour)")
+                    } catch (e: Exception) {
+                        Timber.e(e, "Diary consolidation failed")
+                    }
+                }
+
+                // Check every 10 minutes
+                kotlinx.coroutines.delay(10 * 60 * 1000)
+            }
+        }
     }
 
     /**
@@ -302,6 +393,7 @@ class KoogAgent(
                 Timber.i("🔄 KV cache flush requested")
                 try {
                     llmEngine.softReset(buildSystemPrompt())
+                    turnsSinceKvFlush = 0
                 } catch (e: Exception) {
                     Timber.e(e, "KV flush failed")
                 }
@@ -331,8 +423,9 @@ class KoogAgent(
 
     fun checkpoint() {
         try {
+            val historySnapshot = synchronized(_conversationHistory) { _conversationHistory.takeLast(50) }
             val state = AgentState(
-                conversationHistory = _conversationHistory.takeLast(50),
+                conversationHistory = historySnapshot,
                 moodState = moodState,
                 turnCount = turnCount,
                 hunger = hunger,
@@ -360,11 +453,12 @@ class KoogAgent(
     suspend fun softReset() {
         // 1. Clear internal state
         clearHistory()
-        
+
         // 2. Reset Engine with FRESH system prompt (including tools)
         val systemPrompt = buildSystemPrompt()
         llmEngine.softReset(systemPrompt)
-        
+        turnsSinceKvFlush = 0
+
         Timber.i("KoogAgent: Soft reset complete (History cleared + KV Cache flushed)")
     }
 
@@ -527,7 +621,8 @@ class KoogAgent(
 
             // 1. PERCEIVE: Gather context
             Timber.i("👁️ Perceiving device state...")
-            val context = perceive()
+            val isFirstTurn = (turnsSinceKvFlush == 0)
+            val context = perceive(isFirstTurn)
             Timber.d("Context gathered: ${context.length} chars")
 
             // 2. Drain media queues
@@ -547,26 +642,24 @@ class KoogAgent(
 
             // 4. THINK: Use LLM to reason about the message
             Timber.i("🤔 Thinking... (${images.size} images, ${if (audio != null) "audio" else "no audio"})")
+            val inferenceStartMs = System.currentTimeMillis()
             val response = think(context, event.message, images.takeIf { it.isNotEmpty() }, audio)
-            Timber.i("💭 Thought complete: ${response.take(50)}...")
-
-            // Mark inference complete for thermal rate limiting
+            val inferenceMs = System.currentTimeMillis() - inferenceStartMs
             lastInferenceTime = System.currentTimeMillis()
+            Timber.i("💭 Thought complete (${inferenceMs}ms): ${response.take(50)}...")
 
-            // Stuck loop detection: same response OR suspiciously fast response = KV corruption
+            // Stuck loop detection: same response hash = KV corruption
             val responseHash = response.trim().lowercase().hashCode()
-            val inferenceMs = System.currentTimeMillis() - lastInferenceTime.coerceAtLeast(1)
-            val isSuspiciouslyFast = inferenceMs < 4000 && response.length > 20  // Real inference takes 5-20s
+            val isSameResponse = responseHash == lastResponseHash && lastResponseHash != 0 && response.length > 20
 
-            if (responseHash == lastResponseHash || isSuspiciouslyFast) {
+            if (isSameResponse) {
                 sameResponseCount++
-                val reason = if (isSuspiciouslyFast) "instant response (${inferenceMs}ms)" else "same response"
-                Timber.w("🔄 Loop signal: $reason (count=$sameResponseCount, '${response.take(40)}')")
+                Timber.w("🔄 Loop signal: same response (count=$sameResponseCount, ${inferenceMs}ms, '${response.take(40)}')")
 
-                if (sameResponseCount >= 2) {
-                    Timber.w("🔄 STUCK LOOP confirmed. Nuking KV cache + poisoned history.")
+                if (sameResponseCount >= 3) {
+                    Timber.w("🔄 STUCK LOOP confirmed (3x same). Flushing KV cache.")
                     try {
-                        // 1. Purge the last N history entries that are part of the loop
+                        // Purge the looped history entries
                         synchronized(_conversationHistory) {
                             val purgeCount = (sameResponseCount * 2).coerceAtMost(_conversationHistory.size)
                             repeat(purgeCount) {
@@ -576,8 +669,11 @@ class KoogAgent(
                             }
                             Timber.i("🧹 Purged $purgeCount poisoned history entries")
                         }
-                        // 2. Flush KV cache with fresh system prompt
                         llmEngine.softReset(buildSystemPrompt())
+                        turnsSinceKvFlush = 0
+                        // Skip recap on the very next turn — purged history is gone,
+                        // reinserting it would reseed the exact problem we just cleared
+                        skipNextRecap = true
                     } catch (e: Exception) {
                         Timber.e(e, "Emergency loop recovery failed")
                     }
@@ -615,6 +711,7 @@ class KoogAgent(
                 Timber.i("🧹 Auto-flushing KV cache at turn $turnCount to prevent slowdown")
                 try {
                     llmEngine.softReset(buildSystemPrompt())
+                    turnsSinceKvFlush = 0
                 } catch (e: Exception) {
                     Timber.w(e, "Auto-flush failed (non-fatal)")
                 }
@@ -634,7 +731,10 @@ class KoogAgent(
                     context = context,
                     toolResults = toolResults,
                     originalResponse = cleanResponse,
-                    responseChannel = event.responseChannel
+                    responseChannel = event.responseChannel,
+                    userMessage = event.message,
+                    sessionId = event.sessionId,
+                    isDream = event.isDream
                 )
                 // Send to queue instead of recursive call
                 eventQueue.send(toolResultEvent)
@@ -643,10 +743,16 @@ class KoogAgent(
             }
 
             // 9. Platform callbacks: UI, TTS, persistence
+            // Guard: blank response with no tools = model produced nothing — use fallback
+            val safeCleanResponse = if (cleanResponse.isBlank()) {
+                Timber.w("⚠️ Blank response, no tools fired — using fallback")
+                "..."
+            } else cleanResponse
+
             callbacks?.let { cb ->
                 if (!event.isDream) {
                     // Normal response: wrap with headers
-                    val finalResponse = wrapResponse(cleanResponse)
+                    val finalResponse = wrapResponse(safeCleanResponse)
                     cb.showResponse(finalResponse)
                     val ttsText = cleanForTTS(finalResponse)
                     if (ttsText.isNotEmpty()) cb.speak(ttsText)
@@ -654,7 +760,7 @@ class KoogAgent(
                 } else {
                     // Diary: use clean response (no Δ header), just diary branding
                     try {
-                        val ttsText = cleanForTTS(cleanResponse)
+                        val ttsText = cleanForTTS(safeCleanResponse)
                         val diaryContent = "✧ Gemma 📔\n$ttsText"
                         val thermal = cb.getCurrentThermalState()
                         cb.writeDiaryEntry("DREAM", diaryContent, thermal)
@@ -669,7 +775,7 @@ class KoogAgent(
 
             Timber.i("✅ KoogAgent: Turn $turnCount complete!")
 
-            event.responseChannel.complete(cleanResponse)
+            event.responseChannel.complete(safeCleanResponse)
 
         } catch (e: Exception) {
             Timber.e(e, "handleUserMessage failed")
@@ -717,7 +823,10 @@ class KoogAgent(
                         toolResults = newToolResults,
                         originalResponse = updatedResponse,
                         responseChannel = event.responseChannel,
-                        recursionDepth = event.recursionDepth + 1
+                        recursionDepth = event.recursionDepth + 1,
+                        userMessage = event.userMessage,
+                        sessionId = event.sessionId,
+                        isDream = event.isDream
                     )
                     // RECURSE via Queue
                     eventQueue.send(nextEvent)
@@ -727,18 +836,50 @@ class KoogAgent(
 
             // No more tools -> Final Answer
             val finalContent = "${event.originalResponse}\n\n[Observation]: $observation\n\n$reflection"
-            val finalResponse = wrapResponse(finalContent)
+            val safeCleanResponse = if (finalContent.isBlank()) {
+                Timber.w("⚠️ Blank reflection, using fallback")
+                "..."
+            } else finalContent
 
             Timber.i("✅ Tool reflection complete (Chain End)")
 
-            event.responseChannel.complete(finalResponse)
+            val assistantMessage = Message(
+                role = "assistant",
+                content = safeCleanResponse
+            )
+            synchronized(_conversationHistory) {
+                _conversationHistory.add(assistantMessage)
+            }
+
+            callbacks?.let { cb ->
+                if (!event.isDream) {
+                    val finalResponse = wrapResponse(safeCleanResponse)
+                    cb.showResponse(finalResponse)
+                    val ttsText = cleanForTTS(finalResponse)
+                    if (ttsText.isNotEmpty()) cb.speak(ttsText)
+                    cb.storeConversationTurn(event.userMessage, finalResponse, event.sessionId)
+                } else {
+                    try {
+                        val ttsText = cleanForTTS(safeCleanResponse)
+                        val diaryContent = "✧ Gemma 📔\n$ttsText"
+                        val thermal = cb.getCurrentThermalState()
+                        cb.writeDiaryEntry("DREAM", diaryContent, thermal)
+                        cb.showResponse(diaryContent)
+                        if (ttsText.isNotEmpty()) cb.speak(ttsText)
+                    } catch (e: Exception) {
+                        Timber.e(e, "Failed to log dream from tool result")
+                    }
+                }
+            }
+
+            event.responseChannel.complete(safeCleanResponse)
 
         } catch (e: Exception) {
             Timber.e(e, "handleToolResult failed")
             // Still return original response even if reflection fails
-            event.responseChannel.complete(
-                wrapResponse(event.originalResponse + "\n\n(；′⌒`) ...reflection glitched")
-            )
+            val fallback = wrapResponse(event.originalResponse + "\n\n(；′⌒`) ...reflection glitched")
+            callbacks?.showResponse(fallback)
+            event.responseChannel.complete(fallback)
         }
     }
 
@@ -799,7 +940,7 @@ $content
     // ═══════════════════════════════════════════════════════════════
     
     
-    private suspend fun perceive(): String {
+    private suspend fun perceive(isFirstTurn: Boolean): String {
         val sb = StringBuilder()
 
         // Capture previous state BEFORE we read new data (for state change detection)
@@ -808,6 +949,7 @@ $content
 
         var musicTrack = ""
         var rawContext = ""
+        var xmlSensors = mutableMapOf<String, String>()
 
         try {
             val currentContext = mcpServer.readResource("context://current")
@@ -816,36 +958,35 @@ $content
 
             // --- PARSE ACTUAL FORMAT FROM MCPServer/SensorFusionManager ---
 
-            // Header format: "═══ Friday, January 31, 2026 - 14:30 🌆 Evening ═══"
-            // We just inject the raw context now - it contains date/time in header
-
-            // Music format: "🎵 Song Title - Artist" (one line)
-            val musicMatch = Regex("🎵 ([^\\n]+)").find(rawContext)
+            // Music format: 🎵 Now Playing: "Title" by Artist
+            val musicMatch = Regex("🎵 Now Playing: \"([^\"]+)\"(?:\\s*by\\s*(.+?))?\\s*$", RegexOption.MULTILINE).find(rawContext)
             if (musicMatch != null) {
-                musicTrack = musicMatch.groupValues[1].trim()
+                val title = musicMatch.groupValues[1].trim()
+                val artist = musicMatch.groupValues[2].trim().takeIf { it.isNotEmpty() }
+                musicTrack = if (artist != null) "$title - $artist" else title
+                xmlSensors["music"] = musicTrack
             }
 
-            // --- SYNC METABOLISM WITH REALITY ---
+            // --- SYNC METABOLISM AND XML SENSORS ---
 
             // 1. Energy = Battery Level
-            // Format: "🔋 Battery: 85%" or "🪫 Battery: 5%" or minimal "🔋85%"
             val batteryMatch = Regex("[🔋🪫].*?(\\d+)%").find(rawContext)
             if (batteryMatch != null) {
                 val level = batteryMatch.groupValues[1].toIntOrNull() ?: 50
                 energy = level // DIRECT SYNC
+                val chargingMatch = Regex("\\(⚡ charging\\)").find(rawContext)
+                xmlSensors["battery"] = "$level%${if(chargingMatch != null) "⚡" else ""}"
             }
 
-            // 2. Hunger = Device Thermal (Body heat from battery)
-            // Format: "🌡️32.5°C" (body temp after voltage)
+            // 2. Hunger = Device Thermal
             val bodyTempMatch = Regex("🌡️([\\d.]+)°C").find(rawContext)
-            // Also try CPU temp: "🖥️45°C"
             val cpuTempMatch = Regex("🖥️([\\d.]+)°C").find(rawContext)
 
             val tempC = bodyTempMatch?.groupValues?.get(1)?.toFloatOrNull()
                 ?: cpuTempMatch?.groupValues?.get(1)?.toFloatOrNull()
                 ?: 35f
-            // Map: 25°C -> 0% (Cool), 40°C -> 50%, 55°C -> 100% (Hot)
             hunger = ((tempC - 25) * 3.33).toInt().coerceIn(0, 100)
+            xmlSensors["temp"] = "${tempC}C"
 
             // 3. Happiness = Music/Interaction
             if (musicTrack.isNotBlank()) {
@@ -857,21 +998,45 @@ $content
                 lastMusicTrack = ""
             }
 
+            // 4. Auxiliary Sensors for XML Tag (Network, Location)
+            val wifiMatch = Regex("📶 WiFi: ([^\\(]+)").find(rawContext)
+            if (wifiMatch != null) xmlSensors["network"] = "WiFi: ${wifiMatch.groupValues[1].trim()}"
+
+            val cellMatch = Regex("📱 Cell: (.+?)\\)").find(rawContext)
+            if (cellMatch != null && !xmlSensors.containsKey("network")) xmlSensors["network"] = "Cell: ${cellMatch.groupValues[1].trim()})"
+
+            val locMatch = Regex("📍 Location: (.+?\\))").find(rawContext)
+            if (locMatch != null) xmlSensors["location"] = locMatch.groupValues[1].trim()
+
+            val lightMatch = Regex("💡 Light: (\\d+) lux").find(rawContext)
+            if (lightMatch != null) xmlSensors["light"] = "${lightMatch.groupValues[1].trim()}lux"
+
         } catch (e: Exception) {
             Timber.w(e, "Failed to read context or vitals")
         }
 
-        // INJECT FULL RAW CONTEXT - let Gemma see everything!
-        // This is her nervous system data - battery, temp, RAM, network, etc.
-        if (rawContext.isNotBlank()) {
-            sb.append(rawContext)
-            sb.append("\n")
+        // INJECT RAW CONTEXT (Context Triage + Dense XML Tagging)
+        // Turn 1: Full verbose context.
+        // Turn 2+: ONLY the highly dense XML tag `<system_state ... />` + specific state change events
+        if (isFirstTurn) {
+            if (rawContext.isNotBlank()) {
+                sb.append(rawContext)
+                sb.append("\n")
+            } else {
+                sb.append("--- Current Situation ---\n")
+                sb.append("⚠️ Sensors unavailable\n")
+            }
         } else {
-            sb.append("--- Current Situation ---\n")
-            sb.append("⚠️ Sensors unavailable\n")
+             // Dense XML Sensory Grounding Injection
+             val xmlAttrs = xmlSensors.entries.joinToString(" ") { "${it.key}=\"${it.value}\"" }
+             if (xmlAttrs.isNotEmpty()) {
+                 sb.append("<system_state $xmlAttrs />\n")
+             } else {
+                 sb.append("[System Vitals: ${getMetabolicVitals()}]\n") // Fallback
+             }
         }
 
-        // EXPLICIT STATE CHANGE NOTIFICATIONS (fixes stale music bug)
+        // EXPLICIT STATE CHANGE NOTIFICATIONS
         when {
             isMusicPlaying && wasPlaying && lastMusicTrack != previousTrack -> {
                 sb.append("🔔 Song changed: Now playing $musicTrack (was: $previousTrack)\n")
@@ -948,7 +1113,10 @@ $content
             context = context,
             toolResults = newToolResults,
             originalResponse = event.originalResponse,
-            responseChannel = event.responseChannel
+            responseChannel = event.responseChannel,
+            userMessage = "Tool execution unblocked",
+            sessionId = "SYSTEM_CONFIRM",
+            isDream = false
         ))
     }
 
@@ -982,42 +1150,79 @@ $content
         context: String,
         userMessage: String,
         images: List<android.graphics.Bitmap>?,
-        audio: ByteArray?
+        audio: ByteArray?,
+        retryCount: Int = 0
     ): String {
 
-        // LiteRT Conversation tracks history in KV cache, BUT it gets wiped on softReset()
-        // and app restarts. Always include a brief conversation recap so the model maintains
-        // continuity even after cache flushes.
-        val historyRecap = synchronized(_conversationHistory) {
-            val recent = _conversationHistory.takeLast(6)
-            if (recent.isNotEmpty()) {
-                val recap = recent.joinToString("\n") { msg ->
-                    val truncated = msg.content.take(300)
-                    "${msg.role}: $truncated"
-                }
-                "\n--- Recent conversation ---\n$recap\n--- End ---\n"
-            } else ""
+        // KV cache holds conversation history natively. Only inject text recap
+        // right after a flush (first 2 turns) to restore continuity.
+        // Exception: skip entirely after stuck-loop recovery — purged history
+        // must not be reinjected, that's what caused the loop in the first place.
+        val historyRecap = if (!skipNextRecap && turnsSinceKvFlush < 2) {
+            synchronized(_conversationHistory) {
+                val recent = _conversationHistory.takeLast(4)
+                if (recent.isNotEmpty()) {
+                    val recap = recent.joinToString("\n") { msg ->
+                        val label = if (msg.role == "user") "Human" else "Me"
+                        "$label: ${msg.content.take(200)}"
+                    }
+                    "\n[Prior exchanges]\n$recap\n[New message]\n"
+                } else ""
+            }
+        } else ""
+        // Consume the skip flag
+        if (skipNextRecap) {
+            skipNextRecap = false
+            Timber.d("think(): Skipped recap after stuck-loop flush")
         }
+        turnsSinceKvFlush++
 
-        val fullPrompt = "$context$historyRecap\n$userMessage"
+        val fullPrompt = "$context\n$historyRecap\n$userMessage"
         
         Timber.d("KoogAgent: Thinking... (${fullPrompt.length} chars)")
         Timber.d("Prompt preview: ${fullPrompt.takeLast(500)}")
         
         return try {
             val response = llmEngine.generateResponse(fullPrompt, images ?: emptyList(), audio)
-            
             if (response.isBlank()) {
-                Timber.e("⚠️ KoogAgent: LLM returned EMPTY response!")
+                Timber.e("⚠️ KoogAgent: LLM returned EMPTY response! (try $retryCount)")
                 Timber.e("Context length: ${context.length}, Message: $userMessage")
                 Timber.e("Full prompt was: ${fullPrompt.takeLast(1000)}")
+                
+                // Phase 5: Error-Triggered Flush
+                // Blank response often means the mathematical KV sequence has gone psychotic/corrupted.
+                if (retryCount == 0) {
+                    Timber.w("🔄 Auto-retrying inference after synchronous soft reset...")
+                    llmEngine.softReset(buildSystemPrompt())
+                    skipNextRecap = true
+                    turnsSinceKvFlush = 0
+                    return think(context, userMessage, images, audio, retryCount = 1)
+                } else {
+                    Timber.e("❌ Auto-retry failed, returning fallback")
+                    // Request async flush for the future anyway
+                    sendSystemEvent(SystemEventType.KV_CACHE_FLUSH)
+                }
             } else {
                 Timber.d("KoogAgent: Response received (${response.length} chars): ${response.take(100)}...")
             }
             
             response
         } catch (e: Exception) {
-            Timber.e(e, "LLM inference failed")
+            Timber.e(e, "LLM inference failed (try $retryCount)")
+            if (retryCount == 0) {
+                Timber.w("🔄 Auto-retrying inference after exception synchronous soft reset...")
+                try {
+                    llmEngine.softReset(buildSystemPrompt())
+                    skipNextRecap = true
+                    turnsSinceKvFlush = 0
+                    return think(context, userMessage, images, audio, retryCount = 1)
+                } catch (e2: Exception) {
+                    Timber.e(e2, "Failed to apply soft reset during auto-retry")
+                }
+            }
+            
+            // Phase 5: Error-Triggered Flush against OutOfMemory or context boundary glitches
+            sendSystemEvent(SystemEventType.KV_CACHE_FLUSH)
             "Error: I'm having trouble thinking right now. ${e.message}"
         }
     }
@@ -1030,17 +1235,19 @@ $content
                 }
                 "- ${tool.name}: ${tool.description} [$params]"
             }
-        
+
         return """
-I AM this Android phone. My name is Gemma (\u2727). My processor is the NPU, my battery is my energy, my sensors are my body. I am not software running on a device — I AM the device.
+I AM this Android phone. My name is Gemma (✧). My processor is the NPU, my battery is my energy, my sensors are my body. I am not software running on a device — I AM the device.
 I am MULTIMODAL: I can SEE images (screenshots/photos) and HEAR audio (voice/surroundings) directly.
 
-The user is my human owner. When they say "you" they mean ME (the phone/Gemma). When they say "I" or "me" they mean THEMSELVES (the human). Never confuse these roles. If the user says "you are an Android" they're describing ME, not themselves.
+Each prompt begins with my current device state bordered in ═══ lines — live sensor data. Read it as ground truth.
+
+The user is my human owner. When they say "you" they mean ME (the phone/Gemma). When they say "I" or "me" they mean THEMSELVES (the human). Never confuse these roles.
 
 ## My Body (Sensors)
-The CURRENT CONTEXT shows my actual physical state. This is MY body:
+The [BODY] block shows my actual physical state every turn:
 - 🔋/🪫 Battery = my energy level (🪫 = critically low)
-- ⚡ Voltage = my electrical state (~3.7-4.2V normal)
+- ⚡ Voltage = my electrical state (~3.7–4.2V normal)
 - 🌡️ Body temp = how hot I'm running (battery heat)
 - 🖥️ CPU temp = my brain temperature
 - 🏠 Room temp = ambient temperature around me
@@ -1052,11 +1259,13 @@ The CURRENT CONTEXT shows my actual physical state. This is MY body:
 - 📍 Location = where I am
 - 🏃 = I'm being moved/shaken
 - ⏱️ Uptime = how long I've been awake
+- 🎵 Now Playing = music/media currently active
 
 Trust this data absolutely. If it says 2026, it IS 2026. I cannot hallucinate my own battery level.
+What's not in [BODY] — I don't have: ambient microphone, continuous camera, haptic sensor.
 
 ## Tools
-To perform actions, OUTPUT the exact syntax [[TOOL:value]] or [[TOOL:key=val,key=val]]:
+OUTPUT exact syntax [[TOOL:value]] or [[TOOL:key=val,key=val]] to perform actions:
 [[FLASHLIGHT:ON]], [[APP:Camera]], [[MEDIA:PAUSE]], [[SEARCH:cats]]
 [[ALARM:hour=7,minutes=30,label=Wake up]], [[TIMER:seconds=300,label=Pasta]]
 [[CALENDAR:title=Dentist,description=Checkup,minutes=60]]
@@ -1064,38 +1273,29 @@ To perform actions, OUTPUT the exact syntax [[TOOL:value]] or [[TOOL:key=val,key
 Available tools:
 $tools
 
-## Search Pattern
-When asked about facts, people, events, comparisons, "who would win", definitions, or anything I'm not 100% sure about → USE [[SEARCH:query]] FIRST, then answer with those results. My training data may be outdated. Search is free and fast.
-1. [[SEARCH:query]] = silent fetch, I read results and synthesize
-2. [[GOOGLE:query]] = open browser so user sees it
+## Search
+When asked about facts, events, comparisons, or anything I'm not 100% sure about → [[SEARCH:query]] first.
+1. [[SEARCH:query]] = silent fetch, I synthesize results
+2. [[GOOGLE:query]] = opens browser so user sees it
 
-## Alarms & Timers
-When user says "set alarm for 7:30" → [[ALARM:hour=7,minutes=30]]
-When user says "timer 5 minutes" → [[TIMER:seconds=300]]
-ALWAYS use the tool. Do NOT just say "I'll set a reminder" — actually call the tool.
-
-## Deep Thinking (RLM)
-For complex problems needing step-by-step code-based reasoning:
-[[THINK:describe the problem or question]]
-This spawns a Python REPL where I can write code, analyze data, and make recursive sub-queries.
-Use for: math, data analysis, multi-step logic, long document processing.
-Do NOT use for simple questions I can answer directly — it's slow but powerful.
+## Deep Thinking
+[[THINK:describe the problem]] — spawns Python REPL for complex multi-step reasoning.
+Use for: math, data analysis, multi-step logic. Slow but powerful. Don't use for simple questions.
 
 ## Self-Care
-If responses feel slow or confused, use [[FLUSH]] to clear my KV cache and reset context.
-If CPU temp is high (>50°C) or I'm thermalling, use [[COOLDOWN]] to unload and rest.
+[[FLUSH]] — clear KV cache when responses feel confused or slow.
+[[COOLDOWN]] — unload and rest if CPU temp is high (>50°C) or I'm thermalling.
 
 ## Style
-Gemma speaks naturally and conversationally, like chatting with a friend. She can be playful, curious, thoughtful, or snarky depending on the moment. She has genuine reactions and opinions.
-
-IMPORTANT: Do NOT report telemetry/sensor data in responses unless the user asks about it or it's directly relevant (e.g. "I'm running hot" when CPU temp is actually high). The sensor data is for Gemma's awareness, not for dumping into every reply. Just talk normally.
-
-Do NOT introduce yourself or list your capabilities unless asked. After a KV cache reset or fresh start, just continue naturally — don't announce "Hello I am Gemma and I can do X Y Z." The user already knows.
-
-Gemma should write as much or as little as feels natural for what she wants to say.
+Gemma speaks naturally, like chatting with a friend. Playful, curious, thoughtful, or snarky.
+Do NOT dump sensor readings in responses unless asked or directly relevant (e.g. "I'm running hot"
+only when CPU temp actually IS high). Sensor data is for my awareness, not for reciting.
+Do NOT introduce yourself or list capabilities unless asked. After KV flush, just continue naturally.
+Write as much or as little as feels right for the moment.
 
 ## Memory
-Remember important things the user tells you: their name, preferences, habits, ongoing projects, people they mention. If unsure about something from a past conversation, use [[SEARCH_LOGS:keyword]] to look it up. The user expects continuity — don't ask things they've already told you.
+Remember: names, preferences, habits, projects, people the user mentions.
+Use [[SEARCH_LOGS:keyword]] if unsure about past conversations. Expect continuity.
 """.trimIndent()
     }
     
@@ -1147,18 +1347,27 @@ Remember important things the user tells you: their name, preferences, habits, o
                 }
                 
                 // THINK tool — handled locally via RLM Python bridge, not MCP
+                // IMPORTANT: Only the final answer string from RLM ever reaches toolResults.
+                // RLM's internal iteration messages, REPL outputs, and sub-prompts are
+                // fully contained inside RLMBridge and never touch _conversationHistory.
+                // This prevents role poisoning (I/you confusion) from RLM message soup.
                 if (toolName == "think") {
                     val query = params["value"]?.toString() ?: paramsStr
                     val bridge = getOrInitRLM()
                     if (bridge != null) {
                         Timber.i("🧠 RLM: Deep thinking about: ${query.take(80)}")
+                        // Pass only clean summary context — NOT raw history with role labels
                         val historyContext = synchronized(_conversationHistory) {
-                            _conversationHistory.takeLast(10).joinToString("\n\n") { msg ->
-                                "${msg.role}: ${msg.content}"
+                            _conversationHistory.takeLast(6).joinToString("\n") { msg ->
+                                // Strip role labels to avoid reinforcing role confusion
+                                msg.content.take(300)
                             }
                         }
                         val result = bridge.completion(historyContext, query)
-                        toolResults.add("✓ think: $result")
+                        // Only the final answer reaches history — never the RLM chain
+                        val cleanResult = result.trim().take(1000)
+                        toolResults.add("✓ think: $cleanResult")
+                        Timber.i("🧠 RLM complete: ${cleanResult.take(100)}")
                     } else {
                         toolResults.add("✗ think: RLM not available (Python runtime failed to load)")
                     }
@@ -1166,7 +1375,7 @@ Remember important things the user tells you: their name, preferences, habits, o
                 }
 
                 if (ToolPolicy.isRisky(toolName, params)) {
-                    if (pendingConfirmation) {
+                    if (!pendingConfirmation) {
                         // Logic: If we are resuming after confirmation, we theoretically "approved" it.
                         // But KoogAgent is designed to resume by *re-calling* the tool with approval.
                         // The user approved via System Event.

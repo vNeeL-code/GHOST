@@ -6,8 +6,8 @@
     <uses-permission android:name="android.permission.FLASHLIGHT" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <uses-permission android:name="android.permission.BIND_VOICE_INTERACTION" />
-    <uses-permission android:name="android.permission.MANAGE_VOICE_KEYPHRASES" />
+    <uses-permission android:name="android.permission.BIND_VOICE_INTERACTION" xmlns:tools="http://schemas.android.com/tools" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_VOICE_KEYPHRASES" xmlns:tools="http://schemas.android.com/tools" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
@@ -46,11 +46,11 @@
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
 
     <!-- NOTIFICATION ACCESS (for context awareness) -->
-    <uses-permission android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" />
+    <uses-permission android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" xmlns:tools="http://schemas.android.com/tools" tools:ignore="ProtectedPermissions" />
 
     <!-- Package visibility (Android 11+): needed to resolve app names from
          media session / notification package names via getApplicationInfo() -->
-    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" xmlns:tools="http://schemas.android.com/tools" tools:ignore="QueryAllPackagesPermission" />
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.flash" android:required="false" />

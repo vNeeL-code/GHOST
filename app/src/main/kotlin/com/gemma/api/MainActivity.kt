@@ -102,21 +102,55 @@ class MainActivity : Activity() {
             return
         }
 
-        // 4. Calendar (for diary sync — non-blocking)
+        // 4. Calendar (for diary sync)
         if (checkSelfPermission(android.Manifest.permission.WRITE_CALENDAR) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(
+            showState(
+                "❌ Memory Offline\n\nI need calendar access to keep my diary.",
+                "Grant Calendar"
+            ) { requestPermissions(arrayOf(
                 android.Manifest.permission.READ_CALENDAR,
                 android.Manifest.permission.WRITE_CALENDAR
-            ), 103)
+            ), 103) }
+            return
         }
 
-        // 5. Accessibility (non-blocking — guide user but don't require)
+        // 5. Location (for context awareness)
+        if (checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            showState(
+                "❌ GPS Offline\n\nI need location access to know where we are.",
+                "Grant Location"
+            ) { requestPermissions(arrayOf(
+                android.Manifest.permission.ACCESS_FINE_LOCATION,
+                android.Manifest.permission.ACCESS_COARSE_LOCATION
+            ), 104) }
+            return
+        }
+
+        // 6. Phone state (for context awareness)
+        if (checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            showState(
+                "❌ Phone Offline\n\nI need phone access to know call state.",
+                "Grant Phone"
+            ) { requestPermissions(arrayOf(android.Manifest.permission.READ_PHONE_STATE), 105) }
+            return
+        }
+
+        // 7. Bluetooth (nearby devices)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S &&
+            checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            showState(
+                "❌ Bluetooth Offline\n\nI need Bluetooth access for nearby devices.",
+                "Grant Bluetooth"
+            ) { requestPermissions(arrayOf(android.Manifest.permission.BLUETOOTH_CONNECT), 106) }
+            return
+        }
+
+        // 8. Accessibility (non-blocking — guide user but don't require)
         if (!isAccessibilityEnabled()) {
             Timber.i("Accessibility not enabled — click/scroll/type tools will be unavailable")
-            // Don't block, just log. Tools fail gracefully.
         }
 
-        // 6. Overlay
+        // 9. Overlay
         if (!Settings.canDrawOverlays(this)) {
             showState(
                 "❌ Presence Inactive\n\nI need 'Draw over other apps' permission.",
@@ -131,12 +165,12 @@ class MainActivity : Activity() {
             return
         }
         
-        // 7. ADB / Sovereign (OPTIONAL - NO LONGER BLOCKING)
+        // 10. ADB / Sovereign (OPTIONAL - NO LONGER BLOCKING)
         if (!hasSovereignPermissions()) {
             Timber.w("Sovereign permissions missing. Proceeding in Lite Mode.")
         }
 
-        // 8. Complete
+        // 11. Complete
         showState("✅ SYSTEM GREEN\n\nSovereignty Achieved.", "LAUNCHING...") { }
         completeRitual()
     }

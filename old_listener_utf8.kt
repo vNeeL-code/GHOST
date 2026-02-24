@@ -1,5 +1,7 @@
-package com.gemma.api
+﻿package com.gemma.api
 
+import android.app.Notification
+import android.media.session.MediaSession
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import timber.log.Timber
@@ -14,8 +16,27 @@ class GemmaNotificationListener : NotificationListenerService() {
 
     override fun onCreate() {
         super.onCreate()
-        instance = this
+        instance = this  // Set early so SensorFusion can attempt getActiveSessions
         Timber.d("NotificationListener created")
+    }
+
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        instance = this  // Confirm instance once fully connected
+        // onNotificationPosted only fires for NEW notifications ÔÇö scan what's already there
+        // so we catch media tokens from apps already playing when we connected.
+        try {
+            activeNotifications?.forEach { sbn -> extractMediaToken(sbn) }
+        } catch (e: Exception) {
+            Timber.w("Failed to scan active notifications on connect: ${e.message}")
+        }
+        Timber.d("NotificationListener connected ÔÇö getActiveSessions now available")
+    }
+
+    override fun onListenerDisconnected() {
+        super.onListenerDisconnected()
+        instance = null
+        Timber.d("NotificationListener disconnected")
     }
 
     override fun onDestroy() {
@@ -55,9 +76,32 @@ class GemmaNotificationListener : NotificationListenerService() {
         }
 
         Timber.d("Notification: $pkg - $title")
+        extractMediaToken(sbn)
 
         // TODO: Trigger proactive Gemma response for interesting notifications
         // Could check if Gemma is idle and inject commentary
+    }
+
+    private fun extractMediaToken(sbn: StatusBarNotification) {
+        val pkg = sbn.packageName
+        if (pkg == packageName || pkg in IGNORED_PACKAGES) return
+
+        val extras = sbn.notification.extras
+        @Suppress("DEPRECATION")
+        val token = extras.getParcelable<MediaSession.Token>(Notification.EXTRA_MEDIA_SESSION)
+        if (token != null) {
+            lastMediaToken = token
+            lastMediaPkg = pkg
+            // Also stash the notification title/text as a fallback for when
+            // MediaController.metadata is null (some apps set session before metadata).
+            val notifTitle = extras.getCharSequence("android.title")?.toString()
+            val notifText  = extras.getCharSequence("android.text")?.toString()
+            if (notifTitle?.isNotBlank() == true) {
+                lastMediaNotifTitle = notifTitle
+                lastMediaNotifText  = notifText
+            }
+            Timber.d("Captured media token from $pkg ÔÇö notifTitle=$notifTitle")
+        }
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
@@ -80,6 +124,10 @@ class GemmaNotificationListener : NotificationListenerService() {
 
     companion object {
         var instance: GemmaNotificationListener? = null
+        @Volatile var lastMediaToken: MediaSession.Token? = null
+        @Volatile var lastMediaPkg: String? = null
+        @Volatile var lastMediaNotifTitle: String? = null
+        @Volatile var lastMediaNotifText: String? = null
         private val recentNotifications = ConcurrentLinkedDeque<NotificationEntry>()
 
         // Packages to ignore (system noise)

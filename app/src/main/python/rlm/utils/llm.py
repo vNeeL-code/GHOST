@@ -40,7 +40,13 @@ class GemmaBridge:
             return f"Error during inference: {str(e)}"
 
     def _format_messages(self, messages):
-        """Format a message list into a single text prompt for Gemma 3n."""
+        """Format a message list into a single text prompt for Gemma 3n.
+
+        Deliberately avoids [USER]/[ASSISTANT]/[SYSTEM] role stamps.
+        Those labels bleed into the main conversation history and cause
+        the model to confuse conversational roles (I/you confusion).
+        Instead, use natural turn separators that don't imply identity.
+        """
         if isinstance(messages, str):
             return messages
 
@@ -54,13 +60,15 @@ class GemmaBridge:
                     role = msg.get('role', 'user')
                     content = msg.get('content', '')
                     if role == 'system':
-                        parts.append(f"[SYSTEM]: {content}")
+                        # Skip system entirely — no competing identity injection
+                        continue
                     elif role == 'assistant':
-                        parts.append(f"[ASSISTANT]: {content}")
+                        parts.append(content)
                     else:
-                        parts.append(f"[USER]: {content}")
+                        # user role — plain content, no label
+                        parts.append(content)
                 else:
                     parts.append(str(msg))
-            return "\n\n".join(parts)
+            return "\n\n---\n\n".join(parts)
 
         return str(messages)

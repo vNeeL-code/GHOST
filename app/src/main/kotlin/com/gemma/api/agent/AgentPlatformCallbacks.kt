@@ -32,4 +32,11 @@ interface AgentPlatformCallbacks {
 
     // === Mood (MacroDroid integration) ===
     fun broadcastMoodChange(state: String)
+
+    // === Diary / History ===
+    /** Get recent persisted conversation history (from DB) for diary grounding */
+    suspend fun getRecentConversationHistory(limit: Int): List<Pair<String, String>>
+
+    /** Write a calendar event (title, description) at current time */
+    fun createCalendarEvent(title: String, description: String)
 }

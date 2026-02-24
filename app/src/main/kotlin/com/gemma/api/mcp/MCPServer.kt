@@ -189,6 +189,13 @@ class MCPServer(
                 "minutes" to ParameterSpec("number", "Duration in minutes (default 30)", required = false)
             )
         ),
+        "read_calendar" to ToolDefinition(
+            name = "read_calendar",
+            description = "Read upcoming calendar events (user's schedule). Returns events for the next X days.",
+            parameters = mapOf(
+                "days" to ParameterSpec("number", "Number of days ahead to search (default 7)", required = false)
+            )
+        ),
         "flush" to ToolDefinition(
             name = "flush",
             description = "Clear KV cache and reset context when responses become slow or confused",
@@ -243,6 +250,7 @@ class MCPServer(
                 "alarm" -> executeAlarm(params)
                 "timer" -> executeTimer(params)
                 "calendar" -> executeCalendarEvent(params)
+                "read_calendar" -> executeReadCalendar(params)
                 "flush" -> executeFlush()
                 "cooldown" -> executeCooldown()
                 else -> ToolResult(false, "", "Unknown tool: $name")
@@ -488,6 +496,16 @@ class MCPServer(
 
         val result = systemTools.createCalendarEvent(title, description, System.currentTimeMillis(), durationMinutes)
         val success = result.startsWith("Calendar event created")
+        return ToolResult(success, result, if (success) null else result)
+    }
+
+    private fun executeReadCalendar(params: Map<String, Any>): ToolResult {
+        val days = params["days"]?.toString()?.toIntOrNull()
+            ?: params["value"]?.toString()?.toIntOrNull()
+            ?: 7
+
+        val result = systemTools.readCalendarEvents(days)
+        val success = !result.startsWith("Failed") && !result.startsWith("Calendar permission")
         return ToolResult(success, result, if (success) null else result)
     }
 

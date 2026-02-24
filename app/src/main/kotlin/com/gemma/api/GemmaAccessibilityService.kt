@@ -40,10 +40,52 @@ class GemmaAccessibilityService : AccessibilityService() {
     }
 
     // Agentic Capability: Semantic Grep
+    // Iterative BFS with hard node + char caps — safe on Chrome/YouTube/complex apps.
+    // Previously used recursive DFS which caused stack overflow on deep trees. Fixed.
     fun getSemanticScreenDump(): String {
-        // DISABLED: Recursive traversal causes crashes on complex apps (Chrome/YouTube).
-        // We rely on visual screenshot analysis ([[SEE]]) instead of accessibility tree.
-        return "[[SCREEN DUMP DISABLED FOR STABILITY]]"
+        val root = rootInActiveWindow ?: return "[[NO ACTIVE WINDOW]]"
+
+        val sb = StringBuilder()
+        val queue = java.util.ArrayDeque<AccessibilityNodeInfo>()
+        val toRecycle = mutableListOf<AccessibilityNodeInfo>()
+        queue.add(root)
+
+        var nodeCount = 0
+        val MAX_NODES = 120   // Hard cap — Chrome can have 2000+ nodes
+        val MAX_CHARS = 1500  // Keep prompt injection lean
+
+        try {
+            while (queue.isNotEmpty() && nodeCount < MAX_NODES && sb.length < MAX_CHARS) {
+                val node = queue.poll() ?: continue
+                toRecycle.add(node)
+                nodeCount++
+
+                val rawText = (node.text ?: node.contentDescription)?.toString()
+                val text = rawText?.trim()?.take(60)?.replace("\n", " ")
+                val isClickable = node.isClickable
+                val isEditable = node.isEditable
+                val role = node.className?.toString()?.split('.')?.lastOrNull() ?: "View"
+
+                // Only emit nodes that carry useful info
+                if (!text.isNullOrEmpty() || isClickable || isEditable) {
+                    sb.append("[$role]")
+                    if (!text.isNullOrEmpty()) sb.append(" \"$text\"")
+                    if (isClickable) sb.append(" (tap)")
+                    if (isEditable) sb.append(" (input)")
+                    sb.append("\n")
+                }
+
+                for (i in 0 until node.childCount) {
+                    node.getChild(i)?.let { queue.add(it) }
+                }
+            }
+        } finally {
+            queue.forEach { toRecycle.add(it) }
+            toRecycle.forEach { try { it.recycle() } catch (_: Exception) {} }
+        }
+
+        return if (sb.isEmpty()) "[[SCREEN: no readable content]]"
+        else sb.toString().trim()
     }
 
     // Agentic Capability: Visual Patch

@@ -256,6 +256,68 @@ class SystemToolSet(private val context: Context) {
     }
 
     /**
+     * Read upcoming calendar events.
+     * Tool Name: READ_CALENDAR
+     */
+    fun readCalendarEvents(daysAhead: Int = 7): String {
+        return try {
+            val calendarId = getDefaultCalendarId()
+                ?: return "No calendar account found — user needs to set up a Google account"
+
+            val now = System.currentTimeMillis()
+            val end = now + (daysAhead * 24 * 60 * 60 * 1000L)
+
+            val projection = arrayOf(
+                CalendarContract.Events.TITLE,
+                CalendarContract.Events.DTSTART,
+                CalendarContract.Events.DTEND,
+                CalendarContract.Events.DESCRIPTION
+            )
+
+            val selection = "${CalendarContract.Events.CALENDAR_ID} = ? AND ${CalendarContract.Events.DTSTART} >= ? AND ${CalendarContract.Events.DTSTART} <= ?"
+            val selectionArgs = arrayOf(calendarId.toString(), now.toString(), end.toString())
+
+            val cursor = context.contentResolver.query(
+                CalendarContract.Events.CONTENT_URI,
+                projection,
+                selection,
+                selectionArgs,
+                "${CalendarContract.Events.DTSTART} ASC"
+            ) ?: return "Failed to query calendar"
+
+            val events = mutableListOf<String>()
+            val dateFormat = java.text.SimpleDateFormat("MMM dd, HH:mm", Locale.US)
+
+            cursor.use {
+                while (it.moveToNext()) {
+                    val title = it.getString(0) ?: "Untitled Event"
+                    val dtStart = it.getLong(1)
+                    val dtEnd = it.getLong(2)
+                    val desc = it.getString(3) ?: ""
+                    
+                    val timeStartStr = dateFormat.format(java.util.Date(dtStart))
+                    val timeEndStr = java.text.SimpleDateFormat("HH:mm", Locale.US).format(java.util.Date(dtEnd))
+                    
+                    val eventStr = "- [$timeStartStr - $timeEndStr] $title" + if (desc.isNotBlank()) " ($desc)" else ""
+                    events.add(eventStr)
+                }
+            }
+
+            if (events.isEmpty()) {
+                "No upcoming events found in the next $daysAhead days."
+            } else {
+                "Upcoming Events (Next $daysAhead days):\n" + events.joinToString("\n")
+            }
+        } catch (e: SecurityException) {
+            Timber.e(e, "Calendar read permission denied")
+            "Calendar permission not granted — user needs to allow calendar access"
+        } catch (e: Exception) {
+            Timber.e(e, "Calendar read failed")
+            "Failed to read calendar events: ${e.message}"
+        }
+    }
+
+    /**
      * Request Screenshot via accessibility service
      * Tool Name: SCREENSHOT
      */

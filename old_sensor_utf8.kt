@@ -1,7 +1,6 @@
-package com.gemma.api.hardware
+﻿package com.gemma.api.hardware
 
 import android.app.ActivityManager
-import android.app.Notification
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.ComponentName
@@ -126,7 +125,7 @@ data class ConnectivityState(
 )
 
 data class MotionState(
-    val accelerometerX: Float?,   // m/s²
+    val accelerometerX: Float?,   // m/s┬▓
     val accelerometerY: Float?,
     val accelerometerZ: Float?,
     val isMoving: Boolean,        // Significant motion detected
@@ -172,8 +171,6 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
     // Store listener reference for cleanup
     private var sensorListener: SensorEventListener? = null
     @Volatile private var isClosed = false
-    private var sensorThread: android.os.HandlerThread? = null
-    private var sensorHandler: android.os.Handler? = null
 
     init {
         // Register sensor listeners for environment data
@@ -252,9 +249,6 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
                 Timber.d("SensorFusionManager: Unregistered all sensor listeners")
             }
             sensorListener = null
-            sensorThread?.quitSafely()
-            sensorThread = null
-            sensorHandler = null
         } catch (e: Exception) {
             Timber.w(e, "Error during sensor cleanup")
         }
@@ -294,8 +288,9 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
 
         // Register each sensor if available (many phones don't have all of these)
         // Audit Fix: Offload sensor events to background thread to prevent UI jank
-        sensorThread = android.os.HandlerThread("SensorFusionThread").apply { start() }
-        sensorHandler = android.os.Handler(sensorThread!!.looper)
+        val sensorThread = android.os.HandlerThread("SensorFusionThread")
+        sensorThread.start()
+        val sensorHandler = android.os.Handler(sensorThread.looper)
 
         sm.getDefaultSensor(Sensor.TYPE_AMBIENT_TEMPERATURE)?.let {
             sm.registerListener(listener, it, SensorManager.SENSOR_DELAY_NORMAL, sensorHandler)
@@ -357,9 +352,11 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
                              plugged == BatteryManager.BATTERY_PLUGGED_WIRELESS
 
             // TEMPERATURE - This is HER body temperature, not ambient!
-            // Returns tenths of a degree Celsius (e.g., 295 = 29.5°C)
+            // Returns tenths of a degree Celsius (e.g., 295 = 29.5┬░C)
             val tempRaw = batteryIntent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 250) ?: 250
-            val temperature = tempRaw / 10f
+            val tempCandidate = tempRaw / 10f
+            // Sanity clamp: valid battery temps are 15ÔÇô60┬░C; outside = bad read
+            val temperature = if (tempCandidate in 15f..60f) tempCandidate else 25f
 
             // Voltage in millivolts, convert to volts
             val voltageRaw = batteryIntent?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 3700) ?: 3700
@@ -517,13 +514,14 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
     /**
      * Read temperature from a thermal zone file.
      * Returns temperature in Celsius, or null if unavailable.
-     * Values in these files are typically in millidegrees (e.g., 45000 = 45°C)
+     * Values in these files are typically in millidegrees (e.g., 45000 = 45┬░C)
      */
     private fun readThermalZone(zoneName: String): Float? {
         return try {
             val file = File("/sys/class/thermal/$zoneName/temp")
             if (file.exists() && file.canRead()) {
                 val raw = file.readText().trim().toIntOrNull() ?: return null
+                if (raw <= 0) return null  // Invalid/uninitialized sensor read
                 // Most zones report in millidegrees Celsius
                 if (raw > 1000) raw / 1000f else raw.toFloat()
             } else null
@@ -535,7 +533,6 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
     // === CONNECTIVITY (CELL + BLUETOOTH) ===
     // NOTE: These reads must be FAST and non-blocking to avoid timeouts!
 
-    @android.annotation.SuppressLint("MissingPermission")
     private fun getConnectivityState(): ConnectivityState {
         // Quick fail - return defaults if anything takes too long
         return try {
@@ -654,83 +651,84 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
     // === MEDIA SESSION ===
 
     private fun getNowPlaying(): NowPlayingInfo? {
-        val isMusicActive = audioManager.isMusicActive
-
-        // PRIMARY: Scan active notifications (MacroDroid style)
-        // activeNotifications is a live snapshot — no timing race, always current.
-        val svc = GemmaNotificationListener.instance
-        if (svc != null) {
-            try {
-                val mediaNotif = svc.activeNotifications
-                    ?.asSequence()
-                    ?.filter { sbn ->
-                        if (sbn.packageName == svc.packageName) return@filter false
-                        val notif = sbn.notification
-                        val extras = notif.extras
-                        extras.containsKey(Notification.EXTRA_MEDIA_SESSION) ||
-                        notif.category == Notification.CATEGORY_TRANSPORT ||
-                        (notif.actions?.size ?: 0) >= 2
-                    }
-                    ?.maxByOrNull { it.postTime }
-
-                if (mediaNotif != null) {
-                    val extras = mediaNotif.notification.extras
-                    val title = extras.getCharSequence("android.title")?.toString()
-                        ?.takeIf { it.isNotBlank() }
-                    val text = extras.getCharSequence("android.text")?.toString()
-                        ?.takeIf { it.isNotBlank() }
-                    if (title != null) {
-                        val appName = try {
-                            val info = context.packageManager
-                                .getApplicationInfo(mediaNotif.packageName, 0)
-                            context.packageManager.getApplicationLabel(info).toString()
-                        } catch (_: Exception) {
-                            mediaNotif.packageName.split('.').lastOrNull() ?: "Media"
-                        }
-                        return NowPlayingInfo(
-                            title = title,
-                            artist = text,
-                            album = null,
-                            app = appName,
-                            isPlaying = isMusicActive
-                        )
-                    }
-                }
-            } catch (e: Exception) {
-                Timber.w(e, "Active notification media scan failed")
-            }
-        }
-
-        // FALLBACK: MediaSession API (richer metadata but timing-sensitive)
         return try {
             val msm = mediaSessionManager ?: return null
             val listenerComponent = ComponentName(context, GemmaNotificationListener::class.java)
             val controllers: List<MediaController> = try {
                 msm.getActiveSessions(listenerComponent)
             } catch (e: SecurityException) {
-                emptyList()
+                Timber.w("getActiveSessions denied ÔÇö listener not bound yet")
+                return null
             }
+
+            // Primary path: first controller with metadata from getActiveSessions()
             for (controller in controllers) {
                 val metadata = controller.metadata ?: continue
+                val playbackState = controller.playbackState
                 val title = metadata.getString(android.media.MediaMetadata.METADATA_KEY_TITLE)
                     ?: metadata.getString(android.media.MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
                     ?: continue
                 val artist = metadata.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST)
                     ?: metadata.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
+                    ?: metadata.getString(android.media.MediaMetadata.METADATA_KEY_AUTHOR)
                 val album = metadata.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM)
-                val isPlaying = controller.playbackState?.state == PlaybackState.STATE_PLAYING
+                val isPlaying = when (playbackState?.state) {
+                    PlaybackState.STATE_PLAYING,
+                    PlaybackState.STATE_BUFFERING,
+                    PlaybackState.STATE_CONNECTING -> true
+                    PlaybackState.STATE_PAUSED -> audioManager.isMusicActive
+                    PlaybackState.STATE_STOPPED,
+                    PlaybackState.STATE_ERROR,
+                    PlaybackState.STATE_NONE -> false
+                    null -> audioManager.isMusicActive
+                    else -> false
+                }
                 val appName = try {
-                    val info = context.packageManager
-                        .getApplicationInfo(controller.packageName, 0)
-                    context.packageManager.getApplicationLabel(info).toString()
-                } catch (_: Exception) {
+                    val pm = context.packageManager
+                    pm.getApplicationLabel(pm.getApplicationInfo(controller.packageName, 0)).toString()
+                } catch (e: Exception) {
                     controller.packageName.split('.').lastOrNull() ?: "Unknown"
                 }
                 return NowPlayingInfo(title, artist, album, appName, isPlaying)
             }
+
+            // Fallback: token captured from notification extras (covers apps whose sessions
+            // don't appear in getActiveSessions() ÔÇö e.g. started before listener connected)
+            val token = GemmaNotificationListener.lastMediaToken
+            if (token != null) {
+                try {
+                    val ctrl = MediaController(context, token)
+                    val metadata = ctrl.metadata
+                    val title = metadata?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE)
+                        ?: metadata?.getString(android.media.MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
+                        ?: GemmaNotificationListener.lastMediaNotifTitle
+                    if (title != null) {
+                        val artist = metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST)
+                            ?: metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
+                            ?: GemmaNotificationListener.lastMediaNotifText
+                        val isPlaying = when (ctrl.playbackState?.state) {
+                            PlaybackState.STATE_PLAYING,
+                            PlaybackState.STATE_BUFFERING,
+                            PlaybackState.STATE_CONNECTING -> true
+                            PlaybackState.STATE_PAUSED -> audioManager.isMusicActive
+                            null -> audioManager.isMusicActive
+                            else -> false
+                        }
+                        val pkg = GemmaNotificationListener.lastMediaPkg ?: ""
+                        val appName = try {
+                            val pm = context.packageManager
+                            pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
+                        } catch (e: Exception) { pkg.split('.').lastOrNull() ?: "Media" }
+                        return NowPlayingInfo(title, artist,
+                            metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM),
+                            appName, isPlaying)
+                    }
+                } catch (e: Exception) { /* stale token, ignore */ }
+            }
+
             null
         } catch (e: Exception) {
-            Timber.w(e, "MediaSession fallback failed")
+            Timber.w(e, "getNowPlaying failed")
             null
         }
     }
@@ -748,7 +746,7 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
             buildContextString(ctx)
         } catch (e: Exception) {
             Timber.e(e, "Context string failed - returning minimal")
-            "🔋 ??% 🌡️ ??°C\n⚠️ Sensors unavailable"
+            "­ƒöï ??% ­ƒîí´©Å ??┬░C\nÔÜá´©Å Sensors unavailable"
         }
     }
 
@@ -757,56 +755,67 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
 
         // Battery - clear label format (Her Body Energy)
         val battIcon = when {
-            ctx.battery.level <= 5 -> "🪫"
-            ctx.battery.level <= 20 -> "🔋"
-            else -> "🔋"
+            ctx.battery.level <= 5 -> "­ƒ¬½"
+            ctx.battery.level <= 20 -> "­ƒöï"
+            else -> "­ƒöï"
         }
         sb.append("$battIcon Battery: ${ctx.battery.level}%")
-        if (ctx.battery.isCharging) sb.append(" (⚡ charging)")
+        if (ctx.battery.isCharging) sb.append(" (ÔÜí charging)")
         if (ctx.battery.currentNow < 0) sb.append(" (${ctx.battery.currentNow}mA drain)")
         sb.append("\n")
 
         // Body temperature (Her Body Heat)
-        sb.append("🌡️ System Temp: ${String.format("%.1f", ctx.battery.temperature)}°C\n")
+        sb.append("­ƒîí´©Å System Temp: ${String.format("%.1f", ctx.battery.temperature)}┬░C\n")
 
         // Environment / Thermal sensors
         val env = ctx.environment
-        // cpuTemp removed — redundant with System Temp above + 🧠 emoji reserved for RAM
-        env.ambientTemp?.let { sb.append("🌤️ Weather Sensor: ${String.format("%.1f", it)}°C\n") }
-        env.pressure?.let { sb.append("🎈 Pressure: ${String.format("%.0f", it)} hPa\n") }
-        env.light?.let { sb.append("💡 Light: ${it.toInt()} lux\n") }
+        env.cpuTemp?.let { sb.append("­ƒºá CPU Thermal: ${String.format("%.0f", it)}┬░C\n") }
+        env.ambientTemp?.let { sb.append("­ƒîñ´©Å Weather Sensor: ${String.format("%.1f", it)}┬░C\n") }
+        env.pressure?.let { sb.append("­ƒÄê Pressure: ${String.format("%.0f", it)} hPa\n") }
+        env.light?.let { sb.append("­ƒÆí Light: ${it.toInt()} lux\n") }
 
-        // Music
+        // Audio / Music
+        val volPercent = if (ctx.audio.maxVolumeMedia > 0) (ctx.audio.volumeMedia * 100 / ctx.audio.maxVolumeMedia) else 0
         ctx.audio.nowPlaying?.let { np ->
             if (np.isPlaying) {
-                sb.append("🎵 Now Playing: \"${np.title}\"")
-                np.artist?.let { sb.append(" by $it") }
-                sb.append("\n")
+                sb.append("­ƒÄÁ Playing: \"${np.title}\"")
+                np.artist?.let { sb.append(" - $it") }
+                sb.append(" (${np.app}) ­ƒöè${volPercent}%\n")
+            } else {
+                // Still show the track name when paused ÔÇö agent can reference it contextually
+                sb.append("ÔÅ© Paused: \"${np.title}\"")
+                np.artist?.let { sb.append(" - $it") }
+                sb.append(" (${np.app}) ­ƒöè${volPercent}%\n")
             }
+        } ?: if (ctx.audio.isMusicActive) {
+            sb.append("­ƒÄÁ Music active ­ƒöè${volPercent}% (no session metadata)\n")
+        } else {
+            sb.append("­ƒöç Media: idle ­ƒöè${volPercent}%\n")
         }
 
         // System resources (With Totals)
-        sb.append("🧠 RAM: ${ctx.system.ramAvailableMB}MB free / ${ctx.system.ramTotalMB}MB total (${ctx.system.ramUsedPercent}% used)\n")
-        sb.append("💿 Storage: ${String.format("%.1f", ctx.system.storageFreeGB)}GB free / ${String.format("%.1f", ctx.system.storageTotalGB)}GB total\n")
+        val ramTotalGB = ctx.system.ramTotalMB / 1024f
+        sb.append("­ƒºá RAM: ${ctx.system.ramAvailableMB}MB free / ${String.format("%.1f", ramTotalGB)}GB total (${ctx.system.ramUsedPercent}% used)\n")
+        sb.append("­ƒÆ┐ Storage: ${String.format("%.1f", ctx.system.storageFreeGB)}GB free / ${String.format("%.1f", ctx.system.storageTotalGB)}GB total\n")
 
         // Network (WiFi + Cell)
         val netParts = mutableListOf<String>()
         if (ctx.network.wifiConnected) {
-            netParts.add("📶 WiFi: ${ctx.network.wifiSsid} (${ctx.network.wifiSignalPercent}%)")
+            netParts.add("­ƒôÂ WiFi: ${ctx.network.wifiSsid} (${ctx.network.wifiSignalPercent}%)")
         }
         ctx.connectivity.cellType?.let { type ->
             val signal = ctx.connectivity.cellSignalPercent?.let { " $it%" } ?: ""
-            netParts.add("📱 Cell: $type$signal (${ctx.connectivity.carrierName ?: "Unknown"})")
+            netParts.add("­ƒô▒ Cell: $type$signal (${ctx.connectivity.carrierName ?: "Unknown"})")
         }
         if (netParts.isEmpty()) {
-            sb.append("📵 Network: Offline\n")
+            sb.append("­ƒôÁ Network: Offline\n")
         } else {
             sb.append(netParts.joinToString(" | ") + "\n")
         }
 
         // Bluetooth
         if (ctx.connectivity.bluetoothEnabled) {
-            sb.append("🔵 Bluetooth: ")
+            sb.append("­ƒöÁ Bluetooth: ")
             if (ctx.connectivity.bluetoothConnected) {
                 sb.append(ctx.connectivity.bluetoothDeviceName ?: "Connected")
             } else {
@@ -818,15 +827,15 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
         // Motion / Orientation
         ctx.motion.orientation?.let { orient ->
             val orientIcon = when (orient) {
-                "portrait" -> "📱"
-                "landscape-left", "landscape-right" -> "📱↔️"
-                "flat" -> "📱⬇️"
-                else -> "📱"
+                "portrait" -> "­ƒô▒"
+                "landscape-left", "landscape-right" -> "­ƒô▒Ôåö´©Å"
+                "flat" -> "­ƒô▒Ô¼ç´©Å"
+                else -> "­ƒô▒"
             }
-            sb.append("📐 Orientation: $orientIcon $orient")
+            sb.append("­ƒôÉ Orientation: $orientIcon $orient")
         }
         if (ctx.motion.isMoving) {
-            sb.append(" (🏃 moving)")
+            sb.append(" (­ƒÅâ moving)")
         }
         sb.append("\n")
 
@@ -835,7 +844,7 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
             ctx.motion.lastLocationLon?.let { lon ->
                 val age = ctx.motion.locationAgeMinutes ?: 999
                 if (age < 60) {
-                    sb.append("📍 Location: ${String.format("%.4f", lat)}, ${String.format("%.4f", lon)} (${age}m ago)")
+                    sb.append("­ƒôì Location: ${String.format("%.4f", lat)}, ${String.format("%.4f", lon)} (${age}m ago)")
                 }
             }
         }
@@ -843,7 +852,7 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
         // Uptime
         val hours = ctx.system.uptimeMinutes / 60
         val mins = ctx.system.uptimeMinutes % 60
-        sb.append("⏱️ ${hours}h${mins}m")
+        sb.append("ÔÅ▒´©Å ${hours}h${mins}m")
 
         return sb.toString()
     }

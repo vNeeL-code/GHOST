@@ -38,6 +38,7 @@ class AudioRecorder(private val context: Context) {
      * @param durationSeconds How long to record (max 30 seconds)
      * @return ByteArray of WAV data, or null on failure
      */
+    @android.annotation.SuppressLint("MissingPermission")
     suspend fun record(durationSeconds: Int, rawPcm: Boolean = false): ByteArray? {
         if (!hasPermission()) {
             Timber.w("No audio recording permission")

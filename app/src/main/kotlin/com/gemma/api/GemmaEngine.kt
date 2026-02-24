@@ -295,8 +295,9 @@ class GemmaEngine(private val context: Context) {
     private fun truncateRepetition(response: String): String {
         if (response.length < 500) return response
 
-        // Only flag long sentences (40+ chars) — short phrases could be lyrics or emphasis
-        val sentences = response.split(Regex("""(?<=[.!?])\s+""")).filter { it.length > 40 }
+        // Only flag long sentences (15+ chars) — short phrases could be lyrics or emphasis
+        // Tuned down from 40 to catch short psychotic breaks like "I'm a Gemma."
+        val sentences = response.split(Regex("""(?<=[.!?])\s+""")).filter { it.length >= 15 }
         if (sentences.size < 6) return response
 
         // Find first sentence that repeats 4+ times (genuine loop, not style)
