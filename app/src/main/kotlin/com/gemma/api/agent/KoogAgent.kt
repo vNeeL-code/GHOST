@@ -1223,8 +1223,16 @@ $content
         
         return try {
             val response = llmEngine.generateResponse(fullPrompt, images ?: emptyList(), audio)
-            if (response.isBlank()) {
-                Timber.e("⚠️ KoogAgent: LLM returned EMPTY response! (try $retryCount)")
+            
+            // Phase 10: Fix Auto-Retry Bypass. GemmaEngine returns formatted error strings 
+            // instead of throwing exceptions. We must catch them here to trigger the flush.
+            val isErrorResponse = response.isBlank() || 
+                                  response.contains("Timeout! My thoughts got stuck") || 
+                                  response.startsWith("Error:")
+
+            if (isErrorResponse) {
+                Timber.e("⚠️ KoogAgent: LLM returned Error/Empty response! (try $retryCount)")
+                Timber.e("Response was: $response")
                 Timber.e("Context length: ${context.length}, Message: $userMessage")
                 Timber.e("Full prompt was: ${fullPrompt.takeLast(1000)}")
                 
