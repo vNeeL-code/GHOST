@@ -1366,11 +1366,17 @@ Use [[SEARCH_LOGS:keyword]] if unsure about past conversations. Expect continuit
     ): Pair<String, List<String>> {
         var cleanResponse = response
         
-        // Phase 7: Hallucinated Observation Stripping
-        // If the model ignores the prompt and tries to write its own "[Observation]" to match 
-        // the injection pattern, forcefully delete it to prevent loop buildup.
-        val hallucinatedObsRegex = """(?s)\n\s*\[Observation\].*""".toRegex()
-        cleanResponse = cleanResponse.replace(hallucinatedObsRegex, "")
+        // Phase 7 & 13: Aggressive Hallucination Stripping
+        // If the model ignores the prompt and tries to write its own "[Observation]" or 
+        // hallucinates the massive "CURRENT STATE" block to match the injection pattern,
+        // forcefully delete it to prevent loop buildup and UI poisoning.
+        // We use (?s) for dot-matches-newline, and (\n\s*)* to catch it even if it lacks leading newlines.
+        val hallucinatedObsRegex = """(?s)(\n\s*)*\[Observation\].*""".toRegex()
+        val hallucinatedStateRegex = """(?s)(\n\s*)*═══\s*CURRENT STATE.*""".toRegex()
+        
+        cleanResponse = cleanResponse
+            .replace(hallucinatedObsRegex, "")
+            .replace(hallucinatedStateRegex, "")
 
         // 1. Header/Footer stripping (if model included them)
         val headerRegex = """^\s*✦\s*Gemma[^\n]*∇\s*\n?""".toRegex(RegexOption.MULTILINE)
