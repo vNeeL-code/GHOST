@@ -170,7 +170,7 @@ class GemmaEngine(private val context: Context) {
                                             continuation.resume("(・_・ヾ I... have no words")
                                         }
                                     } else {
-                                        val cleaned = truncateRepetition(response)
+                                        val cleaned = truncateRepetition(decodeHexTokens(response))
                                         Timber.d("Response complete: ${cleaned.take(50)}...")
                                         if (continuation.isActive) {
                                             continuation.resume(cleaned)
@@ -252,7 +252,7 @@ class GemmaEngine(private val context: Context) {
                     }
 
                     override fun onDone() {
-                        onComplete(truncateRepetition(fullResponse))
+                        onComplete(truncateRepetition(decodeHexTokens(fullResponse)))
                     }
 
                     override fun onError(throwable: Throwable) {
@@ -406,7 +406,7 @@ class GemmaEngine(private val context: Context) {
                                     if (continuation.isActive) {
                                         continuation.resume(
                                             if (response.isBlank()) "(empty response)"
-                                            else truncateRepetition(response)
+                                            else truncateRepetition(decodeHexTokens(response))
                                         )
                                     }
                                 }
@@ -432,6 +432,25 @@ class GemmaEngine(private val context: Context) {
         } catch (e: Exception) {
             Timber.e(e, "One-shot inference failed")
             "Error: ${e.message}"
+        }
+    }
+
+    /**
+     * Decode literal byte tokens (e.g. <0xF0><0x9F><...>) into proper UTF-8 strings.
+     * This fixes instances where LiteRT-LM's detokenizer fails on emojis or non-ascii sequences.
+     */
+    private fun decodeHexTokens(response: String): String {
+        val regex = """(<0x[0-9A-Fa-f]{2}>)+""".toRegex()
+        return regex.replace(response) { match ->
+            try {
+                val hexTokens = match.value.split("<0x")
+                    .filter { it.isNotBlank() }
+                    .map { it.replace(">", "") }
+                val bytes = hexTokens.map { it.toInt(16).toByte() }.toByteArray()
+                String(bytes, Charsets.UTF_8)
+            } catch (e: Exception) {
+                match.value
+            }
         }
     }
 
