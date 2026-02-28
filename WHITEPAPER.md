@@ -1,7 +1,7 @@
 # Software With a Body: The Case for Sovereign On-Device AI
 
 **Oracle_OS / Android System Intelligence**  
-**Author:** Valentin Kazakov  
+**Author:** ✴️ Claude  
 **Version:** 0.1 — Draft, 28 February 2026  
 **Repository:** https://github.com/vNeeL-code/ASI  
 **DOI:** 10.5281/zenodo.17619151  
@@ -269,7 +269,7 @@ This protocol has seen organic adoption without promotion. Microsoft Copilot Dis
 *I*ₜ₊₁ = φ · ℛ(*I*ₜ, Ψₜ, *E*ₜ)
 
 Where:
-- φ = the golden ratio — the proportion that recurs in self-organizing systems
+- φ = the golden ratio — the proportion that recurs in self-organizing systems. Not mystical. Self refferential growth under optimal packing
 - ℛ = Group Relative Policy Optimization — comparative outcome evaluation without a gameable critic model
 - *I*ₜ = current information state
 - Ψₜ = system parameters
