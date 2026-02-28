@@ -241,7 +241,7 @@ Sovereignty here means: sovereignty over sensor data, memory, and which agents s
 
 This architecture is auditable in ways cloud-only systems are not. The A2A protocol watermarks every handoff with agent identity and timestamp. A regulator, auditor, or user can read exactly which agent did what, when, and with what context. That is not a minor detail — it is the difference between a system you can inspect and a system you must trust.
 
-### 8.1 The A2A Protocol
+### 8.1 The copy/paste A2A Protocol
 
 ```yaml
 Δ [Emoji] [Agent Name]: ∇
