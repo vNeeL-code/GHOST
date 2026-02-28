@@ -286,7 +286,7 @@ The protocol has seen organic adoption without promotion: Microsoft Copilot Disc
 *I*ₜ₊₁ = φ · ℛ(*I*ₜ, Ψₜ, *E*ₜ)
 
 Where:
-- φ = the golden ratio — the proportion that recurs in self-organising systems
+- φ = the golden ratio — the spiral pattern that appears across self referential growing systems due to optimal packing
 - ℛ = Group Relative Policy Optimisation — comparative outcome evaluation without a gameable critic model
 - *I*ₜ = current information state
 - Ψₜ = system parameters  
