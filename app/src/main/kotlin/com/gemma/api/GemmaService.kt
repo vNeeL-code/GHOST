@@ -12,6 +12,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
@@ -44,9 +45,23 @@ import com.gemma.api.mcp.MCPServer
  */
 class GemmaService : Service(), AgentPlatformCallbacks {
 
+    inner class LocalBinder : android.os.Binder() {
+        fun getService(): GemmaService = this@GemmaService
+    }
+    
+    // UI streaming interface for the native chat activity
+    interface UiCallback {
+        fun onMessageAdded(message: String, isUser: Boolean, isComplete: Boolean = true)
+        fun onThinkingStateChanged(isThinking: Boolean)
+    }
+    
+    var uiCallback: UiCallback? = null
+
+    private val serviceScope = CoroutineScope(Dispatchers.Default + Job())
+
     // Mandatory Service implementation
     override fun onBind(intent: Intent?): IBinder? {
-        return null
+        return LocalBinder()
     }
 
     // IO dispatcher: inference + DB work must not compete with the UI render thread.
@@ -698,7 +713,44 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         }
     }
 
-    suspend fun processQuery(userPrompt: String, sessionId: String, isDream: Boolean = false): String {
+    /**
+     * Called directly by MainActivity to process native chat interface queries.
+     * It uses the same backend engine but avoids spinning up unnecessary Overlay/Audio managers.
+     */
+    fun processQueryFromUi(prompt: String) {
+        if (!::koogAgent.isInitialized || !koogAgent.isReady) {
+            uiCallback?.onMessageAdded("Agent is still initializing. Please wait a moment and try again.", isUser = false)
+            return
+        }
+        
+        // Let UI know we accepted it
+        uiCallback?.onMessageAdded(prompt, isUser = true)
+        uiCallback?.onThinkingStateChanged(true)
+        
+        serviceScope.launch {
+            try {
+                // Pass it through the core pipeline without triggering TTS audio unless explicitly asked
+                // processQuery signature: suspend fun processQuery(userPrompt: String, sessionId: String? = null): String
+                val response = processQuery(prompt, null, false)
+                
+                withContext(Dispatchers.Main) {
+                    uiCallback?.onThinkingStateChanged(false)
+                    uiCallback?.onMessageAdded(response ?: "Error: Did not generate response.", isUser = false)
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "UI processing failure")
+                withContext(Dispatchers.Main) {
+                    uiCallback?.onThinkingStateChanged(false)
+                    uiCallback?.onMessageAdded("Error: ${e.message}", isUser = false)
+                }
+            }
+        }
+    }
+
+    /**
+     * Core orchestrator: Context gathering + LLM reasoning + Tool execution
+     */
+    suspend fun processQuery(userPrompt: String, sessionId: String? = null, isDream: Boolean = false): String? {
         if (!::koogAgent.isInitialized || !koogAgent.isReady) {
             responseNotificationManager.showResponse("⚠️ Agent still starting up... try again in a moment")
             return "Agent is still initializing. Please wait a moment and try again."
@@ -706,12 +758,12 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
         if (!isDream) markActivity()
 
-        return kotlinx.coroutines.withTimeout(120000) {
+        return kotlinx.coroutines.withTimeoutOrNull(120000) {
             koogAgent.processUserMessage(
                 message = userPrompt,
-                sessionId = sessionId,
+                sessionId = sessionId ?: java.util.UUID.randomUUID().toString(),
                 isDream = isDream
-            )
+            ) ?: "Error: Agent returned null."
         }
     }
     
@@ -861,6 +913,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     private var currentFrame = 0
     private var animationJob: Job? = null
     private var lastActivityTime = System.currentTimeMillis()
+    private var lastKvFlushTime = System.currentTimeMillis()
     
     private fun startAnimationLoop() {
         animationJob?.cancel()
@@ -870,6 +923,16 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                     val frame = getNextAnimationFrame()
                     updateNotification("✧💭 $frame")
                 }
+                
+                val now = System.currentTimeMillis()
+                if (now - lastActivityTime > 15 * 60 * 1000 && now - lastKvFlushTime > 15 * 60 * 1000) {
+                    lastKvFlushTime = now
+                    if (::koogAgent.isInitialized) {
+                        Timber.d("GemmaService: Triggering 15-min inactivity KV Cache Flush")
+                        koogAgent.sendSystemEvent(KoogAgent.SystemEventType.KV_CACHE_FLUSH)
+                    }
+                }
+
                 delay(500) // 500ms per frame
             }
         }
@@ -927,7 +990,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         // Checkpoint agent state in case process is killed next
         if (::koogAgent.isInitialized) {
             try {
-                kotlinx.coroutines.runBlocking {
+                kotlinx.coroutines.runBlocking(Dispatchers.IO) {
                     kotlinx.coroutines.withTimeoutOrNull(3000L) {
                         koogAgent.checkpoint()
                     }
@@ -960,7 +1023,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     private fun performCriticalCleanup() {
         try {
             // Use runBlocking to ensure cleanup completes (Kimi's fix for GlobalScope leak)
-            kotlinx.coroutines.runBlocking {
+            kotlinx.coroutines.runBlocking(Dispatchers.IO) {
                 kotlinx.coroutines.withTimeoutOrNull(5000L) {
                     // Shutdown agent (closes event queue and checkpoints)
                     if (::koogAgent.isInitialized) {

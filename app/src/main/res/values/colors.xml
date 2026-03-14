@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="brand_primary">#9C27B0</color>
+    <color name="brand_secondary">#E1BEE7</color>
+    <color name="background_dark">#121212</color>
+    <color name="bubble_user">#212121</color>
+    <color name="bubble_gemma">#1A1A1A</color>
+    <color name="text_primary">#FFFFFF</color>
+    <color name="text_secondary">#B3FFFFFF</color>
+    <color name="accent_border">#333333</color>
+    <color name="matrix_green">#00FF41</color>
+    <color name="user_cyan">#00BCD4</color>
+</resources>

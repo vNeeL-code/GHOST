@@ -91,7 +91,7 @@ class RLMBridge(
     inner class InferenceCallback {
         fun infer(prompt: String): String {
             Timber.d("RLMBridge: Python→Kotlin inference (${prompt.length} chars)")
-            return runBlocking {
+            return kotlinx.coroutines.runBlocking(Dispatchers.IO) {
                 engine.generateOneShot(prompt)
             }
         }

@@ -126,7 +126,7 @@ class SystemToolSet(private val context: Context) {
                 AppInfo(label, pkg)
             }
         }
-        return appListCache!!
+        return appListCache ?: emptyList()
     }
 
     private fun findBestMatch(query: String, apps: List<AppInfo>): AppInfo? {

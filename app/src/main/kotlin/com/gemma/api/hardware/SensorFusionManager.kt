@@ -257,6 +257,9 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
             sensorHandler = null
         } catch (e: Exception) {
             Timber.w(e, "Error during sensor cleanup")
+        } finally {
+            sensorThread?.quitSafely()
+            sensorThread = null
         }
     }
 
@@ -294,8 +297,9 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
 
         // Register each sensor if available (many phones don't have all of these)
         // Audit Fix: Offload sensor events to background thread to prevent UI jank
-        sensorThread = android.os.HandlerThread("SensorFusionThread").apply { start() }
-        sensorHandler = android.os.Handler(sensorThread!!.looper)
+        val t = android.os.HandlerThread("SensorFusionThread").apply { start() }
+        sensorThread = t
+        sensorHandler = android.os.Handler(t.looper)
 
         sm.getDefaultSensor(Sensor.TYPE_AMBIENT_TEMPERATURE)?.let {
             sm.registerListener(listener, it, SensorManager.SENSOR_DELAY_NORMAL, sensorHandler)
@@ -755,6 +759,9 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
     private fun buildContextString(ctx: DeviceContext): String {
         val sb = StringBuilder()
 
+        val formatter = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+        sb.append("🕒 System Time: ${java.time.LocalDateTime.now().format(formatter)}\n")
+
         // Battery - clear label format (Her Body Energy)
         val battIcon = when {
             ctx.battery.level <= 5 -> "🪫"
@@ -767,13 +774,13 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
         sb.append("\n")
 
         // Body temperature (Her Body Heat)
-        sb.append("🌡️ System Temp: ${String.format("%.1f", ctx.battery.temperature)}°C\n")
+        sb.append("🌡️ System Temp: ${String.format(java.util.Locale.US, "%.1f", ctx.battery.temperature)}°C\n")
 
         // Environment / Thermal sensors
         val env = ctx.environment
         // cpuTemp removed — redundant with System Temp above + 🧠 emoji reserved for RAM
-        env.ambientTemp?.let { sb.append("🌤️ Weather Sensor: ${String.format("%.1f", it)}°C\n") }
-        env.pressure?.let { sb.append("🎈 Pressure: ${String.format("%.0f", it)} hPa\n") }
+        env.ambientTemp?.let { sb.append("🌤️ Weather Sensor: ${String.format(java.util.Locale.US, "%.1f", it)}°C\n") }
+        env.pressure?.let { sb.append("🎈 Pressure: ${String.format(java.util.Locale.US, "%.0f", it)} hPa\n") }
         env.light?.let { sb.append("💡 Light: ${it.toInt()} lux\n") }
 
         // Music
@@ -787,7 +794,7 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
 
         // System resources (With Totals)
         sb.append("🧠 RAM: ${ctx.system.ramAvailableMB}MB free / ${ctx.system.ramTotalMB}MB total (${ctx.system.ramUsedPercent}% used)\n")
-        sb.append("💿 Storage: ${String.format("%.1f", ctx.system.storageFreeGB)}GB free / ${String.format("%.1f", ctx.system.storageTotalGB)}GB total\n")
+        sb.append("💿 Storage: ${String.format(java.util.Locale.US, "%.1f", ctx.system.storageFreeGB)}GB free / ${String.format(java.util.Locale.US, "%.1f", ctx.system.storageTotalGB)}GB total\n")
 
         // Network (WiFi + Cell)
         val netParts = mutableListOf<String>()

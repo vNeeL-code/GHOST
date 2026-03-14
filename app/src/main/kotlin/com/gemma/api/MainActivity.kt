@@ -1,78 +1,137 @@
 package com.gemma.api
 
 import android.app.Activity
-import android.app.AlertDialog
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.ServiceConnection
 import android.os.Bundle
 import android.os.Handler
+import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
 import android.net.Uri
+import android.view.View
+import android.widget.Button
+import android.widget.EditText
+import android.widget.ProgressBar
+import android.widget.TextView
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import timber.log.Timber
 import com.gemma.api.services.TTSManager
+import com.gemma.api.ui.chat.ChatAdapter
+import com.gemma.api.ui.chat.ChatMessage
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
- * The Birth Chamber / Activation Ritual
- * 
- * Instead of asking for permissions, the Agent guides the user to "empower" it.
+ * The Advanced Oracle_OS Gateway
+ * Handles Permissions, then spawns the Native Chat Interface seamlessly hooking into GemmaService.
  */
-class MainActivity : Activity() {
+class MainActivity : Activity(), GemmaService.UiCallback {
     
-    private lateinit var statusTextView: android.widget.TextView
-    private lateinit var actionButton: android.widget.Button
-    private lateinit var bypassButton: android.widget.Button // New Bypass Button
+    // UI Elements - Launcher Phase
+    private lateinit var statusTextView: TextView
+    private lateinit var actionButton: Button
+    private lateinit var bypassButton: Button
+    
+    // UI Elements - Chat Phase
+    private var chatRecyclerView: RecyclerView? = null
+    private var chatInputText: EditText? = null
+    private var btnSend: Button? = null
+    private var thinkingProgress: ProgressBar? = null
+    private var thinkingText: TextView? = null
+    
+    private lateinit var chatAdapter: ChatAdapter
     private lateinit var ttsManager: TTSManager
     
+    // Service Binding
+    private var gemmaService: GemmaService? = null
+    private var isBound = false
+    private val scope = CoroutineScope(Dispatchers.Main + Job())
+    
     private val handler = Handler(Looper.getMainLooper())
-    private var isHandshakeInstructionSpoken = false
+    private var isRitualComplete = false
+
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(className: ComponentName, service: IBinder) {
+            val binder = service as GemmaService.LocalBinder
+            gemmaService = binder.getService()
+            gemmaService?.uiCallback = this@MainActivity
+            isBound = true
+            Timber.i("🌀 UI successfully bound to GemmaService")
+            
+            // Switch to Chat UI now that the backend is officially wired up
+            if (!isFinishing) {
+                transitionToChatUi()
+            }
+        }
+
+        override fun onServiceDisconnected(arg0: ComponentName) {
+            isBound = false
+            gemmaService?.uiCallback = null
+            gemmaService = null
+            Timber.i("🌀 UI unbound from GemmaService")
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Timber.i("🌀 Entering the System Check...")
         
-        // UI Layout: Status Text + Action Button
+        // Init Voice
+        ttsManager = TTSManager(this)
+        
+        // Start in Launcher Phase
+        setupLauncherUi()
+    }
+    
+    private fun setupLauncherUi() {
         val layout = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
-            setPadding(50, 50, 50, 50) // manual padding
+            setPadding(50, 50, 50, 50)
             setBackgroundColor(android.graphics.Color.BLACK)
         }
         
-        statusTextView = android.widget.TextView(this).apply {
+        statusTextView = TextView(this).apply {
             textSize = 18f
             setPadding(0, 0, 0, 50)
             text = "Initializing System Check..."
             setTextColor(android.graphics.Color.WHITE)
         }
         
-        actionButton = android.widget.Button(this).apply {
+        actionButton = Button(this).apply {
             textSize = 18f
             text = "Check State"
-            visibility = android.view.View.GONE
+            visibility = View.GONE
         }
         
-        bypassButton = android.widget.Button(this).apply {
+        bypassButton = Button(this).apply {
             textSize = 16f
             text = "Skip (Lite Mode)"
             setTextColor(android.graphics.Color.RED)
-            visibility = android.view.View.GONE
+            visibility = View.GONE
         }
         
         layout.addView(statusTextView)
         layout.addView(actionButton)
-        layout.addView(bypassButton) // Add to layout
+        layout.addView(bypassButton)
         setContentView(layout)
-        
-        // Init Voice
-        ttsManager = TTSManager(this)
     }
     
     override fun onResume() {
         super.onResume()
-        // Check state every time we come back
-        handler.postDelayed({ checkSystemState() }, 500)
+        if (!isRitualComplete) {
+            handler.postDelayed({ checkSystemState() }, 500)
+        }
     }
 
+    // --- PERMISSIONS RITUAL ---
+    
     private fun checkSystemState() {
         // 1. Notifications (Android 13+ requires POST_NOTIFICATIONS)
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
@@ -145,7 +204,7 @@ class MainActivity : Activity() {
             return
         }
 
-        // 8. Accessibility (non-blocking — guide user but don't require)
+        // 8. Accessibility (non-blocking)
         if (!isAccessibilityEnabled()) {
             Timber.i("Accessibility not enabled — click/scroll/type tools will be unavailable")
         }
@@ -165,12 +224,7 @@ class MainActivity : Activity() {
             return
         }
         
-        // 10. ADB / Sovereign (OPTIONAL - NO LONGER BLOCKING)
-        if (!hasSovereignPermissions()) {
-            Timber.w("Sovereign permissions missing. Proceeding in Lite Mode.")
-        }
-
-        // 11. Complete
+        // 10. Complete
         showState("✅ SYSTEM GREEN\n\nSovereignty Achieved.", "LAUNCHING...") { }
         completeRitual()
     }
@@ -178,48 +232,28 @@ class MainActivity : Activity() {
     private fun showState(status: String, buttonText: String, action: () -> Unit) {
         statusTextView.text = status
         actionButton.text = buttonText
-        actionButton.visibility = android.view.View.VISIBLE
+        actionButton.visibility = View.VISIBLE
         actionButton.setOnClickListener { action() }
-    }
-    
-    private fun hasSovereignPermissions(): Boolean {
-        return checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) == android.content.pm.PackageManager.PERMISSION_GRANTED &&
-               checkSelfPermission(android.Manifest.permission.DUMP) == android.content.pm.PackageManager.PERMISSION_GRANTED &&
-               checkSelfPermission(android.Manifest.permission.READ_LOGS) == android.content.pm.PackageManager.PERMISSION_GRANTED
     }
     
     private fun isAccessibilityEnabled(): Boolean {
         val expectedServiceName = "$packageName/${GemmaAccessibilityService::class.java.canonicalName}"
         val enabledServices = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
-        
-        Timber.d("Accessibility Check: Expected='$expectedServiceName', Enabled='$enabledServices'")
-        
-        // Check if service is in the enabled list
         val isInEnabledList = enabledServices?.contains(expectedServiceName) == true
-        
-        // Also check if accessibility is actually turned on globally
-        val accessibilityEnabled = try {
-            Settings.Secure.getInt(contentResolver, Settings.Secure.ACCESSIBILITY_ENABLED)
-        } catch (e: Settings.SettingNotFoundException) {
-            0
-        }
-        
-        val isGloballyEnabled = accessibilityEnabled == 1
-        
-        Timber.d("Accessibility: InList=$isInEnabledList, GloballyEnabled=$isGloballyEnabled")
-        
-        return isInEnabledList && isGloballyEnabled
+        val accessibilityEnabled = try { Settings.Secure.getInt(contentResolver, Settings.Secure.ACCESSIBILITY_ENABLED) } catch (e: Exception) { 0 }
+        return isInEnabledList && accessibilityEnabled == 1
     }
 
     private fun completeRitual() {
-        if (!isFinishing) {
+        if (!isFinishing && !isRitualComplete) {
+           isRitualComplete = true
            actionButton.isEnabled = false
            ttsManager.speak("Online.")
-           handler.postDelayed({ launchServiceAndFinish() }, 1000)
+           handler.postDelayed({ launchAndBindService() }, 1000)
         }
     }
 
-    private fun launchServiceAndFinish() {
+    private fun launchAndBindService() {
         try {
             val intent = Intent(this, GemmaService::class.java)
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
@@ -227,10 +261,10 @@ class MainActivity : Activity() {
             } else {
                 startService(intent)
             }
+            // Bind so we can pipe the UI 
+            bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
         } catch (e: Exception) {
-            Timber.e(e, "Failed to start service")
-        } finally {
-            finish()
+            Timber.e(e, "Failed to start or bind service")
         }
     }
     
@@ -239,8 +273,86 @@ class MainActivity : Activity() {
         checkSystemState()
     }
     
+    // --- NATIVE CHAT UI PHASE ---
+
+    private fun transitionToChatUi() {
+        setContentView(R.layout.activity_main_chat)
+        
+        chatRecyclerView = findViewById(R.id.chatRecyclerView)
+        chatInputText = findViewById(R.id.chatInputText)
+        btnSend = findViewById(R.id.btnSend)
+        thinkingProgress = findViewById(R.id.thinkingProgress)
+        thinkingText = findViewById(R.id.thinkingText)
+        
+        chatAdapter = ChatAdapter()
+        chatRecyclerView?.apply {
+            layoutManager = LinearLayoutManager(this@MainActivity).apply {
+                stackFromEnd = true // Start from bottom like a real chat app
+            }
+            adapter = chatAdapter
+        }
+        
+        btnSend?.setOnClickListener {
+            val text = chatInputText?.text?.toString()?.trim()
+            if (!text.isNullOrEmpty() && gemmaService != null) {
+                chatInputText?.setText("")
+                gemmaService?.processQueryFromUi(text)
+            }
+        }
+        
+        loadHistoricalChat()
+    }
+    
+    private fun loadHistoricalChat() {
+        scope.launch {
+            try {
+                // Fetch the last 20 messages for the UI purely from the SQLite DB bound in GemmaService
+                val history = gemmaService?.getRecentConversationHistory(20) ?: emptyList()
+                val messages = mutableListOf<ChatMessage>()
+                // Since history is [newest..oldest], reverse it to [oldest..newest] for standard logical flow
+                for ((userMsg, gemmaMsg) in history.reversed()) {
+                    messages.add(ChatMessage(userMsg, isFromUser = true))
+                    messages.add(ChatMessage(gemmaMsg, isFromUser = false))
+                }
+                withContext(Dispatchers.Main) {
+                    if (messages.isNotEmpty()) {
+                        chatAdapter.setMessages(messages)
+                        chatRecyclerView?.scrollToPosition(messages.size - 1)
+                    } else {
+                        // Empty state initial greeting
+                        chatAdapter.addMessage(ChatMessage("Hello! I am completely integrated natively now. How can I help?", isFromUser = false))
+                    }
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to load chat history")
+            }
+        }
+    }
+
+    // --- GEMMA SERVICE CALLBACKS ---
+
+    override fun onMessageAdded(message: String, isUser: Boolean, isComplete: Boolean) {
+        runOnUiThread {
+            chatAdapter.addMessage(ChatMessage(message, isFromUser = isUser))
+            chatRecyclerView?.scrollToPosition(chatAdapter.itemCount - 1)
+        }
+    }
+
+    override fun onThinkingStateChanged(isThinking: Boolean) {
+        runOnUiThread {
+            thinkingProgress?.visibility = if (isThinking) View.VISIBLE else View.GONE
+            thinkingText?.visibility = if (isThinking) View.VISIBLE else View.GONE
+            btnSend?.isEnabled = !isThinking
+            chatInputText?.isEnabled = !isThinking
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
+        if (isBound) {
+            unbindService(serviceConnection)
+            isBound = false
+        }
         if (::ttsManager.isInitialized) ttsManager.shutdown()
     }
 }

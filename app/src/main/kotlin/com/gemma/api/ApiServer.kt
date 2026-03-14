@@ -31,17 +31,20 @@ class ApiServer(
                 post("/api/generate") {
                     try {
                         val request = call.receiveText()
-                        @Suppress("UNCHECKED_CAST")
-                        val json = gson.fromJson(request, Map::class.java) as Map<String, Any>
-                        val prompt = json["prompt"] as? String ?: ""
-                        val sessionId = json["session_id"] as? String ?: UUID.randomUUID().toString()
+                        val parsed = gson.fromJson(request, Map::class.java)
+                        if (parsed !is Map<*, *>) {
+                            call.respondText("""{"error": "Invalid JSON format"}""", ContentType.Application.Json, HttpStatusCode.BadRequest)
+                            return@post
+                        }
+                        val prompt = parsed["prompt"] as? String ?: ""
+                        val sessionId = parsed["session_id"] as? String ?: UUID.randomUUID().toString()
 
                         Timber.d("API: ${prompt.take(30)}...")
 
                         // DELEGATE TO GEMMA SERVICE (Orchestrator)
                         // Storage is handled atomically inside processQuery
                         val aiResponse = withContext(Dispatchers.Default) {
-                            gemmaService.processQuery(prompt, sessionId)
+                            gemmaService.processQuery(prompt, sessionId) ?: "Error: No response generated"
                         }
 
                         val jsonResponse = gson.toJson(mapOf(

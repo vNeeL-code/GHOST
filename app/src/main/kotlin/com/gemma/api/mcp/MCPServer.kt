@@ -605,7 +605,6 @@ class MCPServer(
         sb.append("═══ CURRENT STATE ═══\n")
         sb.append("📅 Date: ${now.format(dateFormatter)}\n")
         sb.append("🕐 Time: ${now.format(timeFormatter)} ($timeOfDay)\n")
-        sb.append("\n")
 
         try {
             // Use the full sensor context string (all the new telemetry!)

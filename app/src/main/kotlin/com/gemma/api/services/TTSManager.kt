@@ -28,6 +28,10 @@ import java.util.concurrent.ConcurrentLinkedQueue
  */
 class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
 
+    companion object {
+        private const val LUX_POCKET_THRESHOLD = 10f
+    }
+
     private var tts: TextToSpeech? = null
     private var isReady = false
 
@@ -98,7 +102,7 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
                         updatePocketState()
                     }
                     Sensor.TYPE_LIGHT -> {
-                        ambientLightLow = event.values[0] < 10f // Less than 10 lux = very dark
+                        ambientLightLow = event.values[0] < LUX_POCKET_THRESHOLD // Less than 10 lux = very dark
                         updatePocketState()
                     }
                 }
@@ -130,7 +134,10 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
     }
 
     private fun initWithPreferredEngine() {
-        val availableEngines = TextToSpeech(context, null).engines.map { it.name }
+        val throwawayTts = TextToSpeech(context, null)
+        val availableEngines = throwawayTts.engines.map { it.name }
+        throwawayTts.shutdown() // CRITICAL: Stop memory leak
+        
         Timber.d("Available TTS engines: $availableEngines")
 
         val engineToUse = preferredEngines.firstOrNull { it in availableEngines }

@@ -112,6 +112,10 @@ dependencies {
 
     implementation("androidx.core:core-ktx:1.13.1")
 
+    // UI & Layouts
+    implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+    implementation("androidx.recyclerview:recyclerview:1.3.2")
+
     // Coroutines - 1.10.2 for Koog/Ktor 3.x compatibility
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")

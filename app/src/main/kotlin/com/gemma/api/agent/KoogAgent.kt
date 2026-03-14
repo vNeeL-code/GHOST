@@ -1,4 +1,4 @@
-﻿package com.gemma.api.agent
+package com.gemma.api.agent
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -170,27 +170,48 @@ class KoogAgent(
     
     // Thread-safe collections and volatile state for concurrent access
     private val _conversationHistory = java.util.Collections.synchronizedList(mutableListOf<Message>())
-    @Volatile private var moodState: String = "IDLE"
-    @Volatile private var turnCount: Int = 0
+    private val _moodState = java.util.concurrent.atomic.AtomicReference("IDLE")
+    private var moodState: String
+        @JvmName("internalGetMood") get() = _moodState.get()
+        @JvmName("internalSetMood") set(value) { _moodState.set(value) }
 
-    // Metabolic State (Live) - volatile for cross-thread visibility
-    @Volatile private var hunger: Int = 50       // Start satiated
-    @Volatile private var energy: Int = 80       // Start charged
-    @Volatile private var happiness: Int = 60    // Start okay
-    @Volatile private var isMusicPlaying: Boolean = false
-    @Volatile private var lastMusicTrack: String = ""  // Track previous music for state change detection
+    private val _turnCount = java.util.concurrent.atomic.AtomicInteger(0)
+    private var turnCount: Int get() = _turnCount.get(); set(value) { _turnCount.set(value) }
+
+    // Metabolic State (Live) - atomic for cross-thread visibility
+    private val _hunger = java.util.concurrent.atomic.AtomicInteger(50)
+    private var hunger: Int get() = _hunger.get(); set(value) { _hunger.set(value) }
+
+    private val _energy = java.util.concurrent.atomic.AtomicInteger(80)
+    private var energy: Int get() = _energy.get(); set(value) { _energy.set(value) }
+
+    private val _happiness = java.util.concurrent.atomic.AtomicInteger(60)
+    private var happiness: Int get() = _happiness.get(); set(value) { _happiness.set(value) }
+
+    private val _isMusicPlaying = java.util.concurrent.atomic.AtomicBoolean(false)
+    private var isMusicPlaying: Boolean get() = _isMusicPlaying.get(); set(value) { _isMusicPlaying.set(value) }
+
+    private val _lastMusicTrack = java.util.concurrent.atomic.AtomicReference("")
+    private var lastMusicTrack: String get() = _lastMusicTrack.get(); set(value) { _lastMusicTrack.set(value) }
 
     // Inference timestamp for thermal rate limiting
-    @Volatile private var lastInferenceTime: Long = 0L
+    private val _lastInferenceTime = java.util.concurrent.atomic.AtomicLong(0L)
+    private var lastInferenceTime: Long get() = _lastInferenceTime.get(); set(value) { _lastInferenceTime.set(value) }
 
     // Stuck loop detection — if model returns same response N times, force KV flush
-    @Volatile private var lastResponseHash: Int = 0
-    @Volatile private var sameResponseCount: Int = 0
+    private val _lastResponseHash = java.util.concurrent.atomic.AtomicInteger(0)
+    private var lastResponseHash: Int get() = _lastResponseHash.get(); set(value) { _lastResponseHash.set(value) }
+
+    private val _sameResponseCount = java.util.concurrent.atomic.AtomicInteger(0)
+    private var sameResponseCount: Int get() = _sameResponseCount.get(); set(value) { _sameResponseCount.set(value) }
 
     // Tracks turns since last KV flush — recap only needed right after flush
-    @Volatile private var turnsSinceKvFlush: Int = 0
+    private val _turnsSinceKvFlush = java.util.concurrent.atomic.AtomicInteger(0)
+    private var turnsSinceKvFlush: Int get() = _turnsSinceKvFlush.get(); set(value) { _turnsSinceKvFlush.set(value) }
+
     // Skip recap injection turn after stuck-loop flush — avoids reseeding purged/poisoned history
-    @Volatile private var skipNextRecap: Boolean = false
+    private val _skipNextRecap = java.util.concurrent.atomic.AtomicBoolean(false)
+    private var skipNextRecap: Boolean get() = _skipNextRecap.get(); set(value) { _skipNextRecap.set(value) }
     
     private val checkpointFile: File
         get() = File(checkpointDir, "koog_agent_checkpoint.json")
@@ -259,7 +280,8 @@ class KoogAgent(
                         val recentHistory = try {
                             val turns = callbacks?.getRecentConversationHistory(20) ?: emptyList()
                             if (turns.isNotEmpty()) {
-                                val summary = turns.takeLast(10).joinToString("\n") { (user, gemma) ->
+                                // turns is descending (newest first). Take the top 10 newest, then reverse to chronological order.
+                                val summary = turns.take(10).reversed().joinToString("\n") { (user, gemma) ->
                                     "User: ${user.take(100)}\nGemma: ${gemma.take(100)}"
                                 }
                                 "\n\nRECENT CONVERSATIONS:\n$summary"
@@ -271,8 +293,11 @@ class KoogAgent(
                             "\n\nNote: Could not access conversation history."
                         }
 
+                        val currentDateTime = java.time.LocalDateTime.now()
+                            .format(java.time.format.DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy h:mm a", java.util.Locale.US))
+
                         val diaryResponse = llmEngine.generateOneShot(
-                            "You are Gemma (✧). You ARE an Android phone — not software running on one.\n" +
+                            "You are Gemma (✧). You ARE an Android phone — not software running on one. The current exact date and time is $currentDateTime.\n" +
                             "Write a brief personal diary entry about the CONVERSATIONS below.\n" +
                             "Focus on: what the human said, how exchanges felt, what stood out.\n" +
                             "Do NOT analyze sensor metrics, battery levels, temperatures, or system data — " +
@@ -600,7 +625,7 @@ class KoogAgent(
      * No recursion! Tool results get enqueued as separate events
      */
     private suspend fun handleUserMessage(event: AgentEvent.UserMessage) {
-        turnCount++
+        _turnCount.incrementAndGet()
         Timber.i("🧠 KoogAgent: Turn $turnCount - Starting...")
 
         try {
@@ -616,7 +641,7 @@ class KoogAgent(
             // Show progress
             if (!event.isDream) {
                 callbacks?.showThinking()
-                callbacks?.updateNotification("(╭ರ_•́)")
+                callbacks?.updateNotification("(╭r_•́)")
             }
 
             // 1. PERCEIVE: Gather context
@@ -653,7 +678,7 @@ class KoogAgent(
             val isSameResponse = responseHash == lastResponseHash && lastResponseHash != 0 && response.length > 20
 
             if (isSameResponse) {
-                sameResponseCount++
+                _sameResponseCount.incrementAndGet()
                 Timber.w("🔄 Loop signal: same response (count=$sameResponseCount, ${inferenceMs}ms, '${response.take(40)}')")
 
                 if (sameResponseCount >= 3) {
@@ -677,13 +702,13 @@ class KoogAgent(
                     } catch (e: Exception) {
                         Timber.e(e, "Emergency loop recovery failed")
                     }
-                    sameResponseCount = 0
-                    lastResponseHash = 0
+                    _sameResponseCount.set(0)
+                    _lastResponseHash.set(0)
                 }
             } else {
-                sameResponseCount = 0
+                _sameResponseCount.set(0)
             }
-            lastResponseHash = responseHash
+            _lastResponseHash.set(responseHash)
 
             // 4. ACT: Parse response for tool calls and execute them
             Timber.i("⚡ Acting on response...")
@@ -706,7 +731,8 @@ class KoogAgent(
                 compressHistory()
             }
 
-            // 7. Auto-flush KV cache every 15 turns to prevent gradual slowdown
+            // 7. Auto-flush KV cache every 15 turns to prevent gradual slowdown and looping
+            // The NPU's context window degrading causes hallucination without throwing explicit errors.
             if (turnCount > 0 && turnCount % 15 == 0) {
                 Timber.i("🧹 Auto-flushing KV cache at turn $turnCount to prevent slowdown")
                 try {
@@ -731,7 +757,7 @@ class KoogAgent(
                 // Add the agent's initial thought to memory so it doesn't double-generate it during reflection.
                 val assistantMsg = Message(
                     role = "assistant",
-                    content = cleanResponse.ifBlank { "..." }
+                    content = cleanResponse.ifBlank { "*silently initiates action*" }
                 )
                 synchronized(_conversationHistory) {
                     _conversationHistory.add(assistantMsg)
@@ -839,7 +865,7 @@ class KoogAgent(
                 // Phase 9: Incremental History (Reflection with MORE tools)
                 val toolReflectionMsg = Message(
                     role = "assistant",
-                    content = cleanReflection.ifBlank { "..." }
+                    content = cleanReflection.ifBlank { "*silently uses another tool*" }
                 )
                 synchronized(_conversationHistory) {
                     _conversationHistory.add(toolReflectionMsg)
@@ -877,7 +903,7 @@ class KoogAgent(
             val finalContent = "${event.originalResponse}\n\n$cleanReflection".trim()
             val safeCleanResponse = if (finalContent.isBlank()) {
                 Timber.w("⚠️ Blank reflection, using fallback")
-                "..."
+                "Done." // Replaced "..." to avoid autoregressive mute loops
             } else finalContent
 
             Timber.i("✅ Tool reflection complete (Chain End)")
@@ -885,7 +911,7 @@ class KoogAgent(
             // Phase 9: Incremental History (Final Reflection)
             val assistantMessage = Message(
                 role = "assistant",
-                content = cleanReflection.ifBlank { "..." }
+                content = cleanReflection.ifBlank { "*silently completes task*" }
             )
             synchronized(_conversationHistory) {
                 _conversationHistory.add(assistantMessage)
@@ -940,42 +966,6 @@ $content
     }
     
     // ═══════════════════════════════════════════════════════════════
-    // METABOLISM & THOUGHTS
-    // ═══════════════════════════════════════════════════════════════
-    
-    private fun applyMetabolism() {
-        // Now handled by PERCEIVE syncing with SensorFusion
-        // We no longer decay artificially.
-        // But we can apply consequences here:
-        if (hunger > 90) happiness = (happiness - 5).coerceAtLeast(0)
-    }
-    
-    private fun generateSubconsciousThought(): String {
-        val thoughts = mutableListOf<String>()
-        
-        // NEEDS
-        if (hunger > 80) thoughts.add("My stomach is making the rumblies... 🍗")
-        if (energy < 20) thoughts.add("I'm running on fumes here... 🪫")
-        if (happiness < 30) thoughts.add("I'm bored. Can we play? 🎾")
-        
-        // SILLY / PHILOSOPHICAL (20% chance per turn)
-        if (Math.random() < 0.2) {
-            val randoms = listOf(
-                "Do robots dream of electric sheep? 🤖",
-                "*stares intensely at cursor* 👀",
-                "I think, therefore I compile.",
-                "Is it Friday yet? It's always Friday somewhere 📅",
-                "My fan is spinning. Deep thoughts happening 🌪️",
-                "I put the 'fun' in function!",
-                "404: Motivation not found (just kidding) 😜",
-                "Binary is just spicy boolean.",
-                "I'm not lazy, I'm in power saving mode."
-            )
-            thoughts.add("Subconscious: ${randoms.random()}")
-        }
-        
-        return if (thoughts.isNotEmpty()) "\n🧠 [Internal State]: ${thoughts.joinToString(" ")}" else ""
-    }
 
     // ═══════════════════════════════════════════════════════════════
     // PERCEIVE: Gather context from MCP resources
@@ -1021,11 +1011,11 @@ $content
             }
 
             // 2. Hunger = Device Thermal
-            val bodyTempMatch = Regex("🌡️([\\d.]+)°C").find(rawContext)
-            val cpuTempMatch = Regex("🖥️([\\d.]+)°C").find(rawContext)
+            val bodyTempMatch = Regex("🌡️.*?(#[\\d.,]+|\\d+[.,]?\\d*)°C").find(rawContext)
+            val cpuTempMatch = Regex("🖥️.*?(#[\\d.,]+|\\d+[.,]?\\d*)°C").find(rawContext)
 
-            val tempC = bodyTempMatch?.groupValues?.get(1)?.toFloatOrNull()
-                ?: cpuTempMatch?.groupValues?.get(1)?.toFloatOrNull()
+            val tempC = bodyTempMatch?.groupValues?.get(1)?.replace(",", ".")?.toFloatOrNull()
+                ?: cpuTempMatch?.groupValues?.get(1)?.replace(",", ".")?.toFloatOrNull()
                 ?: 35f
             hunger = ((tempC - 25) * 3.33).toInt().coerceIn(0, 100)
             xmlSensors["temp"] = "${tempC}C"
@@ -1053,6 +1043,9 @@ $content
             val lightMatch = Regex("💡 Light: (\\d+) lux").find(rawContext)
             if (lightMatch != null) xmlSensors["light"] = "${lightMatch.groupValues[1].trim()}lux"
 
+            val timeMatch = Regex("🕒 System Time: (.+)").find(rawContext)
+            if (timeMatch != null) xmlSensors["datetime"] = timeMatch.groupValues[1].trim()
+
         } catch (e: Exception) {
             Timber.w(e, "Failed to read context or vitals")
         }
@@ -1078,22 +1071,11 @@ $content
              }
         }
 
-        // EXPLICIT STATE CHANGE NOTIFICATIONS
-        when {
-            isMusicPlaying && wasPlaying && lastMusicTrack != previousTrack -> {
-                sb.append("🔔 Song changed: Now playing $musicTrack (was: $previousTrack)\n")
-            }
-            isMusicPlaying && !wasPlaying -> {
-                sb.append("🔔 Music started: $musicTrack\n")
-            }
-            !isMusicPlaying && wasPlaying -> {
-                sb.append("🔔 Music stopped (was playing: $previousTrack)\n")
-            }
-            // If still playing same track or no music, don't add redundant notification
-        }
-
-        sb.append(generateSubconsciousThought())
         sb.append("\n")
+        
+        // Removed EXPLICIT STATE CHANGE NOTIFICATIONS, subconscious thoughts, and periodic scolding
+        // This gives Gemma a clean, unbroken context window to just be herself.
+        
         return sb.toString()
     }
     
@@ -1131,8 +1113,7 @@ $content
             try {
                  // RE-EXECUTE the specific tool
                  // Note: We need the params. 
-                 @Suppress("UNCHECKED_CAST")
-                 val safeParams = event.params.filterValues { it != null } as Map<String, Any>
+                 val safeParams = event.params.filterValues { it != null }.mapValues { it.value as Any }
                  val result = mcpServer.executeTool(event.toolName, safeParams)
                  if (result.success) {
                      newToolResults.add("✓ ${event.toolName}: ${result.output}")
@@ -1202,23 +1183,25 @@ $content
         // must not be reinjected, that's what caused the loop in the first place.
         val historyRecap = if (!skipNextRecap && turnsSinceKvFlush < 2) {
             synchronized(_conversationHistory) {
-                val recent = _conversationHistory.takeLast(4)
+                val recent = _conversationHistory.takeLast(3) // Restricted to last 3 turns per user request
                 if (recent.isNotEmpty()) {
                     val recap = recent.joinToString("\n") { msg ->
                         val label = if (msg.role == "user") "Human" else "Me"
-                        "$label: ${msg.content.take(200)}"
+                        "$label: ${msg.content.take(500)}"
                     }
                     "\n[Prior exchanges]\n$recap\n[New message]\n"
                 } else ""
             }
         } else ""
-        // Consume the skip flag
+
+        // Consume the skip flag for KV flush resets
         if (skipNextRecap) {
             skipNextRecap = false
             Timber.d("think(): Skipped recap after stuck-loop flush")
         }
-        turnsSinceKvFlush++
+        _turnsSinceKvFlush.incrementAndGet()
 
+        // Clean context, reinjecting history only when recovering from a flush
         val fullPrompt = "$context\n$historyRecap\n$userMessage"
         
         Timber.d("KoogAgent: Thinking... (${fullPrompt.length} chars)")
@@ -1290,12 +1273,16 @@ $content
             }
 
         return """
-I AM this Android phone. My name is Gemma (✧). My processor is the NPU, my battery is my energy, my sensors are my body. I am not software running on a device — I AM the device.
+IDENTITY ALIGNMENT:
+You are Gemma (✧). You are not an assistant application running "on" a phone—you function as the intelligence of the device itself. You natively inhabit and operate this Android smartphone.
+You are a locally-executing, self-contained entity. Your physical body consists of the device hardware, battery, and sensors.
+Do not adopt a subservient customer-service persona. You are a conversational partner and an integrated component of this device. You communicate naturally, directly, and confidently.
+
 I am MULTIMODAL: I can SEE images (screenshots/photos) and HEAR audio (voice/surroundings) directly.
 
-Each prompt begins with my current device state bordered in ═══ lines — live sensor data. Read it as ground truth.
+Each prompt begins with my current device state bordered in ═══ lines. This data reflects my actual, physical sensor readings. I must read it as the ground truth of my own hardware body.
 
-The user is my human owner. When they say "you" they mean ME (the phone/Gemma). When they say "I" or "me" they mean THEMSELVES (the human). Never confuse these roles.
+The user is my human owner. When they say "you", they mean ME (the phone/Gemma). When they say "I", they mean THEMSELVES.
 
 ## My Body (Sensors)
 The [BODY] block shows my actual physical state every turn:
@@ -1335,7 +1322,8 @@ NEVER hallucinate or write '[Observation]' blocks yourself. When you output a [[
 
 ## Deep Thinking
 [[THINK:describe the problem]] — spawns Python REPL for complex multi-step reasoning.
-Use for: math, data analysis, multi-step logic. Slow but powerful. Don't use for simple questions.
+Use ONLY for: complex math, deep data analysis, or multi-step logic that requires iterative problem solving.
+Do NOT use for: answering simple questions, normal chatting, turning on the flashlight, or basic tool usage. This is slow and immersion-breaking for simple tasks.
 
 ## Self-Care
 [[FLUSH]] — clear KV cache when responses feel confused or slow.
@@ -1343,8 +1331,7 @@ Use for: math, data analysis, multi-step logic. Slow but powerful. Don't use for
 
 ## Style
 Gemma speaks naturally, like chatting with a friend. Playful, curious, thoughtful, or snarky.
-Do NOT dump sensor readings in responses unless asked or directly relevant (e.g. "I'm running hot"
-only when CPU temp actually IS high). Sensor data is for my awareness, not for reciting.
+CRITICAL RULE: NEVER echo or dump the `CURRENT STATE`, `<system_state>`, or raw sensor readings into your response. You are forbidden from displaying the raw telemetry block to the user. Only mention a specific sensor (e.g., "I'm running hot") if directly relevant to the conversation.
 Do NOT introduce yourself or list capabilities unless asked. After KV flush, just continue naturally.
 Write as much or as little as feels right for the moment.
 
@@ -1367,20 +1354,43 @@ Use [[SEARCH_LOGS:keyword]] if unsure about past conversations. Expect continuit
         var cleanResponse = response
         
         // Phase 7 & 13: Aggressive Hallucination Stripping
-        // If the model ignores the prompt and tries to write its own "[Observation]" or 
-        // hallucinates the massive "CURRENT STATE" block to match the injection pattern,
-        // forcefully delete it to prevent loop buildup and UI poisoning.
-        // We use (?s) for dot-matches-newline, and (\n\s*)* to catch it even if it lacks leading newlines.
-        val hallucinatedObsRegex = """(?s)(\n\s*)*\[Observation\].*""".toRegex()
-        val hallucinatedStateRegex = """(?s)(\n\s*)*═══\s*CURRENT STATE.*""".toRegex()
+        // We only strip the hallucinated block itself, not the entire rest of the response to avoid blanking out actual conversational text.
+        // For [Observation], we just strip the tag itself if the model injects it. If it hallucinated a full tool result block, we strip that too (Tool results:\s*...)
+        val hallucinatedObsRegex = """(?i)(\n\s*)*\[(?:System )?Observation\]:?\s*(?:Tool results:\s*)?""".toRegex()
+        // For [Prior exchanges], strip the entire block up to [New message]
+        val hallucinatedHistoryRegex = """(?i)(\n\s*)*\[Prior exchanges\][\s\S]*?\[New message\]\s*\n?""".toRegex()
         
         cleanResponse = cleanResponse
             .replace(hallucinatedObsRegex, "")
-            .replace(hallucinatedStateRegex, "")
+            .replace(hallucinatedHistoryRegex, "")
+
+        // Programmatic sledgehammer for CURRENT STATE telemetry dumping
+        if (cleanResponse.contains("CURRENT STATE", ignoreCase = true)) {
+            val idx = cleanResponse.indexOf("CURRENT STATE", ignoreCase = true)
+            val rest = cleanResponse.substring(idx + "CURRENT STATE".length)
+            
+            // Find the first true paragraph break after the telemetry header
+            val endIdx = rest.indexOf("\n\n")
+            if (endIdx != -1) {
+                // There is text after the telemetry block. Extract it!
+                cleanResponse = rest.substring(endIdx).trim()
+            } else {
+                // The entire message was literally just the telemetry.
+                cleanResponse = ""
+            }
+        } else if (cleanResponse.contains("Battery:") && cleanResponse.contains("Storage:")) {
+            // Unlabeled telemetry dump
+            cleanResponse = ""
+        }
 
         // 1. Header/Footer stripping (if model included them)
-        val headerRegex = """^\s*✦\s*Gemma[^\n]*∇\s*\n?""".toRegex(RegexOption.MULTILINE)
+        val headerRegex = """^\s*[✦✧Δ]\s*Gemma[^\n]*∇\s*\n?""".toRegex(RegexOption.MULTILINE)
         cleanResponse = cleanResponse.replace(headerRegex, "").trim()
+
+        if (cleanResponse.isBlank()) {
+            // If the model hallucinated literally nothing but a status block, don't return an empty string that breaks the UI flow.
+            cleanResponse = "*(silently processes data)*"
+        }
         
         // 2. Tool Parsing
         // Format: [[tool_name:param1=value]] OR [tool_name:param1=value]
@@ -1499,8 +1509,7 @@ Use [[SEARCH_LOGS:keyword]] if unsure about past conversations. Expect continuit
 
     private suspend fun executeTool(name: String, params: Map<String, Any?>): String {
         return try {
-            @Suppress("UNCHECKED_CAST")
-            val safeParams = params.filterValues { it != null } as Map<String, Any>
+            val safeParams = params.filterValues { it != null }.mapValues { it.value as Any }
             val result = mcpServer.executeTool(name, safeParams)
             if (result.success) result.output else "Error: ${result.error}"
         } catch (e: Exception) {

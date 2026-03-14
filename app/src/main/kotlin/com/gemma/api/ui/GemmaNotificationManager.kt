@@ -1,4 +1,4 @@
-﻿package com.gemma.api.ui
+package com.gemma.api.ui
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -64,9 +64,6 @@ class GemmaNotificationManager(private val context: Context) {
 
     fun showResponse(response: String) {
         try {
-            // Auto-copy to clipboard (Agent Paperclip mode)
-            copyToClipboard(response)
-
             // Extract just the main content for notification title
             val shortResponse = extractMainContent(response).take(100)
 

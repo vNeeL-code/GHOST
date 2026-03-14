@@ -247,12 +247,7 @@ class OverlayManager(private val context: Context) {
     }
 
 private fun getPassiveLayoutParams(): WindowManager.LayoutParams {
-    val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-    } else {
-        @Suppress("DEPRECATION")
-        WindowManager.LayoutParams.TYPE_PHONE
-    }
+    val type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
     
     // Key flags for "Visible Sovereignty":
     // FLAG_NOT_FOCUSABLE: Don't steal keyboard
@@ -274,12 +269,7 @@ private fun getPassiveLayoutParams(): WindowManager.LayoutParams {
 }
 
     private fun getInteractiveLayoutParams(): WindowManager.LayoutParams {
-        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        } else {
-            @Suppress("DEPRECATION")
-            WindowManager.LayoutParams.TYPE_PHONE
-        }
+        val type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         
         // Interactive overlay - must capture touch and keyboard
         val flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
@@ -301,12 +291,7 @@ private fun getPassiveLayoutParams(): WindowManager.LayoutParams {
     fun isVisible(): Boolean = isShowing
 
     private fun getBaseLayoutParams(): WindowManager.LayoutParams {
-        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        } else {
-            @Suppress("DEPRECATION")
-            WindowManager.LayoutParams.TYPE_PHONE
-        }
+        val type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         
         // Interactive flags: Allow focus and touch
         val flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or 

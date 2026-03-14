@@ -81,7 +81,7 @@ class GemmaAccessibilityService : AccessibilityService() {
             }
         } finally {
             queue.forEach { toRecycle.add(it) }
-            toRecycle.forEach { try { it.recycle() } catch (_: Exception) {} }
+            toRecycle.forEach { try { it.recycle() } catch (e: IllegalStateException) { Timber.v("Failed to recycle node: ${e.message}") } }
         }
 
         return if (sb.isEmpty()) "[[SCREEN: no readable content]]"
@@ -213,7 +213,7 @@ class GemmaAccessibilityService : AccessibilityService() {
         } finally {
             // Drain remaining queue and recycle all
             queue.forEach { toRecycle.add(it) }
-            toRecycle.forEach { try { it.recycle() } catch (_: Exception) {} }
+            toRecycle.forEach { try { it.recycle() } catch (e: IllegalStateException) { Timber.v("Failed to recycle node: ${e.message}") } }
         }
         return found
     }
@@ -245,7 +245,7 @@ class GemmaAccessibilityService : AccessibilityService() {
             }
         } finally {
             queue.forEach { toRecycle.add(it) }
-            toRecycle.forEach { try { it.recycle() } catch (_: Exception) {} }
+            toRecycle.forEach { try { it.recycle() } catch (e: IllegalStateException) { Timber.v("Failed to recycle node: ${e.message}") } }
         }
         return result
     }
@@ -297,7 +297,7 @@ class GemmaAccessibilityService : AccessibilityService() {
             }
         } finally {
             queue.forEach { toRecycle.add(it) }
-            toRecycle.forEach { try { it.recycle() } catch (_: Exception) {} }
+            toRecycle.forEach { try { it.recycle() } catch (e: IllegalStateException) { Timber.v("Failed to recycle node: ${e.message}") } }
         }
         return result
     }
