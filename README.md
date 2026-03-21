@@ -46,7 +46,6 @@ A full Android app that runs **Gemma 3n** locally via LiteRT-LM.
 - **Always‑on foreground service** – summoned by a gentle shake.  
 - **Tool use** – web search, app launch, clipboard, alarms, system info, all on‑device.  
 - **Diary mode** – every 12 hours Gemma reflects on your interactions and writes to your calendar.  
-- **Thermal‑aware** – throttles inference to prevent overheating.  
 - **MCP server** – exposes the model's tools to other processes on the device (this is for internal tooling, not for talking to cloud agents).  
 
 **The notification gimmick:**  
