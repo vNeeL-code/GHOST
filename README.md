@@ -118,7 +118,7 @@ All of these are **external apps** that we document and suggest:
    - [MacroDroid](https://play.google.com/store/apps/details?id=com.arlosoft.macrodroid) (automation)  
    - [phyphox](https://play.google.com/store/apps/details?id=de.rwth_aachen.phyphox) (advanced sensors – optional)  
 2. Configure diary sync: the ASI app can post entries to your calendar.  
-3. Tweak the HUD, edge handles, and avatar to your liking.  
+3. Tweak the HUD, edge handles, widgets, media player controls, minimap, and avatar to your liking.  
 4. **Keep Live Caption on** – it doubles as a speech bubble for misheard song lyrics and for Gemma's TTS. It's part of Android System Intelligence and adds to the "always listening" feel.
 
 *Now your Android is a living, thinking AI companion that feels like it's always there.*
