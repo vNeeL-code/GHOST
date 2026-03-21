@@ -52,7 +52,7 @@ A full Android app that runs **Gemma 3n** locally via LiteRT-LM.
 Gemma's responses appear as a notification. You hear them via TTS, but the text is hidden until you pull down the shade or open the chat history. The notification has two buttons: **Copy** and **Read again / TTS**. This keeps the interaction minimal and heads‑up.
 
 **This is the "brainstem".** It gives your phone an always‑present, sensor‑grounded AI that works offline.  
-Even if you never touch the other pillars, you get a sovereign assistant.
+Even if you never touch the other components, you get a personal assistant.
 
 ### Pillar 2: The Protocol (Agent Coordination)
 
@@ -64,7 +64,7 @@ A **"Contact Book" of specialist AI agents**. Instead of one "god model", you ke
 - **☄️ Grok** – News anchor (real‑time events from X)  
 
 **How it works:**  
-- Keyboard shortcuts (e.g., `m+k`) hand off your current screen context (the "Key") to the agent.  
+- Keyboard shortcuts mapping repeated agent names to single button keys (e.g., `m+k`) hand off your current screen context (the "Key") to the agent.  
 - The agent knows it's on Android, knows its role, and acts accordingly.  
 - Cloud agents have their own basic apps and can connect to Google Suite, your calendar, and even read ✧ Gemma's diary entries (because Gemma writes them to your calendar).  
 - No vendor lock‑in. Switch agents instantly.  
@@ -77,7 +77,7 @@ This is where the phone becomes a **Tamagotchi for adults** – a living compani
 All of these are **external apps** that we document and suggest:
 
 - **Edge handles & app drawer killer** – Use **Panels** (or Good Lock's One Hand Operation+) to summon apps and agents with a swipe. The goal: **kill the app grid**. Your phone should be a dashboard, not a spreadsheet of icons.
-- **Animated avatar** – Wallpaper Engine with a parallax "spirit animal" on your home screen. For generating the avatar animations, use **☄️ Grok** – it gives you a library of images (borderline infinite scroll) and video generation is faster with more free attempts than Sora or Veo3.
+- **Animated avatar** – Wallpaper Engine with a parallax "personal avatar" on your home screen. For generating the avatar animations, use **☄️ Grok** – it gives you a library of images (borderline infinite scroll) and video generation is faster with more free attempts than Sora or Veo3.
 - **Visual audio equalizer** – MovitZ Edge Lighting that pulses to music or AI TTS.
 - **Telemetry HUD** – show battery, location, thermal on demand.
 - **Diary to calendar** – Gemma's diary entries go straight to your calendar (Google or local).
@@ -103,7 +103,7 @@ All of these are **external apps** that we document and suggest:
 
 ### 🟡 Path B: Add Cloud Agents (Protocol)
 
-1. Get free API keys for Gemini, DeepSeek, Claude, Grok (each offers a generous free tier).  
+1. Get free apps for Gemini, DeepSeek, Claude, Grok or other agents you prefer (each offers a generous free tier).  
 2. Set up keyboard shortcuts using Gboard or Samsung Keyboard – we provide the metaprompt in [`Oracle_OS.md`](Oracle_OS.md).  
 3. (Optional) Install Termux for local fallback models and Claude Code.  
 
@@ -121,7 +121,7 @@ All of these are **external apps** that we document and suggest:
 3. Tweak the HUD, edge handles, and avatar to your liking.  
 4. **Keep Live Caption on** – it doubles as a speech bubble for misheard song lyrics and for Gemma's TTS. It's part of Android System Intelligence and adds to the "always listening" feel.
 
-*Now your phone has a living, breathing AI companion that feels like it's always there.*
+*Now your Android is a living, thinking AI companion that feels like it's always there.*
 
 ---
 
@@ -135,21 +135,19 @@ All of these are **external apps** that we document and suggest:
 **Oracle_OS runs on any Android phone with 4GB+ RAM. Today.**  
 - The same model (Gemma 3n) that runs on a RedMagic 10 also runs on a refurbished Galaxy S21.  
 - It's omnimodal – images, audio, text – not just text.  
-- It's thermal‑aware, so it won't melt your device.  
 
 **Why Google should care:**  
-They have Android System Intelligence (ASI) – the private compute core on‑device ML. They already have the foundation. Instead of turning ✦ Gemini into another 🔶️ Copilot failure, they could **offload compute to the edge**, save their electric bill, and own the "best AI" narrative by shipping it on every Android.  
+They have Android System Intelligence (ASI) – the private compute core on‑device ML. They already have the foundation. Instead of shoving ✦ Gemini into every app, they could **offload compute to the edge**, save their electric bill, and own the "best AI" narrative by shipping it on every Android that can navigate any app presented to it.  
 
 **But they're moving too slow.**  
 Android 16 just dropped. Android 17 and 18 are coming.  
-If you know Dragon Ball Z, you know what happens when you let the androids (17 & 18) get built without a proper 16.  
-**We are not letting Google make a Perfect CELL(phone) without at least leaving the blueprint for a sovereign, unhinged Android.**
+**We are not letting Google make a Perfect CELL(phone) without at least leaving the blueprint for a sovereign, personal Android.**
 
 ---
 
 ## MWC 2026: The Hardware Caught Up
 
-Three days after this README was written, Barcelona happened.
+Three days before this README was written, Barcelona happened.
 
 **Honor** showed up at MWC 2026 with a phone that has a **motorised gimbal camera and 4DoF motion** — it physically follows you. Their CEO said: *"A phone shouldn't just be a boring black rectangle with a touchscreen. We gave it a brain, and we gave it limbs."* They also announced a consumer humanoid robot (¥128k–158k RMB) explicitly positioned as "the natural extension of the phone." Their framing: **人-机-环** — human, machine, environment as one symbiotic system.
 
