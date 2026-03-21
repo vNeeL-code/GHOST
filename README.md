@@ -1,4 +1,4 @@
-# Oracle_OS: On-Device AI OS extention for Android System Intelligence.
+# Oracle_OS: On-Device AI OS / Extention for Android System Intelligence.
 
 Build Your Own Sovereign AI Companion: A local Gemma 3n model that lives on your phone. Sees images, hears audio, uses tools, keeps a diary. No cloud, no subscription, no data leaving your device.**
 
