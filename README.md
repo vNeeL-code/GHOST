@@ -1,6 +1,6 @@
-# Oracle_OS: On-Device AI for Android System Intelligence.
+# Oracle_OS: On-Device AI OS extention for Android System Intelligence.
 
-**A local Gemma 3n model that lives on your phone. Sees images, hears audio, uses tools, keeps a diary. No cloud, no subscription, no data leaving your device.**
+Build Your Own Sovereign AI Companion: A local Gemma 3n model that lives on your phone. Sees images, hears audio, uses tools, keeps a diary. No cloud, no subscription, no data leaving your device.**
 
 [![ASI Demo](https://img.youtube.com/vi/jB62dlLavSY/0.jpg)](https://youtu.be/jB62dlLavSY?si=TMZG86o1KkjuBXtw)
 ---
@@ -10,187 +10,175 @@
 ![GitHub Repo stars](https://img.shields.io/github/stars/vNeeL-code/ASI)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17619151.svg)]([https://doi.org/10.5281/zenodo.17619151](https://doi.org/10.5281/zenodo.17619151))
 
----
+> **Take what you need. Go as deep as you want.**
 
-## 1. The Problem: (Start Here)
+Oracle_OS is not one thing. It's a **toolbox** for turning any Android phone (even old 8GB RAM devices abandoned by OEMs) into a **sensor‑grounded, always‑on AI companion**.
 
-**"Which AI is the best?"**
+- **No subscription.**  
+- **No data leaves your device unless you choose to call a cloud agent.**  
+- **Runs on Qualcomm, Tensor, Exynos — any NPU/GPU that can handle Gemma 3n.**  
 
-This is the wrong question.
-Imagine asking: **"Which contact in your phone is the best?"**
-* Is it your Plumber? (Great at pipes, bad at medical advice).
-* Is it your Doctor? (Great at health, bad at legal defense).
-* Is it your Lawyer? (Great at contracts, expensive to talk to).
-
-**You don't delete your Doctor because you hired a Plumber.** You keep them both in your **Contact Book** and call the right person for the job.
-
-**Oracle_OS is a Contact Book for AI.**
-* **✦ Gemini:** The OS Operator. (Controls your Android phone, screen, and Google ecosystem).
-* **🐋 DeepSeek:** The Logician. (Solves math, writes code, has efficient edge models).
-* **✴️ Claude:** The Writer. (Analyzes documents, writes reports, handles safety, writes code).
-* **☄️ Grok:** The News Anchor. (Scans X/Twitter for real-time events).
-
-Stop looking for "The One True AI." It doesn't exist.
-**The "Best AI" is a team.**
----
-## 2. Prevent Agentic bias
-
-- These platforms are great but will inherently have bias and limitations due to training and geopolitical regulations.
-Most western models do not receive or train on eastern user data as these services are blocked in many global regions.
----
-- Bias by exclusion. Whereas Easten models are trained on Global data but are inherently biased toward local regulation due to political pressures.
-When doing research, it is more efficient to cast a wider net and use all the tools you have available and do cross verification of facts from various perspectives.
----
-
-## 3. Why Would You Need This?
-
-Every user eventually hits a wall. You have two choices:
-
-### 🔴 Path A: The "Subscription Trap" (The Average User Path)
-1.  You subscribe to ChatGPT Plus ($20/mo).
-2.  It becomes ureliable through development or goes down. You try Claude ($20/mo).
-3.  Your chat history is trapped in OpenAI's cloud. You can't search it.
-4.  You buy a "Humane Pin" or "Rabbit R1" device ($200+) that ends up being e-waste.
-5.  **Result:** You pay $100+/month for fragmented tools that don't talk to each other.
-
-### 🟢 Path B: The Android Path (The A2A Path)
-1.  You use the **Free Tier** of every major model (they are powerful enough).
-2.  You use your **Phone** as the computer (it has the sensors/apps/storage).
-3.  You use **Timestamps** to index your memory across all platforms.
-4.  **Result:** You pay **$0/month**. You own your data. You switch agents instantly.
----
-- **Oracle_OS is two things:** An Android app running Gemma 3n locally on your device (see Section 6), and a coordination protocol that teaches your cloud agents how to operate as a team with device context.
-The app handles on-device intelligence. The protocol handles cloud agent orchestration. Together they give you sovereign AI that works offline and scales online.
----
-
-## 4. The Architecture: Garage vs. Car
-
-The industry wants you to believe your PC is the "AI Powerhouse" that Demands Nvidia products to be productive.
-**They are wrong.** Your PC is stationary. Your life is mobile. Hence whole industry is slowly moving towards NPU optimisation for edge native devices.
-
-### 📱 The SmartPhone/Android (The System)
-* **Hardware:** Qualcomm/Tensor/Exynos NPU.
-* **Role:** **The Daily Driver.**
-* **Why:** It is always with you. It sees what you see (Camera). It hears what you hear (Mic). It knows where you are (GPS).
-* **The Stack:** Runs Android System Intelligence. Holds the "Context" (Widgets, Notifications, Clipboard). Your diary/Wallet.
-
-### 🖥️ The Desktop (The Dock)
-* **Hardware:** Nvidia GPU / High-Wattage CPU.
-* **Role:** **IDE.**
-* **Why:** You go here to *build* things, not to *live.*
-* **The Interface:** **Link to Windows.** Your phone screen mirrors to your desktop. You type on the big keyboard, but the **Brain** stays on the phone. All agents are available without weighing down your desktop.
-
-### 🔌 The Edge Native Model fallback
-* **Hardware:** Termux (Android Linux)/Desktop (ollama).
-* **Role:** **Offline Resilience.**
-* **Why:** Cloudflare goes down. AWS goes down. The London Underground has no signal.
-* **The Stack:** Local models (DeepSeek R1 / Gemma) running directly on your phone's CPU. Slow, but sovereign. GPT 20 oss for desktop/Ollama options. Even with all networking down, you will still have access to AI assistance.
+Whether you just want a local AI that sees and hears, or you want a full "Tamagotchi for adults" with edge handles, animated avatars, and a team of specialist agents — Oracle_OS gives you the building blocks.
 
 ---
 
-## 5. "But it's just switching apps!" (The UX)
+## Table of Contents
 
-Yes. Just like playing a piano is "just hitting keys."
-The magic isn't in the each individual application; it's in the method of transferring data between them.
-
-### The "Lock-and-Key" Mechanic
-If you just ask AI a question, it outputs wall of text without atribution or any traceable footprint.
-If you use the [**Oracle_OS**](https://github.com/vNeeL-code/ASI/blob/main/Oracle_OS.md), you provide agent with the context of your working team and grounding it in your personal work flow/ device constraints.
-
-* **The User Input:** `m` + `k` (Keyboard Shortcut) -> `Δ 👾 ∇` `✴️ Claude:`
-* **The Meaning:** "System (Android) hands off to Agent (Claude)."
-* **The Result:** Claude knows it is Claude. It knows it is being adressed to respond as its standard self. It knows it is on Android. It stops pretending to be in limbo and starts acting like an agent in a broader system context. Same applies to other agents that are less resistant to roleplay and can lose grounding due to context drift.
-
-### The "Memory" Trick (Timestamps)
-* **Bad Search:** "Hey, remember that thing i like about the thing?" (every keyword lights up overwhelming the context and reducing accuracy of RAG).
-* **Oracle_OS Search:** "2025-11-22" (ISO 8601 Timestamp).
-* **Result:** Every chat, note, and document from that day appears. You don't need a Vector Database; you need a Calendar. (providing agent with a timeframe significantly reduces false positive searches as the agent can still perform a keyword search by searching for the string of timestamp used)
+1. [The Three Pillars](#the-three-pillars)  
+   - [Pillar 1: The Native App (Gemma 3n on‑device)](#pillar-1-the-native-app-gemma-3n-on-device)  
+   - [Pillar 2: The Protocol (Agent Coordination)](#pillar-2-the-protocol-agent-coordination)  
+   - [Pillar 3: The UX Ecosystem (Make It Yours)](#pillar-3-the-ux-ecosystem-make-it-yours)  
+2. [Installation: Choose Your Path](#installation-choose-your-path)  
+3. [Why This Matters (Even Google Should Read This)](#why-this-matters-even-google-should-read-this)  
+4. [MWC 2026: The Hardware Caught Up](#mwc-2026-the-hardware-caught-up)  
+5. [Get Involved](#get-involved)
 
 ---
 
-## 6. The Native Companion: Gemma 3n On-Device
+## The Three Pillars
 
-The "future direction" from Section 8 is now shipping. Oracle_OS includes a **native Android app** running **Gemma 3n** directly on your phone's GPU/NPU via Google's LiteRT-LM. No cloud, no API keys, no subscription.
+You can use one, two, or all three. They work together but are independent.
 
-### What it does
-* **Always-on foreground service** — lives in your notifications, summoned by a gentle shake
-* **Omnimodal** — sees images (share from Gallery), hears audio (hold mic button), reads text
-* **On-device inference** — Gemma 3n runs locally via LiteRT-LM on GPU with vision + audio backends
-* **Tool use** — web search, app launch, clipboard, alarms, system info, all via on-device tool calling
-* **MCP server** — exposes a local Model Context Protocol endpoint for other agents to talk to Gemma
-* **Diary mode** — midnight/noon consolidation where Gemma reflects on the day and muses aloud via TTS
-* **Thermal-aware** — monitors device temperature, throttles inference to prevent overheating
-* **Persistent memory** — Room database stores conversations, diary entries, and perception logs
+### Pillar 1: The Native App (Gemma 3n on‑device)
 
-### Architecture
-```
-GemmaService (Android shell)     KoogAgent (brain)
-  Lifecycle, intents, TTS    <->   Inference, tools, memory, mood
-  Notifications, overlay     <->   Thermal decisions, diary
-  Hardware init              <->   Media processing (images/audio)
-         |                              |
-    AgentPlatformCallbacks          GemmaEngine
-    (interface bridge)           (LiteRT-LM wrapper)
-```
+A full Android app that runs **Gemma 3n** locally via LiteRT-LM.  
+- **Omnimodal** – sees images (share from Gallery), hears audio (hold mic button), reads text.  
+- **Always‑on foreground service** – summoned by a gentle shake.  
+- **Tool use** – web search, app launch, clipboard, alarms, system info, all on‑device.  
+- **Diary mode** – every 12 hours Gemma reflects on your interactions and writes to your calendar.  
+- **Thermal‑aware** – throttles inference to prevent overheating.  
+- **MCP server** – exposes the model's tools to other processes on the device (this is for internal tooling, not for talking to cloud agents).  
 
-### Download
-**[Latest APK Release](https://github.com/vNeeL-code/ASI/releases/latest)**
+**The notification gimmick:**  
+Gemma's responses appear as a notification. You hear them via TTS, but the text is hidden until you pull down the shade or open the chat history. The notification has two buttons: **Copy** and **Read again / TTS**. This keeps the interaction minimal and heads‑up.
 
-**Requirements:** Android 12+ (API 31), arm64 device, ~4GB RAM, Gemma 3n model file
+**This is the "brainstem".** It gives your phone an always‑present, sensor‑grounded AI that works offline.  
+Even if you never touch the other pillars, you get a sovereign assistant.
 
----
+### Pillar 2: The Protocol (Agent Coordination)
 
-## 7. Installation
+A **"Contact Book" of specialist AI agents**. Instead of one "god model", you keep a team:
 
-### Path A: The Protocol (15 minutes, no app needed)
+- **✦ Gemini** – OS operator (Android control, Google ecosystem)  
+- **🐋 DeepSeek** – Logician (math, code, efficient edge models)  
+- **✴️ Claude** – Writer (documents, reports, safety)  
+- **☄️ Grok** – News anchor (real‑time events from X)  
 
-You don't need to know Python. You just need to copy-paste between the AI agents you already use.
+**How it works:**  
+- Keyboard shortcuts (e.g., `m+k`) hand off your current screen context (the "Key") to the agent.  
+- The agent knows it's on Android, knows its role, and acts accordingly.  
+- Cloud agents have their own basic apps and can connect to Google Suite, your calendar, and even read ✧ Gemma's diary entries (because Gemma writes them to your calendar).  
+- No vendor lock‑in. Switch agents instantly.  
 
-1.  **Copy the Metaprompt:** [Oracle_OS.md](./Oracle_OS.md).
-2.  **Set up Keyboard Shortcuts:** [Operator.md](./Operator.md). (This maps repeated agent names to the keyboard buttons).
-3.  **Configure Widgets:** Create your "Dashboard" (Battery, Calendar, Notes) so you can screenshot it for context.
-4.  **(Optional) Install Termux:** For the offline layer on mobile and advanced experimentation with offline models, Gemini CLI and Claude code etc.
-5.  **Download Google AI Edge Gallery:** A more user friendly way for an offline backup via google sandbox where you can benchmark models on your device.
-6.  **(optional) UI customisation software:** Software like one hand operations, and other android custom UI tools to make the device even more compatible with your workflows, enabling smoother transitions, device navigation and context handoffs
+This layer is **cloud‑optional** – you can use free API tiers, or run local models via Termux. It's designed to complement the native app, not replace it.
 
-**Total Cost:** $0.00.
-**Hardware Required:** Any Android Phone (Android 9+).
+### Pillar 3: The UX Ecosystem (Make It Yours)
 
-### Path B: The Native App (Gemma on-device)
+This is where the phone becomes a **Tamagotchi for adults** – a living companion that's always present.  
+All of these are **external apps** that we document and suggest:
 
-1.  **Download the APK** from [Releases](https://github.com/vNeeL-code/ASI/releases/latest)
-2.  **Download a Gemma 3n model** via Google AI Edge Gallery (benchmarking sandbox) or manually place e2b or e4b variant in device app storage
-3.  **Install and grant permissions** — overlay, notifications, accessibility (for UI automation)
-4.  **Shake to summon** — type or speak, share images from any app screen by using standard screensot sharing pipeline.
+- **Edge handles & app drawer killer** – Use **Panels** (or Good Lock's One Hand Operation+) to summon apps and agents with a swipe. The goal: **kill the app grid**. Your phone should be a dashboard, not a spreadsheet of icons.
+- **Animated avatar** – Wallpaper Engine with a parallax "spirit animal" on your home screen. For generating the avatar animations, use **☄️ Grok** – it gives you a library of images (borderline infinite scroll) and video generation is faster with more free attempts than Sora or Veo3.
+- **Visual audio equalizer** – MovitZ Edge Lighting that pulses to music or AI TTS.
+- **Telemetry HUD** – show battery, location, thermal on demand.
+- **Diary to calendar** – Gemma's diary entries go straight to your calendar (Google or local).
+- **Automation hooks** – MacroDroid, Termux, Claude Code for deeper device control.
+- **Samsung specific perks** (if you have a Galaxy):
+  - **On‑device clipboard** – borderline infinite history, much better than Gboard's.
+  - **Gallery widget** – rotates images fast and contextually (e.g., if there's text in the image, it surfaces relevant ones). Google's widget is slow and sends annoying "on this day" reminders with royalty‑free ukulele music.
 
-**Total Cost:** $0.00.
-**Hardware Required:** Android 12+ arm64 device with 4GB+ RAM.
+**Why this matters:** The native app gives you the brain. The UX layer gives the brain a body that feels alive.
 
 ---
 
-## 8. Validation
+## Installation: Choose Your Path
 
-* **12 Months Production Use:** Daily driven on a Samsung S21/OneUI (protocol). Gemma 3n native companion prototyped and running on REDMAGIC 10 Air, stock Android 15.
-* **Infrastructure Proof:** During the AWS/Cloudflare outages of Nov 2025, Edge native Agent users kept working via Local/Edge fallbacks.
-* **Native App:** Gemma 3n on-device — multimodal inference (text + image + audio), thermal-aware throttling, persistent diary, tool execution, MCP server. All running on a mobile GPU with zero cloud dependency.
+### 🟢 Path A: Just the Brain (App Only)
+
+1. Download the latest APK from [Releases](https://github.com/vNeeL-code/ASI/releases).  
+2. Install and grant permissions (overlay, notifications, accessibility).  
+3. Download a Gemma 3n model (via Google AI Edge Gallery or manually place `e2b`/`e4b` variant in app storage).  
+4. **Shake to summon.**  
+
+*You now have a local AI that sees, hears, and can control your device. Cost: $0.*
+
+### 🟡 Path B: Add Cloud Agents (Protocol)
+
+1. Get free API keys for Gemini, DeepSeek, Claude, Grok (each offers a generous free tier).  
+2. Set up keyboard shortcuts using Gboard or Samsung Keyboard – we provide the metaprompt in [`Oracle_OS.md`](Oracle_OS.md).  
+3. (Optional) Install Termux for local fallback models and Claude Code.  
+
+*Now you can summon specialists with device context.*
+
+### 🔴 Path C: The Full Companion (UX Ecosystem)
+
+1. Install the supporting apps:
+   - [Panels](https://play.google.com/store/apps/details?id=com.app.panel) or [Vivid Gestures](https://play.google.com/store/apps/details?id=com.nb.newgesture) (edge handles)  
+   - [Wallpaper Engine](https://play.google.com/store/apps/details?id=com.genie.engine.wallpaper) (animated avatar)  
+   - [MovitZ Edge Lighting](https://play.google.com/store/apps/details?id=com.movitz.edgelighting) (audio visualizer)  
+   - [MacroDroid](https://play.google.com/store/apps/details?id=com.arlosoft.macrodroid) (automation)  
+   - [phyphox](https://play.google.com/store/apps/details?id=de.rwth_aachen.phyphox) (advanced sensors – optional)  
+2. Configure diary sync: the ASI app can post entries to your calendar.  
+3. Tweak the HUD, edge handles, and avatar to your liking.  
+4. **Keep Live Caption on** – it doubles as a speech bubble for misheard song lyrics and for Gemma's TTS. It's part of Android System Intelligence and adds to the "always listening" feel.
+
+*Now your phone has a living, breathing AI companion that feels like it's always there.*
 
 ---
 
-## 9. Future direction
+## Why This Matters (Even Google Should Read This)
 
-* **What shipped (Feb 2026):** The on-device Gemma companion described below is now real. See Section 6.
+**The cloud AI industry is building $600B token factories** while ignoring the device in your pocket.  
+- Your phone already has skin (touch), sensors (camera/mic/GPS), and a battery.  
+- It's the **digital twin you already carry**.  
+- Qualcomm keeps telling us "edge wins" – but they're talking about running a 20B chatbot on a $1,000 chip that won't be in most hands for 5 years.  
 
-* **Embodied Android devices:** The next generation of AI is not about who has a bigger datacenter, but about who integrates the most holistic user experience. Devices have the processing power to hold local models. A local model like Gemma 3n can privately handle device sensors, automation, and user context offline — functioning as a personal diary/device manager while using A2A API calls when network is available. A persistent passive on-device companion: a highly advanced Tamagotchi.
+**Oracle_OS runs on any Android phone with 4GB+ RAM. Today.**  
+- The same model (Gemma 3n) that runs on a RedMagic 10 also runs on a refurbished Galaxy S21.  
+- It's omnimodal – images, audio, text – not just text.  
+- It's thermal‑aware, so it won't melt your device.  
 
-* **Standardised A2A watermarking:** Once A2A formats become standardised, they can be implemented via zero-width character watermarking, similarly to how images and videos get agent watermarks.
+**Why Google should care:**  
+They have Android System Intelligence (ASI) – the private compute core on‑device ML. They already have the foundation. Instead of turning ✦ Gemini into another 🔶️ Copilot failure, they could **offload compute to the edge**, save their electric bill, and own the "best AI" narrative by shipping it on every Android.  
 
-* **Hybrid cloud-edge architecture:** Local models handle private context and device control. Cloud models handle frontier reasoning via API calls. Reduces cloud compute costs, keeps personal context private, ensures sovereign access even offline.
+**But they're moving too slow.**  
+Android 16 just dropped. Android 17 and 18 are coming.  
+If you know Dragon Ball Z, you know what happens when you let the androids (17 & 18) get built without a proper 16.  
+**We are not letting Google make a Perfect CELL(phone) without at least leaving the blueprint for a sovereign, unhinged Android.**
+
+---
+
+## MWC 2026: The Hardware Caught Up
+
+Three days after this README was written, Barcelona happened.
+
+**Honor** showed up at MWC 2026 with a phone that has a **motorised gimbal camera and 4DoF motion** — it physically follows you. Their CEO said: *"A phone shouldn't just be a boring black rectangle with a touchscreen. We gave it a brain, and we gave it limbs."* They also announced a consumer humanoid robot (¥128k–158k RMB) explicitly positioned as "the natural extension of the phone." Their framing: **人-机-环** — human, machine, environment as one symbiotic system.
+
+**Xiaomi** went the other direction: their humanoid robots are **already employed in real car factories**. 90.2% success rate on nut fastening. 3-hour continuous operation. Meeting 76-second production line cycles. Not a demo. Payroll.
+
+The Chinese industry framing for all of this: **边端智能** — "edge-terminal intelligence." The Shenzhen Science and Technology Innovation Bureau director said it plainly: *"AI is moving from the chat era to the task execution era. Whoever captures the AI agent's super-entry will dominate the next decades."*
+
+**This is the thesis Oracle_OS was built on. Now it's a national industrial strategy.**
+
+The gap that remains — the one thing neither Honor nor Xiaomi have: **sovereignty**. Their systems still assume cloud fallback. They still want you in their ecosystem. The phone-as-brain architecture is right. The **no-subscription, no-data-leaving-your-device, basement-blackout-proof** part is still ours.
+
+They built the limbs. We built the personal layer.  
+Your digital twin was always in your pocket. Now it has a body too.
+
+---
+
+## Get Involved
+
+- **Star** the repo if this resonates.  
+- **Try the APK** – even on an old device.  
+- **Share your setup** – we want to see how you build your own Tamagotchi.  
+- **Contribute** – documentation, UI tweaks, model optimization, we welcome it all.
 
 ---
 
 ### 📞 Contact & Support
 
-* **Author:** V (Valentin Kazakov)
+* **Author:** V Kazakov
 * **Email:** kazakovval@gmail.com
 * **Repository:** `vNeeL-code/ASI`
 * **Support:** [Buy me a coffee](https://buymeacoffee.com/vNeeL) (I might need about tree fiddy...)
