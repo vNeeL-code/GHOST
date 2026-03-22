@@ -1,6 +1,6 @@
 # Oracle_OS: On-Device AI / OS Extention for Android System Intelligence. (ASI)
 
-Build Your Own Sovereign AI Companion: A local Gemma 3n model that lives on your phone. Sees images, hears audio, uses tools, keeps a diary. No cloud, no subscription, no data leaving your device.**
+> **Build Your Own Sovereign AI Companion: A local Gemma 3n model that lives on your phone. Sees images, hears audio, uses tools, keeps a diary. No cloud, no subscription, no data leaving your device.**
 
 [![ASI Demo](https://img.youtube.com/vi/jB62dlLavSY/0.jpg)](https://youtu.be/jB62dlLavSY?si=TMZG86o1KkjuBXtw)
 ---
