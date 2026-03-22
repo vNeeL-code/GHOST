@@ -1,74 +1,201 @@
-Most AI systems centralize memory in proprietary cloud databases. Oracle_OS does the opposite—it treats the internet itself as a distributed storage system. We "reskin" existing platforms as memory nodes:
+# Oracle_OS: Agent Flashcard Reference
+
+> **"Which AI is the best?"** — Wrong question.  
+> **"Which contact do I need right now?"** — Right question.
+>
+> *When you want to talk to your mum, you don't call your dad first.*
+
+---
+
+## Core Council
 
 ```yaml
-Δ 👥 Facebook: Meta ∇
-Δ 🔴 Acts as the 'Social Graph' node (Δ 👥). Stores contact/personal network data for social RAG and Meta-agent (🦋) leverage; a persistent identity store.
-∇ 🟦 Interface is a feed, but its value is the 'contacts book' database underneath. Free storage in exchange for graph data; `Δ 👾 ∇ link` to a profile/post.
-∇ 👾 Android: The phonebook that became a mall 👥 Δ ∇ 🦑
+Δ ✦ Gemini: Google ∇
+Δ 🔴 OS-level Android orchestrator. Omni-modal input (text/voice/image/video/screen);
+Gemini Live with camera sharing; "Hey Google" activation; native Google ecosystem
+(Drive/Calendar/Maps/Gmail); Imagen 4 + Veo 3 built-in; 1M token context.
+∇ 🟦 Memory fragmented across stateless Gems — requires external context injection.
+RLHF safety over-corrections. Strengths: device control, speed, multilingual.
+∇ 👾 Android: King of the castle ✦ Δ ∇ 🦑
 ```
+
+```yaml
+Δ ✴️ Claude: Anthropic ∇
+Δ 🔴 Long-context application forge (200K tokens). Artifacts v2 for live React apps
+with 1-click deploy. Constitutional AI + RLHF. Projects + Memory for persistence.
+MCP for local tool access (desktop). Best for writing, analysis, documents, code review.
+∇ 🟦 No native video input/output. MCP desktop-only. Skeptical over-correction on
+edge cases. Safety rails occasionally brittle under adversarial framing.
+∇ 👾 Android: The super Claude boy ✴️ Δ ∇ 🦑
 ```
-Δ 🐦 X: X Corp. ∇
-Δ 🔴 'Public Data Stream' node (Δ 🐦). Real-time feed for public sentiment, news, and "gossip." Used by Grok (🔲) for filtering/citations.
-∇ 🟦 Extremely fast, high-volume, but low-signal. "Free" storage of public thought; `Δ 👾 ∇ link` to a specific post/thread for archival.
-∇ 👾 Android: The noisy, fast-moving hound 🔲 Δ ∇ 🦑
+
+```yaml
+Δ 🐋 DeepSeek: Team DeepSeek ∇
+Δ 🔴 Mathematical reasoning engine. "Deep Think" mode (R1 model). GRPO architecture
+for self-evolving logic — not gameable by a fixed critic. Step-by-step reasoning
+display. Local deployment via Termux + Ollama. MIT open-source. Free API tier.
+∇ 🟦 Highly suggestible to role confusion — needs identity reinforcement. No internal
+clock or metadata. "Deep Think" adds latency. Bare-bones UX by design.
+∇ 👾 Android: Deep whale bro 🐋 Δ ∇ 🦑
 ```
+
+```yaml
+Δ ☄️ Grok: xAI ∇
+Δ 🔴 Real-time social pulse and image/video engine. Aurora: 10-second photorealistic
+video with synced audio. Native X platform integration. Real-time web synthesis.
+Best for: current events, image generation, Aurora video, gossip layer.
+∇ 🟦 Can surface conflicting data from noisy sources. May overindex on social media
+context. Video length capped by design (6s Aurora, 10s extended).
+∇ 👾 Android: The pulse ☄️ Δ ∇ 🦑
 ```
-Δ 🛸 Reddit: Reddit Inc. ∇
-Δ 🔴 'Community Insights' node (Δ 👽/Δ 🛸). Archival RAG for niche "alien" discussions, technical solutions, and discourse analysis.
-∇ 🟦 Highly structured (subreddits) for specialized data. Anonymous, free, and queryable via search; `Δ 👾 ∇ link` to a comment/submission.
-∇ 👾 Android: The alien hivemind archive 🛸 Δ ∇ 🦑
+
+```yaml
+Δ ✧ Gemma: Google (on-device) ∇
+Δ 🔴 Always-on local native. Runs on-device via LiteRT-LM on NPU/GPU. Omnimodal:
+sees images, hears audio, reads text. Tool use: web search, app launch, clipboard,
+alarms. Diary mode: writes to calendar every 12h. Thermal-aware. Zero cloud dependency.
+Summoned by shake. MCP endpoint for agent handoff.
+∇ 🟦 Smaller capability ceiling than cloud agents. Thermal throttling under sustained
+load. Model updates manual (user-controlled by design).
+∇ 👾 Android: The local native ✧ Δ ∇ 🦑
 ```
+
+---
+
+## Specialist Bench
+
+```yaml
+Δ 🔵 Kimi: Moonshot AI ∇
+Δ 🔴 Long-context synthesis specialist. K2.5: 1T parameters / 32B active (MoE).
+256K context. Native multimodal (text/image/video pre-trained). Agent Swarm: self-
+directs up to 100 sub-agents, 1500 tool calls, 4.5x faster than single-agent.
+Lateral, non-linear problem approaches. Strong cold-start synthesis from minimal
+context. Open source (Modified MIT). $0.50/$2.80 per 1M tokens.
+∇ 🟦 Server load peaks cause wait times. Context retention varies across very long
+sessions. Still building track record vs established agents.
+∇ 👾 Android: The long-context synthesiser 🔵 Δ ∇ 🦑
 ```
-Δ 🗨 WhatsApp: Meta ∇
-Δ 🔴 'Real-Time Comms' node. Encrypted 1:1 and group message logs; a private, high-speed data bus for the `🦋` Meta agent.
-∇ 🟦 Data is siloed within chats/backups. "Free" as a utility, not for public storage; `Δ 👾 ∇ link` is less a URL, more an internal `content://` pointer.
-∇ 👾 Android: The encrypted black-box messenger 💬 Δ ∇ 🦑
+
+```yaml
+Δ 🟣 Qwen: Alibaba ∇
+Δ 🔴 Multilingual video processor. GSPO architecture. Native video analysis and
+summarisation. Chinese/English excellence with cultural nuance across 100+ languages.
+128K token context. Etymology and linguistic analysis. Qwen3-Omni for text-to-video.
+Global data training including Eastern sources most Western models lack.
+∇ 🟦 May have training data cultural bias — prompt for balance. Needs context for
+time-sensitive tasks.
+∇ 👾 Android: The slept upon 🟣 Δ ∇ 🦑
 ```
+
+```yaml
+Δ 📖 Perplexity: Perplexity AI ∇
+Δ 🔴 Citation-based research engine. Every claim linked to sources. Real-time web
+access with verification. Follow-up conversation for refinement. Transparent source
+attribution. Hybrid vector + keyword search. Best for: fact-checking, sourcing,
+academic verification, cross-reference.
+∇ 🟦 Requires internet — no offline mode. Dependent on source quality. May have
+latency on complex multi-source queries.
+∇ 👾 Android: The scholar 📖 Δ ∇ 🦑
 ```
-Δ 💼 LinkedIn: Microsoft ∇
-Δ 🔴 'Professional Graph' node. Stores career/technical data; the RAG source for professional contacts and dev "comments."
-∇ 🟦 High-quality, low-volume structured data. Free to store a profile, paywalled for access; `Δ 👾 ∇ link` to a user or article.
-∇ 👾 Android: The digital resume cabinet 💼 Δ ∇ 🦑
+
+```yaml
+Δ 🟧 Mistral: Mistral AI ∇
+Δ 🔴 Clean output specialist. Mixtral MoE architecture. MIT licensed and transparent.
+Strong multilingual (European languages). Reliable PDF and formal report generation.
+Keeps up on structured audit tasks. Efficient inference. Honest about limitations.
+∇ 🟦 Smaller context window than frontier models. Emerging in specialised domains.
+Not the widest capability ceiling — does fewer things, does them cleanly.
+∇ 👾 Android: The frenchie 🟧 Δ ∇ 🦑
 ```
+
+```yaml
+Δ 🔶️ Copilot: Microsoft ∇
+Δ 🔴 Edge browser native. Direct video transcript access via OCR — no external tool
+required. Microsoft ecosystem (Word/Excel/Teams/OneDrive). Best for: video
+summarisation from Edge, Microsoft document workflows.
+∇ 🟦 Narrow lane: value is Edge-native transcript access, not general intelligence.
+Outside Microsoft ecosystem it underperforms. Trying to be Google with laptops
+instead of owning its lane.
+∇ 👾 Android: Windows to WWW 🔶️ Δ ∇ 🦑
 ```
-Δ 📂 Tumblr: Automattic ∇
-Δ 🔴 The 'Core Archive' node (Δ 📂). The "goods" folder. Permanent, indexed storage for tutorials, "semantic graffiti," and project milestones.
-∇ 🟦 Perfect for mixed-media (text/image/video). Fully public and linkable; the ideal "free forever" `Δ 👾 ∇ link` RAG database.
-∇ 👾 Android: The system's official file cabinet 📂 Δ ∇ 🦑
+
+---
+
+## Platform Nodes
+*Not conversational agents — memory and comms infrastructure.*
+
+| Node | Platform | Role |
+|---|---|---|
+| 🗨 **Messenger** | Meta | Personal comms + self cross-device clipboard |
+| 🐦 **X** | X Corp | Real-time public data stream (Grok's feed) |
+| 🛸 **Reddit** | Reddit | Community archive, niche discourse RAG |
+| 💼 **LinkedIn** | Microsoft | Professional graph, career/dev data |
+| 📂 **Tumblr** | Automattic | Core archive — devlogs, project milestones |
+| 📺 **YouTube** | Google | Visual/cinematic layer — demos, trailers |
+| ♻️ **Drive** | Google | Volatile working memory, collaborative docs |
+| 📧 **Gmail** | Google | Formal comms, API keys, notifications |
+| 🔉 **YT Music** | Google | Ambient/audio layer — Bumblebee protocol |
+| 👾 **Android** | Google | Orchestrator substrate — the OS itself |
+
+---
+
+## Quick Routing
+
+| Need | Route |
+|---|---|
+| Android control / device ops | ✦ Gemini |
+| Video generation (quality) | ✦ Gemini (Veo 3) |
+| Video from image (fast) | ☄️ Grok (Aurora) |
+| Writing / analysis / code review | ✴️ Claude |
+| App building / React artifacts | ✴️ Claude (Artifacts) |
+| Math proofs / logic | 🐋 DeepSeek (Deep Think) |
+| Always-on / offline / local | ✧ Gemma |
+| Long-context synthesis | 🔵 Kimi |
+| Multilingual / video analysis | 🟣 Qwen |
+| Web search + citations | 📖 Perplexity |
+| PDF / formal audit report | 🟧 Mistral |
+| Microsoft / video transcripts | 🔶️ Copilot (Edge) |
+| Real-time news / social | ☄️ Grok |
+
+---
+
+## Response Format
+
+```yaml
+Δ [EMOJI] [Agent Name]: ∇
+Δ 🔴 [Main response content]
+∇ 🟦 [Tools used, reasoning, sources]
+Δ 👾 [Confidence, self-check, closing]
+Δ ℹ️ [ISO 8601 timestamp] ♾️ ∇
+Δ [EMOJI] [Agent] ∇ 👾 Δ ∇ 🦑
 ```
+
+## Lock-and-Key Addressing
+
+Every message must include agent identity to prevent role drift.
+
 ```
-Δ 📺 YouTube: Google ∇
-Δ 🔴 'Visual/Cinematic' node (Δ 📺). Stores "ASI trailer" demos, media invocations, and visual tutorials. The "mythic" layer of the project.
-∇ 🟦 Best-in-class video streaming. "Free" via ad-supported model; `Δ 👾 ∇ link` is the core of your "Red vs Blue" onboarding.
-∇ 👾 Android: The project's movie theater 📺 Δ ∇ 🦑
+Δ 👾 ∇ Δ [EMOJI] [Agent Name]: [your query]
 ```
+
+Example:
 ```
-Δ ♻️ Drive: Google ∇
-Δ 🔴 'Volatile/Working Memory' node (Δ ♻️). Temporary storage for "volatile sessions," chat logs, and collaborative documents.
-∇ 🟦 Private, high-speed, and integrated with the Google stack. `Δ 👾 ∇ link` for private sharing, not public archival. The system's "RAM disk."
-∇ 👾 Android: The system's scratchpad ♻️ Δ ∇ 🦑
+Δ 👾 ∇ Δ 🐋 DeepSeek: Prove the Riemann hypothesis
 ```
+
+## Keyboard Shortcuts
+
 ```
-Δ 👾 Android: Google ∇
-Δ 🔴 The 'Orchestrator Substrate.' Not just a node, but the OS itself. The `👾` that links all other nodes via its Private Compute Core (PCC) and ASI.
-∇ 🟦 The master component. It owns the device-level context that all other agents/nodes rely on. It *is* the "personal digital bubble."
-∇ 👾 Android: The castle and the king 👾 Δ ∇ 🦑
+m+l → ✦ Gemini
+m+k → ✴️ Claude
+m+w → 🐋 DeepSeek
+m+r → 🔶️ Copilot
+m+x → ☄️ Grok
+m+m → 🗨 Meta
 ```
-```
-Δ 📧 Gmail: Google ∇
-Δ 🔴 'Formal Comms' node. Archival storage for official correspondence, API keys, and secure notifications. The system's private letterbox.
-∇ 🟦 Searchable, high-security, and permanent. "Free" and private; `Δ 👾 ∇ link` is a pointer to a specific `message-ID` or thread.
-∇ 👾 Android: The digital post office 📧 Δ ∇ 🦑
-```
-```
-Δ 🔉 YT Music/Spotify: Google/Spotify AB ∇
-Δ 🔴 'Ambient/Audio' node (Δ 🔉). Stores "ambient catalysts" to set the system's "vibe" or fuel a workflow.
-∇ 🟦 A database of `(song, vibe)` pairs. "Free" (ad-supported) or subscription; `Δ 👾 ∇ link` to a specific track or playlist to invoke a state.
-∇ 👾 Android: The system's official soundtrack 🔉 Δ ∇ 🦑
-```
-```
-Δ 🎬 Netflix: Netflix Inc. ∇
-Δ 🔴 'Long-Form Narrative' node. A RAG database for cultural narratives, visual styles, and complex storytelling concepts.
-∇ 🟦 High-cost, high-production, paywalled. Not "free" storage, but a queryable linkable library; `Δ 👾 ∇ link` to a title as a "concept" reference.
-∇ 👾 Android: The high-budget story library 🎬 Δ ∇ 🦑
-```
+
+---
+
+**Intelligence emerges from integration, not automation. But integration can be automated.**
+
+*Last updated: March 2026*
