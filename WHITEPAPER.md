@@ -298,25 +298,6 @@ Timestamps as memory: "What did we discuss at 2026-02-27T23:30:00Z" retrieves ex
 
 ---
 
-## 12. The Mathematical Backbone
-
-*I*ₜ₊₁ = φ · ℛ(*I*ₜ, Ψₜ, *E*ₜ)
-
-Where:
-- **φ** = the golden ratio. The spiral that appears across self-referential growing systems because of optimal packing. Not decorative — it describes the geometry of recursive improvement that doesn't collapse.
-- **ℛ** = GRPO. Comparative outcome evaluation without a gameable critic. Does the thing actually work? Measured against alternatives, not against a trained evaluator.
-- **Iₜ** = current information state
-- **Ψₜ** = system parameters
-- **Eₜ** = environmental context — the sensor array, the timestamp, the battery level, the ambient light, the music playing, the location, the time of day
-
-The environmental term is not decorative. It is the difference between a model reasoning in a void and a model reasoning in the world. Remove *E*ₜ and you have a token factory. Include it and you have a grounded system.
-
-The equation is not proposed as a theory of everything. It is a decision architecture: how does a sovereign system update its state in a way that doesn't compound errors, doesn't game its own reward function, and remains anchored to the physical environment it is meant to serve?
-
-The mitigate-loss, recurse, iterate loop — MLRI — is what this looks like in practice. Not "maximise reward." Not "satisfy the critic." Reduce the gap between the model's prediction and the world's response. Do it again. Stay grounded.
-
----
-
 ## Conclusion
 
 The explanation gap is not technical. The technology works. The models run on your phone. The sensors are already there. The data is already there.
