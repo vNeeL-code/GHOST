@@ -71,10 +71,10 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     
     // REPLACE: private lateinit var engine: GemmaEngine
     // WITH:
-    private val engineRef = AtomicReference<GemmaEngine?>(null)
+    private val engineRef = AtomicReference<LlmBackend?>(null)
     private val engineMutex = kotlinx.coroutines.sync.Mutex()
 
-    val engine: GemmaEngine?
+    val engine: LlmBackend?
         get() = engineRef.get()
 
     fun isGemmaLoaded(): Boolean = engineRef.get()?.let { 
@@ -601,20 +601,32 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             val modelNames = listOf(
                 "gemma-3n-E4B-it-int4.litertlm",
                 "gemma-3n-E2B-it-int4.litertlm",
-                "gemma.litertlm"
+                "gemma.litertlm",
+                "model.gguf" // Add support for catching GGUF models directly
             )
+            // Let it find ANY .gguf file as a fallback if explicit name isn't matched
             val searchDirs = listOf(
                 getExternalFilesDir(null),  // App storage (survives Downloads cleanup)
                 downloadDir                  // Downloads folder
             )
-            val modelFile = searchDirs.flatMap { dir ->
+            
+            // Modified: Search for explicit model names first, if not found, scan for any .gguf
+            var modelFile = searchDirs.flatMap { dir ->
                 modelNames.map { name -> File(dir, name) }
             }.firstOrNull { it.exists() }
+            
+            if (modelFile == null) {
+                // Secondary heuristic: Pick any .gguf file available
+                modelFile = searchDirs.mapNotNull { dir ->
+                    dir?.listFiles { _, name -> name.endsWith(".gguf") || name.endsWith(".nexa") }?.firstOrNull()
+                }.firstOrNull()
+            }
 
             if (modelFile != null) {
                 val variant = when {
                     modelFile.name.contains("E4B") -> "E4B (full)"
                     modelFile.name.contains("E2B") -> "E2B (lite)"
+                    modelFile.name.endsWith(".gguf") -> "GGUF Open Weights"
                     else -> "unknown variant"
                 }
                 Timber.i("📦 Found model: ${modelFile.name} ($variant) in ${modelFile.parent}")
@@ -622,29 +634,38 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
             if (modelFile == null) {
                 val searchedPaths = searchDirs.mapNotNull { it?.absolutePath }
-                Timber.e("No model found! Searched: $searchedPaths for: $modelNames")
-                updateNotification("ERROR: No model found. Place .litertlm in app folder or Downloads")
+                Timber.e("No model found! Searched: $searchedPaths")
+                updateNotification("ERROR: No model found. Place .litertlm or .gguf in app folder/Downloads")
                 return
             }
 
-            updateNotification("Loading Gemma...")
-            val newEngine = GemmaEngine(applicationContext)
-            // Pass empty system prompt here — KoogAgent.initialize() sets the real one
-            // via softReset(buildSystemPrompt()) immediately after engine init.
-            // Previously BASE_SYSTEM_PROMPT was injected here AND buildSystemPrompt() was
-            // called on first flush, creating two competing identities on cold start.
-            val error = newEngine.initialize(modelFile.absolutePath, "")
-            if (error != null) {
-                val hint = when {
-                    error.contains("memory", ignoreCase = true) || error.contains("OOM", ignoreCase = true) ->
-                        " (Try E2B model on this device)"
-                    error.contains("GPU", ignoreCase = true) ->
-                        " (GPU init failed — device may not support this model)"
-                    else -> ""
+            updateNotification("Loading Model Core...")
+            
+            val newEngine: LlmBackend = if (modelFile.name.endsWith(".gguf") || modelFile.name.endsWith(".nexa")) {
+                NexaEngine(applicationContext).apply {
+                    val error = initialize(modelFile.absolutePath, "")
+                    if (error != null) {
+                        Timber.e("NexaEngine load failed: $error")
+                        updateNotification("GGUF Load Error: ${error.take(80)}")
+                        return
+                    }
                 }
-                Timber.e("Model load failed: $error")
-                updateNotification("Load Error: ${error.take(80)}$hint")
-                return
+            } else {
+                GemmaEngine(applicationContext).apply {
+                    val error = initialize(modelFile.absolutePath, "")
+                    if (error != null) {
+                        val hint = when {
+                            error.contains("memory", ignoreCase = true) || error.contains("OOM", ignoreCase = true) ->
+                                " (Try E2B model on this device)"
+                            error.contains("GPU", ignoreCase = true) ->
+                                " (GPU init failed — device may not support this model)"
+                            else -> ""
+                        }
+                        Timber.e("GemmaEngine load failed: $error")
+                        updateNotification("LiteRT Load Error: ${error.take(80)}$hint")
+                        return
+                    }
+                }
             }
             
             // Atomic set (Kimi K2 Fix)

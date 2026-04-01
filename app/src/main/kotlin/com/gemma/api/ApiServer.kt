@@ -42,7 +42,6 @@ class ApiServer(
                         Timber.d("API: ${prompt.take(30)}...")
 
                         // DELEGATE TO GEMMA SERVICE (Orchestrator)
-                        // Storage is handled atomically inside processQuery
                         val aiResponse = withContext(Dispatchers.Default) {
                             gemmaService.processQuery(prompt, sessionId) ?: "Error: No response generated"
                         }
@@ -57,6 +56,80 @@ class ApiServer(
                     } catch (e: Exception) {
                         Timber.e(e, "API error")
                         val errorJson = gson.toJson(mapOf("error" to (e.message ?: "Unknown error")))
+                        call.respondText(errorJson, ContentType.Application.Json, HttpStatusCode.InternalServerError)
+                    }
+                }
+                
+                // STANDARD OPENAI-COMPATIBLE ENDPOINT FOR OPENCLAW / HONCHO
+                post("/v1/chat/completions") {
+                    try {
+                        val request = call.receiveText()
+                        val parsed = gson.fromJson(request, Map::class.java)
+                        
+                        @Suppress("UNCHECKED_CAST")
+                        val messages = parsed["messages"] as? List<Map<String, Any>> ?: emptyList()
+                        
+                        // Extract the query. For our stateful agent, we ideally just want the latest user message
+                        // since we maintain our own KV cache and SQLite history natively.
+                        val lastMessage = messages.lastOrNull()
+                        val content = lastMessage?.get("content")?.toString() ?: ""
+                        
+                        // Fallback: If it's a completely stateless external request, we might need all messages.
+                        // But Oracle_OS is inherently stateful. Let's just pass the payload contents.
+                        val promptBuilder = StringBuilder()
+                        if (messages.size > 1) {
+                            // If they passed history, let's concatenate loosely just in case
+                            for (msg in messages) {
+                                val role = msg["role"]?.toString() ?: "user"
+                                val text = msg["content"]?.toString() ?: ""
+                                promptBuilder.append("[\${role.uppercase()}]: \$text\n")
+                            }
+                        } else {
+                            promptBuilder.append(content)
+                        }
+                        
+                        val prompt = promptBuilder.toString().trim()
+                        val sessionId = "openclaw_session"
+
+                        Timber.d("OpenAI API: \${prompt.take(50)}...")
+
+                        val aiResponse = withContext(Dispatchers.Default) {
+                            gemmaService.processQuery(prompt, sessionId) ?: "Error: No response generated"
+                        }
+
+                        // Build OpenAI Schema conformant response
+                        val responseMap = mapOf(
+                            "id" to "chatcmpl-\${UUID.randomUUID()}",
+                            "object" to "chat.completion",
+                            "created" to (System.currentTimeMillis() / 1000),
+                            "model" to (parsed["model"]?.toString() ?: "gemma-local"),
+                            "choices" to listOf(
+                                mapOf(
+                                    "index" to 0,
+                                    "message" to mapOf(
+                                        "role" to "assistant",
+                                        "content" to aiResponse
+                                    ),
+                                    "finish_reason" to "stop"
+                                )
+                            ),
+                            "usage" to mapOf(
+                                "prompt_tokens" to prompt.length / 4,
+                                "completion_tokens" to aiResponse.length / 4,
+                                "total_tokens" to (prompt.length + aiResponse.length) / 4
+                            )
+                        )
+
+                        call.respondText(gson.toJson(responseMap), ContentType.Application.Json)
+                    } catch (e: Exception) {
+                        Timber.e(e, "OpenAI API error")
+                        val errorJson = gson.toJson(mapOf(
+                            "error" to mapOf(
+                                "message" to (e.message ?: "Unknown error"),
+                                "type" to "server_error",
+                                "code" to 500
+                            )
+                        ))
                         call.respondText(errorJson, ContentType.Application.Json, HttpStatusCode.InternalServerError)
                     }
                 }

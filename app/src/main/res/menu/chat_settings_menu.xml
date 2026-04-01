@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/action_transparent_wallpaper"
+        android:title="Set Transparent Wallpaper" />
+    <item
+        android:id="@+id/action_backup_1"
+        android:title="Toggle 1 (Placeholder)" />
+    <item
+        android:id="@+id/action_backup_2"
+        android:title="Toggle 2 (Placeholder)" />
+</menu>

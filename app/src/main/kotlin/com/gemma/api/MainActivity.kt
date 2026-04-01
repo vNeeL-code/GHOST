@@ -81,6 +81,7 @@ class MainActivity : Activity(), GemmaService.UiCallback {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        actionBar?.hide()
         Timber.i("🌀 Entering the System Check...")
         
         // Init Voice
@@ -283,6 +284,30 @@ class MainActivity : Activity(), GemmaService.UiCallback {
         btnSend = findViewById(R.id.btnSend)
         thinkingProgress = findViewById(R.id.thinkingProgress)
         thinkingText = findViewById(R.id.thinkingText)
+        val btnSettings = findViewById<android.view.View>(R.id.btnSettings)
+        
+        btnSettings?.setOnClickListener { view ->
+            val popup = android.widget.PopupMenu(this, view)
+            popup.menuInflater.inflate(R.menu.chat_settings_menu, popup.menu)
+            popup.setOnMenuItemClickListener { item ->
+                when (item.itemId) {
+                    R.id.action_transparent_wallpaper -> {
+                        try {
+                            val intent = Intent(android.app.WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).apply {
+                                putExtra(android.app.WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT, 
+                                    ComponentName(this@MainActivity, com.gemma.api.ui.CameraWallpaperService::class.java))
+                            }
+                            startActivity(intent)
+                        } catch (e: Exception) {
+                            Timber.e(e, "Setup Live Wallpaper Intent Failed")
+                        }
+                        true
+                    }
+                    else -> false
+                }
+            }
+            popup.show()
+        }
         
         chatAdapter = ChatAdapter()
         chatRecyclerView?.apply {

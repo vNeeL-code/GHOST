@@ -25,7 +25,7 @@ import kotlin.coroutines.resumeWithException
  * Uses the proper Google AI Edge LiteRT-LM library for Gemma 3n inference
  * with full support for images and audio (omnimodal!)
  */
-class GemmaEngine(private val context: Context) {
+class GemmaEngine(private val context: Context) : LlmBackend {
 
     private var engine: Engine? = null
     private var conversation: Conversation? = null
@@ -33,7 +33,7 @@ class GemmaEngine(private val context: Context) {
 
     @Volatile private var isResetting = false
 
-    var activeBackend: String? = null
+    override var activeBackend: String? = null
         private set
 
     // Phase 12: Cache initialization params for hardReset
@@ -103,10 +103,10 @@ class GemmaEngine(private val context: Context) {
         }
     }
 
-    suspend fun generateResponse(
+    override suspend fun generateResponse(
         prompt: String,
-        images: List<Bitmap> = emptyList(),
-        audioData: ByteArray? = null
+        images: List<Bitmap>,
+        audioData: ByteArray?
     ): String {
         // Wait if reset is in progress or conversation is transiently null
         var waitCount = 0
@@ -207,10 +207,10 @@ class GemmaEngine(private val context: Context) {
         }
     }
 
-    fun streamResponse(
+    override fun streamResponse(
         prompt: String,
-        images: List<Bitmap> = emptyList(),
-        audioData: ByteArray? = null,
+        images: List<Bitmap>,
+        audioData: ByteArray?,
         onToken: (String) -> Unit,
         onComplete: (String) -> Unit,
         onError: (String) -> Unit
@@ -267,7 +267,8 @@ class GemmaEngine(private val context: Context) {
         }
     }
 
-    fun softReset(systemPrompt: String) {
+    override fun softReset(systemPrompt: String) {
+        Timber.i("GemmaEngine Soft Reset with robust prompt injection")
         isResetting = true
         try {
             synchronized(sessionLock) {
@@ -299,7 +300,7 @@ class GemmaEngine(private val context: Context) {
     }
 
     // Phase 12: Implement hardReset to cure Hexagon DSP NPU hardware timeouts.
-    fun hardReset() {
+    override fun hardReset() {
         if (lastModelPath.isBlank()) {
             Timber.e("Cannot hard reset: Engine was never initialized")
             return
@@ -373,7 +374,8 @@ class GemmaEngine(private val context: Context) {
      * Creates a temporary conversation, runs inference, cleans up.
      * Used by RLM for recursive sub-calls that shouldn't pollute the main conversation.
      */
-    suspend fun generateOneShot(prompt: String): String {
+    override suspend fun generateOneShot(prompt: String): String {
+        Timber.i("Executing one-shot prompt...")
         val currentEngine = synchronized(sessionLock) { engine }
             ?: return "Error: Engine not initialized"
 
@@ -454,7 +456,7 @@ class GemmaEngine(private val context: Context) {
         }
     }
 
-    fun cleanup() {
+    override fun cleanup() {
         runCatching {
             synchronized(sessionLock) {
                 conversation?.close()
