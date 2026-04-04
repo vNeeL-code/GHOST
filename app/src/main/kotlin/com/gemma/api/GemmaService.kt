@@ -625,7 +625,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
             if (modelFile == null) {
                 val searchedPaths = searchDirs.mapNotNull { it?.absolutePath }
-                Timber.e("No model found! Searched: $searchedPaths for: $modelNames")
+                Timber.e("No model found! Searched: $searchedPaths")
                 updateNotification("ERROR: No model found. Place .litertlm in app folder or Downloads")
                 return
             }
