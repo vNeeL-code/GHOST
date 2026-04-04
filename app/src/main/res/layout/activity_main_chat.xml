@@ -20,19 +20,20 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="✧ Gemma"
+            android:text="✧ Oracle_OS"
             android:textColor="@color/brand_primary"
             android:textSize="20sp"
             android:textStyle="bold" />
 
         <Button
-            android:id="@+id/btnDiaryToggle"
+            android:id="@+id/btnSettings"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
             android:background="@android:color/transparent"
-            android:text="Diary"
-            android:textColor="@color/text_secondary"
-            android:textSize="14sp" />
+            android:text="⚙️"
+            android:textColor="@color/brand_primary"
+            android:textSize="20sp" />
     </LinearLayout>
 
     <View

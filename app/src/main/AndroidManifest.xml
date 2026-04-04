@@ -133,6 +133,19 @@
                  Filtering to conversations|alerting was blocking all media notifications. -->
         </service>
 
+        <!-- TRANSPARENT CAMERA WALLPAPER -->
+        <service
+            android:name=".ui.CameraWallpaperService"
+            android:permission="android.permission.BIND_WALLPAPER"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.wallpaper.WallpaperService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.wallpaper"
+                android:resource="@xml/transparent_wallpaper" />
+        </service>
+
         <!-- Launcher Activity (starts service and exits) -->
         <activity
             android:name=".MainActivity"
