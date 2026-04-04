@@ -598,18 +598,21 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 android.os.Environment.DIRECTORY_DOWNLOADS
             )
             // Search for any Gemma model variant (E4B preferred, E2B fallback, generic last)
-            val modelNames = listOf(
-                "gemma-3n-E4B-it-int4.litertlm",
-                "gemma-3n-E2B-it-int4.litertlm",
-                "gemma.litertlm"
-            )
             val searchDirs = listOf(
                 getExternalFilesDir(null),  // App storage (survives Downloads cleanup)
                 downloadDir                  // Downloads folder
             )
             val modelFile = searchDirs.flatMap { dir ->
-                modelNames.map { name -> File(dir, name) }
-            }.firstOrNull { it.exists() }
+                dir?.listFiles { _, name -> name.endsWith(".litertlm", ignoreCase = true) }?.toList() ?: emptyList()
+            }.sortedByDescending { file ->
+                val name = file.name.lowercase()
+                when {
+                    name.contains("gemma-4") -> 100
+                    name.contains("e4b") -> 90
+                    name.contains("e2b") -> 80
+                    else -> 0
+                }
+            }.firstOrNull()
 
             if (modelFile != null) {
                 val variant = when {
