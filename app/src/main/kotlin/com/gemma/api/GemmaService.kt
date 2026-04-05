@@ -638,25 +638,30 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             updateNotification("Loading ${if(isGguf) "GGUF Engine" else "LiteRT Engine"}...")
             
             val newEngine: LlmBackend = if (isGguf) {
-                NexaEngine(applicationContext)
-            } else {
-                GemmaEngine(applicationContext)
-            }
-
-            // Pass empty system prompt here — KoogAgent.initialize() sets the real one
-            // via softReset(buildSystemPrompt()) immediately after engine init.
-            val error = newEngine.initialize(modelFile.absolutePath, "")
-            if (error != null) {
-                val hint = when {
-                    error.contains("memory", ignoreCase = true) || error.contains("OOM", ignoreCase = true) ->
-                        " (Try quantizing device backend)"
-                    error.contains("GPU", ignoreCase = true) ->
-                        " (GPU init failed — device may not support this model natively)"
-                    else -> ""
+                NexaEngine(applicationContext).apply {
+                    val error = initialize(modelFile.absolutePath, "")
+                    if (error != null) {
+                        Timber.e("Model load failed: $error")
+                        updateNotification("Load Error: ${error.take(80)}")
+                        return
+                    }
                 }
-                Timber.e("Model load failed: $error")
-                updateNotification("Load Error: ${error.take(80)}$hint")
-                return
+            } else {
+                GemmaEngine(applicationContext).apply {
+                    val error = initialize(modelFile.absolutePath, "")
+                    if (error != null) {
+                        val hint = when {
+                            error.contains("memory", ignoreCase = true) || error.contains("OOM", ignoreCase = true) ->
+                                " (Try quantizing device backend)"
+                            error.contains("GPU", ignoreCase = true) ->
+                                " (GPU init failed — device may not support this model natively)"
+                            else -> ""
+                        }
+                        Timber.e("Model load failed: $error")
+                        updateNotification("Load Error: ${error.take(80)}$hint")
+                        return
+                    }
+                }
             }
             
             // Atomic set (Kimi K2 Fix)
