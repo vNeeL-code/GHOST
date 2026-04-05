@@ -71,10 +71,10 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     
     // REPLACE: private lateinit var engine: GemmaEngine
     // WITH:
-    private val engineRef = AtomicReference<GemmaEngine?>(null)
+    private val engineRef = AtomicReference<LlmBackend?>(null)
     private val engineMutex = kotlinx.coroutines.sync.Mutex()
 
-    val engine: GemmaEngine?
+    val engine: LlmBackend?
         get() = engineRef.get()
 
     fun isGemmaLoaded(): Boolean = engineRef.get()?.let { 
@@ -603,7 +603,11 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 downloadDir                  // Downloads folder
             )
             val modelFile = searchDirs.flatMap { dir ->
-                dir?.listFiles { _, name -> name.endsWith(".litertlm", ignoreCase = true) }?.toList() ?: emptyList()
+                dir?.listFiles { _, name -> 
+                    name.endsWith(".litertlm", ignoreCase = true) ||
+                    name.endsWith(".gguf", ignoreCase = true) ||
+                    name.endsWith(".nexa", ignoreCase = true)
+                }?.toList() ?: emptyList()
             }.sortedByDescending { file ->
                 val name = file.name.lowercase()
                 when {
@@ -630,19 +634,24 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 return
             }
 
-            updateNotification("Loading Gemma...")
-            val newEngine = GemmaEngine(applicationContext)
+            val isGguf = modelFile.name.endsWith(".gguf", ignoreCase = true) || modelFile.name.endsWith(".nexa", ignoreCase = true)
+            updateNotification("Loading ${if(isGguf) "GGUF Engine" else "LiteRT Engine"}...")
+            
+            val newEngine: LlmBackend = if (isGguf) {
+                NexaEngine(applicationContext)
+            } else {
+                GemmaEngine(applicationContext)
+            }
+
             // Pass empty system prompt here — KoogAgent.initialize() sets the real one
             // via softReset(buildSystemPrompt()) immediately after engine init.
-            // Previously BASE_SYSTEM_PROMPT was injected here AND buildSystemPrompt() was
-            // called on first flush, creating two competing identities on cold start.
             val error = newEngine.initialize(modelFile.absolutePath, "")
             if (error != null) {
                 val hint = when {
                     error.contains("memory", ignoreCase = true) || error.contains("OOM", ignoreCase = true) ->
-                        " (Try E2B model on this device)"
+                        " (Try quantizing device backend)"
                     error.contains("GPU", ignoreCase = true) ->
-                        " (GPU init failed — device may not support this model)"
+                        " (GPU init failed — device may not support this model natively)"
                     else -> ""
                 }
                 Timber.e("Model load failed: $error")

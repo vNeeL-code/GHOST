@@ -4,7 +4,7 @@ import android.content.Context
 import com.chaquo.python.Python
 import com.chaquo.python.PyObject
 import com.chaquo.python.android.AndroidPlatform
-import com.gemma.api.GemmaEngine
+import com.gemma.api.LlmBackend
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -22,11 +22,11 @@ import timber.log.Timber
  *                                                   ↕
  *                                              GemmaBridge callback
  *                                                   ↕
- *                                          GemmaEngine.generateOneShot()
+ *                                          LlmBackend.generateOneShot()
  */
 class RLMBridge(
     private val appContext: Context,
-    private val engine: GemmaEngine
+    private val engine: LlmBackend
 ) {
     private var rlmModule: PyObject? = null
     @Volatile private var isInitialized = false

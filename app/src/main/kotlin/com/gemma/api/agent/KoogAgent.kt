@@ -2,7 +2,7 @@ package com.gemma.api.agent
 
 import android.content.Context
 import android.graphics.Bitmap
-import com.gemma.api.GemmaEngine
+import com.gemma.api.LlmBackend
 import com.gemma.api.mcp.MCPServer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -30,7 +30,7 @@ import com.google.gson.Gson
  */
 class KoogAgent(
     private val context: Context,
-    private val llmEngine: GemmaEngine,
+    private val llmEngine: LlmBackend,
     private val mcpServer: MCPServer,
     private val checkpointDir: File,
     private val callbacks: AgentPlatformCallbacks? = null

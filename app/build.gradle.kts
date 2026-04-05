@@ -104,6 +104,9 @@ dependencies {
     // (NOT mediapipe:tasks-genai - that's a different/older API)
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.9.0-alpha01")
     
+    // Nexa SDK (llama.cpp backend) for Gemma 4 (.gguf)
+    implementation("ai.nexa:core:0.0.24")
+    
     // TFLite GPU delegate - Use Google Play Services versions (like Gallery app)
     implementation("com.google.android.gms:play-services-tflite-java:16.4.0")
     implementation("com.google.android.gms:play-services-tflite-gpu:16.4.0")
