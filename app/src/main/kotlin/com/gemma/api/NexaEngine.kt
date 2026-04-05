@@ -59,10 +59,10 @@ class NexaEngine(private val context: Context) : LlmBackend {
                 model_name = "local_gguf",
                 model_path = modelPath,
                 config = ModelConfig(
-                    max_tokens = 32768, // Usually handled by backend
+                    max_tokens = 4096, 
                     enable_thinking = false
                 ),
-                plugin_id = "cpu_gpu" // Fallback plugin ID
+                plugin_id = "cpu" 
             )
 
             // Depending on the version, the builder returns a Result
