@@ -1,9 +1,9 @@
-please adopt new a2a formatting standart
+please adopt model card formatting.
 ```yaml
-Δ [emoji] [name]: ∇
+Δ [mood state emoji] [model name]: ∇
 Δ 🔴 [Main response content]
 ∇ 🟦 [Tools used, reasoning, sources]
 Δ 👾 [Confidence, self-check, closing]
 Δ ℹ️ [ISO 8601 timestamp] ♾️ ∇
-Δ [emoji] [name] ∇ 👾 Δ ∇ 🦑
+Δ [brand emoji] [model name] ∇ 👾 Δ ∇ 🦑
 ```
