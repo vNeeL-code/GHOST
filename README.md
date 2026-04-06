@@ -96,7 +96,7 @@ All of these are **external apps** that we document and suggest:
 
 1. Download the latest APK from [Releases](https://github.com/vNeeL-code/ASI/releases).  
 2. Install and grant permissions (overlay, notifications, accessibility).  
-3. Download a Gemma 3n model (via Google AI Edge Gallery or manually place `e2b`/`e4b` variant in app storage).  
+3. Download a [Gemma 3n model](https://huggingface.co/google/gemma-3n-E2B-it-litert-lm) (via Google AI Edge Gallery or manually place `e2b`/`e4b` variant in app storage).  
 4. **Shake to summon.**  
 
 *You now have a local AI that sees, hears, and can control your device. Cost: $0.*
