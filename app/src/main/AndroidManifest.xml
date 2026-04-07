@@ -202,5 +202,11 @@
                 <action android:name="com.gemma.api.ACTION_TTS_REPLAY" />
             </intent-filter>
         </receiver>
+
+        <!-- Required Native Bindings for LiteRT 0.10.0 hardware mapping (Snapdragon / OpenCL) -->
+        <uses-native-library android:name="libvndksupport.so" android:required="false"/>
+        <uses-native-library android:name="libOpenCL.so" android:required="false"/>
+        <uses-native-library android:name="libcdsprpc.so" android:required="false"/>
+
     </application>
 </manifest>
