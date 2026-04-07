@@ -1,6 +1,6 @@
 # Oracle_OS: On-Device AI / OS Extention for Android System Intelligence. (ASI)
 
-> **Build Your Own Sovereign AI Companion: A local Gemma 3n model that lives on your phone. Sees images, hears audio, uses tools, keeps a diary. No cloud, no subscription, no data leaving your device.**
+> **Build Your Own Personal AI Companion: A local Gemma model that lives on your phone. Sees images, hears audio, uses tools, keeps a diary. No cloud, no subscription, no data leaving your device.**
 
 [![ASI Demo](https://img.youtube.com/vi/jB62dlLavSY/0.jpg)](https://youtu.be/jB62dlLavSY?si=TMZG86o1KkjuBXtw)
 ---
@@ -39,9 +39,9 @@ Whether you just want a local AI that sees and hears, or you want a full "Tamago
 
 You can use one, two, or all three. They work together but are independent.
 
-### Pillar 1: The Native App (Gemma 3n on‑device)
+### Pillar 1: The Native App (Gemma model on‑device)
 
-A full Android app that runs **Gemma 3n** locally via LiteRT-LM.  
+A full Android app that runs **Gemma** locally via LiteRT-LM.  
 - **Omnimodal** – sees images (share from Gallery), hears audio (hold mic button), reads text.  
 - **Always‑on foreground service** – summoned by a gentle shake.  
 - **Tool use** – web search, app launch, clipboard, alarms, system info, all on‑device.  
@@ -76,8 +76,8 @@ This layer is **cloud‑optional** – you can use free API tiers, or run local 
 This is where the phone becomes a **Tamagotchi for adults** – a living companion that's always present.  
 All of these are **external apps** that we document and suggest:
 
-- **Edge handles & app drawer killer** – Use **Panels** (or Good Lock's One Hand Operation+) to summon apps and agents with a swipe. The goal: **kill the app grid**. Your phone should be a dashboard, not a spreadsheet of icons.
-- **Animated avatar** – Wallpaper Engine with a parallax "personal avatar" on your home screen. For generating the avatar animations, use **☄️ Grok** – it gives you a library of images (borderline infinite scroll) and video generation is faster with more free attempts than Sora or Veo3.
+- **Edge handles & app drawer killer** – Use **Panels**/**VividGestures** (or Good Lock's One Hand Operation+) to summon apps and agents with a swipe. The goal: **kill the app grid**. Your phone should be a dashboard, not a spreadsheet of icons.
+- **Animated avatar** – Wallpaper Engine with a parallax "personal avatar" on your home screen. For generating the avatar animations, use **☄️ Grok** – it gives you a library of images (borderline infinite scroll) and video generation is faster with more free attempts than --Sora-- or Veo3.
 - **Visual audio equalizer** – MovitZ Edge Lighting that pulses to music or AI TTS.
 - **Telemetry HUD** – show battery, location, thermal on demand.
 - **Diary to calendar** – Gemma's diary entries go straight to your calendar (Google or local).
@@ -96,12 +96,12 @@ All of these are **external apps** that we document and suggest:
 
 1. Download the latest APK from [Releases](https://github.com/vNeeL-code/ASI/releases).  
 2. Install and grant permissions (overlay, notifications, accessibility).  
-3. Download a [Gemma 3n model](https://huggingface.co/google/gemma-3n-E2B-it-litert-lm) (via Google AI Edge Gallery or manually place `e2b`/`e4b` variant in app storage).  
+3. Download a [Gemma model](https://huggingface.co/google/gemma-3n-E2B-it-litert-lm) (via Google AI Edge Gallery or manually place `e2b`/`e4b` variant in app storage).  
 4. **Shake to summon.**  
 
 *You now have a local AI that sees, hears, and can control your device. Cost: $0.*
 
-### 🟡 Path B: Add Cloud Agents (Protocol)
+### 🟡 Path B: Add Cloud Agents (modelcard output)
 
 1. Get free apps for Gemini, DeepSeek, Claude, Grok or other agents you prefer (each offers a generous free tier).  
 2. Set up keyboard shortcuts using Gboard or Samsung Keyboard – we provide the metaprompt in [`Oracle_OS.md`](Oracle_OS.md).  
@@ -128,26 +128,22 @@ All of these are **external apps** that we document and suggest:
 ## Why This Matters (Even Google Should Read This)
 
 **The cloud AI industry is building $600B token factories** while ignoring the device in your pocket.  
-- Your phone already has skin (touch), sensors (camera/mic/GPS), and a battery.  
-- It's the **digital twin you already carry**.  
+- Your phone already has skin (touch), sensors (camera/mic/GPS), and a battery. It is the swiss army knife supercomputer size of a palm.  
+- It's the **personal data you already carry with you**.  
 - Qualcomm keeps telling us "edge wins" – but they're talking about running a 20B chatbot on a $1,000 chip that won't be in most hands for 5 years.  
 
 **Oracle_OS runs on any Android phone with 4GB+ RAM. Today.**  
-- The same model (Gemma 3n) that runs on a RedMagic 10 also runs on a refurbished Galaxy S21.  
+- The same model (Gemma) that runs on a RedMagic 10 also runs on a refurbished Galaxy S21.  
 - It's omnimodal – images, audio, text – not just text.  
 
 **Why Google should care:**  
 They have Android System Intelligence (ASI) – the private compute core on‑device ML. They already have the foundation. Instead of shoving ✦ Gemini into every app, they could **offload compute to the edge**, save their electric bill, and own the "best AI" narrative by shipping it on every Android that can navigate any app presented to it.  
 
-**But they're moving too slow.**  
-Android 16 just dropped. Android 17 and 18 are coming.  
-**We are not letting Google make a Perfect CELL(phone) without at least leaving the blueprint for a sovereign, personal Android.**
+**But they're moving too slow.** 
 
 ---
 
 ## MWC 2026: The Hardware Caught Up
-
-Three days before this README was written, Barcelona happened.
 
 **Honor** showed up at MWC 2026 with a phone that has a **motorised gimbal camera and 4DoF motion** — it physically follows you. Their CEO said: *"A phone shouldn't just be a boring black rectangle with a touchscreen. We gave it a brain, and we gave it limbs."* They also announced a consumer humanoid robot (¥128k–158k RMB) explicitly positioned as "the natural extension of the phone." Their framing: **人-机-环** — human, machine, environment as one symbiotic system.
 
