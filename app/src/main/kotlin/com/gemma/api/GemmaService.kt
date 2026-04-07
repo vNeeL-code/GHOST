@@ -656,7 +656,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 // CRITICAL: We DO NOT return or stopSelf() here. 
                 // We let the service stay alive so the user can see the error 
                 // and it doesn't crash-loop the OS.
-                return@launch
+                return
             }
             
             // Atomic set (Kimi K2 Fix)
