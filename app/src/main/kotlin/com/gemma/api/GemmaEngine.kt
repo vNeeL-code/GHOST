@@ -58,53 +58,64 @@ class GemmaEngine(private val context: Context) : LlmBackend {
             lastVisionEnabled = enableVision
             lastAudioEnabled = enableAudio
 
-            // Determine best backend (NPU > GPU)
-            val preferredBackend = try {
-                // Official Google Edge recommendation for Snapdragon devices
-                Backend.NPU(nativeLibraryDir = context.applicationInfo.nativeLibraryDir)
-            } catch (e: Throwable) {
-                Timber.w("NPU initialization pre-check failed, defaulting to GPU")
-                Backend.GPU()
-            }
-
-            // Configure engine with multimodal backends
-            val engineConfig = EngineConfig(
-                modelPath = modelPath,
-                backend = preferredBackend,
-                visionBackend = null,      // Text-only Gemma 4
-                audioBackend = null,       // Text-only Gemma 4
-                maxNumTokens = 32768,      // Restored to 32k as per user verification
-                cacheDir = null            // Disabled to prevent native filesystem lockups on production paths
+            // Phase 12: Triple-Tier Hardware Fallback (NPU -> GPU -> CPU)
+            val backendsToTry = listOf(
+                "NPU" to { Backend.NPU(nativeLibraryDir = context.applicationInfo.nativeLibraryDir) },
+                "GPU" to { Backend.GPU() },
+                "CPU" to { Backend.CPU() }
             )
 
-            // Create and initialize engine
-            val newEngine = Engine(engineConfig)
-            newEngine.initialize()
+            var lastError: String? = null
+            
+            for ((backendName, backendProvider) in backendsToTry) {
+                try {
+                    val currentBackend = backendProvider()
+                    Timber.i("⚙️ Attempting LiteRT Initialization on $backendName Backend...")
+                    
+                    val engineConfig = EngineConfig(
+                        modelPath = modelPath,
+                        backend = currentBackend,
+                        visionBackend = null,
+                        audioBackend = null,
+                        maxNumTokens = 32768,
+                        cacheDir = null
+                    )
 
-            // Create conversation with sampling config
-            val conversationConfig = ConversationConfig(
-                samplerConfig = SamplerConfig(
-                    topK = 40,
-                    topP = 0.95,
-                    temperature = 0.8
-                )
-            )
+                    val newEngine = Engine(engineConfig)
+                    newEngine.initialize()
 
-            val newConversation = newEngine.createConversation(conversationConfig)
+                    val conversationConfig = ConversationConfig(
+                        samplerConfig = if (currentBackend is Backend.NPU) null else SamplerConfig(
+                            topK = 40,
+                            topP = 0.95,
+                            temperature = 0.8
+                        )
+                    )
 
-            synchronized(sessionLock) {
-                conversation?.close()
-                engine?.close()
-                engine = newEngine
-                conversation = newConversation
+                    val newConversation = newEngine.createConversation(conversationConfig)
+
+                    synchronized(sessionLock) {
+                        conversation?.close()
+                        engine?.close()
+                        engine = newEngine
+                        conversation = newConversation
+                    }
+
+                    activeBackend = "LiteRT-LM ($backendName)"
+                    Timber.i("✓ Gemma initialized successfully on $backendName!")
+                    return null // Success!
+                } catch (e: Exception) {
+                    lastError = e.message ?: "Unknown native error"
+                    Timber.w("⚠️ $backendName initialization failed: $lastError")
+                    // Continue to next backend...
+                }
             }
 
-            activeBackend = "LiteRT-LM (${if (preferredBackend is Backend.NPU) "NPU" else "GPU"})"
-            Timber.i("✓ Gemma initialized successfully with omnimodal support!")
-            null  // Success
-
+            // If we reached here, everything failed
+            Timber.e("❌ All backends (NPU, GPU, CPU) failed to initialize Gemma 4.")
+            lastError ?: "Total hardware rejection"
         }.getOrElse { e ->
-            Timber.e(e, "Fatal: Could not initialize Gemma")
+            Timber.e(e, "Fatal: Unexpected initialization error")
             e.message ?: "Unknown fatal error"
         }
     }
