@@ -62,9 +62,9 @@ class GemmaEngine(private val context: Context) : LlmBackend {
             val engineConfig = EngineConfig(
                 modelPath = modelPath,
                 backend = Backend.GPU(),  // Main inference on GPU
-                visionBackend = if (enableVision) Backend.GPU() else null,  // GPU for vision (Gemma 3n)
-                audioBackend = if (enableAudio) Backend.CPU() else null,    // CPU for audio (Gemma 3n)
-                maxNumTokens = 32768, // Context 32k — standard for Gemma 3n
+                visionBackend = null,     // Disabled to prevent graph-build panics on non-vision Gemma 4
+                audioBackend = null,      // Disabled to prevent graph-build panics on non-audio Gemma 4
+                maxNumTokens = 4096,      // Slashed to prevent 32k KV Cache Native Memory Overflow
                 cacheDir = context.getExternalFilesDir(null)?.absolutePath
             )
 
