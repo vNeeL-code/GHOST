@@ -61,9 +61,9 @@ class GemmaEngine(private val context: Context) : LlmBackend {
             // Configure engine with multimodal backends
             val engineConfig = EngineConfig(
                 modelPath = modelPath,
-                backend = Backend.GPU,  // Main inference on GPU
-                visionBackend = if (enableVision) Backend.GPU else null,  // GPU for vision (Gemma 3n)
-                audioBackend = if (enableAudio) Backend.CPU else null,    // CPU for audio (Gemma 3n)
+                backend = Backend.GPU(),  // Main inference on GPU
+                visionBackend = if (enableVision) Backend.GPU() else null,  // GPU for vision (Gemma 3n)
+                audioBackend = if (enableAudio) Backend.CPU() else null,    // CPU for audio (Gemma 3n)
                 maxNumTokens = 32768, // Context 32k — standard for Gemma 3n
                 cacheDir = context.getExternalFilesDir(null)?.absolutePath
             )
@@ -78,10 +78,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                     topK = 40,
                     topP = 0.95,
                     temperature = 0.8
-                ),
-                systemMessage = if (systemPrompt.isNotBlank()) {
-                    Message.of(listOf(Content.Text(systemPrompt)))
-                } else null
+                )
             )
 
             val newConversation = newEngine.createConversation(conversationConfig)
@@ -283,10 +280,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                         topK = 40,
                         topP = 0.95,
                         temperature = 0.8
-                    ),
-                    systemMessage = if (systemPrompt.isNotBlank()) {
-                        Message.of(listOf(Content.Text(systemPrompt)))
-                    } else null
+                    )
                 )
 
                 conversation = currentEngine.createConversation(conversationConfig)
@@ -388,8 +382,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                                 topK = 40,
                                 topP = 0.95,
                                 temperature = 0.7
-                            ),
-                            systemMessage = null
+                            )
                         )
                         val tempConv = currentEngine.createConversation(config)
 
