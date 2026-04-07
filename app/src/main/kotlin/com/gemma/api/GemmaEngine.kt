@@ -4,10 +4,12 @@ import android.content.Context
 import android.graphics.Bitmap
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Content
+import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
+import com.google.ai.edge.litertlm.ExperimentalApi
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.MessageCallback
 import com.google.ai.edge.litertlm.SamplerConfig
@@ -42,6 +44,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
     private var lastVisionEnabled: Boolean = true
     private var lastAudioEnabled: Boolean = true
 
+    @OptIn(ExperimentalApi::class)
     fun initialize(
         modelPath: String,
         systemPrompt: String,
@@ -173,7 +176,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                         val responseBuilder = StringBuilder()
 
                         conv.sendMessageAsync(
-                            Message.of(contents),
+                            Contents.of(contents),
                             object : MessageCallback {
                                 override fun onMessage(message: Message) {
                                     responseBuilder.append(message.toString())
@@ -260,7 +263,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
             var fullResponse = ""
 
             conv.sendMessageAsync(
-                Message.of(contents),
+                Contents.of(contents),
                 object : MessageCallback {
                     override fun onMessage(message: Message) {
                         val token = message.toString()
@@ -409,7 +412,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                         val responseBuilder = StringBuilder()
 
                         tempConv.sendMessageAsync(
-                            Message.of(listOf(Content.Text(prompt))),
+                            Contents.of(listOf(Content.Text(prompt))),
                             object : MessageCallback {
                                 override fun onMessage(message: Message) {
                                     responseBuilder.append(message.toString())
