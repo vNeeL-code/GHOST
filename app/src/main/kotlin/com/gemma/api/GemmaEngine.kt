@@ -64,7 +64,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                 backend = Backend.GPU(),  // Main inference on GPU
                 visionBackend = null,     // Disabled to prevent graph-build panics on non-vision Gemma 4
                 audioBackend = null,      // Disabled to prevent graph-build panics on non-audio Gemma 4
-                maxNumTokens = 32768,      // Restored to full 32k baseline since native crash was traced to missing Manifest libraries
+                maxNumTokens = 4096,      // Slashed to prevent 32k KV Cache Native Memory Overflow on the massive E4B parameters
                 cacheDir = context.getExternalFilesDir(null)?.absolutePath
             )
 
