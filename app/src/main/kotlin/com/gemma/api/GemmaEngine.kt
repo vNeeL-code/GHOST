@@ -81,7 +81,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                         visionBackend = null,
                         audioBackend = null,
                         maxNumTokens = 32768,
-                        cacheDir = null
+                        cacheDir = context.cacheDir.absolutePath  // REQUIRED: JNI converts null to "" which causes SIGSEGV
                     )
 
                     val newEngine = Engine(engineConfig)
