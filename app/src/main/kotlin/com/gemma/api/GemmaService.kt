@@ -638,24 +638,28 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             updateNotification("Loading ${if(isGguf) "GGUF Engine" else "LiteRT Engine"}...")
             
             val newEngine: LlmBackend = try {
+                // Diagnostic step: confirm model is actually accessible
+                Timber.i("Model path: ${modelFile.absolutePath}")
+                Timber.i("Model size: ${modelFile.length() / 1024 / 1024} MB")
+                Timber.i("Model readable: ${modelFile.canRead()}")
+                updateNotification("Found: ${modelFile.name} (${modelFile.length()/1024/1024}MB)")
+                
                 if (isGguf) {
                     NexaEngine(applicationContext).apply {
                         val error = initialize(modelFile.absolutePath, "")
-                        if (error != null) throw Exception("GGUF Init Error: $error")
+                        if (error != null) throw Exception("GGUF: $error")
                     }
                 } else {
                     GemmaEngine(applicationContext).apply {
                         val error = initialize(modelFile.absolutePath, "")
-                        if (error != null) throw Exception("LiteRT Init Error: $error")
+                        if (error != null) throw Exception("NPU/GPU/CPU all failed: $error")
                     }
                 }
             } catch (e: Exception) {
                 val error = e.message ?: "Unknown init failure"
                 Timber.e("Model load failed: $error")
-                updateNotification("Load Error: ${error.take(80)}")
-                // CRITICAL: We DO NOT return or stopSelf() here. 
-                // We let the service stay alive so the user can see the error 
-                // and it doesn't crash-loop the OS.
+                // Show FULL error - no truncation
+                updateNotification("Load Error: $error")
                 return
             }
             
