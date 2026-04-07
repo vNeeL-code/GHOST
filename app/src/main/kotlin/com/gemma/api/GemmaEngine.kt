@@ -58,14 +58,23 @@ class GemmaEngine(private val context: Context) : LlmBackend {
             lastVisionEnabled = enableVision
             lastAudioEnabled = enableAudio
 
+            // Determine best backend (NPU > GPU)
+            val preferredBackend = try {
+                // Official Google Edge recommendation for Snapdragon devices
+                Backend.NPU(nativeLibraryDir = context.applicationInfo.nativeLibraryDir)
+            } catch (e: Throwable) {
+                Timber.w("NPU initialization pre-check failed, defaulting to GPU")
+                Backend.GPU()
+            }
+
             // Configure engine with multimodal backends
             val engineConfig = EngineConfig(
                 modelPath = modelPath,
-                backend = Backend.GPU(),  // Main inference on GPU
-                visionBackend = null,     // Disabled to prevent graph-build panics on non-vision Gemma 4
-                audioBackend = null,      // Disabled to prevent graph-build panics on non-audio Gemma 4
-                maxNumTokens = 4096,      // Slashed to prevent 32k KV Cache Native Memory Overflow on the massive E4B parameters
-                cacheDir = null           // Set to NULL to mimic EdgeGallery. Prevents PROT_EXEC mapping faults in external storage
+                backend = preferredBackend,
+                visionBackend = null,      // Text-only Gemma 4
+                audioBackend = null,       // Text-only Gemma 4
+                maxNumTokens = 32768,      // Restored to 32k as per user verification
+                cacheDir = null            // Disabled to prevent native filesystem lockups on production paths
             )
 
             // Create and initialize engine
@@ -90,7 +99,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                 conversation = newConversation
             }
 
-            activeBackend = "LiteRT-LM (GPU + Vision + Audio)"
+            activeBackend = "LiteRT-LM (${if (preferredBackend is Backend.NPU) "NPU" else "GPU"})"
             Timber.i("✓ Gemma initialized successfully with omnimodal support!")
             null  // Success
 

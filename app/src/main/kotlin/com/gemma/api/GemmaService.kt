@@ -637,31 +637,26 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             val isGguf = modelFile.name.endsWith(".gguf", ignoreCase = true) || modelFile.name.endsWith(".nexa", ignoreCase = true)
             updateNotification("Loading ${if(isGguf) "GGUF Engine" else "LiteRT Engine"}...")
             
-            val newEngine: LlmBackend = if (isGguf) {
-                NexaEngine(applicationContext).apply {
-                    val error = initialize(modelFile.absolutePath, "")
-                    if (error != null) {
-                        Timber.e("Model load failed: $error")
-                        updateNotification("Load Error: ${error.take(80)}")
-                        return
+            val newEngine: LlmBackend = try {
+                if (isGguf) {
+                    NexaEngine(applicationContext).apply {
+                        val error = initialize(modelFile.absolutePath, "")
+                        if (error != null) throw Exception("GGUF Init Error: $error")
+                    }
+                } else {
+                    GemmaEngine(applicationContext).apply {
+                        val error = initialize(modelFile.absolutePath, "")
+                        if (error != null) throw Exception("LiteRT Init Error: $error")
                     }
                 }
-            } else {
-                GemmaEngine(applicationContext).apply {
-                    val error = initialize(modelFile.absolutePath, "")
-                    if (error != null) {
-                        val hint = when {
-                            error.contains("memory", ignoreCase = true) || error.contains("OOM", ignoreCase = true) ->
-                                " (Try quantizing device backend)"
-                            error.contains("GPU", ignoreCase = true) ->
-                                " (GPU init failed — device may not support this model natively)"
-                            else -> ""
-                        }
-                        Timber.e("Model load failed: $error")
-                        updateNotification("Load Error: ${error.take(80)}$hint")
-                        return
-                    }
-                }
+            } catch (e: Exception) {
+                val error = e.message ?: "Unknown init failure"
+                Timber.e("Model load failed: $error")
+                updateNotification("Load Error: ${error.take(80)}")
+                // CRITICAL: We DO NOT return or stopSelf() here. 
+                // We let the service stay alive so the user can see the error 
+                // and it doesn't crash-loop the OS.
+                return@launch
             }
             
             // Atomic set (Kimi K2 Fix)
