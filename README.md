@@ -25,7 +25,7 @@ Whether you just want a local AI that sees and hears, or you want a full "Tamago
 ## Table of Contents
 
 1. [The Three Pillars](#the-three-pillars)  
-   - [Pillar 1: The Native App (Gemma 3n on‑device)](#pillar-1-the-native-app-gemma-3n-on-device)  
+   - [Pillar 1: The Native App (Gemma 4 on‑device)](#pillar-1-the-native-app-gemma-4-on-device)  
    - [Pillar 2: The Protocol (Agent Coordination)](#pillar-2-the-protocol-agent-coordination)  
    - [Pillar 3: The UX Ecosystem (Make It Yours)](#pillar-3-the-ux-ecosystem-make-it-yours)  
 2. [Installation: Choose Your Path](#installation-choose-your-path)  
