@@ -1,4 +1,4 @@
-# Oracle_OS: On-Device AI / OS Extention for Android System Intelligence. (ASI)
+# Oracle_OS: On-Device AI assistant for Android System Intelligence. (ASI)
 
 > **Build Your Own Personal AI Companion: A local Gemma model that lives on your phone. Sees images, hears audio, uses tools, keeps a diary. No cloud, no subscription, no data leaving your device.**
 
