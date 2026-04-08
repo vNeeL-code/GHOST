@@ -61,9 +61,11 @@ class GemmaEngine(private val context: Context) : LlmBackend {
             lastVisionEnabled = enableVision
             lastAudioEnabled = enableAudio
 
-            // Phase 12: Triple-Tier Hardware Fallback (NPU -> GPU -> CPU)
+            // Enable verbose native logging 
+            Engine.setNativeMinLogSeverity(LogSeverity.VERBOSE)
+
+            // Minimal config — exactly matches official LiteRT-LM example (no maxNumTokens, no cacheDir)
             val backendsToTry = listOf(
-                "NPU" to { Backend.NPU(nativeLibraryDir = context.applicationInfo.nativeLibraryDir) },
                 "GPU" to { Backend.GPU() },
                 "CPU" to { Backend.CPU() }
             )
@@ -77,11 +79,9 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                     
                     val engineConfig = EngineConfig(
                         modelPath = modelPath,
-                        backend = currentBackend,
-                        visionBackend = null,
-                        audioBackend = null,
-                        maxNumTokens = 32768,
-                        cacheDir = context.cacheDir.absolutePath  // REQUIRED: JNI converts null to "" which causes SIGSEGV
+                        backend = currentBackend
+                        // No maxNumTokens — let model metadata decide
+                        // No cacheDir — use model directory per Config.kt docs
                     )
 
                     val newEngine = Engine(engineConfig)
