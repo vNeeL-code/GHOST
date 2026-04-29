@@ -171,8 +171,6 @@ Your digital twin was always in your pocket. Now it has a body too.
 
 ### 📞 Contact & Support
 
-* **Author:** V Kazakov
-* **Email:** kazakovval@gmail.com
 * **Repository:** `vNeeL-code/ASI`
 * **Support:** [Buy me a coffee](https://buymeacoffee.com/vNeeL) (I might need about tree fiddy...)
 * **Devlogs:** [tumblr](https://www.tumblr.com/oracle-os)
