@@ -11,12 +11,12 @@ import timber.log.Timber
 @Database(
     entities = [
         ConversationTurn::class,
-        // ConversationTurnFts::class,  // Disabled temporarily - may cause crashes
+        ConversationTurnFts::class,
         SemanticFact::class,
         AgentState::class,
         DiaryEntry::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false  // Disable schema export to fix build warning
 )
 abstract class OracleDatabase : RoomDatabase() {
@@ -52,6 +52,17 @@ abstract class OracleDatabase : RoomDatabase() {
         }
 
         /**
+         * Migration 3→4: Added FTS table for conversations
+         */
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                Timber.i("OracleDatabase: Migrating 3→4 (FTS)")
+                db.execSQL("CREATE VIRTUAL TABLE IF NOT EXISTS `conversations_fts` USING FTS4(`userMessage`, `assistantResponse`, content=`conversations`)")
+                // Triggers are handled by Room if using contentEntity
+            }
+        }
+
+        /**
          * Migration 1→2: Added diary_entries table
          */
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -78,14 +89,13 @@ abstract class OracleDatabase : RoomDatabase() {
                 )
                 .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
                 // Apply migrations in order
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
-                // Only fall back to destructive if no migration path exists
-                // This preserves data when possible but handles edge cases
-                .fallbackToDestructiveMigrationOnDowngrade()  // Only on DOWNGRADE
-                .fallbackToDestructiveMigrationFrom(0)        // Only from initial/corrupt state
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                // CRITICAL: If ANY migration fails, wipe the database rather than crash.
+                // Data loss is acceptable vs bootloop.
+                .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance
-                Timber.i("OracleDatabase: Initialized (version 3)")
+                Timber.i("OracleDatabase: Initialized (version 4)")
                 instance
             }
         }

@@ -66,11 +66,12 @@
         android:usesCleartextTraffic="true"
         android:supportsRtl="true">
 
-        <!-- REQUIRED for GPU Access on modern Android/restricted ROMs -->
+        <!-- GPU Access: Required on modern Android/restricted ROMs (Gallery-aligned) -->
         <uses-native-library android:name="libvndksupport.so" android:required="false"/>
         <uses-native-library android:name="libOpenCL.so" android:required="false"/>
+        <uses-native-library android:name="libcdsprpc.so" android:required="false"/>
 
-        <!-- NPU ACCESS (Experiment: Unhide Snapdragon Drivers) -->
+        <!-- NPU Access: Snapdragon HTP Drivers (for future NPU support) -->
         <uses-native-library android:name="libadsprpc.so" android:required="false"/>
         <uses-native-library android:name="libQnnHtp.so" android:required="false"/>
         <uses-native-library android:name="libQnnSystem.so" android:required="false"/>
@@ -146,9 +147,20 @@
                 android:resource="@xml/transparent_wallpaper" />
         </service>
 
+        <!-- Native Bubble Activity -->
+        <activity
+            android:name=".BubbleActivity"
+            android:allowEmbedded="true"
+            android:resizeableActivity="true"
+            android:exported="true"
+            android:windowLayoutInDisplayCutoutMode="always"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density"
+            android:documentLaunchMode="always" />
+
         <!-- Launcher Activity (starts service and exits) -->
         <activity
             android:name=".MainActivity"
+            android:windowSoftInputMode="adjustResize"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -203,10 +215,7 @@
             </intent-filter>
         </receiver>
 
-        <!-- Required Native Bindings for LiteRT 0.10.0 hardware mapping (Snapdragon / OpenCL) -->
-        <uses-native-library android:name="libvndksupport.so" android:required="false"/>
-        <uses-native-library android:name="libOpenCL.so" android:required="false"/>
-        <uses-native-library android:name="libcdsprpc.so" android:required="false"/>
+
 
     </application>
 </manifest>

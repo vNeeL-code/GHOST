@@ -16,6 +16,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.ProgressBar
 import android.widget.TextView
+import android.widget.Toast
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import timber.log.Timber
@@ -28,11 +29,16 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
+import java.io.File
+import com.gemma.api.database.ConversationTurn
+
 /**
  * The Advanced Oracle_OS Gateway
  * Handles Permissions, then spawns the Native Chat Interface seamlessly hooking into GemmaService.
  */
-class MainActivity : Activity(), GemmaService.UiCallback {
+class MainActivity : ComponentActivity(), GemmaService.UiCallback {
     
     // UI Elements - Launcher Phase
     private lateinit var statusTextView: TextView
@@ -56,6 +62,12 @@ class MainActivity : Activity(), GemmaService.UiCallback {
     
     private val handler = Handler(Looper.getMainLooper())
     private var isRitualComplete = false
+    private var isShowingDiary = false
+
+    // Multimodal
+    private val imagePicker = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri: Uri? ->
+        uri?.let { handlePickedImage(it) }
+    }
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(className: ComponentName, service: IBinder) {
@@ -195,6 +207,32 @@ class MainActivity : Activity(), GemmaService.UiCallback {
             return
         }
 
+        // 6b. Check for previous crashes and show forensic alert
+        val crashLogDir = File(filesDir, "logs/crashes")
+        if (crashLogDir.exists()) {
+            val latestCrash = crashLogDir.listFiles()?.maxByOrNull { f -> f.lastModified() }
+            if (latestCrash != null) {
+                showState(
+                    "⚠️ Forensic Alert: Previous crash detected.\n\n${latestCrash.name}\n\nReview before launching?",
+                    "View Crash Log"
+                ) {
+                    val text = latestCrash.readText()
+                    statusTextView.text = text.take(1000)
+                    actionButton.text = "Recovery Boot"
+                    actionButton.setOnClickListener {
+                        latestCrash.delete()
+                        // Clear service watchdog too
+                        getSharedPreferences(Constants.PREFS_NAME, MODE_PRIVATE).edit()
+                            .putBoolean("is_initializing", false)
+                            .putInt("init_crash_count", 0)
+                            .apply()
+                        completeRitual()
+                    }
+                }
+                return
+            }
+        }
+
         // 7. Bluetooth (nearby devices)
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S &&
             checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
@@ -226,7 +264,7 @@ class MainActivity : Activity(), GemmaService.UiCallback {
         }
         
         // 10. Complete
-        showState("✅ SYSTEM GREEN\n\nSovereignty Achieved.", "LAUNCHING...") { }
+        showState("(Δ 👾 ∇)\n\nStatus: online", "LAUNCHING...") { }
         completeRitual()
     }
     
@@ -249,7 +287,7 @@ class MainActivity : Activity(), GemmaService.UiCallback {
         if (!isFinishing && !isRitualComplete) {
            isRitualComplete = true
            actionButton.isEnabled = false
-           ttsManager.speak("Online.")
+           try { ttsManager.speak("Online.") } catch (e: Exception) { Timber.e(e) }
            handler.postDelayed({ launchAndBindService() }, 1000)
         }
     }
@@ -269,7 +307,7 @@ class MainActivity : Activity(), GemmaService.UiCallback {
         }
     }
     
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         checkSystemState()
     }
@@ -284,7 +322,7 @@ class MainActivity : Activity(), GemmaService.UiCallback {
         btnSend = findViewById(R.id.btnSend)
         thinkingProgress = findViewById(R.id.thinkingProgress)
         thinkingText = findViewById(R.id.thinkingText)
-        val btnSettings = findViewById<android.view.View>(R.id.btnSettings)
+        val btnSettings = findViewById<android.view.View>(R.id.titleText)
         
         btnSettings?.setOnClickListener { view ->
             val popup = android.widget.PopupMenu(this, view)
@@ -303,9 +341,47 @@ class MainActivity : Activity(), GemmaService.UiCallback {
                         }
                         true
                     }
+                    R.id.action_notification_tts -> {
+                        val prefs = getSharedPreferences(Constants.PREFS_NAME, MODE_PRIVATE)
+                        val newState = !prefs.getBoolean(Constants.PREF_PASSIVE_TTS, false)
+                        prefs.edit().putBoolean(Constants.PREF_PASSIVE_TTS, newState).apply()
+                        item.isChecked = newState
+                        Toast.makeText(this@MainActivity, "Passive TTS: ${if (newState) "ON" else "OFF"}", Toast.LENGTH_SHORT).show()
+                        true
+                    }
+                    R.id.action_toggle_diary -> {
+                        isShowingDiary = !isShowingDiary
+                        item.title = if (isShowingDiary) "Show Main Chat" else "Show Gemma's Internal Diary"
+                        findViewById<TextView>(R.id.titleText)?.text = if (isShowingDiary) "Δ 📔 ∇" else "Δ ✧ ∇"
+                        chatAdapter.isDiaryMode = isShowingDiary
+                        loadHistoricalChat()
+                        true
+                    }
+                    R.id.action_clear_safe_mode -> {
+                        getSharedPreferences(Constants.PREFS_NAME, MODE_PRIVATE).edit()
+                            .putInt("init_crash_count", 0)
+                            .putBoolean("is_initializing", false)
+                            .putBoolean("force_cpu", false)
+                            .putBoolean("gpu_native_crashed", false)
+                            .putBoolean("npu_native_crashed", false)
+                            .putBoolean("gpu_verified", false)
+                            .putBoolean("npu_verified", false)
+                            .putLong("last_native_crash_time", 0)
+                            .apply()
+                        Toast.makeText(this@MainActivity, "Recovery state cleared", Toast.LENGTH_SHORT).show()
+                        true
+                    }
                     else -> false
                 }
             }
+            
+            // Set initial state for checkable items
+            val prefs = getSharedPreferences(Constants.PREFS_NAME, MODE_PRIVATE)
+            popup.menu.findItem(R.id.action_notification_tts)?.isChecked = prefs.getBoolean(Constants.PREF_PASSIVE_TTS, false)
+            if (isShowingDiary) {
+                popup.menu.findItem(R.id.action_toggle_diary)?.title = "Show Main Chat"
+            }
+            
             popup.show()
         }
         
@@ -325,32 +401,64 @@ class MainActivity : Activity(), GemmaService.UiCallback {
             }
         }
         
+        val btnAddMedia = findViewById<android.view.View>(R.id.btnAddMedia)
+        val btnMic = findViewById<android.view.View>(R.id.btnMic)
+
+        btnAddMedia?.setOnClickListener {
+            imagePicker.launch("image/*")
+        }
+
+        btnMic?.setOnClickListener {
+            handleMicClick()
+        }
+        
         loadHistoricalChat()
     }
     
     private fun loadHistoricalChat() {
         scope.launch {
             try {
-                // Fetch the last 20 messages for the UI purely from the SQLite DB bound in GemmaService
-                val history = gemmaService?.getRecentConversationHistory(20) ?: emptyList()
-                val messages = mutableListOf<ChatMessage>()
-                // Since history is [newest..oldest], reverse it to [oldest..newest] for standard logical flow
-                for ((userMsg, gemmaMsg) in history.reversed()) {
-                    messages.add(ChatMessage(userMsg, isFromUser = true))
-                    messages.add(ChatMessage(gemmaMsg, isFromUser = false))
-                }
-                withContext(Dispatchers.Main) {
-                    if (messages.isNotEmpty()) {
+                if (isShowingDiary) {
+                    val entries = gemmaService?.memoryManager?.getRecentDiaryEntries(50) ?: emptyList()
+                    withContext(Dispatchers.Main) {
+                        val messages = entries.sortedBy { it.timestamp }.map { entry ->
+                            ChatMessage(
+                                content = entry.observation,
+                                isFromUser = false,
+                                timestamp = entry.timestamp,
+                                eventType = entry.eventType
+                            )
+                        }
                         chatAdapter.setMessages(messages)
-                        chatRecyclerView?.scrollToPosition(messages.size - 1)
-                    } else {
-                        // Empty state initial greeting
-                        chatAdapter.addMessage(ChatMessage("Hello! I am completely integrated natively now. How can I help?", isFromUser = false))
+                        chatRecyclerView?.scrollToPosition(chatAdapter.itemCount - 1)
+                    }
+                } else {
+                    val service = gemmaService
+                    if (service == null) {
+                        Timber.w("Cannot load historical chat: service not bound")
+                        return@launch
+                    }
+                    val history: List<ConversationTurn> = service.getRecentTurns()
+                    withContext(Dispatchers.Main) {
+                        val messages = history.sortedBy { it.timestamp }.flatMap { turn: ConversationTurn ->
+                            val list = mutableListOf<ChatMessage>()
+                            if (turn.userMessage.isNotEmpty()) {
+                                list.add(ChatMessage(turn.userMessage, isFromUser = true, timestamp = turn.timestamp))
+                            }
+                            if (turn.assistantResponse.isNotEmpty()) {
+                                list.add(ChatMessage(turn.assistantResponse, isFromUser = false, timestamp = turn.timestamp + 1))
+                            }
+                            list
+                        }
+                        if (messages.isEmpty()) {
+                            // Chat remains clean until initialized
+                        } else {
+                            chatAdapter.setMessages(messages)
+                            chatRecyclerView?.scrollToPosition(chatAdapter.itemCount - 1)
+                        }
                     }
                 }
-            } catch (e: Exception) {
-                Timber.e(e, "Failed to load chat history")
-            }
+            } catch (e: Exception) { Timber.e(e, "Failed to load chat history") }
         }
     }
 
@@ -358,8 +466,30 @@ class MainActivity : Activity(), GemmaService.UiCallback {
 
     override fun onMessageAdded(message: String, isUser: Boolean, isComplete: Boolean) {
         runOnUiThread {
-            chatAdapter.addMessage(ChatMessage(message, isFromUser = isUser))
+            if (isUser || isComplete) {
+                chatAdapter.addMessage(ChatMessage(message, isFromUser = isUser))
+            } else {
+                // Streaming update
+                if (chatAdapter.itemCount > 0 && !isUser) {
+                    chatAdapter.updateLastMessage(message)
+                } else {
+                    chatAdapter.addMessage(ChatMessage(message, isFromUser = isUser))
+                }
+            }
             chatRecyclerView?.scrollToPosition(chatAdapter.itemCount - 1)
+        }
+    }
+
+    override fun onThoughtUpdated(thought: String) {
+        if (isShowingDiary) {
+            runOnUiThread {
+                if (chatAdapter.itemCount > 0) {
+                    chatAdapter.updateLastMessage(thought)
+                } else {
+                    chatAdapter.addMessage(ChatMessage(thought, isFromUser = false))
+                }
+                chatRecyclerView?.scrollToPosition(chatAdapter.itemCount - 1)
+            }
         }
     }
 
@@ -370,6 +500,53 @@ class MainActivity : Activity(), GemmaService.UiCallback {
             btnSend?.isEnabled = !isThinking
             chatInputText?.isEnabled = !isThinking
         }
+    }
+
+    private fun handlePickedImage(uri: Uri) {
+        scope.launch {
+            try {
+                val inputStream = contentResolver.openInputStream(uri)
+                val bitmap = android.graphics.BitmapFactory.decodeStream(inputStream)
+                inputStream?.close()
+                if (bitmap != null) {
+                    val downsampled = downsampleBitmap(bitmap, 1024)
+                    gemmaService?.processMultimodalFromUi("Please analyze this image.", images = listOf(downsampled))
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to process picked image")
+            }
+        }
+    }
+
+    private fun handleMicClick() {
+        if (gemmaService == null) return
+        
+        scope.launch {
+            try {
+                onThinkingStateChanged(true)
+                thinkingText?.text = "Δ Listening... ∇"
+                
+                // Record 5s of voice
+                val audioBytes = gemmaService?.recordAudio(5)
+                
+                if (audioBytes != null) {
+                    thinkingText?.text = "Δ Processing... ∇"
+                    gemmaService?.processMultimodalFromUi("I am speaking to you now.", audio = audioBytes)
+                } else {
+                    onThinkingStateChanged(false)
+                    android.widget.Toast.makeText(this@MainActivity, "Failed to record audio or permission denied", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Mic error")
+                onThinkingStateChanged(false)
+            }
+        }
+    }
+
+    private fun downsampleBitmap(bitmap: android.graphics.Bitmap, maxDim: Int): android.graphics.Bitmap {
+        if (bitmap.width <= maxDim && bitmap.height <= maxDim) return bitmap
+        val ratio = minOf(maxDim.toFloat() / bitmap.width, maxDim.toFloat() / bitmap.height)
+        return android.graphics.Bitmap.createScaledBitmap(bitmap, (bitmap.width * ratio).toInt(), (bitmap.height * ratio).toInt(), true)
     }
 
     override fun onDestroy() {

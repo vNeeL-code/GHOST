@@ -254,7 +254,7 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
     }
 
     /**
-     * Smart speak - considers device state before speaking
+     * Smart speak - considers device state before speaking and handles long text chunking
      *
      * @param text Text to speak
      * @param priority Priority level (affects queueing behavior)
@@ -263,12 +263,54 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
     fun smartSpeak(text: String, priority: Priority = Priority.NORMAL): Boolean {
         if (!isReady || text.isBlank()) return false
 
+        val maxLen = TextToSpeech.getMaxSpeechInputLength()
+        if (text.length > maxLen) {
+            val chunks = chunkText(text, maxLen)
+            var lastResult = false
+            for ((index, chunk) in chunks.withIndex()) {
+                val p = if (index == 0) priority else Priority.NORMAL
+                lastResult = doSmartSpeak(chunk, p, isChunk = index > 0)
+            }
+            return lastResult
+        } else {
+            return doSmartSpeak(text, priority, isChunk = false)
+        }
+    }
+
+    private fun chunkText(text: String, maxLen: Int): List<String> {
+        val chunks = mutableListOf<String>()
+        var start = 0
+        while (start < text.length) {
+            if (start + maxLen >= text.length) {
+                chunks.add(text.substring(start))
+                break
+            }
+            var end = start + maxLen
+            var boundary = text.lastIndexOfAny(charArrayOf('.', '!', '?'), end)
+            if (boundary <= start) {
+                boundary = text.lastIndexOf(' ', end)
+                if (boundary <= start) {
+                    boundary = end
+                }
+            } else {
+                boundary += 1
+            }
+            chunks.add(text.substring(start, boundary).trim())
+            start = boundary
+        }
+        return chunks
+    }
+
+    private fun doSmartSpeak(text: String, priority: Priority, isChunk: Boolean): Boolean {
+        if (!isReady || text.isBlank()) return false
+
         val state = getDeviceState()
         Timber.d("TTS smartSpeak: state=$state, priority=$priority, text=${text.take(30)}...")
 
         // IMMEDIATE priority bypasses all checks
         if (priority == Priority.IMMEDIATE) {
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "GemmaImmediate")
+            val queueMode = if (isChunk) TextToSpeech.QUEUE_ADD else TextToSpeech.QUEUE_FLUSH
+            tts?.speak(text, queueMode, null, "GemmaImmediate")
             return true
         }
 
@@ -312,12 +354,12 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
             }
             DeviceState.ACTIVE -> {
                 // Active use - check if we should interrupt media
-                if (audioManager.isMusicActive && priority < Priority.HIGH) {
-                    // Music playing - queue instead of flush
-                    tts?.speak(text, TextToSpeech.QUEUE_ADD, null, "GemmaQueued")
+                val queueMode = if (isChunk || (audioManager.isMusicActive && priority < Priority.HIGH)) {
+                    TextToSpeech.QUEUE_ADD
                 } else {
-                    tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "GemmaResponse")
+                    TextToSpeech.QUEUE_FLUSH
                 }
+                tts?.speak(text, queueMode, null, if (queueMode == TextToSpeech.QUEUE_ADD) "GemmaQueued" else "GemmaResponse")
                 lastSpeechTime = System.currentTimeMillis()
                 true
             }

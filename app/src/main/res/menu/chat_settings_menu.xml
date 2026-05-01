@@ -4,9 +4,13 @@
         android:id="@+id/action_transparent_wallpaper"
         android:title="Set Transparent Wallpaper" />
     <item
-        android:id="@+id/action_backup_1"
-        android:title="Toggle 1 (Placeholder)" />
+        android:id="@+id/action_notification_tts"
+        android:title="Passive Notification TTS"
+        android:checkable="true" />
     <item
-        android:id="@+id/action_backup_2"
-        android:title="Toggle 2 (Placeholder)" />
+        android:id="@+id/action_toggle_diary"
+        android:title="Show Gemma's Internal Diary" />
+    <item
+        android:id="@+id/action_clear_safe_mode"
+        android:title="Clear Safe Mode (Reset Guard)" />
 </menu>

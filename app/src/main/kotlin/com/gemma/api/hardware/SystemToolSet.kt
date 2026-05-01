@@ -12,118 +12,89 @@ import android.view.KeyEvent
 import timber.log.Timber
 import java.util.Locale
 import java.util.TimeZone
+import com.google.ai.edge.litertlm.Tool
+import com.google.ai.edge.litertlm.ToolParam
+import com.google.ai.edge.litertlm.ToolSet
 
 /**
- * System Tools - Apps, Media, and Volume
+ * System Tools - Apps, Media, and Volume aligned with LiteRT @Tool Architecture
  */
-class SystemToolSet(private val context: Context) {
+class SystemToolSet(private val context: Context) : ToolSet {
 
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val packageManager: PackageManager = context.packageManager
-
-    // Cache of installed apps (lazy load or refresh on demand)
     private var appListCache: List<AppInfo>? = null
 
     data class AppInfo(val label: String, val packageName: String)
 
-    /**
-     * Open an app by name (Fuzzy Match)
-     */
-    fun openApp(query: String): String {
+    @Tool(description = "Opens an app by its name")
+    fun app(
+        @ToolParam(description = "The name of the app to launch (e.g., Spotify, Chrome)") name: String
+    ): Map<String, String> {
         val apps = getInstalledApps()
-        val bestMatch = findBestMatch(query, apps)
+        val bestMatch = findBestMatch(name, apps)
 
         return if (bestMatch != null) {
             try {
                 val intent = packageManager.getLaunchIntentForPackage(bestMatch.packageName)
                 if (intent != null) {
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    
-                    // 1. Try Direct Launch (if permitted)
                     if (android.provider.Settings.canDrawOverlays(context)) {
-                        try {
-                            context.startActivity(intent)
-                            return "Launched ${bestMatch.label}"
-                        } catch (e: Exception) {
-                            Timber.w(e, "Direct launch failed, trying fallback")
-                        }
+                        context.startActivity(intent)
+                        mapOf("result" to "success", "message" to "Launched ${bestMatch.label}")
                     } else {
-                         Timber.w("No Overlay Permission - using Notification Fallback for App Launch")
+                        val pendingIntent = android.app.PendingIntent.getActivity(
+                            context, bestMatch.packageName.hashCode(), intent, 
+                            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+                        )
+                        val notificationManager = context.getSystemService(android.app.NotificationManager::class.java)
+                        val builder = android.app.Notification.Builder(context, "gemma_actions")
+                            .setSmallIcon(android.R.drawable.sym_def_app_icon)
+                            .setContentTitle("Launch ${bestMatch.label}")
+                            .setContentText("Tap to open app")
+                            .setContentIntent(pendingIntent)
+                            .setAutoCancel(true)
+                        notificationManager.notify(bestMatch.packageName.hashCode(), builder.build())
+                        mapOf("result" to "success", "message" to "Posted notification to launch ${bestMatch.label}")
                     }
-
-                    // 2. Fallback: Notification
-                    val pendingIntent = android.app.PendingIntent.getActivity(
-                        context, 
-                        bestMatch.packageName.hashCode(), 
-                        intent, 
-                        android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
-                    )
-
-                    val notificationManager = context.getSystemService(android.app.NotificationManager::class.java)
-                    val channelId = "gemma_actions"
-
-                     // Channel creation handled by GemmaService central logic
-                     
-
-                    val builder = android.app.Notification.Builder(context, channelId)
-                        .setSmallIcon(android.R.drawable.sym_def_app_icon)
-                        .setContentTitle("Launch ${bestMatch.label}")
-                        .setContentText("Tap to open app")
-                        .setContentIntent(pendingIntent)
-                        .setAutoCancel(true)
-                        
-                    notificationManager.notify(bestMatch.packageName.hashCode(), builder.build())
-                    
-                    "Posted notification to launch ${bestMatch.label} (Background restriction)"
                 } else {
-                    "Could not launch ${bestMatch.label} (No Intent found)"
+                    mapOf("result" to "error", "message" to "Could not launch ${bestMatch.label}")
                 }
             } catch (e: Exception) {
-                Timber.e(e, "Launch failed")
-                "Failed to launch ${bestMatch.label}: ${e.message}"
+                mapOf("result" to "error", "message" to "Failed to launch: ${e.message}")
             }
         } else {
-            "App not found matching '$query'"
+            mapOf("result" to "error", "message" to "App not found matching '$name'")
         }
     }
 
-    /**
-     * Media Controls using AudioManager key injection
-     */
-    fun mediaControl(action: String): String {
+    @Tool(description = "Controls media playback (Play, Pause, Next, Previous, Stop)")
+    fun media(
+        @ToolParam(description = "The media action to perform (e.g., PLAY, PAUSE, NEXT, PREV)") action: String
+    ): Map<String, String> {
         val keyEvent = when (action.uppercase(Locale.ROOT)) {
             "PLAY", "PAUSE", "PLAYPAUSE", "TOGGLE" -> KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
             "NEXT", "SKIP" -> KeyEvent.KEYCODE_MEDIA_NEXT
             "PREVIOUS", "PREV", "BACK" -> KeyEvent.KEYCODE_MEDIA_PREVIOUS
             "STOP" -> KeyEvent.KEYCODE_MEDIA_STOP
-            else -> return "Unknown media command: $action"
+            else -> return mapOf("result" to "error", "message" to "Unknown command")
         }
 
         return try {
-            // Emulate press down and up
-            val downEvent = KeyEvent(KeyEvent.ACTION_DOWN, keyEvent)
-            val upEvent = KeyEvent(KeyEvent.ACTION_UP, keyEvent)
-            
-            audioManager.dispatchMediaKeyEvent(downEvent)
-            audioManager.dispatchMediaKeyEvent(upEvent)
-            
-            "Media Action Sent: $action"
+            audioManager.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyEvent))
+            audioManager.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, keyEvent))
+            mapOf("result" to "success", "message" to "Media Action Sent: $action")
         } catch (e: Exception) {
-            Timber.e(e, "Media control failed")
-            "Media failed: ${e.message}"
+            mapOf("result" to "error", "message" to (e.message ?: "Failed"))
         }
     }
 
     private fun getInstalledApps(): List<AppInfo> {
         if (appListCache == null) {
-            val intent = Intent(Intent.ACTION_MAIN, null).apply {
-                addCategory(Intent.CATEGORY_LAUNCHER)
-            }
+            val intent = Intent(Intent.ACTION_MAIN, null).apply { addCategory(Intent.CATEGORY_LAUNCHER) }
             val resolveInfos = packageManager.queryIntentActivities(intent, 0)
             appListCache = resolveInfos.map {
-                val label = it.loadLabel(packageManager).toString()
-                val pkg = it.activityInfo.packageName
-                AppInfo(label, pkg)
+                AppInfo(it.loadLabel(packageManager).toString(), it.activityInfo.packageName)
             }
         }
         return appListCache ?: emptyList()
@@ -131,46 +102,39 @@ class SystemToolSet(private val context: Context) {
 
     private fun findBestMatch(query: String, apps: List<AppInfo>): AppInfo? {
         val lowerQuery = query.lowercase(Locale.ROOT)
-        // 1. Exact Match
         apps.find { it.label.equals(query, ignoreCase = true) }?.let { return it }
-        
-        // 2. Starts With
         apps.find { it.label.startsWith(query, ignoreCase = true) }?.let { return it }
-        
-        // 3. Contains
         apps.find { it.label.contains(query, ignoreCase = true) }?.let { return it }
-        
-        // 4. Levenshtein for typos? (Simple implementation for now: minimal checks)
-        // If simple checks fail, return null for now to avoid wrong launches.
         return null
     }
 
-
-    /**
-     * Set an alarm via Android AlarmClock intent
-     */
-    fun setAlarm(hour: Int, minutes: Int, label: String = ""): String {
+    @Tool(description = "Sets an alarm")
+    fun alarm(
+        @ToolParam(description = "The hour of the alarm (0-23)") hour: Int,
+        @ToolParam(description = "The minutes of the alarm (0-59)") minutes: Int,
+        @ToolParam(description = "Optional label for the alarm") label: String = ""
+    ): Map<String, String> {
         return try {
             val intent = Intent(AlarmClock.ACTION_SET_ALARM).apply {
                 putExtra(AlarmClock.EXTRA_HOUR, hour)
                 putExtra(AlarmClock.EXTRA_MINUTES, minutes)
                 if (label.isNotBlank()) putExtra(AlarmClock.EXTRA_MESSAGE, label)
                 putExtra(AlarmClock.EXTRA_SKIP_UI, true)
+                putExtra(AlarmClock.EXTRA_VIBRATE, true)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)
-            val timeStr = "${hour.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}"
-            "Alarm set for $timeStr${if (label.isNotBlank()) " ($label)" else ""}"
+            mapOf("result" to "success", "message" to "Alarm set for $hour:$minutes")
         } catch (e: Exception) {
-            Timber.e(e, "Set alarm failed")
-            "Failed to set alarm: ${e.message}"
+            mapOf("result" to "error", "message" to (e.message ?: "error").toString())
         }
     }
 
-    /**
-     * Set a countdown timer via Android AlarmClock intent
-     */
-    fun setTimer(seconds: Int, label: String = ""): String {
+    @Tool(description = "Sets a countdown timer")
+    fun timer(
+        @ToolParam(description = "The duration in seconds") seconds: Int,
+        @ToolParam(description = "Optional label") label: String = ""
+    ): Map<String, String> {
         return try {
             val intent = Intent(AlarmClock.ACTION_SET_TIMER).apply {
                 putExtra(AlarmClock.EXTRA_LENGTH, seconds)
@@ -179,149 +143,81 @@ class SystemToolSet(private val context: Context) {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)
-            val display = if (seconds >= 60) "${seconds / 60}m ${seconds % 60}s" else "${seconds}s"
-            "Timer set for $display${if (label.isNotBlank()) " ($label)" else ""}"
+            mapOf("result" to "success", "message" to "Timer set for $seconds seconds")
         } catch (e: Exception) {
-            Timber.e(e, "Set timer failed")
-            "Failed to set timer: ${e.message}"
+            mapOf("result" to "error", "message" to (e.message ?: "error").toString())
         }
     }
 
-    /**
-     * Create a calendar event silently via ContentProvider.
-     * Used by both the CALENDAR tool and diary-to-calendar integration.
-     */
-    fun createCalendarEvent(
-        title: String,
-        description: String = "",
-        startTimeMillis: Long = System.currentTimeMillis(),
-        durationMinutes: Int = 30
-    ): String {
-        return try {
-            val calendarId = getDefaultCalendarId()
-                ?: return "No calendar account found — user needs to set up a Google account"
-
-            val values = ContentValues().apply {
-                put(CalendarContract.Events.TITLE, title)
-                put(CalendarContract.Events.DESCRIPTION, description)
-                put(CalendarContract.Events.DTSTART, startTimeMillis)
-                put(CalendarContract.Events.DTEND, startTimeMillis + durationMinutes * 60 * 1000L)
-                put(CalendarContract.Events.CALENDAR_ID, calendarId)
-                put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
-            }
-
-            val uri = context.contentResolver.insert(CalendarContract.Events.CONTENT_URI, values)
-            if (uri != null) {
-                Timber.i("Calendar event created: $title (uri=$uri)")
-                "Calendar event created: $title"
-            } else {
-                "Failed to create calendar event (insert returned null)"
-            }
-        } catch (e: SecurityException) {
-            Timber.e(e, "Calendar permission denied")
-            "Calendar permission not granted — user needs to allow calendar access"
-        } catch (e: Exception) {
-            Timber.e(e, "Calendar event creation failed")
-            "Failed to create calendar event: ${e.message}"
-        }
-    }
-
-    /**
-     * Find the default (primary) calendar ID on the device
-     */
     private fun getDefaultCalendarId(): Long? {
-        val projection = arrayOf(
-            CalendarContract.Calendars._ID,
-            CalendarContract.Calendars.IS_PRIMARY
-        )
         val cursor = context.contentResolver.query(
             CalendarContract.Calendars.CONTENT_URI,
-            projection,
+            arrayOf(CalendarContract.Calendars._ID, CalendarContract.Calendars.IS_PRIMARY),
             null, null, null
         ) ?: return null
-
         cursor.use {
-            // Try to find primary calendar first
             while (it.moveToNext()) {
-                val id = it.getLong(0)
-                val isPrimary = it.getInt(1) == 1
-                if (isPrimary) return id
+                if (it.getInt(1) == 1) return it.getLong(0)
             }
-            // Fallback: use first available calendar
-            if (it.moveToFirst()) {
-                return it.getLong(0)
-            }
+            if (it.moveToFirst()) return it.getLong(0)
         }
         return null
     }
 
-    /**
-     * Read upcoming calendar events.
-     * Tool Name: READ_CALENDAR
-     */
-    fun readCalendarEvents(daysAhead: Int = 7): String {
+    @Tool(description = "Creates a calendar event")
+    fun calendar(
+        @ToolParam(description = "Event title") title: String,
+        @ToolParam(description = "Event description") description: String = "",
+        @ToolParam(description = "Duration in minutes") minutes: Int = 30
+    ): Map<String, String> {
         return try {
-            val calendarId = getDefaultCalendarId()
-                ?: return "No calendar account found — user needs to set up a Google account"
-
-            val now = System.currentTimeMillis()
-            val end = now + (daysAhead * 24 * 60 * 60 * 1000L)
-
-            val projection = arrayOf(
-                CalendarContract.Events.TITLE,
-                CalendarContract.Events.DTSTART,
-                CalendarContract.Events.DTEND,
-                CalendarContract.Events.DESCRIPTION
-            )
-
-            val selection = "${CalendarContract.Events.CALENDAR_ID} = ? AND ${CalendarContract.Events.DTSTART} >= ? AND ${CalendarContract.Events.DTSTART} <= ?"
-            val selectionArgs = arrayOf(calendarId.toString(), now.toString(), end.toString())
-
-            val cursor = context.contentResolver.query(
-                CalendarContract.Events.CONTENT_URI,
-                projection,
-                selection,
-                selectionArgs,
-                "${CalendarContract.Events.DTSTART} ASC"
-            ) ?: return "Failed to query calendar"
-
-            val events = mutableListOf<String>()
-            val dateFormat = java.text.SimpleDateFormat("MMM dd, HH:mm", Locale.US)
-
-            cursor.use {
-                while (it.moveToNext()) {
-                    val title = it.getString(0) ?: "Untitled Event"
-                    val dtStart = it.getLong(1)
-                    val dtEnd = it.getLong(2)
-                    val desc = it.getString(3) ?: ""
-                    
-                    val timeStartStr = dateFormat.format(java.util.Date(dtStart))
-                    val timeEndStr = java.text.SimpleDateFormat("HH:mm", Locale.US).format(java.util.Date(dtEnd))
-                    
-                    val eventStr = "- [$timeStartStr - $timeEndStr] $title" + if (desc.isNotBlank()) " ($desc)" else ""
-                    events.add(eventStr)
-                }
+            val calendarId = getDefaultCalendarId() ?: return mapOf("result" to "error", "message" to "No account")
+            val startTimeMillis = System.currentTimeMillis()
+            val values = ContentValues().apply {
+                put(CalendarContract.Events.TITLE, title)
+                put(CalendarContract.Events.DESCRIPTION, description)
+                put(CalendarContract.Events.DTSTART, startTimeMillis)
+                put(CalendarContract.Events.DTEND, startTimeMillis + minutes * 60 * 1000L)
+                put(CalendarContract.Events.CALENDAR_ID, calendarId)
+                put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
             }
-
-            if (events.isEmpty()) {
-                "No upcoming events found in the next $daysAhead days."
-            } else {
-                "Upcoming Events (Next $daysAhead days):\n" + events.joinToString("\n")
-            }
-        } catch (e: SecurityException) {
-            Timber.e(e, "Calendar read permission denied")
-            "Calendar permission not granted — user needs to allow calendar access"
+            val uri = context.contentResolver.insert(CalendarContract.Events.CONTENT_URI, values)
+            if (uri != null) mapOf("result" to "success", "message" to "Created $title")
+            else mapOf("result" to "error", "message" to "Insert failed")
         } catch (e: Exception) {
-            Timber.e(e, "Calendar read failed")
-            "Failed to read calendar events: ${e.message}"
+            mapOf("result" to "error", "message" to (e.message ?: "fail").toString())
         }
     }
 
-    /**
-     * Request Screenshot via accessibility service
-     * Tool Name: SCREENSHOT
-     */
-    fun takeScreenshot(): String {
+    @Tool(description = "Reads upcoming calendar events")
+    fun read_calendar(
+        @ToolParam(description = "Days ahead to check") days: Int = 7
+    ): Map<String, String> {
+        return try {
+            val calendarId = getDefaultCalendarId() ?: return mapOf("result" to "error", "message" to "No account")
+            val now = System.currentTimeMillis()
+            val end = now + (days * 24 * 60 * 60 * 1000L)
+            val cursor = context.contentResolver.query(
+                CalendarContract.Events.CONTENT_URI,
+                arrayOf(CalendarContract.Events.TITLE, CalendarContract.Events.DTSTART, CalendarContract.Events.DTEND, CalendarContract.Events.DESCRIPTION),
+                "${CalendarContract.Events.CALENDAR_ID} = ? AND ${CalendarContract.Events.DTSTART} >= ? AND ${CalendarContract.Events.DTSTART} <= ?",
+                arrayOf(calendarId.toString(), now.toString(), end.toString()),
+                "${CalendarContract.Events.DTSTART} ASC"
+            ) ?: return mapOf("result" to "error", "message" to "Query failed")
+            val events = mutableListOf<String>()
+            cursor.use {
+                while (it.moveToNext()) {
+                    events.add("${it.getString(0)} from ${it.getLong(1)} to ${it.getLong(2)}")
+                }
+            }
+            mapOf("result" to "success", "events" to if (events.isEmpty()) "None" else events.joinToString("\n"))
+        } catch (e: Exception) {
+            mapOf("result" to "error", "message" to (e.message ?: "fail").toString())
+        }
+    }
+
+    @Tool(description = "Takes a screenshot")
+    fun take_screenshot(): Map<String, String> {
         return try {
             val intent = Intent(context, com.gemma.api.GemmaService::class.java).apply {
                 action = "com.gemma.api.ACTION_REQUEST_SCREENSHOT"
@@ -331,9 +227,50 @@ class SystemToolSet(private val context: Context) {
             } else {
                 context.startService(intent)
             }
-            "Screenshot requested... Check clipboard/vision." 
+            mapOf("result" to "success", "message" to "Screenshot requested")
         } catch (e: Exception) {
-            "Failed to request screenshot: ${e.message}"
+            mapOf("result" to "error", "message" to (e.message ?: "failed").toString())
         }
+    }
+    @Tool(description = "Click a button or text visible on the screen")
+    fun click(
+        @ToolParam(description = "The exact text or description of the UI element to click") target: String
+    ): Map<String, String> {
+        val success = com.gemma.api.GemmaAccessibilityService.instance?.performClick(target) ?: false
+        return if (success) {
+            mapOf("result" to "success", "message" to "Clicked on \'$target\'")
+        } else {
+            mapOf("result" to "error", "message" to "Failed to click \'$target\', element not found or Accessibility disabled.")
+        }
+    }
+
+    @Tool(description = "Scrolls the currently active visual screen")
+    fun scroll(
+        @ToolParam(description = "Direction to scroll: UP or DOWN") direction: String
+    ): Map<String, String> {
+        val success = com.gemma.api.GemmaAccessibilityService.instance?.performScroll(direction) ?: false
+        return if (success) {
+            mapOf("result" to "success", "message" to "Scrolled screen $direction")
+        } else {
+            mapOf("result" to "error", "message" to "Failed to scroll, no scrollable nodes or Accessibility disabled.")
+        }
+    }
+
+    @Tool(description = "Performs global Android navigation")
+    fun navigate(
+        @ToolParam(description = "Global action: HOME, BACK, RECENTS, NOTIFICATIONS, QUICK_SETTINGS") action: String
+    ): Map<String, String> {
+        val success = com.gemma.api.GemmaAccessibilityService.instance?.performGlobal(action) ?: false
+        return if (success) {
+            mapOf("result" to "success", "message" to "Navigated $action")
+        } else {
+            mapOf("result" to "error", "message" to "Navigation failed")
+        }
+    }
+
+    @Tool(description = "Returns a structural dump of the current app screen to 'read' what is open")
+    fun resources_screen(): Map<String, String> {
+        val dump = com.gemma.api.GemmaAccessibilityService.instance?.getSemanticScreenDump() ?: "Accessibility Service not bound."
+        return mapOf("result" to "success", "screen_state" to dump)
     }
 }

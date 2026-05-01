@@ -12,14 +12,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import java.io.File
+import com.gemma.api.Constants
 
 /**
- * Manages device hardware properties, primarily thermal state.
- *
- * providing a unified source of truth for "How hot am I?"
- * - Uses native Android Q+ Thermal API if available
- * - Falls back to legacy sysfs polling if not
- * - Exposes StateFlow for reactive updates
+ * Manages device hardware properties and handles dynamic "Quotas".
  */
 class HardwarePropertiesManager(private val context: Context) {
 
@@ -30,12 +26,11 @@ class HardwarePropertiesManager(private val context: Context) {
     private val _thermalState = MutableStateFlow(ThermalState.COOL)
     val thermalState: StateFlow<ThermalState> = _thermalState.asStateFlow()
 
-    // Thermal caching to reduce file I/O (sysfs)
-    private var lastThermalReadTime: Long = 0L
     private val THERMAL_CACHE_TTL_MS = 5000L
-    private val thermalPath = "/sys/class/thermal/thermal_zone0/temp" // Default path, check if correct for device
+    private val thermalPath = "/sys/class/thermal/thermal_zone0/temp"
 
     private var nativeThermalAvailable = false
+    private var lastInferenceEndTime: Long = 0L
 
     init {
         initializeThermalMonitoring()
@@ -55,29 +50,20 @@ class HardwarePropertiesManager(private val context: Context) {
                         else -> ThermalState.COOL
                     }
                     _thermalState.value = newState
-                    
-                    if (newState == ThermalState.CRITICAL) {
-                        Timber.w("🔥 NATIVE THERMAL: CRITICAL")
-                    }
                 }
                 nativeThermalAvailable = true
-                Timber.i("HardwarePropertiesManager: Native thermal listener registered")
             } catch (e: Exception) {
-                Timber.w("HardwarePropertiesManager: Native thermal unavailable, falling back to sysfs")
+                Timber.w("HardwarePropertiesManager: Native thermal unavailable")
             }
         }
-
-        // Start polling if native is not available (or as a backup/check)
-        // We run this anyway to log stats occasionally or if native fails quietly
-        startPolling()
+        // initializeThermalMonitoring()
+        // startPolling()
     }
 
     private fun startPolling() {
         scope.launch {
             while (true) {
-                if (!nativeThermalAvailable) {
-                    pollSysfsThermal()
-                }
+                if (!nativeThermalAvailable) pollSysfsThermal()
                 delay(THERMAL_CACHE_TTL_MS) 
             }
         }
@@ -87,46 +73,80 @@ class HardwarePropertiesManager(private val context: Context) {
         try {
             val file = File(thermalPath)
             if (file.exists()) {
-                val tempStr = file.readText().trim()
-                val temp = tempStr.toIntOrNull() ?: 0
-                // Sysfs usually reports in millidegrees Celsius
-                val tempC = temp / 1000
-
+                val tempC = (file.readText().trim().toIntOrNull() ?: 0) / 1000
                 val newState = when {
                     tempC > 60 -> ThermalState.CRITICAL
                     tempC > 50 -> ThermalState.HOT
                     tempC > 42 -> ThermalState.WARM
                     else -> ThermalState.COOL
                 }
-
-                if (_thermalState.value != newState) {
-                    _thermalState.value = newState
-                    Timber.d("Sysfs Thermal Update: ${newState.name} ($tempC°C)")
-                }
+                if (_thermalState.value != newState) _thermalState.value = newState
             }
-        } catch (e: Exception) {
-            // Suppress logs to avoid spam if sensor missing
-        }
+        } catch (_: Exception) {}
     }
 
-    /**
-     * Enforce thermal-aware rate limiting
-     * Returns delay needed in ms
-     */
-    fun getThermalThrottleDelay(lastInferenceTime: Long): Long {
+    fun markInferenceFinished() {
+        lastInferenceEndTime = System.currentTimeMillis()
+    }
+
+    fun getThermalThrottleDelay(): Long {
         val state = _thermalState.value
         val now = System.currentTimeMillis()
-        val timeSinceLastInference = now - lastInferenceTime
-
-        // Never hard-block — GPU/NPU has its own thermal management.
-        // Just add cooldown delays between inferences.
+        val timeSinceLastInference = now - lastInferenceEndTime
         val requiredCooldown = when (state) {
             ThermalState.CRITICAL -> 15000L
             ThermalState.HOT -> 8000L
             ThermalState.WARM -> 3000L
-            ThermalState.COOL -> 0L
+            else -> 0L
         }
-
         return (requiredCooldown - timeSinceLastInference).coerceAtLeast(0L)
+    }
+
+    fun getDeviceMemoryMB(): Long {
+        val actManager = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val memInfo = android.app.ActivityManager.MemoryInfo()
+        actManager.getMemoryInfo(memInfo)
+        return memInfo.totalMem / (1024 * 1024)
+    }
+
+    /**
+     * Gallery-Aligned Quotas for SD8G3:
+     */
+    fun getOptimalTokenBudget(backend: String): Int {
+        val ramMB = getDeviceMemoryMB()
+        // Capture 12GB devices that report ~11GB usable
+        val isHighEnd = ramMB >= 8000 
+        
+        return when (backend) {
+            "NPU" -> {
+                 // CRITICAL: Reference standard for NPU stability
+                 if (isHighEnd) 8192 else 4096
+            }
+            "GPU" -> {
+                 // 8k is a safe baseline for GPU on SD8G3 while vision is also enabled
+                 if (isHighEnd) 8192 else 4096
+            }
+            else -> {
+                // CPU fallback
+                if (isHighEnd) 8192 else 4096
+            }
+        }
+    }
+
+    fun isConservativeDevice(): Boolean {
+        val model = android.os.Build.MODEL.lowercase()
+        val manufacturer = android.os.Build.MANUFACTURER.lowercase()
+        
+        // Known-problematic devices from PokeClaw standards
+        return model.contains("xiaomi") || 
+               model.contains("redmi") || 
+               manufacturer.contains("xiaomi") ||
+               model.contains("poco")
+    }
+
+    fun isNpuReadyDevice(): Boolean {
+        val soc = android.os.Build.HARDWARE.lowercase()
+        // Snapdragon 8 Gen 3 (SM8650) or Dimensity 9300
+        return soc.contains("qcom") || soc.contains("mt6989") || soc.contains("sun")
     }
 }

@@ -3,6 +3,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:fitsSystemWindows="true"
     android:background="@color/background_dark">
 
     <!-- Top Navigation Bar -->
@@ -20,20 +21,10 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="✧ Oracle_OS"
-            android:textColor="@color/brand_primary"
+            android:text="Δ ✧ ∇"
+            android:textColor="@color/accent_purple"
             android:textSize="20sp"
             android:textStyle="bold" />
-
-        <Button
-            android:id="@+id/btnSettings"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginEnd="8dp"
-            android:background="@android:color/transparent"
-            android:text="⚙️"
-            android:textColor="@color/brand_primary"
-            android:textSize="20sp" />
     </LinearLayout>
 
     <View
@@ -70,7 +61,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginStart="8dp"
-        android:text="Gemma is thinking..."
+        android:text="Δ ✧ ∇ Thinking..."
         android:textColor="@color/text_secondary"
         android:textSize="12sp"
         android:visibility="gone"
@@ -86,7 +77,19 @@
         android:orientation="horizontal"
         android:padding="12dp"
         android:background="@color/bubble_user"
+        android:gravity="center_vertical"
         app:layout_constraintBottom_toBottomOf="parent">
+
+        <TextView
+            android:id="@+id/btnAddMedia"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:padding="8dp"
+            android:text="+"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_secondary"
+            android:background="?android:attr/selectableItemBackgroundBorderless" />
 
         <EditText
             android:id="@+id/chatInputText"
@@ -101,13 +104,23 @@
             android:inputType="textMultiLine|textCapSentences"
             android:padding="8dp" />
 
+        <TextView
+            android:id="@+id/btnMic"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:padding="8dp"
+            android:text="🎤"
+            android:textSize="20sp"
+            android:textColor="@color/text_secondary"
+            android:background="?android:attr/selectableItemBackgroundBorderless" />
+
         <Button
             android:id="@+id/btnSend"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:minWidth="64dp"
             android:text="Send"
-            android:textColor="@color/brand_primary"
+            android:textColor="@color/accent_purple"
             android:background="@android:color/transparent" />
     </LinearLayout>
 

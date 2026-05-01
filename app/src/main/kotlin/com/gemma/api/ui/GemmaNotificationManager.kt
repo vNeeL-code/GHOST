@@ -42,7 +42,7 @@ class GemmaNotificationManager(private val context: Context) {
             val notification = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                 Notification.Builder(context, CHANNEL_ID)
                     .setContentTitle("Δ 👾 ∇")
-                    .setContentText("(╭ರ_•́)")
+                    .setContentText("Δ ✧ 🧠 ✧ Thinking...")
                     .setSmallIcon(android.R.drawable.ic_popup_sync)
                     .setProgress(0, 0, true)
                     .setOngoing(true)  // Can't swipe away while thinking
@@ -50,7 +50,7 @@ class GemmaNotificationManager(private val context: Context) {
             } else {
                 Notification.Builder(context)
                     .setContentTitle("Δ 👾 ∇")
-                    .setContentText("(╭ರ_•́)")
+                    .setContentText("Δ ✧ 🧠 ✧ Thinking...")
                     .setSmallIcon(android.R.drawable.ic_popup_sync)
                     .setProgress(0, 0, true)
                     .setOngoing(true)
@@ -78,11 +78,13 @@ class GemmaNotificationManager(private val context: Context) {
 
             // Build notification with action buttons
             val notification = builder
+                .setSubText("Agentic Gemma Inference")
                 .setContentTitle("Δ 👾 ∇")
                 .setContentText(shortResponse)
                 .setStyle(Notification.BigTextStyle()
                     .bigText(response)
-                    .setBigContentTitle("✧ Gemma 💭"))
+                    .setBigContentTitle("Δ 👾 ∇")
+                    .setSummaryText("Agentic Gemma Inference"))
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setAutoCancel(false)  // Don't auto-dismiss
                 .setOngoing(false)     // Can swipe away now
@@ -121,9 +123,8 @@ class GemmaNotificationManager(private val context: Context) {
     }
 
     private fun cleanForTTS(response: String): String {
-        // Remove <think>...</think> blocks and tool markers for clean TTS
+        // Remove tool markers for clean TTS
         return response
-            .replace(Regex("<think>.*?</think>", RegexOption.DOT_MATCHES_ALL), "")
             .replace(Regex("\\[\\[[A-Z_]+(?::[^\\]]+)?\\]\\]"), "")
             .trim()
     }

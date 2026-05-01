@@ -9,16 +9,7 @@
     android:paddingTop="4dp"
     android:paddingBottom="4dp">
 
-    <!-- Timestamp (Centered) -->
-    <TextView
-        android:id="@+id/textTimestamp"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:paddingBottom="4dp"
-        android:textSize="12sp"
-        android:textColor="@color/text_secondary"
-        android:visibility="gone" />
+
 
     <!-- Message Bubble -->
     <LinearLayout
@@ -29,13 +20,53 @@
         android:padding="12dp"
         android:maxWidth="300dp">
 
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/textHeader"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:paddingBottom="4dp"
+                android:text="Δ 👾 ∇"
+                android:textColor="@color/accent_purple"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textIsSelectable="true" />
+
+            <ImageButton
+                android:id="@+id/btnCopy"
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:src="@android:drawable/ic_menu_save"
+                android:contentDescription="Copy Message"
+                android:alpha="0.6"
+                android:scaleType="centerInside" />
+        </LinearLayout>
+
         <TextView
             android:id="@+id/textMessage"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:textColor="@color/text_primary"
             android:textSize="16sp"
+            android:typeface="monospace"
             android:textIsSelectable="true"/>
 
     </LinearLayout>
+
+    <TextView
+        android:id="@+id/textTimestamp"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:textSize="10sp"
+        android:textColor="@color/text_secondary"
+        android:textIsSelectable="true"
+        android:visibility="visible" />
 </LinearLayout>

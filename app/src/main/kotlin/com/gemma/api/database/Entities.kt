@@ -18,13 +18,12 @@ data class ConversationTurn(
     val tokenHash: String = "" // Detect content changes without re-tokenizing
 )
 
-// FTS disabled temporarily - was causing KSP/Room issues
-// @androidx.room.Fts4(contentEntity = ConversationTurn::class)
-// @Entity(tableName = "conversations_fts")
-// data class ConversationTurnFts(
-//     val userMessage: String,
-//     val assistantResponse: String
-// )
+@androidx.room.Fts4(contentEntity = ConversationTurn::class)
+@Entity(tableName = "conversations_fts")
+data class ConversationTurnFts(
+    val userMessage: String,
+    val assistantResponse: String
+)
 
 /**
  * Semantic facts extracted from conversations

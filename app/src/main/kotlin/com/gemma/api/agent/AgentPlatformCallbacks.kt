@@ -11,6 +11,9 @@ interface AgentPlatformCallbacks {
     // === UI ===
     fun showThinking()
     fun showResponse(text: String)
+    fun onMessageAdded(message: String, isUser: Boolean, isComplete: Boolean)
+    fun onThoughtUpdated(thought: String)
+    fun onThoughtComplete(thought: String)
     fun updateNotification(text: String)
     fun showConfirmation(toolName: String, params: Map<String, Any?>, description: String)
 

@@ -14,6 +14,8 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.location.Location
 import android.location.LocationManager
+import android.net.ConnectivityManager
+import android.os.PowerManager
 import android.media.AudioManager
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
@@ -97,7 +99,10 @@ data class SystemState(
     val storageFreeGB: Float,
     val storageUsedPercent: Int,
     val uptimeMinutes: Long,
-    val screenTimeoutSec: Int
+    val screenTimeoutSec: Int,
+    val model: String,
+    val manufacturer: String,
+    val osVersion: String
 )
 
 data class NetworkState(
@@ -140,13 +145,16 @@ data class MotionState(
 
 class SensorFusionManager(private val context: Context) : AutoCloseable {
 
-    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
     private val mediaSessionManager = context.getSystemService(Context.MEDIA_SESSION_SERVICE) as? MediaSessionManager
-    private val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-    private val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+    private val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+    private val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
     private val telephonyManager = context.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+    private val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
     private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+    private val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+    private val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
     private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
     
     // Coroutine scope for background polling
@@ -174,23 +182,27 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
     @Volatile private var isClosed = false
     private var sensorThread: android.os.HandlerThread? = null
     private var sensorHandler: android.os.Handler? = null
+    private var isLoopRunning = false
 
     init {
         // Register sensor listeners for environment data
         registerEnvironmentSensors()
         
-        // Start background polling (Split: Fast & Slow)
-        startMonitoring()
+        // Note: startFusionLoop() must be called explicitly by GemmaService after foreground setup
     }
 
-    private fun startMonitoring() {
+    fun startFusionLoop() {
+        if (isClosed || isLoopRunning) return
+        isLoopRunning = true
+        
+        Timber.i("🌀 Starting SensorFusion background loops...")
         // FAST LOOP: 5s (Battery, Thermal, RAM)
         scope.launch {
             while (!isClosed) {
                 try {
                      updateFastState()
-                } catch (e: Throwable) {
-                    Timber.e(e, "Error updating fast context state")
+                } catch (t: Throwable) {
+                    Timber.e(t, "Fast fusion loop error")
                 }
                 delay(5000) 
             }
@@ -201,8 +213,8 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
             while (!isClosed) {
                 try {
                     updateSlowState()
-                } catch (e: Throwable) {
-                    Timber.e(e, "Error updating slow context state")
+                } catch (t: Throwable) {
+                    Timber.e(t, "Slow fusion loop error")
                 }
                 delay(30000)
             }
@@ -336,7 +348,7 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
             timestamp = System.currentTimeMillis(),
             battery = BatteryState(50, false, 25f, 3.7f, 0),
             audio = AudioState(false, 0, 0, 0, 0, 15, null),
-            system = SystemState(128, 50, 0, 0, 0, 0f, 0f, 0, 0, 30),
+            system = SystemState(128, 50, 0, 0, 0, 0f, 0f, 0, 0, 30, Build.MODEL, Build.MANUFACTURER, Build.VERSION.RELEASE),
             network = NetworkState(false, null, 0),
             environment = EnvironmentState(null, null, null, null, null, null, null),
             connectivity = ConnectivityState(null, null, null, false, false, null),
@@ -348,7 +360,7 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
 
     private fun getBatteryState(): BatteryState {
         return try {
-            val bm = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+            val bm = batteryManager ?: return BatteryState(-1, false, 0f, 0f, 0)
             val batteryIntent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
 
             // Level (0-100)
@@ -389,14 +401,14 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
 
     private fun getAudioState(): AudioState {
         return try {
-            val isMusicActive = audioManager.isMusicActive
+            val isMusicActive = audioManager?.isMusicActive ?: false
 
             // All volume channels
-            val volMedia = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-            val volRinger = audioManager.getStreamVolume(AudioManager.STREAM_RING)
-            val volAlarm = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
-            val volNotif = audioManager.getStreamVolume(AudioManager.STREAM_NOTIFICATION)
-            val maxMedia = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+            val volMedia = audioManager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 0
+            val volRinger = audioManager?.getStreamVolume(AudioManager.STREAM_RING) ?: 0
+            val volAlarm = audioManager?.getStreamVolume(AudioManager.STREAM_ALARM) ?: 0
+            val volNotif = audioManager?.getStreamVolume(AudioManager.STREAM_NOTIFICATION) ?: 0
+            val maxMedia = audioManager?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 15
 
             val nowPlaying = getNowPlaying()
 
@@ -427,10 +439,10 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
 
             // RAM
             val memInfo = ActivityManager.MemoryInfo()
-            activityManager.getMemoryInfo(memInfo)
-            val ramTotalMB = memInfo.totalMem / (1024 * 1024)
+            activityManager?.getMemoryInfo(memInfo)
+            val ramTotalMB = if (memInfo.totalMem > 0) memInfo.totalMem / (1024 * 1024) else 1
             val ramAvailableMB = memInfo.availMem / (1024 * 1024)
-            val ramUsedPercent = ((ramTotalMB - ramAvailableMB) * 100 / ramTotalMB).toInt()
+            val ramUsedPercent = (((ramTotalMB - ramAvailableMB) * 100 / ramTotalMB).toInt()).coerceIn(0, 100)
 
             // Storage
             val stat = StatFs(Environment.getDataDirectory().path)
@@ -458,11 +470,14 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
                 storageFreeGB = storageFreeGB,
                 storageUsedPercent = storageUsedPercent,
                 uptimeMinutes = uptimeMinutes,
-                screenTimeoutSec = screenTimeoutSec
+                screenTimeoutSec = screenTimeoutSec,
+                model = Build.MODEL,
+                manufacturer = Build.MANUFACTURER,
+                osVersion = Build.VERSION.RELEASE
             )
         } catch (e: Exception) {
             Timber.e(e, "System state read failed")
-            SystemState(128, 50, 0, 0, 0, 0f, 0f, 0, 0, 30)
+            SystemState(128, 50, 0, 0, 0, 0f, 0f, 0, 0, 30, Build.MODEL, Build.MANUFACTURER, Build.VERSION.RELEASE)
         }
     }
 
@@ -471,6 +486,7 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
     private fun getNetworkState(): NetworkState {
         return try {
             val wm = wifiManager ?: return NetworkState(false, null, 0)
+            @Suppress("DEPRECATION")
             val wifiInfo = wm.connectionInfo
 
             val isConnected = wm.isWifiEnabled && wifiInfo.networkId != -1
@@ -479,8 +495,26 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
             } else null
 
             // Signal strength as percentage (0-100)
-            val rssi = wifiInfo.rssi
-            val signalPercent = WifiManager.calculateSignalLevel(rssi, 100)
+            val signalPercent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                // Modern API (31+)
+                val network = connectivityManager?.activeNetwork
+                val capabilities = connectivityManager?.getNetworkCapabilities(network)
+                if (capabilities?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) == true) {
+                    // We still need WifiInfo for signal level, but it's restricted
+                    @Suppress("DEPRECATION")
+                    val wifiInfo = wm.connectionInfo
+                    wm.calculateSignalLevel(wifiInfo.rssi) * 100 / 4 // Scale 0-4 to 0-100
+                } else 0
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                @Suppress("DEPRECATION")
+                val wifiInfo = wm.connectionInfo
+                wm.calculateSignalLevel(wifiInfo.rssi) * 100 / wm.maxSignalLevel.coerceAtLeast(1)
+            } else {
+                @Suppress("DEPRECATION")
+                val wifiInfo = wm.connectionInfo
+                @Suppress("DEPRECATION")
+                WifiManager.calculateSignalLevel(wifiInfo.rssi, 100)
+            }
 
             NetworkState(
                 wifiConnected = isConnected,
@@ -583,10 +617,9 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
             try {
                 bluetoothManager?.adapter?.let { adapter ->
                     btEnabled = adapter.isEnabled
-                    // Skip bondedDevices - it can block without permission
                 }
-            } catch (e: Exception) {
-                Timber.w("BT read failed: ${e.message}")
+            } catch (t: Throwable) {
+                Timber.w("BT read failed: ${t.message}")
             }
 
             ConnectivityState(cellSignalPercent, cellType, carrierName, btEnabled, btConnected, btDeviceName)
@@ -658,24 +691,31 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
     // === MEDIA SESSION ===
 
     private fun getNowPlaying(): NowPlayingInfo? {
-        val isMusicActive = audioManager.isMusicActive
+        val isMusicActive = audioManager?.isMusicActive ?: false
 
         // PRIMARY: Scan active notifications (MacroDroid style)
         // activeNotifications is a live snapshot — no timing race, always current.
         val svc = GemmaNotificationListener.instance
         if (svc != null) {
             try {
-                val mediaNotif = svc.activeNotifications
-                    ?.asSequence()
-                    ?.filter { sbn ->
-                        if (sbn.packageName == svc.packageName) return@filter false
-                        val notif = sbn.notification
-                        val extras = notif.extras
-                        extras.containsKey(Notification.EXTRA_MEDIA_SESSION) ||
-                        notif.category == Notification.CATEGORY_TRANSPORT ||
-                        (notif.actions?.size ?: 0) >= 2
-                    }
-                    ?.maxByOrNull { it.postTime }
+                val mediaNotif = try {
+                    val active = svc.activeNotifications
+                    active?.asSequence()
+                        ?.filter { sbn ->
+                            if (sbn.packageName == svc.packageName) return@filter false
+                            val notif = sbn.notification
+                            val extras = notif.extras
+                            extras.containsKey(Notification.EXTRA_MEDIA_SESSION) ||
+                            notif.category == Notification.CATEGORY_TRANSPORT ||
+                            (notif.actions?.size ?: 0) >= 2
+                        }
+                        ?.maxByOrNull { it.postTime }
+                } catch (e: SecurityException) {
+                    Timber.w("No permission to read active notifications")
+                    null
+                } catch (e: Exception) {
+                    null
+                }
 
                 if (mediaNotif != null) {
                     val extras = mediaNotif.notification.extras
@@ -761,6 +801,7 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
 
         val formatter = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
         sb.append("🕒 System Time: ${java.time.LocalDateTime.now().format(formatter)}\n")
+        sb.append("📱 Device: ${ctx.system.manufacturer} ${ctx.system.model} (Android ${ctx.system.osVersion})\n")
 
         // Battery - clear label format (Her Body Energy)
         val battIcon = when {

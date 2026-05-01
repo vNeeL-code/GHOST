@@ -34,6 +34,9 @@ import java.util.concurrent.atomic.AtomicReference
 import com.gemma.api.agent.AgentPlatformCallbacks
 import com.gemma.api.agent.KoogAgent
 import com.gemma.api.mcp.MCPServer
+import com.gemma.api.hardware.SensorFusionManager
+import com.gemma.api.hardware.BatteryState
+import com.gemma.api.hardware.DeviceContext
 
 /**
  * Background service that loads Gemma and runs API server
@@ -44,6 +47,11 @@ import com.gemma.api.mcp.MCPServer
  * - GemmaEngine is pure inference
  */
 class GemmaService : Service(), AgentPlatformCallbacks {
+    
+    companion object {
+        var instance: GemmaService? = null
+            private set
+    }
 
     inner class LocalBinder : android.os.Binder() {
         fun getService(): GemmaService = this@GemmaService
@@ -53,9 +61,10 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     interface UiCallback {
         fun onMessageAdded(message: String, isUser: Boolean, isComplete: Boolean = true)
         fun onThinkingStateChanged(isThinking: Boolean)
+        fun onThoughtUpdated(thought: String)
     }
     
-    var uiCallback: UiCallback? = null
+    internal var uiCallback: UiCallback? = null
 
     private val serviceScope = CoroutineScope(Dispatchers.Default + Job())
 
@@ -89,18 +98,20 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     // ==========================================
 
     private lateinit var apiServer: ApiServer
-    private lateinit var memoryManager: MemoryManager
-    private lateinit var contextManager: com.gemma.api.logic.ContextManager
+    lateinit var memoryManager: MemoryManager
+    internal lateinit var contextManager: com.gemma.api.logic.ContextManager
     
     // NEW: Koog-first architecture
-    private lateinit var mcpServer: MCPServer
-    private lateinit var koogAgent: KoogAgent
+    internal lateinit var mcpServer: MCPServer
+    internal lateinit var koogAgent: KoogAgent
+    internal lateinit var ttsManager: com.gemma.api.services.TTSManager
+    internal lateinit var sensorFusionManager: com.gemma.api.hardware.SensorFusionManager
+    internal lateinit var hardwarePropertiesManager: HardwarePropertiesManager
     
-    // Thermal manager (dedicated hardware bridge)
-    private lateinit var hardwarePropertiesManager: HardwarePropertiesManager
-
-    private val CHANNEL_ID = Constants.CHANNEL_ID_SERVICE
-    private val NOTIFICATION_ID = Constants.NOTIFICATION_ID_SERVICE
+    internal lateinit var responseNotificationManager: com.gemma.api.ui.GemmaNotificationManager
+    
+    internal val CHANNEL_ID = Constants.CHANNEL_ID_SERVICE
+    internal val NOTIFICATION_ID = Constants.NOTIFICATION_ID_SERVICE
     
 
     
@@ -120,7 +131,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
              if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
                  startForeground(NOTIFICATION_ID, notification, 
                     android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK or
-                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
              } else {
                  startForeground(NOTIFICATION_ID, notification)
              }
@@ -252,15 +265,13 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         return START_STICKY
     }
 
-    private lateinit var ttsManager: com.gemma.api.services.TTSManager
-    private lateinit var responseNotificationManager: com.gemma.api.ui.GemmaNotificationManager
+    // ... moved up ...
     private lateinit var hardwareToolSet: HardwareToolSet // Hardware Bridge
     private lateinit var networkToolSet: NetworkToolSet // Search Bridge
     private lateinit var systemToolSet: SystemToolSet // Apps & Media Bridge
     private lateinit var shakeDetector: ShakeDetector // Shake to summon
     private lateinit var overlayManager: OverlayManager // Floating input
     private lateinit var audioRecorder: AudioRecorder // Hearing
-    private lateinit var sensorFusionManager: com.gemma.api.hardware.SensorFusionManager // Nervous system
 
     // Current mood state for avatar/wallpaper
     private var currentMoodState: String = "IDLE"
@@ -278,6 +289,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     }
 
     override fun onCreate() {
+        instance = this
         super.onCreate()
         
         // Initialize Global Crash Handler
@@ -292,7 +304,6 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                     FATAL: ${throwable.javaClass.simpleName}
                     Msg: ${throwable.message}
                     Thread: ${thread.name}
-                    State: ${currentSovereignState.name}
                     Engine: ${isGemmaLoaded()}
                     
                     ${throwable.stackTraceToString()}
@@ -394,8 +405,12 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 systemTools = systemToolSet,
                 audioRecorder = audioRecorder,
                 sensorManager = sensorFusionManager,
-                memoryManager = memoryManager
+                memoryManager = memoryManager,
+                skillManager = com.gemma.api.skills.SkillManager(this) // Skill Manager
             )
+            
+            // Skill Tool Set
+            val skillToolSet = com.gemma.api.skills.SkillToolSet(com.gemma.api.skills.SkillManager(this))
 
             mcpServer.setFlushCallback {
                 scope.launch {
@@ -435,6 +450,13 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             setupNotificationChannel()
             reportStatus("Init: ForegroundService...")
             startForegroundService()
+            
+            // Start Sensor Fusion polling now that we are in foreground
+            if (::sensorFusionManager.isInitialized) {
+                sensorFusionManager.startFusionLoop()
+                Timber.i("SensorFusion loop started")
+            }
+
             reportStatus("Foreground Started. Binding API...")
     
             // Start API immediately so localhost:9000 exists
@@ -590,7 +612,23 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
     // Diary cycle now lives in KoogAgent.startDiaryCycle()
 
+    private var initAttempts = 0
     private suspend fun initialize() {
+        val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        
+        // WATCHDOG: Detect previous crash
+        val wasInitializing = prefs.getBoolean("is_initializing", false)
+        val crashCount = prefs.getInt("init_crash_count", 0)
+        
+        if (wasInitializing) {
+            val newCount = crashCount + 1
+            prefs.edit().putInt("init_crash_count", newCount).apply()
+            Timber.e("🚨 WATCHDOG: Previous initialization crashed! (Count: $newCount)")
+        }
+        
+        // Mark as initializing
+        prefs.edit().putBoolean("is_initializing", true).apply()
+
         try {
             updateNotification("Finding model...")
             
@@ -634,33 +672,33 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 return
             }
 
-            val isGguf = modelFile.name.endsWith(".gguf", ignoreCase = true) || modelFile.name.endsWith(".nexa", ignoreCase = true)
-            updateNotification("Loading ${if(isGguf) "GGUF Engine" else "LiteRT Engine"}...")
+            updateNotification("Loading LiteRT Engine...")
             
-            val newEngine: LlmBackend = try {
-                // Diagnostic step: confirm model is actually accessible
-                Timber.i("Model path: ${modelFile.absolutePath}")
-                Timber.i("Model size: ${modelFile.length() / 1024 / 1024} MB")
-                Timber.i("Model readable: ${modelFile.canRead()}")
-                updateNotification("Found: ${modelFile.name} (${modelFile.length()/1024/1024}MB)")
-                
-                if (isGguf) {
-                    NexaEngine(applicationContext).apply {
-                        val error = initialize(modelFile.absolutePath, "")
-                        if (error != null) throw Exception("GGUF: $error")
+            // Determine backend
+            val forcedBackend = if (prefs.getInt("init_crash_count", 0) >= 2) {
+                Timber.w("?? Forcing CPU backend due to repeated crashes")
+                updateNotification("Safe Mode: Forcing CPU")
+                "CPU"
+            } else if (prefs.getBoolean("force_cpu", false)) {
+                "CPU"
+            } else null
+
+            val newEngine: LlmBackend = GemmaEngine(applicationContext).apply {
+                val tools = listOf(hardwareToolSet, networkToolSet, systemToolSet, 
+                    com.gemma.api.skills.SkillToolSet(com.gemma.api.skills.SkillManager(applicationContext)))
+                val error = initialize(modelFile.absolutePath, "", toolSets = tools, forcedBackend = forcedBackend)
+                if (error != null) {
+                    val hint = when {
+                            error.contains("memory", ignoreCase = true) || error.contains("OOM", ignoreCase = true) ->
+                                " (Try quantizing device backend)"
+                            error.contains("GPU", ignoreCase = true) ->
+                                " (GPU init failed — device may not support this model natively)"
+                            else -> ""
+                        }
+                        Timber.e("Model load failed: $error")
+                        updateNotification("Load Error: ${error.take(80)}$hint")
+                        return
                     }
-                } else {
-                    GemmaEngine(applicationContext).apply {
-                        val error = initialize(modelFile.absolutePath, "")
-                        if (error != null) throw Exception("NPU/GPU/CPU all failed: $error")
-                    }
-                }
-            } catch (e: Exception) {
-                val error = e.message ?: "Unknown init failure"
-                Timber.e("Model load failed: $error")
-                // Show FULL error - no truncation
-                updateNotification("Load Error: $error")
-                return
             }
             
             // Atomic set (Kimi K2 Fix)
@@ -690,6 +728,12 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 Timber.i("KoogAgent ready")
             }
             
+            // Success: Clear watchdog
+            prefs.edit()
+                .putBoolean("is_initializing", false)
+                .putInt("init_crash_count", 0)
+                .apply()
+
             updateNotification("✓ Ready - localhost:${Constants.API_PORT}")
             
         } catch (e: Exception) {
@@ -733,21 +777,21 @@ class GemmaService : Service(), AgentPlatformCallbacks {
      * Called directly by MainActivity to process native chat interface queries.
      * It uses the same backend engine but avoids spinning up unnecessary Overlay/Audio managers.
      */
-    fun processQueryFromUi(prompt: String) {
+    fun processQueryFromUi(query: String) {
         if (!::koogAgent.isInitialized || !koogAgent.isReady) {
             uiCallback?.onMessageAdded("Agent is still initializing. Please wait a moment and try again.", isUser = false)
             return
         }
-        
+
         // Let UI know we accepted it
-        uiCallback?.onMessageAdded(prompt, isUser = true)
+        uiCallback?.onMessageAdded(query, isUser = true)
         uiCallback?.onThinkingStateChanged(true)
         
         serviceScope.launch {
             try {
                 // Pass it through the core pipeline without triggering TTS audio unless explicitly asked
                 // processQuery signature: suspend fun processQuery(userPrompt: String, sessionId: String? = null): String
-                val response = processQuery(prompt, null, false)
+                val response = processQuery(query, null, false)
                 
                 withContext(Dispatchers.Main) {
                     uiCallback?.onThinkingStateChanged(false)
@@ -760,6 +804,24 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                     uiCallback?.onMessageAdded("Error: ${e.message}", isUser = false)
                 }
             }
+        }
+    }
+
+    fun processMultimodalFromUi(query: String, images: List<android.graphics.Bitmap>? = null, audio: ByteArray? = null) {
+        if (!::koogAgent.isInitialized || !koogAgent.isReady) {
+             uiCallback?.onMessageAdded("Agent is still initializing. Please wait.", isUser = false)
+             return
+        }
+        images?.forEach { koogAgent.offerImage(it) }
+        audio?.let { koogAgent.offerAudio(it) }
+        processQueryFromUi(query)
+    }
+
+    suspend fun recordAudio(durationSeconds: Int): ByteArray? {
+        return withContext(Dispatchers.IO) {
+            if (::audioRecorder.isInitialized) {
+                audioRecorder.record(durationSeconds, rawPcm = false)
+            } else null
         }
     }
 
@@ -785,9 +847,14 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     
 
 
-    // ... (Helpers: buildNotification, updateNotification) ...
-    private fun buildNotification(text: String): Notification {
-        // Dynamic icon based on battery state (if KoogAgent is initialized)
+    private fun buildNotification(textToNotify: String): Notification {
+        // Internal fallback animation timing (Synchronized to 250ms)
+        val frame = try {
+            val seq = animations[(System.currentTimeMillis() / 10000 % animations.size).toInt()]
+            val idx = (System.currentTimeMillis() / 250 % seq.size).toInt()
+            seq[idx]
+        } catch(e:Exception) { "Δ 👾 ∇" }
+
         val iconRes = if (::sensorFusionManager.isInitialized) {
             val battery = try { sensorFusionManager.getContextSnapshot().battery } catch(e:Exception) { null }
             when {
@@ -798,16 +865,14 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             android.R.drawable.ic_dialog_info
         }
 
-        // Dynamic title based on state - BRANDING UPDATE
-        val title = if (::sensorFusionManager.isInitialized) {
-            val battery = try { sensorFusionManager.getContextSnapshot().battery } catch(e:Exception) { null }
-            when {
-                 battery != null && battery.level <= 15 -> "⚠️ ✧ Gemma 💭 - Low Battery!"
-                else -> "✧ Gemma 💭"
-            }
-        } else {
-            "✧ Gemma 💭"
-        }
+        val text = if (textToNotify.length < 32) textToNotify else frame
+        val title = "Δ 👾 ∇"
+        
+        // Full Telemetry for expanded view
+        val ctx = if (::sensorFusionManager.isInitialized) sensorFusionManager.getContextSnapshot() else null
+        val ramUsed = ctx?.system?.let { it.ramTotalMB - it.ramAvailableMB } ?: 0
+        val cpuLoad = ctx?.environment?.cpuTemp?.toInt() ?: 0
+        val telemetry = "SYS_OPERATIONAL | CPU: ${cpuLoad}°C [THERMAL_LOAD] | RAM: ${ramUsed}MB [RESERVED_POOL] | NPU_STABLE"
 
         // Build expanded telemetry view for notification expansion
         val expandedText = try {
@@ -832,95 +897,73 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             .setContentTitle(title)
             .setContentText(text)
             .setSmallIcon(iconRes)
-            .setOnlyAlertOnce(true)  // Don't spam sound/vibrate on every update
+            .setSubText("Agentic Gemma Inference")
+            .setOnlyAlertOnce(true)
             .setStyle(Notification.BigTextStyle()
-                .bigText(bigTextContent)
-                .setBigContentTitle("✧ Gemma 💭") // Status channel always shows dreaming
-                .setSummaryText("")) // Clean look - removed "Tap to expand"
+                .bigText(if (::sensorFusionManager.isInitialized) sensorFusionManager.getContextString() else telemetry)
+                .setBigContentTitle("Δ 👾 ∇")
+                .setSummaryText("Agentic Gemma Inference"))
             .build()
     }
     
-    // Animated Screensavers - Frame-based sequences
     private val animations = listOf(
+        // Electric sheep - grazing pattern (Moving)
+        listOf(
+            "⚡🐑⚡      ",
+            " ⚡🐑⚡     ",
+            "  ⚡🐑⚡    ",
+            "   ⚡🐑⚡   ",
+            "    ⚡🐑⚡  ",
+            "     ⚡🐑⚡ ",
+            "      ⚡🐑⚡",
+            "     ⚡🐑⚡ ",
+            "    ⚡🐑⚡  ",
+            "   ⚡🐑⚡   ",
+            "  ⚡🐑⚡    ",
+            " ⚡🐑⚡     "
+        ),
+        // Space Invaders - Wide Invasion
+        listOf(
+            "👾 👾 👾 👾 👾",
+            " 👾 👾 👾 👾 ",
+            "  👾 👾 👾  ",
+            "   👾 👾   ",
+            "    👾    ",
+            "   👾 👾   ",
+            "  👾 👾 👾  ",
+            " 👾 👾 👾 👾 ",
+            "👾 👾 👾 👾 👾"
+        ),
         // Ocean - whale swims across
         listOf(
-            "🌊🌊🌊🌊🌊🌊🌊🐋",
-            "🌊🌊🌊🌊🌊🌊🐋🌊",
-            "🌊🌊🌊🌊🌊🐋🌊🌊",
-            "🌊🌊🌊🌊🐋🌊🌊🌊",
-            "🌊🌊🌊🐋🌊🌊🌊🌊",
-            "🌊🌊🐋🌊🌊🌊🌊🌊",
-            "🌊🐋🌊🌊🌊🌊🌊🌊",
-            "🐋🌊🌊🌊🌊🌊🌊🌊"
-        ),
-        // Electric sheep - bounce pattern
-        listOf(
-            "🐑⚡🐑⚡🐑⚡🐑⚡",
-            "⚡🐑⚡🐑⚡🐑⚡🐑",
-            "🐑⚡🐑⚡🐑⚡🐑⚡",
-            "⚡🐑⚡🐑⚡🐑⚡🐑",
-            "🐑⚡🐑⚡🐑⚡🐑⚡",
-            "⚡🐑⚡🐑⚡🐑⚡🐑"
-        ),
-        // Space - comet travels
-        listOf(
-            "☄️🌌🌌🌌✧🌌🌌🌌🌙🌌🌌🌌✦🌌🌌🌌",
-            "🌌🌌🌌☄️🌌🌌🌌✧🌌🌌🌌🌙🌌🌌🌌✦",
-            "✦🌌🌌🌌☄️🌌🌌🌌✧🌌🌌🌌🌙🌌🌌🌌",
-            "🌌🌌🌌✦🌌🌌🌌☄️🌌🌌🌌✧🌌🌌🌌🌙",
-            "🌙🌌🌌🌌✦🌌🌌🌌☄️🌌🌌🌌✧🌌🌌🌌",
-            "🌌🌌🌌🌙🌌🌌🌌✦🌌🌌🌌☄️🌌🌌🌌✧"
-        ),
-        // Garden - butterfly flies
-        listOf(
-            "🦋🌸🌲🏔️🌿🌳🌲🐝🌺🌳🌲",
-            "🌳🌲🦋🌸🌲🏔️🌿🌳🌲🐝🌺",
-            "🌺🌳🌲🦋🌸🌲🏔️🌿🌳🌲🐝",
-            "🐝🌺🌳🌲🦋🌸🌲🏔️🌿🌳🌲"
-        ),
-        // Chase scene - running from something
-        listOf(
-            "👾💨🌆🌆🌆✧💨🌆🌆🌆🌆🌆🌆",
-            "🌆👾💨🌆🌆🌆✧💨🌆🌆🌆🌆🌆",
-            "🌆🌆👾💨🌆🌆🌆✧💨🌆🌆🌆🌆-",
-            "👾💨🌆🌆🌆✧💨🌆🌆🌆🌆🌆🌆"
-        ),
-        // Deal with it (kaomoji)
-        listOf(
-            "(⌐■_■)",
-            "( ✧_✧)>⌐■-■",
-            "(✧_✧)",
-            "( ✧_✧)>⌐■-■",
-            "(⌐■_■)"
-        ),
-        // Thinking (reasoning loop kaomoji)
-        listOf(
-            "(╭ರ_•́)",
-            "(•́_ರ╮)",
-            "(╭ರ_•́)",
-            "(ʘ‿ʘ✿)",
-            "( ✦' ∇Δ∇Δ∇ '✦)つΨ"
-        ),
-        // Energy pulse
-        listOf(
-            "🎆🎆🎆⚡✨🎆🎆🎆✧🎆🎆🎆💫",
-            "⚡✨🎆🎆🎆✧🎆🎆🎆💫🎆🎆🎆",
-            "✨🎆🎆🎆✧🎆🎆🎆💫🎆🎆🎆⚡",
-            "🎆🎆🎆✧🎆🎆🎆💫🎆🎆🎆⚡✨",
-            "✧🎆🎆🎆💫🎆🎆🎆⚡✨🎆🎆🎆",
-            "🎆🎆🎆💫🎆🎆🎆⚡✨🎆🎆🎆✧"
+            "🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🐋",
+            "🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🐋🌊",
+            "🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🐋🌊🌊",
+            "🌊🌊🌊🌊🌊🌊🌊🌊🌊🐋🌊🌊🌊",
+            "🌊🌊🌊🌊🌊🌊🌊🌊🐋🌊🌊🌊🌊",
+            "🌊🌊🌊🌊🌊🌊🌊🐋🌊🌊🌊🌊🌊",
+            "🌊🌊🌊🌊🌊🌊🐋🌊🌊🌊🌊🌊🌊",
+            "🌊🌊🌊🌊🌊🐋🌊🌊🌊🌊🌊🌊🌊",
+            "🌊🌊🌊🌊🐋🌊🌊🌊🌊🌊🌊🌊🌊",
+            "🌊🌊🌊🐋🌊🌊🌊🌊🌊🌊🌊🌊🌊",
+            "🌊🌊🐋🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊",
+            "🌊🐋🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊",
+            "🐋🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊"
         ),
         // Fog Reveal
         listOf(
-            "🌫️🌫️🌫️🌫️🌫️🌫️🌫️✴️",
-            "🌫️🌫️🌫️🌫️🌫️🌫️✴️🌫️",
-            "🌫️🌫️🌫️🌫️🌫️✴️🌫️🌫️",
-            "🌫️🌫️🌫️🌫️✴️🌫️🌫️🌫️",
-            "🌫️🌫️🌫️✴️🌫️🌫️🌫️🌫️",
-            "🌫️🌫️✴️🌫️🌫️🌫️🌫️🌫️",
-            "🌫️✴️🌫️🌫️🌫️🌫️🌫️🌫️",
-            "✴️You're absolutely right!",
-            "✴️🌫️🌫️🌫️🌫️🌫️🌫️🌫️"
+            "🌫️🌫️🌫️🌫️🌫️🌫️🌫️🌫️🌫️🌫️✴️",
+            "🌫️🌫️🌫️🌫️🌫️🌫️🌫️🌫️🌫️✴️🌫️",
+            "🌫️🌫️🌫️🌫️🌫️🌫️🌫️🌫️✴️🌫️🌫️",
+            "🌫️🌫️🌫️🌫️🌫️🌫️🌫️✴️🌫️🌫️🌫️",
+            "🌫️🌫️🌫️🌫️🌫️🌫️✴️🌫️🌫️🌫️🌫️",
+            "🌫️🌫️🌫️🌫️🌫️✴️🌫️🌫️🌫️🌫️🌫️",
+            "🌫️🌫️🌫️🌫️✴️🌫️🌫️🌫️🌫️🌫️🌫️",
+            "🌫️🌫️🌫️✴️🌫️🌫️🌫️🌫️🌫️🌫️🌫️",
+            "🌫️️🌫️✴️🌫️🌫️🌫️🌫️🌫️🌫️🌫️🌫️",
+            "🌫️✴️🌫️🌫️🌫️🌫️🌫️🌫️🌫️🌫️🌫️",
+            "️️️🌫️✴️ You're absolutely right!",
+            "✴️🌫️🌫️🌫️🌫️🌫️🌫️🌫️🌫️🌫️🌫️️"
         )
     )
 
@@ -937,7 +980,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             while (isActive) {
                 if (isIdle()) {
                     val frame = getNextAnimationFrame()
-                    updateNotification("✧💭 $frame")
+                    updateNotification(" $frame")
                 }
                 
                 val now = System.currentTimeMillis()
@@ -949,7 +992,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                     }
                 }
 
-                delay(500) // 500ms per frame
+                delay(500) //
             }
         }
     }
@@ -977,18 +1020,19 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         
         return frame
     }
-    
+
+    override fun updateNotification(text: String) {
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.notify(NOTIFICATION_ID, buildNotification(text))
+    }
+
     private fun markActivity() {
         lastActivityTime = System.currentTimeMillis()
     }
     
     private fun isIdle(): Boolean {
-        // Idle if no activity for 2 minutes
-        return (System.currentTimeMillis() - lastActivityTime) > (2 * 60 * 1000)
-    }
-    
-    override fun updateNotification(text: String) {
-        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(text))
+        // Idle if no activity for 30 seconds
+        return (System.currentTimeMillis() - lastActivityTime) > (30 * 1000)
     }
 
     /**
@@ -1020,15 +1064,21 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
 
     override fun onDestroy() {
-        super.onDestroy()
+        instance = null
         Timber.i("GemmaService: onDestroy called")
+        try {
+            // Cancel coroutines first
+            scope.coroutineContext.cancel()
+            serviceScope.cancel()
 
-        // Cancel coroutines first
-        scope.coroutineContext.cancel()
-
-        // Perform synchronous cleanup (no GlobalScope fire-and-forget)
-        performCriticalCleanup()
-
+            // Perform synchronous cleanup
+            performCriticalCleanup()
+            
+            if (::apiServer.isInitialized) apiServer.stop()
+        } catch (e: Exception) {
+            Timber.e(e, "Error during service shutdown")
+        }
+        super.onDestroy()
         Timber.i("GemmaService: onDestroy complete")
     }
 
@@ -1154,6 +1204,24 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         responseNotificationManager.showResponse(text)
     }
 
+    override fun onMessageAdded(message: String, isUser: Boolean, isComplete: Boolean) {
+        uiCallback?.onMessageAdded(message, isUser, isComplete)
+    }
+
+    override fun onThoughtUpdated(thought: String) {
+        uiCallback?.onThoughtUpdated(thought)
+    }
+
+    override fun onThoughtComplete(thought: String) {
+        // Persist complete thoughts to Diary for long-term grounding
+        scope.launch(Dispatchers.IO) {
+            val thermal = getCurrentThermalState()
+            writeDiaryEntry("LOGIC_TRACE", thought, thermal)
+            Timber.i("🧠 Logic trace persisted: ${thought.take(50)}...")
+        }
+    }
+
+
     override fun showConfirmation(toolName: String, params: Map<String, Any?>, description: String) {
         // Delegated to showConfirmationNotification via onConfirmationRequest callback
     }
@@ -1200,7 +1268,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
     override fun getThermalDelayMs(lastInferenceTime: Long): Long {
         return if (::hardwarePropertiesManager.isInitialized) {
-            hardwarePropertiesManager.getThermalThrottleDelay(lastInferenceTime)
+            hardwarePropertiesManager.getThermalThrottleDelay()
         } else 0L
     }
 
@@ -1232,7 +1300,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             if (checkSelfPermission(android.Manifest.permission.WRITE_CALENDAR)
                 == android.content.pm.PackageManager.PERMISSION_GRANTED
             ) {
-                systemToolSet.createCalendarEvent(title, description, System.currentTimeMillis(), 15)
+                systemToolSet.calendar(title, description, 15)
                 Timber.i("📅 Calendar event created: $title")
             } else {
                 Timber.w("📅 Calendar permission not granted")
@@ -1267,6 +1335,12 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 processQuery("[User sent voice message — listen and respond to the audio]", sessionId)
             }
         }
+    }
+
+    // ... end of class ...
+    
+    suspend fun getRecentTurns(limit: Int = 20): List<ConversationTurn> {
+        return memoryManager.getSessionHistory(limit)
     }
 
 }

@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Oracle_OS</string>
-    <string name="service_desc">Oracle_OS - Ambient AI Agent</string>
-    <string name="accessibility_desc">Enables screen reading, UI automation, and ambient context awareness for Oracle_OS</string>
+    <string name="app_name">Agentic Gemma Instance</string>
+    <string name="service_desc">Agentic Gemma Instance background service</string>
+    <string name="accessibility_desc">Enables screen reading, UI automation, and ambient context awareness for Agentic Gemma Instance</string>
 </resources>

@@ -31,7 +31,8 @@ class MCPServer(
 
     private val audioRecorder: AudioRecorder,
     private val sensorManager: SensorFusionManager,
-    private val memoryManager: MemoryManager
+    private val memoryManager: MemoryManager,
+    private val skillManager: com.gemma.api.skills.SkillManager
 ) {
     
     // ═══════════════════════════════════════════════════════════════
@@ -266,66 +267,53 @@ class MCPServer(
     // ═══════════════════════════════════════════════════════════════
     
     private fun executeFlashlight(params: Map<String, Any>): ToolResult {
-        val state = (params["state"] ?: params["value"])?.toString()?.uppercase() == "ON"
-        hardwareTools.controlFlashlight(state)
-        return ToolResult(true, "Flashlight ${if (state) "ON" else "OFF"}")
+        val state = (params["state"] ?: params["value"])?.toString()?.uppercase() ?: "OFF"
+        hardwareTools.flashlight(state)
+        return ToolResult(true, "Flashlight $state")
     }
 
     private fun executeVibrate(params: Map<String, Any>): ToolResult {
         val pattern = (params["pattern"] ?: params["value"])?.toString()?.uppercase() ?: "SHORT"
-        val timing = if (pattern == "SOS") {
-            listOf(0L, 200L, 100L, 200L, 100L, 200L, 300L, 500L, 100L, 500L, 100L, 500L, 300L, 200L, 100L, 200L, 100L, 200L)
-        } else {
-            listOf(0L, 500L)
-        }
-        hardwareTools.vibrate(timing)
-        return ToolResult(true, "Vibrated $pattern pattern")
+        val result = hardwareTools.vibrate(pattern)
+        val message = result["message"] ?: ""
+        val success = result["result"] == "success"
+        return ToolResult(success, message, if (success) null else message)
     }
     
     private fun executeClick(params: Map<String, Any>): ToolResult {
         val target = (params["target"] ?: params["value"])?.toString() ?: return ToolResult(false, "", "Missing target")
-        val service = GemmaAccessibilityService.instance
-            ?: return ToolResult(false, "", "Accessibility service not active")
-        
-        val found = service.performClick(target)
-        return if (found) {
-            ToolResult(true, "Clicked on '$target'")
-        } else {
-            ToolResult(false, "", "Could not find '$target' on screen")
-        }
+        val result = systemTools.click(target)
+        val message = result["message"] ?: ""
+        val success = result["result"] == "success"
+        return ToolResult(success, message, if (success) null else message)
     }
     
     private fun executeScroll(params: Map<String, Any>): ToolResult {
         val direction = (params["direction"] ?: params["value"])?.toString()?.uppercase() ?: "DOWN"
-        val service = GemmaAccessibilityService.instance
-            ?: return ToolResult(false, "", "Accessibility service not active")
-        
-        val success = service.performScroll(direction)
-        return if (success) {
-            ToolResult(true, "Scrolled $direction")
-        } else {
-            ToolResult(false, "", "Failed to scroll")
-        }
+        val result = systemTools.scroll(direction)
+        val message = result["message"] ?: ""
+        val success = result["result"] == "success"
+        return ToolResult(success, message, if (success) null else message)
     }
     
     private fun executeNavigate(params: Map<String, Any>): ToolResult {
         val action = (params["action"] ?: params["value"])?.toString()?.uppercase() ?: "HOME"
-        val service = GemmaAccessibilityService.instance
-            ?: return ToolResult(false, "", "Accessibility service not active")
-        
-        service.performGlobal(action)
-        return ToolResult(true, "Navigated $action")
+        val result = systemTools.navigate(action)
+        val message = result["message"] ?: ""
+        val success = result["result"] == "success"
+        return ToolResult(success, message, if (success) null else message)
     }
     
     private suspend fun executeSearch(params: Map<String, Any>): ToolResult {
         val query = params["query"]?.toString() ?: params["value"]?.toString() ?: return ToolResult(false, "", "Missing query")
         
         return try {
-            val results = networkTools.fetchSearchResults(query, 3)
-            ToolResult(true, "Search results for '$query':\n$results")
+            val results = networkTools.search(query, 3)
+            val content = results["content"] ?: results["message"] ?: ""
+            ToolResult(results["result"] == "success", content)
         } catch (e: Exception) {
             // Fallback: open browser
-            networkTools.googleSearch(query)
+            networkTools.google(query)
             ToolResult(true, "Opened browser for '$query' (fetch failed)")
         }
     }
@@ -333,11 +321,12 @@ class MCPServer(
     private suspend fun executeGoogle(params: Map<String, Any>): ToolResult {
         val query = params["query"]?.toString() ?: params["value"]?.toString() ?: return ToolResult(false, "", "Missing query")
         // 1. Open browser for user to see the page
-        networkTools.googleSearch(query)
+        networkTools.google(query)
         // 2. Background fetch so model knows what the user is looking at
         return try {
-            val results = networkTools.fetchSearchResults(query, 3)
-            ToolResult(true, "Opened Google for user. Here's what they're seeing:\n$results")
+            val results = networkTools.search(query, 3)
+            val content = results["content"] ?: results["message"] ?: ""
+            ToolResult(true, "Opened Google for user. Here's what they're seeing:\n$content")
         } catch (e: Exception) {
             ToolResult(true, "Opened Google search for '$query' (background fetch failed: ${e.message})")
         }
@@ -345,13 +334,15 @@ class MCPServer(
 
     private fun executeBrowser(params: Map<String, Any>): ToolResult {
         val url = params["url"]?.toString() ?: params["value"]?.toString() ?: return ToolResult(false, "", "Missing URL")
-        networkTools.openBrowser(url)
+        networkTools.browser(url)
         return ToolResult(true, "Opened $url")
     }
     
     private fun executeTakeScreenshot(): ToolResult {
-        val result = systemTools.takeScreenshot()
-        return ToolResult(true, result)
+        val result = systemTools.take_screenshot()
+        val message = result["message"] ?: ""
+        val success = result["result"] == "success"
+        return ToolResult(success, message, if (success) null else message)
     }
     
     private suspend fun executeRecordAudio(params: Map<String, Any>): ToolResult {
@@ -428,16 +419,18 @@ class MCPServer(
 
     private fun executeOpenApp(params: Map<String, Any>): ToolResult {
         val appName = (params["name"] ?: params["value"])?.toString() ?: return ToolResult(false, "", "Missing app name")
-        val result = systemTools.openApp(appName)
-        val success = result.startsWith("Launched")
-        return ToolResult(success, result, if (success) null else result)
+        val result = systemTools.app(appName)
+        val message = result["message"] ?: ""
+        val success = result["result"] == "success"
+        return ToolResult(success, message, if (success) null else message)
     }
 
     private fun executeMediaControl(params: Map<String, Any>): ToolResult {
         val action = (params["action"] ?: params["value"])?.toString()?.uppercase() ?: return ToolResult(false, "", "Missing action")
-        val result = systemTools.mediaControl(action)
-        val success = result.startsWith("Media Action Sent")
-        return ToolResult(success, result, if (success) null else result)
+        val result = systemTools.media(action)
+        val message = result["message"] ?: ""
+        val success = result["result"] == "success"
+        return ToolResult(success, message, if (success) null else message)
     }
 
     private fun executeFlush(): ToolResult {
@@ -472,9 +465,10 @@ class MCPServer(
             ?: 0
         val label = params["label"]?.toString() ?: ""
 
-        val result = systemTools.setAlarm(hour, minutes, label)
-        val success = result.startsWith("Alarm set")
-        return ToolResult(success, result, if (success) null else result)
+        val result = systemTools.alarm(hour, minutes, label)
+        val message = result["message"] ?: ""
+        val success = result["result"] == "success"
+        return ToolResult(success, message, if (success) null else message)
     }
 
     private fun executeTimer(params: Map<String, Any>): ToolResult {
@@ -483,9 +477,10 @@ class MCPServer(
             ?: return ToolResult(false, "", "Missing seconds")
         val label = params["label"]?.toString() ?: ""
 
-        val result = systemTools.setTimer(seconds, label)
-        val success = result.startsWith("Timer set")
-        return ToolResult(success, result, if (success) null else result)
+        val result = systemTools.timer(seconds, label)
+        val message = result["message"] ?: ""
+        val success = result["result"] == "success"
+        return ToolResult(success, message, if (success) null else message)
     }
 
     private fun executeCalendarEvent(params: Map<String, Any>): ToolResult {
@@ -494,9 +489,10 @@ class MCPServer(
         val description = params["description"]?.toString() ?: ""
         val durationMinutes = params["minutes"]?.toString()?.toIntOrNull() ?: 30
 
-        val result = systemTools.createCalendarEvent(title, description, System.currentTimeMillis(), durationMinutes)
-        val success = result.startsWith("Calendar event created")
-        return ToolResult(success, result, if (success) null else result)
+        val result = systemTools.calendar(title, description, durationMinutes)
+        val message = result["message"] ?: ""
+        val success = result["result"] == "success"
+        return ToolResult(success, message, if (success) null else message)
     }
 
     private fun executeReadCalendar(params: Map<String, Any>): ToolResult {
@@ -504,9 +500,10 @@ class MCPServer(
             ?: params["value"]?.toString()?.toIntOrNull()
             ?: 7
 
-        val result = systemTools.readCalendarEvents(days)
-        val success = !result.startsWith("Failed") && !result.startsWith("Calendar permission")
-        return ToolResult(success, result, if (success) null else result)
+        val result = systemTools.read_calendar(days)
+        val success = result["result"] == "success"
+        val message = result["events"] ?: result["message"] ?: ""
+        return ToolResult(success, message, if (success) null else message)
     }
 
     private fun executeType(params: Map<String, Any>): ToolResult {

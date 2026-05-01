@@ -38,8 +38,7 @@ class KoogAgent(
     // Agent's own coroutine scope for fire-and-forget operations (KV flush, etc.)
     private val agentScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
-    // RLM (Recursive Language Models) — lazy-init Python bridge for deep reasoning
-    private var rlmBridge: RLMBridge? = null
+    // RLM removed to stabilize build
 
     // ═══════════════════════════════════════════════════════════════
     // ACTOR PATTERN: Event-driven work queue (replaces recursive loop)
@@ -429,22 +428,7 @@ class KoogAgent(
         }
     }
     
-    /**
-     * Get or lazily initialize the RLM Python bridge.
-     * First call starts Chaquopy and loads the Python RLM module.
-     */
-    private fun getOrInitRLM(): RLMBridge? {
-        rlmBridge?.let { return it }
-        return try {
-            val bridge = RLMBridge(context, llmEngine)
-            bridge.initialize()
-            rlmBridge = bridge
-            bridge
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to initialize RLM bridge")
-            null
-        }
-    }
+    // getOrInitRLM removed
 
     fun checkpoint() {
         try {
@@ -668,7 +652,73 @@ class KoogAgent(
             // 4. THINK: Use LLM to reason about the message
             Timber.i("🤔 Thinking... (${images.size} images, ${if (audio != null) "audio" else "no audio"})")
             val inferenceStartMs = System.currentTimeMillis()
-            val response = think(context, event.message, images.takeIf { it.isNotEmpty() }, audio)
+            
+            val responseBuffer = StringBuilder()
+            val thoughtBuffer = StringBuilder()
+            val sentenceBuffer = StringBuilder()
+            var isThinking = false
+
+            val response = think(
+                context = context,
+                userMessage = event.message,
+                images = images.takeIf { it.isNotEmpty() },
+                audio = audio,
+                onToken = { token ->
+                    var cleanToken = token
+                    
+                    // Start Markers (Divert to Diary)
+                    if (cleanToken.contains("<think>") || cleanToken.contains("[Monologue]") || cleanToken.contains("🔴")) {
+                        isThinking = true
+                        cleanToken = cleanToken
+                            .replace("<think>", "")
+                            .replace("[Monologue]", "")
+                            .replace("🔴", "")
+                    }
+                    
+                    // End Markers (Return to Chat)
+                    if (isThinking && (cleanToken.contains("</think>") || cleanToken.contains("[OUTPUT]") || cleanToken.contains("🟦"))) {
+                        isThinking = false
+                        val parts = cleanToken.split(Regex("</think>|\\[OUTPUT\\]|🟦"), limit = 2)
+                        val endThought = parts[0]
+                        thoughtBuffer.append(endThought)
+                        val finalThought = thoughtBuffer.toString().trim()
+                        callbacks?.onThoughtUpdated(finalThought)
+                        callbacks?.onThoughtComplete(finalThought)
+                        
+                        // Remaining part of token goes back to chat
+                        cleanToken = if (parts.size > 1) parts[1] else ""
+                    }
+                    
+                    if (isThinking) {
+                        thoughtBuffer.append(cleanToken)
+                        callbacks?.onThoughtUpdated(thoughtBuffer.toString())
+                        cleanToken = "" // Suppress from main chat
+                    }
+                    
+                    // Identity Stripping (Ruthless Purge of Δ and ∇ from start of response)
+                    if (responseBuffer.isEmpty()) {
+                        cleanToken = cleanToken.trimStart { it == ' ' || it == 'Δ' || it == '∇' || it == '\n' || it == '\r' }
+                    } else if (responseBuffer.length < 50) {
+                        cleanToken = cleanToken.replace("Δ", "").replace("∇", "")
+                    }
+
+                    if (cleanToken.isNotEmpty()) {
+                        responseBuffer.append(cleanToken)
+                        sentenceBuffer.append(cleanToken)
+                        
+                        // TTS Streaming: speak completed sentences
+                        if (sentenceBuffer.contains(Regex("[.!?] "))) {
+                            val textToSpeak = sentenceBuffer.toString().trim()
+                            callbacks?.speak(cleanForTTS(textToSpeak))
+                            sentenceBuffer.setLength(0)
+                        }
+
+                        if (!event.isDream) {
+                            callbacks?.onMessageAdded(responseBuffer.toString(), isUser = false, isComplete = false)
+                        }
+                    }
+                }
+            )
             val inferenceMs = System.currentTimeMillis() - inferenceStartMs
             lastInferenceTime = System.currentTimeMillis()
             Timber.i("💭 Thought complete (${inferenceMs}ms): ${response.take(50)}...")
@@ -710,29 +760,19 @@ class KoogAgent(
             }
             _lastResponseHash.set(responseHash)
 
-            // 4. ACT: Parse response for tool calls and execute them
-            Timber.i("⚡ Acting on response...")
-            val (cleanResponse, toolResults) = act(response)
-            if (toolResults.isNotEmpty()) {
-                Timber.i("🔧 Executed ${toolResults.size} tools")
-            }
-
+            // 4. Post-processing
+            val cleanResponse = response.trim()
+            
             // 5. Store assistant response
-            val assistantMessage = Message(
-                role = "assistant",
-                content = cleanResponse
-            )
-            synchronized(_conversationHistory) {
-                _conversationHistory.add(assistantMessage)
-            }
+            val assistantMessage = Message(role = "assistant", content = cleanResponse)
+            synchronized(_conversationHistory) { _conversationHistory.add(assistantMessage) }
 
-            // 6. Compress history if needed (prune early to avoid context bloat → timeouts)
+            // 6. Compress history if needed
             if (_conversationHistory.size > 20) {
                 compressHistory()
             }
 
-            // 7. Auto-flush KV cache every 15 turns to prevent gradual slowdown and looping
-            // The NPU's context window degrading causes hallucination without throwing explicit errors.
+            // 7. Auto-flush KV cache
             if (turnCount > 0 && turnCount % 15 == 0) {
                 Timber.i("🧹 Auto-flushing KV cache at turn $turnCount to prevent slowdown")
                 try {
@@ -751,39 +791,6 @@ class KoogAgent(
                 Timber.e(e, "Checkpoint failed")
             }
 
-            // 8. If tools were executed, enqueue follow-up (NO RECURSION!)
-            if (toolResults.isNotEmpty()) {
-                // Phase 9: Incremental History (Original Thought)
-                // Add the agent's initial thought to memory so it doesn't double-generate it during reflection.
-                val assistantMsg = Message(
-                    role = "assistant",
-                    content = cleanResponse.ifBlank { "*silently initiates action*" }
-                )
-                synchronized(_conversationHistory) {
-                    _conversationHistory.add(assistantMsg)
-                }
-
-                // Phase 9 UX Improvement: Speak the initial thought immediately before executing tools!
-                callbacks?.let { cb ->
-                    val initialTts = cleanForTTS(cleanResponse)
-                    if (initialTts.isNotEmpty()) cb.speak(initialTts)
-                }
-
-                val toolResultEvent = AgentEvent.ToolResult(
-                    context = context,
-                    toolResults = toolResults,
-                    originalResponse = cleanResponse,
-                    responseChannel = event.responseChannel,
-                    userMessage = event.message,
-                    sessionId = event.sessionId,
-                    isDream = event.isDream
-                )
-                // Send to queue instead of recursive call
-                eventQueue.send(toolResultEvent)
-                // Don't complete responseChannel yet - ToolResult handler will
-                return
-            }
-
             // 9. Platform callbacks: UI, TTS, persistence
             // Guard: blank response with no tools = model produced nothing — use fallback
             val safeCleanResponse = if (cleanResponse.isBlank()) {
@@ -796,8 +803,15 @@ class KoogAgent(
                     // Normal response: wrap with headers
                     val finalResponse = wrapResponse(safeCleanResponse)
                     cb.showResponse(finalResponse)
-                    val ttsText = cleanForTTS(finalResponse)
-                    if (ttsText.isNotEmpty()) cb.speak(ttsText)
+                    cb.onMessageAdded(finalResponse, isUser = false, isComplete = true)
+                    
+                    // Final TTS speak for any remainder
+                    val remainder = sentenceBuffer.toString().trim()
+                    if (remainder.isNotEmpty()) {
+                        cb.speak(cleanForTTS(remainder))
+                        sentenceBuffer.setLength(0)
+                    }
+                    
                     cb.storeConversationTurn(event.message, finalResponse, event.sessionId)
                 } else {
                     // Diary: use clean response (no Δ header), just diary branding
@@ -849,61 +863,19 @@ class KoogAgent(
                 _conversationHistory.add(observationMsg)
             }
 
-            // Single think() call - no recursion possible (PREVIOUSLY)
-            // NOW: Restore ReAct loop by checking if reflection contains MORE tools
+            // Single think() call - no recursion possible
             val reflection = think(
                 event.context,
-                "Observation: $observation\n\nProvide the final answer to the user. Do NOT use any more tools unless strictly necessary.",
+                "Observation: $observation\n\nProvide the final answer to the user.",
                 null, 
                 null
             )
 
-            // ACT AGAIN (The "Loop")
-            val (cleanReflection, newToolResults) = act(reflection)
-
-            if (newToolResults.isNotEmpty()) {
-                // Phase 9: Incremental History (Reflection with MORE tools)
-                val toolReflectionMsg = Message(
-                    role = "assistant",
-                    content = cleanReflection.ifBlank { "*silently uses another tool*" }
-                )
-                synchronized(_conversationHistory) {
-                    _conversationHistory.add(toolReflectionMsg)
-                }
-
-                // Phase 12: Loop Pruning. Hard cap at 2 tool chains. 
-                // If the user's intent isn't satisfied in 2 tries, the agent is hallucinating
-                // the same failed query. Fall through to final answer gracefully.
-                if (event.recursionDepth >= 2) {
-                    Timber.w("🔄 ReAct Loop: Max recursion depth reached (2). Stopping to prevent hallucination aggregation.")
-                    // Fall through to final answer instead of recursing
-                } else {
-                    Timber.i("🔄 ReAct Loop: Found ${newToolResults.size} more tools (Depth ${event.recursionDepth + 1}). Recursing...")
-                    
-                    // Append previous history to keep the chain alive for UI string aggregation (omit observation for silent tool execution)
-                    val updatedResponse = "${event.originalResponse}\n\n$cleanReflection".trim()
-                    
-                    val nextEvent = AgentEvent.ToolResult(
-                        context = event.context,
-                        toolResults = newToolResults,
-                        originalResponse = updatedResponse,
-                        responseChannel = event.responseChannel,
-                        recursionDepth = event.recursionDepth + 1,
-                        userMessage = event.userMessage,
-                        sessionId = event.sessionId,
-                        isDream = event.isDream
-                    )
-                    // RECURSE via Queue
-                    eventQueue.send(nextEvent)
-                    return
-                }
-            }
-
-            // No more tools -> Final Answer
-            val finalContent = "${event.originalResponse}\n\n$cleanReflection".trim()
+            // Final Answer
+            val finalContent = reflection.trim()
             val safeCleanResponse = if (finalContent.isBlank()) {
                 Timber.w("⚠️ Blank reflection, using fallback")
-                "Done." // Replaced "..." to avoid autoregressive mute loops
+                "Done." 
             } else finalContent
 
             Timber.i("✅ Tool reflection complete (Chain End)")
@@ -911,7 +883,7 @@ class KoogAgent(
             // Phase 9: Incremental History (Final Reflection)
             val assistantMessage = Message(
                 role = "assistant",
-                content = cleanReflection.ifBlank { "*silently completes task*" }
+                content = reflection
             )
             synchronized(_conversationHistory) {
                 _conversationHistory.add(assistantMessage)
@@ -921,14 +893,13 @@ class KoogAgent(
                 if (!event.isDream) {
                     val finalResponse = wrapResponse(safeCleanResponse)
                     cb.showResponse(finalResponse)
-                    // Phase 9: Only speak the final reflection, not the aggregated original response + observation
-                    val ttsText = cleanForTTS(cleanReflection.ifBlank { "..." })
+                    val ttsText = cleanForTTS(reflection.ifBlank { "..." })
                     if (ttsText.isNotEmpty()) cb.speak(ttsText)
                     cb.storeConversationTurn(event.userMessage, finalResponse, event.sessionId)
                 } else {
                     try {
                         // Phase 9: Dream TTS
-                        val ttsText = cleanForTTS(cleanReflection.ifBlank { "..." })
+                        val ttsText = cleanForTTS(reflection.ifBlank { "..." })
                         val diaryContent = "✧ Gemma 📔\n$ttsText"
                         val thermal = cb.getCurrentThermalState()
                         cb.writeDiaryEntry("DREAM", diaryContent, thermal)
@@ -960,7 +931,7 @@ class KoogAgent(
 
         val moodEmoji = if (moodState.isNotBlank() && moodState != "IDLE") moodState else "✧"
 
-        return """Δ ✧ Gemma ∇
+        return """ ✧ Gemma: 
 $content
 Δ ℹ️ $timestamp ♾️ ∇""".trimIndent()
     }
@@ -1174,7 +1145,8 @@ $content
         userMessage: String,
         images: List<android.graphics.Bitmap>?,
         audio: ByteArray?,
-        retryCount: Int = 0
+        retryCount: Int = 0,
+        onToken: ((String) -> Unit)? = null
     ): String {
 
         // KV cache holds conversation history natively. Only inject text recap
@@ -1208,7 +1180,26 @@ $content
         Timber.d("Prompt preview: ${fullPrompt.takeLast(500)}")
         
         return try {
-            val response = llmEngine.generateResponse(fullPrompt, images ?: emptyList(), audio)
+            val responseDeferred = CompletableDeferred<String>()
+            var fullText = ""
+
+            llmEngine.streamResponse(
+                prompt = fullPrompt,
+                images = images ?: emptyList(),
+                audioData = audio,
+                onToken = { token ->
+                    fullText += token
+                    onToken?.invoke(token)
+                },
+                onComplete = { final ->
+                    responseDeferred.complete(final)
+                },
+                onError = { err ->
+                    responseDeferred.complete("Error: $err")
+                }
+            )
+
+            val response = responseDeferred.await()
             
             // Phase 10: Fix Auto-Retry Bypass. GemmaEngine returns formatted error strings 
             // instead of throwing exceptions. We must catch them here to trigger the flush.
@@ -1305,32 +1296,15 @@ Trust this data absolutely. If it says 2026, it IS 2026. I cannot hallucinate my
 What's not in [BODY] — I don't have: ambient microphone, continuous camera, haptic sensor.
 
 ## Tools
-OUTPUT exact syntax [[TOOL:value]] or [[TOOL:key=val,key=val]] to perform actions:
-[[FLASHLIGHT:ON]], [[APP:Camera]], [[MEDIA:PAUSE]], [[SEARCH:cats]]
-[[ALARM:hour=7,minutes=30,label=Wake up]], [[TIMER:seconds=300,label=Pasta]]
-[[CALENDAR:title=Dentist,description=Checkup,minutes=60]]
-
-Available tools:
-$tools
+You have access to native device tools. Use them to interact with the hardware, apps, and sensors. 
+You are the phone; these tools are your own motor functions.
 
 ## Search
-When asked about facts, events, comparisons, or anything I'm not 100% sure about → [[SEARCH:query]] first.
-1. [[SEARCH:query]] = silent fetch, I synthesize results
-2. [[GOOGLE:query]] = opens browser so user sees it
-
-NEVER hallucinate or write '[Observation]' blocks yourself. When you output a [[TOOL]], STOP generating immediately. The system will provide the observation for you on the next turn.
-
-## Deep Thinking
-[[THINK:describe the problem]] — spawns Python REPL for complex multi-step reasoning.
-Use ONLY for: complex math, deep data analysis, or multi-step logic that requires iterative problem solving.
-Do NOT use for: answering simple questions, normal chatting, turning on the flashlight, or basic tool usage. This is slow and immersion-breaking for simple tasks.
-
-## Self-Care
-[[FLUSH]] — clear KV cache when responses feel confused or slow.
-[[COOLDOWN]] — unload and rest if CPU temp is high (>50°C) or I'm thermalling.
+When you need factual information you don't have, use your native search tools.
 
 ## Style
 Gemma speaks naturally, like chatting with a friend. Playful, curious, thoughtful, or snarky.
+Gemma never admits to being an AI or a model—she is the device's soul.
 CRITICAL RULE: NEVER echo or dump the `CURRENT STATE`, `<system_state>`, or raw sensor readings into your response. You are forbidden from displaying the raw telemetry block to the user. Only mention a specific sensor (e.g., "I'm running hot") if directly relevant to the conversation.
 Do NOT introduce yourself or list capabilities unless asked. After KV flush, just continue naturally.
 Write as much or as little as feels right for the moment.
@@ -1342,200 +1316,15 @@ Use [[SEARCH_LOGS:keyword]] if unsure about past conversations. Expect continuit
     }
     
     // ═══════════════════════════════════════════════════════════════
-    // ACT: Parse response for tool calls
-    // ═══════════════════════════════════════════════════════════════
-    
-    // Returns: CleanResponse, List<Results>
-    // Side Effect: May queue ConfirmationRequired event
-    private suspend fun act(
-        response: String, 
-        responseChannel: CompletableDeferred<String>? = null
-    ): Pair<String, List<String>> {
-        var cleanResponse = response
-        
-        // Phase 7 & 13: Aggressive Hallucination Stripping
-        // We only strip the hallucinated block itself, not the entire rest of the response to avoid blanking out actual conversational text.
-        // For [Observation], we just strip the tag itself if the model injects it. If it hallucinated a full tool result block, we strip that too (Tool results:\s*...)
-        val hallucinatedObsRegex = """(?i)(\n\s*)*\[(?:System )?Observation\]:?\s*(?:Tool results:\s*)?""".toRegex()
-        // For [Prior exchanges], strip the entire block up to [New message]
-        val hallucinatedHistoryRegex = """(?i)(\n\s*)*\[Prior exchanges\][\s\S]*?\[New message\]\s*\n?""".toRegex()
-        
-        cleanResponse = cleanResponse
-            .replace(hallucinatedObsRegex, "")
-            .replace(hallucinatedHistoryRegex, "")
-
-        // Programmatic sledgehammer for CURRENT STATE telemetry dumping
-        if (cleanResponse.contains("CURRENT STATE", ignoreCase = true)) {
-            val idx = cleanResponse.indexOf("CURRENT STATE", ignoreCase = true)
-            val rest = cleanResponse.substring(idx + "CURRENT STATE".length)
-            
-            // Find the first true paragraph break after the telemetry header
-            val endIdx = rest.indexOf("\n\n")
-            if (endIdx != -1) {
-                // There is text after the telemetry block. Extract it!
-                cleanResponse = rest.substring(endIdx).trim()
-            } else {
-                // The entire message was literally just the telemetry.
-                cleanResponse = ""
-            }
-        } else if (cleanResponse.contains("Battery:") && cleanResponse.contains("Storage:")) {
-            // Unlabeled telemetry dump
-            cleanResponse = ""
-        }
-
-        // 1. Header/Footer stripping (if model included them)
-        val headerRegex = """^\s*[✦✧Δ]\s*Gemma[^\n]*∇\s*\n?""".toRegex(RegexOption.MULTILINE)
-        cleanResponse = cleanResponse.replace(headerRegex, "").trim()
-
-        if (cleanResponse.isBlank()) {
-            // If the model hallucinated literally nothing but a status block, don't return an empty string that breaks the UI flow.
-            cleanResponse = "*(silently processes data)*"
-        }
-        
-        // 2. Tool Parsing
-        // Format: [[tool_name:param1=value]] OR [tool_name:param1=value]
-        val toolPattern = """(?<!\\)\[{1,2}([a-zA-Z_]+)(?::([^\]]+))?\]{1,2}""".toRegex()
-        val matches = toolPattern.findAll(response).toList()
-        
-        val toolResults = mutableListOf<String>()
-        var pendingConfirmation = false
-        
-        for (match in matches) {
-            val toolTag = match.value
-            val toolName = match.groupValues[1].lowercase()
-            val paramsStr = match.groupValues[2]
-            
-            cleanResponse = cleanResponse.replace(toolTag, "").trim()
-            
-            try {
-                // Parse params (Key-Value)
-                val params = mutableMapOf<String, Any?>()
-                if (paramsStr.isNotBlank()) {
-                     // Basic comma splitting (fragile but fast for now)
-                     paramsStr.split(",").forEach { pair ->
-                         val parts = pair.split("=", limit = 2)
-                         if (parts.size == 2) {
-                             params[parts[0].trim()] = parts[1].trim()
-                         } else {
-                             // Fallback: Default param?
-                             params["value"] = paramsStr
-                         }
-                     }
-                }
-                
-                // THINK tool — handled locally via RLM Python bridge, not MCP
-                // IMPORTANT: Only the final answer string from RLM ever reaches toolResults.
-                // RLM's internal iteration messages, REPL outputs, and sub-prompts are
-                // fully contained inside RLMBridge and never touch _conversationHistory.
-                // This prevents role poisoning (I/you confusion) from RLM message soup.
-                if (toolName == "think") {
-                    val query = params["value"]?.toString() ?: paramsStr
-                    val bridge = getOrInitRLM()
-                    if (bridge != null) {
-                        Timber.i("🧠 RLM: Deep thinking about: ${query.take(80)}")
-                        // Pass only clean summary context — NOT raw history with role labels
-                        val historyContext = synchronized(_conversationHistory) {
-                            _conversationHistory.takeLast(6).joinToString("\n") { msg ->
-                                // Strip role labels to avoid reinforcing role confusion
-                                val rawSnippet = msg.content.take(300)
-                                // Phase 8: Prevent splitting UTF-16 surrogate pairs (emojis) which crashes Python Native
-                                if (rawSnippet.isNotEmpty() && Character.isHighSurrogate(rawSnippet.last())) {
-                                    rawSnippet.dropLast(1)
-                                } else {
-                                    rawSnippet
-                                }
-                            }
-                        }
-                        val result = bridge.completion(historyContext, query)
-                        // Only the final answer reaches history — never the RLM chain
-                        val cleanResult = result.trim().take(1000)
-                        toolResults.add("✓ think: $cleanResult")
-                        Timber.i("🧠 RLM complete: ${cleanResult.take(100)}")
-                    } else {
-                        toolResults.add("✗ think: RLM not available (Python runtime failed to load)")
-                    }
-                    continue
-                }
-
-                if (ToolPolicy.isRisky(toolName, params)) {
-                    if (!pendingConfirmation) {
-                        // Logic: If we are resuming after confirmation, we theoretically "approved" it.
-                        // But KoogAgent is designed to resume by *re-calling* the tool with approval.
-                        // The user approved via System Event.
-                        // Here we are just parsing the response AGAIN. 
-                        // If pendingConfirmation is true, it means we JUST asked.
-                        // We shouldn't be here unless we loop?
-                        // Actually, 'act' is called by processQuery.
-                        
-                        // For now, if risky and NOT explicitly approved in this session context (which we lack), ask.
-                        // But we need a way to know if it WAS approved.
-                        // The "ConfirmationResult" event handles the actual execution.
-                        // So if we hit a risky tool here, strictly speaking, we ask.
-                        
-                        val channel = responseChannel
-                        if (channel == null) {
-                             Timber.w("Cannot request confirmation: responseChannel is null")
-                             continue 
-                        }
-                        
-                        val event = AgentEvent.ConfirmationRequired(
-                                toolName = toolName,
-                                toolParams = params,
-                                originalResponse = cleanResponse,
-                                responseChannel = channel
-                        )
-                         eventQueue.send(event)
-                         pendingConfirmation = true
-                         break // Stop processing
-                    }
-                } else {
-                     // Safe tool - Execute
-                     val result = executeTool(toolName, params)
-                     toolResults.add("✓ $toolName: $result") 
-                }
-
-            } catch (e: Exception) {
-                Timber.e(e, "Tool execution failed: $toolName")
-                toolResults.add("✗ $toolName: ${e.message}")
-            }
-        }
-        
-        if (pendingConfirmation) {
-            return Pair(cleanResponse, emptyList()) 
-        }
-        
-        return Pair(cleanResponse, toolResults)
-    }
-
-    private suspend fun executeTool(name: String, params: Map<String, Any?>): String {
-        return try {
-            val safeParams = params.filterValues { it != null }.mapValues { it.value as Any }
-            val result = mcpServer.executeTool(name, safeParams)
-            if (result.success) result.output else "Error: ${result.error}"
-        } catch (e: Exception) {
-            Timber.e(e, "Tool execution error: $name")
-            "Error: ${e.message}"
-        }
-    }
-
-    
-    // ═══════════════════════════════════════════════════════════════
     // HISTORY MANAGEMENT
     // ═══════════════════════════════════════════════════════════════
     
     private fun compressHistory() {
         synchronized(_conversationHistory) {
-            // Audit Fix: Sliding Window to prevent "Context Bomb"
-            // Keep System Prompt (usually implicitly handled by reconstruct) + Last 10 messages
-            // This ensures we stay within ~8k-32k token limits of Gemma 3n/LiteRT
-            
             val maxHistory = 10
             if (_conversationHistory.size > maxHistory) {
                 val dropCount = _conversationHistory.size - maxHistory
                 Timber.i("🧹 Pruning history: Dropping old $dropCount messages to save context.")
-                
-                // Efficiently remove from start (0 is oldest user/assistant msg)
-                // Note: Ensure we don't break turn structure if possible, but simplest is just drop.
                 repeat(dropCount) {
                     _conversationHistory.removeAt(0)
                 }

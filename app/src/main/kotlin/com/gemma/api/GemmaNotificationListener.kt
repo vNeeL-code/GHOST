@@ -55,6 +55,19 @@ class GemmaNotificationListener : NotificationListenerService() {
         }
 
         Timber.d("Notification: $pkg - $title")
+        
+        // Passive TTS: Read aloud if enabled (Filter out silence and media spam)
+        val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        if (prefs.getBoolean(Constants.PREF_PASSIVE_TTS, false) && text.isNotBlank()) {
+            // Filter out media player noise (titles like "Song is playing" or similar)
+            val isMedia = pkg.contains("music") || pkg.contains("audio") || pkg.contains("player") || title.contains("playing", ignoreCase = true)
+            val isMessaging = pkg.contains("chat") || pkg.contains("msg") || pkg.contains("whatsapp") || pkg.contains("telegram") || pkg.contains("discord")
+
+            if (!isMedia || isMessaging) {
+                val ttsText = entry.toContextString()
+                try { GemmaService.instance?.ttsManager?.speak(ttsText) } catch (_: Exception) {}
+            }
+        }
 
         // TODO: Trigger proactive Gemma response for interesting notifications
         // Could check if Gemma is idle and inject commentary

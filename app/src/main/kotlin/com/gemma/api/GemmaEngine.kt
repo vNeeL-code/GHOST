@@ -3,6 +3,7 @@ package com.gemma.api
 import android.content.Context
 import android.graphics.Bitmap
 import com.google.ai.edge.litertlm.Backend
+import com.google.ai.edge.litertlm.Channel
 import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.Conversation
@@ -14,6 +15,8 @@ import com.google.ai.edge.litertlm.LogSeverity
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.MessageCallback
 import com.google.ai.edge.litertlm.SamplerConfig
+import com.google.ai.edge.litertlm.ToolSet
+import com.google.ai.edge.litertlm.tool
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
 import timber.log.Timber
@@ -35,6 +38,12 @@ class GemmaEngine(private val context: Context) : LlmBackend {
     private val sessionLock = Object()
 
     @Volatile private var isResetting = false
+    private var toolSets: List<ToolSet> = emptyList()
+    private var samplerConfig: SamplerConfig = SamplerConfig(
+        topK = 40,
+        topP = 0.95,
+        temperature = 0.8
+    )
 
     override var activeBackend: String? = null
         private set
@@ -50,51 +59,56 @@ class GemmaEngine(private val context: Context) : LlmBackend {
         modelPath: String,
         systemPrompt: String,
         enableVision: Boolean = true,
-        enableAudio: Boolean = true
+        enableAudio: Boolean = true,
+        toolSets: List<ToolSet> = emptyList(),
+        forcedBackend: String? = null
     ): String? {
         return runCatching {
             Timber.i("Initializing Gemma with LiteRT-LM Engine...")
             Timber.i("Model: $modelPath")
             Timber.i("Vision: $enableVision, Audio: $enableAudio")
+            Engine.setNativeMinLogSeverity(LogSeverity.INFO)
 
             lastModelPath = modelPath
             lastSystemPrompt = systemPrompt
             lastVisionEnabled = enableVision
             lastAudioEnabled = enableAudio
+            this.toolSets = toolSets
 
-            // Enable verbose native logging 
-            Engine.setNativeMinLogSeverity(LogSeverity.VERBOSE)
-
-            // Minimal config — exactly matches official LiteRT-LM example (no maxNumTokens, no cacheDir)
-            val backendsToTry = listOf(
-                "GPU" to { Backend.GPU() },
-                "CPU" to { Backend.CPU() }
-            )
-
+            // Try GPU first, fall back to CPU — mirrors PokeClaw's LocalModelRuntime pattern
+            val backendsToTry = when (forcedBackend?.uppercase()) {
+                "CPU" -> listOf("CPU" to Backend.CPU())
+                "GPU" -> listOf("GPU" to Backend.GPU())
+                else -> listOf(
+                    "GPU" to Backend.GPU(),
+                    "CPU" to Backend.CPU()
+                )
+            }
             var lastError: String? = null
-            
-            for ((backendName, backendProvider) in backendsToTry) {
+
+            for ((backendName, backend) in backendsToTry) {
                 try {
-                    val currentBackend = backendProvider()
-                    Timber.i("⚙️ Attempting LiteRT Initialization on $backendName Backend...")
-                    
+                    Timber.i("Attempting $backendName backend...")
                     val engineConfig = EngineConfig(
                         modelPath = modelPath,
-                        backend = currentBackend
-                        // No maxNumTokens — let model metadata decide
-                        // No cacheDir — use model directory per Config.kt docs
+                        backend = backend,
+                        visionBackend = if (enableVision && backendName == "GPU") Backend.GPU() else null,
+                        audioBackend = if (enableAudio) Backend.CPU() else null,
+                        maxNumTokens = Constants.MAX_TOKENS,
+                        cacheDir = context.cacheDir.absolutePath
                     )
 
                     val newEngine = Engine(engineConfig)
                     newEngine.initialize()
 
-                    val conversationConfig = ConversationConfig(
-                        samplerConfig = if (currentBackend is Backend.NPU) null else SamplerConfig(
-                            topK = 40,
-                            topP = 0.95,
-                            temperature = 0.8
+                        val conversationConfig = ConversationConfig(
+                            samplerConfig = samplerConfig,
+                            systemInstruction = if (systemPrompt.isNotBlank()) {
+                                Contents.of(systemPrompt)
+                            } else null,
+                            channels = listOf(Channel(channelName = "thought", start = "<think>", end = "</think>")),
+                            tools = toolSets.map { tool(it) }
                         )
-                    )
 
                     val newConversation = newEngine.createConversation(conversationConfig)
 
@@ -105,21 +119,22 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                         conversation = newConversation
                     }
 
-                    activeBackend = "LiteRT-LM ($backendName)"
+                    activeBackend = "LiteRT-LM ($backendName${if (enableVision && backendName == "GPU") " + Vision" else ""}${if (enableAudio) " + Audio" else ""})"
                     Timber.i("✓ Gemma initialized successfully on $backendName!")
-                    return null // Success!
+                    return null  // Success
+
                 } catch (e: Exception) {
-                    lastError = e.message ?: "Unknown native error"
-                    Timber.w("⚠️ $backendName initialization failed: $lastError")
-                    // Continue to next backend...
+                    lastError = e.message ?: "Unknown error"
+                    Timber.w("$backendName backend failed: $lastError")
+                    // continue to next backend
                 }
             }
 
-            // If we reached here, everything failed
-            Timber.e("❌ All backends (NPU, GPU, CPU) failed to initialize Gemma 4.")
-            lastError ?: "Total hardware rejection"
+            Timber.e("All backends failed. Last error: $lastError")
+            lastError ?: "All backends failed"
+
         }.getOrElse { e ->
-            Timber.e(e, "Fatal: Unexpected initialization error")
+            Timber.e(e, "Fatal: Could not initialize Gemma")
             e.message ?: "Unknown fatal error"
         }
     }
@@ -300,11 +315,11 @@ class GemmaEngine(private val context: Context) : LlmBackend {
 
                 // Create new conversation with fresh system prompt
                 val conversationConfig = ConversationConfig(
-                    samplerConfig = SamplerConfig(
-                        topK = 40,
-                        topP = 0.95,
-                        temperature = 0.8
-                    )
+                    samplerConfig = samplerConfig,
+                    systemInstruction = if (systemPrompt.isNotBlank()) {
+                        Contents.of(systemPrompt)
+                    } else null,
+                    tools = toolSets.map { tool(it) }
                 )
 
                 conversation = currentEngine.createConversation(conversationConfig)
@@ -406,7 +421,8 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                                 topK = 40,
                                 topP = 0.95,
                                 temperature = 0.7
-                            )
+                            ),
+                            systemInstruction = null
                         )
                         val tempConv = currentEngine.createConversation(config)
 

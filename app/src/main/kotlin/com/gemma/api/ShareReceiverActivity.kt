@@ -47,7 +47,12 @@ class ShareReceiverActivity : Activity() {
     }
 
     private fun handleImage() {
-        val uri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+        val uri = if (android.os.Build.VERSION.SDK_INT >= 33) {
+            intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+        }
         if (uri == null) {
             Toast.makeText(this, "No image received", Toast.LENGTH_SHORT).show()
             finish()
@@ -139,7 +144,12 @@ class ShareReceiverActivity : Activity() {
     }
 
     private fun handleVideo() {
-        val uri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+        val uri = if (android.os.Build.VERSION.SDK_INT >= 33) {
+            intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+        }
         if (uri == null) {
             Toast.makeText(this, "No video received", Toast.LENGTH_SHORT).show()
             finish()
@@ -153,7 +163,12 @@ class ShareReceiverActivity : Activity() {
     }
 
     private fun handleAudio() {
-        val uri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+        val uri = if (android.os.Build.VERSION.SDK_INT >= 33) {
+            intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+        }
         if (uri == null) {
             Toast.makeText(this, "No audio received", Toast.LENGTH_SHORT).show()
             finish()
@@ -167,7 +182,12 @@ class ShareReceiverActivity : Activity() {
     }
 
     private fun handlePdf() {
-        val uri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+        val uri = if (android.os.Build.VERSION.SDK_INT >= 33) {
+            intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+        }
         if (uri == null) {
             Toast.makeText(this, "No PDF received", Toast.LENGTH_SHORT).show()
             finish()

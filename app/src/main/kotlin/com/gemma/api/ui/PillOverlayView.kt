@@ -271,7 +271,8 @@ class PillOverlayView(
     private fun expand() {
         if (currentState == State.EXPANDED) return
         setState(State.EXPANDED)
-        inputField.requestFocus()
+        // Keyboard will spawn only on explicit tap now
+        // inputField.requestFocus()
     }
 
     private fun collapse() {
@@ -296,6 +297,20 @@ class PillOverlayView(
         setState(State.RESPONSE)
         responseArea.text = text
         responseArea.visibility = View.VISIBLE
+    }
+
+    fun appendResponseToken(token: String) {
+        if (currentState != State.RESPONSE && currentState != State.THINKING) {
+            setState(State.RESPONSE)
+            responseArea.text = ""
+            responseArea.visibility = View.VISIBLE
+        }
+        if (currentState == State.THINKING) {
+            setState(State.RESPONSE)
+            responseArea.text = ""
+            responseArea.visibility = View.VISIBLE
+        }
+        responseArea.append(token)
     }
 
     fun showError(error: String) {

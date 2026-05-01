@@ -4,143 +4,111 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import com.google.ai.edge.litertlm.Tool
+import com.google.ai.edge.litertlm.ToolParam
+import com.google.ai.edge.litertlm.ToolSet
 
 /**
  * Network Tools - Web search and fetch
  */
-class NetworkToolSet(private val context: Context) {
+class NetworkToolSet(private val context: Context) : ToolSet {
 
-    /**
-     * Launch browser search (UI action)
-     */
-    fun googleSearch(query: String): Map<String, Any> {
+    var onBrowserBubbleRequest: ((String, (String) -> Unit) -> Unit)? = null
+
+    @Tool(description = "Researches a query via the floating web browser bubble")
+    fun googleSearch(
+        @ToolParam(description = "The query to search for") query: String
+    ): Map<String, String> {
         val url = "https://www.google.com/search?q=${Uri.encode(query)}"
         
-        // 1. Try launching directly if we have Overlay Permission (Background Launch allowed)
-        if (android.provider.Settings.canDrawOverlays(context)) {
-            try {
-                Timber.i("Launching Google Search (Direct): $query")
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(intent)
-                return mapOf("success" to true, "action" to "opened_browser_direct", "query" to query)
-            } catch (e: Exception) {
-                Timber.w(e, "Direct launch failed, trying notification fallback")
-            }
-        } else {
-            Timber.w("No Overlay Permission - using Notification Fallback")
-        }
-
-        // 2. Fallback: Send a high-priority notification with PendingIntent
-        try {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return if (onBrowserBubbleRequest != null) {
+            Timber.i("Launching Agent Browser Bubble for Google Search: $query")
+            var scrapedData = ""
+            var wait = true
             
-            val pendingIntent = android.app.PendingIntent.getActivity(
-                context, 
-                query.hashCode(), 
-                intent, 
-                android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
-            )
-
-            val notificationManager = context.getSystemService(android.app.NotificationManager::class.java)
-            val channelId = "gemma_actions"
-            
-            // Ensure channel exists
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                if (notificationManager.getNotificationChannel(channelId) == null) {
-                    val channel = android.app.NotificationChannel(
-                        channelId,
-                        "Gemma Actions",
-                        android.app.NotificationManager.IMPORTANCE_HIGH
-                    )
-                    notificationManager.createNotificationChannel(channel)
+            runBlocking {
+                withContext(Dispatchers.Main) {
+                    onBrowserBubbleRequest?.invoke(url) { data ->
+                        scrapedData = data.take(4000)
+                        wait = false
+                    }
+                }
+                
+                // Wait for the UI callback to fire back the scraped data
+                var waitCount = 0
+                while (wait && waitCount < 100) { // 10s max wait
+                    kotlinx.coroutines.delay(100)
+                    waitCount++
                 }
             }
-
-            val builder = android.app.Notification.Builder(context, channelId)
-                .setSmallIcon(android.R.drawable.ic_menu_search)
-                .setContentTitle("Search Ready: $query")
-                .setContentText("Tap to open results in browser")
-                .setContentIntent(pendingIntent)
-                .setAutoCancel(true)
-                .setOngoing(false) // Dismissable
             
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                // Foreground service logic might require this if we were strictly binding, but simple notification is fine
-            }
-
-            notificationManager.notify(url.hashCode(), builder.build())
-            
-            return mapOf("success" to true, "action" to "posted_notification", "query" to query, "note" to "User must tap notification (missing permissions)")
-        } catch (e: Exception) {
-            Timber.e(e, "Notification fallback failed")
-            return mapOf("success" to false, "error" to (e.message ?: "Unknown error"))
+            mapOf("result" to "success", "content" to "Top results from browser:\n$scrapedData")
+        } else {
+            mapOf("result" to "error", "message" to "No browser bubble callback")
         }
     }
 
-    /**
-     * Open a generic URL in the browser
-     */
-    fun openBrowser(url: String) {
-        try {
-            Timber.i("Opening URL: $url")
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+    @Tool(description = "Open a browser with Google search results for a query")
+    fun google(
+        @ToolParam(description = "The search query") query: String
+    ): Map<String, String> {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=${Uri.encode(query)}"))
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+        return mapOf("result" to "success", "message" to "Opened Google Search for: $query")
+    }
+
+    @Tool(description = "Open a specific URL in the web browser")
+    fun browser(
+        @ToolParam(description = "The full URL to open (must start with http:// or https://)") url: String
+    ): Map<String, String> {
+        return try {
+            val validUrl = if (url.startsWith("http")) url else "https://$url"
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(validUrl))
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(intent)
+            mapOf("result" to "success", "message" to "Opened $validUrl")
         } catch (e: Exception) {
-            Timber.e(e, "Failed to open browser")
+            mapOf("result" to "error", "message" to (e.message ?: "Could not open URL"))
         }
     }
 
-    /**
-     * Fetch search results as text (RAG-style)
-     * Uses Google search with fallback to DuckDuckGo
-     */
-    suspend fun fetchSearchResults(query: String, maxResults: Int = 5): String = withContext(Dispatchers.IO) {
-        // Try Google first, fall back to DuckDuckGo
+    @Tool(description = "Fetch search results silently (returns top snippets, no browser opened)")
+    fun search(
+        @ToolParam(description = "Search query") query: String, 
+        @ToolParam(description = "Max results to return") maxResults: Int = 5
+    ): Map<String, String> = runBlocking(Dispatchers.IO) {
         val googleResult = try { fetchGoogleResults(query, maxResults) } catch (_: Exception) { null }
-        if (googleResult != null) return@withContext googleResult
+        if (googleResult != null) return@runBlocking mapOf("result" to "success", "content" to googleResult)
 
         val ddgResult = try { fetchDuckDuckGoResults(query, maxResults) } catch (_: Exception) { null }
-        if (ddgResult != null) return@withContext ddgResult
+        if (ddgResult != null) return@runBlocking mapOf("result" to "success", "content" to ddgResult)
 
-        "Search failed for '$query' — both Google and DuckDuckGo unavailable."
+        mapOf("result" to "error", "message" to "Search failed for '$query'")
     }
 
-    /**
-     * Scrape Google search results (no API key needed)
-     */
     private fun fetchGoogleResults(query: String, maxResults: Int): String? {
-        Timber.i("Fetching Google results for: $query")
         val encoded = URLEncoder.encode(query, "UTF-8")
         val url = URL("https://www.google.com/search?q=$encoded&num=$maxResults&hl=en")
-
         val connection = url.openConnection() as HttpURLConnection
         connection.requestMethod = "GET"
-        // Mobile UA gets simpler HTML from Google
-        connection.setRequestProperty("User-Agent",
-            "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
+        connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
         connection.setRequestProperty("Accept-Language", "en-US,en;q=0.9")
         connection.connectTimeout = 10000
         connection.readTimeout = 10000
         connection.instanceFollowRedirects = true
 
-        val responseCode = connection.responseCode
-        if (responseCode != 200) {
-            Timber.w("Google search HTTP $responseCode")
-            return null
-        }
+        if (connection.responseCode != 200) return null
 
         val html = connection.inputStream.bufferedReader().readText()
         connection.disconnect()
 
-        // Parse Google results — extract text from result divs
         val results = parseGoogleResults(html, maxResults, query)
         if (results.isEmpty()) return null
 
@@ -148,30 +116,22 @@ class NetworkToolSet(private val context: Context) {
         results.forEachIndexed { index, result ->
             sb.append("${index + 1}. ${result.title}\n")
             if (result.snippet.isNotBlank()) sb.append("   ${result.snippet}\n")
-            if (result.url.isNotBlank()) sb.append("   ${result.url}\n")
-            sb.append("\n")
+            if (result.url.isNotBlank()) sb.append("   ${result.url}\n\n")
         }
-        sb.append("---\nSynthesize these results to answer the user's question.")
+        sb.append("---\nSynthesize these results to answer.")
         return sb.toString()
     }
 
-    /**
-     * Fallback: DuckDuckGo HTML scraping
-     */
     private fun fetchDuckDuckGoResults(query: String, maxResults: Int): String? {
-        Timber.i("Fetching DuckDuckGo results for: $query")
         val encoded = URLEncoder.encode(query, "UTF-8")
         val url = URL("https://html.duckduckgo.com/html/?q=$encoded")
-
         val connection = url.openConnection() as HttpURLConnection
         connection.requestMethod = "GET"
         connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) Gemma/1.0")
         connection.connectTimeout = 10000
         connection.readTimeout = 10000
 
-        val responseCode = connection.responseCode
-        if (responseCode != 200) return null
-
+        if (connection.responseCode != 200) return null
         val html = connection.inputStream.bufferedReader().readText()
         connection.disconnect()
 
@@ -180,20 +140,18 @@ class NetworkToolSet(private val context: Context) {
 
         val sb = StringBuilder("SEARCH RESULTS for '$query':\n\n")
         results.forEachIndexed { index, result ->
-            sb.append("${index + 1}. ${result.title}\n")
-            sb.append("   ${result.snippet}\n")
-            sb.append("   URL: ${result.url}\n\n")
+            sb.append("${index + 1}. ${result.title}\n   ${result.snippet}\n   URL: ${result.url}\n\n")
         }
-        sb.append("---\nSynthesize these results to answer the user's question.")
+        sb.append("---\nSynthesize these results to answer.")
         return sb.toString()
     }
 
-    /**
-     * Fetch webpage content as text
-     */
-    suspend fun fetchWebpage(urlString: String, maxChars: Int = 10000): String = withContext(Dispatchers.IO) {
+    @Tool(description = "Fetches plaintext content from a webpage URL")
+    fun fetchWebpage(
+        @ToolParam(description = "The URL string") urlString: String, 
+        @ToolParam(description = "Maximum characters to return") maxChars: Int = 10000
+    ): Map<String, String> = runBlocking(Dispatchers.IO) {
         try {
-            Timber.i("Fetching webpage: $urlString")
             val url = URL(urlString)
             val connection = url.openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
@@ -201,15 +159,13 @@ class NetworkToolSet(private val context: Context) {
             connection.connectTimeout = 10000
             connection.readTimeout = 10000
 
-            val responseCode = connection.responseCode
-            if (responseCode != 200) {
-                return@withContext "Fetch failed: HTTP $responseCode"
+            if (connection.responseCode != 200) {
+                return@runBlocking mapOf("result" to "error", "message" to "HTTP ${connection.responseCode}")
             }
 
             val html = connection.inputStream.bufferedReader().readText()
             connection.disconnect()
 
-            // Strip HTML tags for plain text
             val text = html
                 .replace(Regex("<script[^>]*>[\\s\\S]*?</script>"), "")
                 .replace(Regex("<style[^>]*>[\\s\\S]*?</style>"), "")
@@ -218,142 +174,66 @@ class NetworkToolSet(private val context: Context) {
                 .trim()
                 .take(maxChars)
 
-            "WEBPAGE CONTENT from $urlString:\n\n$text"
+            mapOf("result" to "success", "content" to text)
         } catch (e: Exception) {
-            Timber.e(e, "Webpage fetch failed")
-            "Fetch failed: ${e.message}"
+            mapOf("result" to "error", "message" to (e.message ?: "failed"))
         }
     }
 
     private data class SearchResult(val title: String, val snippet: String, val url: String)
 
-    /**
-     * Parse Google mobile search HTML.
-     * Google's mobile HTML is simpler — results are in divs with data-hveid.
-     * We extract text content from each result block.
-     */
     private fun parseGoogleResults(html: String, maxResults: Int, query: String = ""): List<SearchResult> {
         val results = mutableListOf<SearchResult>()
-
-        // Phase 7: Anti-Bot Redirect Detection
         if (html.contains("redirected within a few seconds", ignoreCase = true) || 
             html.contains("having trouble accessing Google Search", ignoreCase = true)) {
-            Timber.w("Google anti-bot redirect detected. Failing to trigger DuckDuckGo fallback.")
-            return emptyList() // Returning empty forces fetchSearchResults() to use DuckDuckGo
+            return emptyList()
         }
 
-        // Strategy: Find <a> tags with /url?q= (Google's redirect links) as anchors for result blocks
-        // Then extract nearby text as title/snippet
-        val linkPattern = Regex("""<a[^>]*href="/url\?q=([^&"]+)[^"]*"[^>]*>(.*?)</a>""",
-            setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
-
+        val linkPattern = Regex("""<a[^>]*href="/url\?q=([^&"]+)[^"]*"[^>]*>(.*?)</a>""", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
         for (match in linkPattern.findAll(html)) {
             if (results.size >= maxResults) break
-
-            val rawUrl = try {
-                java.net.URLDecoder.decode(match.groupValues[1], "UTF-8")
-            } catch (_: Exception) { match.groupValues[1] }
-
-            // Skip Google's own links (accounts, support, etc.)
+            val rawUrl = try { java.net.URLDecoder.decode(match.groupValues[1], "UTF-8") } catch (_: Exception) { match.groupValues[1] }
             if (rawUrl.contains("google.com/") && !rawUrl.contains("google.com/amp")) continue
             if (rawUrl.contains("accounts.google")) continue
 
-            // Extract title from link text (strip HTML tags)
-            val title = match.groupValues[2]
-                .replace(Regex("<[^>]+>"), "")
-                .replace("&amp;", "&").replace("&quot;", "\"").replace("&#39;", "'")
-                .trim()
-
+            val title = match.groupValues[2].replace(Regex("<[^>]+>"), "").replace("&amp;", "&").replace("&quot;", "\"").replace("&#39;", "'").trim()
             if (title.isBlank() || title.length < 3) continue
 
-            // Look for snippet text after this link — grab next text block
-            val afterLink = html.substring(
-                (match.range.last + 1).coerceAtMost(html.length),
-                (match.range.last + 800).coerceAtMost(html.length)
-            )
-            // Find first substantial text block (not in a tag)
-            val snippetMatch = Regex("""<(?:span|div)[^>]*>([^<]{20,})</(?:span|div)>""")
-                .find(afterLink)
-            val snippet = snippetMatch?.groupValues?.get(1)
-                ?.replace("&amp;", "&")?.replace("&quot;", "\"")?.replace("&#39;", "'")
-                ?.trim() ?: ""
-
+            val afterLink = html.substring((match.range.last + 1).coerceAtMost(html.length), (match.range.last + 800).coerceAtMost(html.length))
+            val snippetMatch = Regex("""<(?:span|div)[^>]*>([^<]{20,})</(?:span|div)>""").find(afterLink)
+            val snippet = snippetMatch?.groupValues?.get(1)?.replace("&amp;", "&")?.replace("&quot;", "\"")?.replace("&#39;", "'")?.trim() ?: ""
             results.add(SearchResult(title, snippet, rawUrl))
         }
 
-        // Fallback: brute-force text extraction if structured parsing got nothing
         if (results.isEmpty()) {
-            Timber.w("Google structured parsing failed, trying text extraction")
-            val text = html
-                .replace(Regex("<script[^>]*>[\\s\\S]*?</script>"), "")
-                .replace(Regex("<style[^>]*>[\\s\\S]*?</style>"), "")
-                .replace(Regex("<[^>]+>"), " ")
-                .replace(Regex("\\s+"), " ")
-                .trim()
-                .take(3000)
-
-            if (text.length > 100) {
-                results.add(SearchResult("Google Search: $query", text.take(500), ""))
-            }
+            val text = html.replace(Regex("<script[^>]*>[\\s\\S]*?</script>"), "").replace(Regex("<style[^>]*>[\\s\\S]*?</style>"), "").replace(Regex("<[^>]+>"), " ").replace(Regex("\\s+"), " ").trim().take(3000)
+            if (text.length > 100) results.add(SearchResult("Google Search: $query", text.take(500), ""))
         }
-
         return results
     }
 
     private fun parseDuckDuckGoResults(html: String, maxResults: Int): List<SearchResult> {
         val results = mutableListOf<SearchResult>()
-
-        // BUGFIX: Parse each result block as a coherent unit to prevent misalignment
-        // DuckDuckGo wraps each result in <div class="result results_links results_links_deep web-result">
-        val resultBlockPattern = Regex(
-            """<div[^>]*class="[^"]*result[^"]*results_links[^"]*"[^>]*>.*?</div>\s*</div>""",
-            setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)
-        )
-
-        // Patterns to extract from WITHIN each block
+        val resultBlockPattern = Regex("""<div[^>]*class="[^"]*result[^"]*results_links[^"]*"[^>]*>.*?</div>\s*</div>""", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
         val titlePattern = Regex("""<a[^>]*class="result__a"[^>]*>([^<]+)</a>""")
         val snippetPattern = Regex("""<a[^>]*class="result__snippet"[^>]*>([^<]+)</a>""")
         val urlPattern = Regex("""<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>""")
 
-        // Find all result blocks first
-        val blocks = resultBlockPattern.findAll(html).take(maxResults).toList()
-
-        for (block in blocks) {
-            val blockHtml = block.value
-
-            // Extract title, snippet, and URL from THIS block only
-            val title = titlePattern.find(blockHtml)?.groupValues?.get(1)?.trim()
-                ?.replace("&amp;", "&")?.replace("&quot;", "\"")
-                ?: continue  // Skip if no title
-
-            val snippet = snippetPattern.find(blockHtml)?.groupValues?.get(1)?.trim()
-                ?.replace("&amp;", "&")?.replace("&quot;", "\"")
-                ?: ""  // Snippet optional
-
-            val url = urlPattern.find(blockHtml)?.groupValues?.get(1)?.trim()
-                ?: continue  // Skip if no URL
-
+        for (block in resultBlockPattern.findAll(html).take(maxResults).toList()) {
+            val title = titlePattern.find(block.value)?.groupValues?.get(1)?.trim()?.replace("&amp;", "&")?.replace("&quot;", "\"") ?: continue
+            val snippet = snippetPattern.find(block.value)?.groupValues?.get(1)?.trim()?.replace("&amp;", "&")?.replace("&quot;", "\"") ?: ""
+            val url = urlPattern.find(block.value)?.groupValues?.get(1)?.trim() ?: continue
             results.add(SearchResult(title, snippet, url))
         }
 
-        // Fallback: If block-based parsing found nothing, try legacy approach
         if (results.isEmpty()) {
-            Timber.w("Block parsing failed, trying legacy extraction")
             val titles = titlePattern.findAll(html).map { it.groupValues[1].trim() }.toList()
             val snippets = snippetPattern.findAll(html).map { it.groupValues[1].trim() }.toList()
-            val urls = Regex("""<a[^>]*class="result__url"[^>]*href="([^"]*)"[^>]*>""")
-                .findAll(html).map { it.groupValues[1].trim() }.toList()
-
-            val count = minOf(titles.size, snippets.size, urls.size, maxResults)
-            for (i in 0 until count) {
-                results.add(SearchResult(
-                    title = titles[i].replace("&amp;", "&").replace("&quot;", "\""),
-                    snippet = snippets[i].replace("&amp;", "&").replace("&quot;", "\""),
-                    url = urls[i]
-                ))
+            val urls = Regex("""<a[^>]*class="result__url"[^>]*href="([^"]*)"[^>]*>""").findAll(html).map { it.groupValues[1].trim() }.toList()
+            for (i in 0 until minOf(titles.size, snippets.size, urls.size, maxResults)) {
+                results.add(SearchResult(titles[i].replace("&amp;", "&").replace("&quot;", "\""), snippets[i].replace("&amp;", "&").replace("&quot;", "\""), urls[i]))
             }
         }
-
         return results
     }
 }

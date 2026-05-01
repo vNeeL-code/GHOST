@@ -16,14 +16,16 @@ interface ConversationDao {
     @Query("SELECT * FROM conversations ORDER BY timestamp DESC LIMIT :limit")
     suspend fun getAllRecentTurns(limit: Int = 50): List<ConversationTurn>
 
-    @Query("SELECT * FROM conversations WHERE userMessage LIKE '%' || :keyword || '%' OR assistantResponse LIKE '%' || :keyword || '%' ORDER BY timestamp DESC")
+    @Query("""
+        SELECT c.* FROM conversations c
+        JOIN conversations_fts fts ON c.id = fts.rowid
+        WHERE conversations_fts MATCH :keyword
+        ORDER BY c.timestamp DESC
+    """)
     suspend fun searchByKeyword(keyword: String): List<ConversationTurn>
 
-    @Query("DELETE FROM conversations WHERE timestamp < :beforeTimestamp")
-    suspend fun deleteOldTurns(beforeTimestamp: Long): Int
-
-    // FTS disabled temporarily - using LIKE search instead
-    // To re-enable: uncomment FTS entity in OracleDatabase and restore these methods
+    @Query("DELETE FROM conversations")
+    suspend fun deleteAll()
 }
 
 @Dao
@@ -64,6 +66,6 @@ interface DiaryDao {
     @Query("SELECT * FROM diary_entries WHERE eventType = :type ORDER BY timestamp DESC")
     suspend fun getEntriesByType(type: String): List<DiaryEntry>
 
-    @Query("DELETE FROM diary_entries WHERE timestamp < :beforeTimestamp")
-    suspend fun deleteOldEntries(beforeTimestamp: Long): Int
+    @Query("DELETE FROM diary_entries")
+    suspend fun deleteAll()
 }
