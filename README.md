@@ -16,7 +16,7 @@
 
 > **Take what you need. Go as deep as you want.**
 
-**Oracle_OS** is not one thing. It's a **toolbox** for turning any Android phone into a **sensor‑grounded, always‑on AI companion**.
+**GHOST** is not one thing. It's a **toolbox** for turning any Android phone into a **sensor‑grounded, always‑on AI companion**.
 
 - **No subscription.**  
 - **No data leaves your device.**  
