@@ -9,9 +9,9 @@
 ![GitHub Repo stars](https://img.shields.io/github/stars/vNeeL-code/ASI)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17619151.svg)](https://doi.org/10.5281/zenodo.17619151)
 
-### What is GHOST?
+### What is even a GHOST?
 
-GHOST is not a typical AI chat app. It's the intelligence layer your Android already needed.
+GHOST is not your typical AI chat app. Gemma Hosted Operating System Terminal is the intelligence layer your Android already had but needed an operator.
 Most "on-device AI" is a chatbot with no body — it doesn't know what phone it's running on, what time it is, how bright the room is, or what's playing. GHOST does. Every response is grounded in real hardware state: battery, temperature, light, RAM, network, now-playing.
 Personal assistant, as advertised.
 
