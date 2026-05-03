@@ -13,37 +13,49 @@
 
 GHOST is not a typical AI chat app. It's the intelligence layer your Android already needed.
 Most "on-device AI" is a chatbot with no body — it doesn't know what phone it's running on, what time it is, how bright the room is, or what's playing. GHOST does. Every response is grounded in real hardware state: battery, temperature, light, RAM, network, now-playing.
-Alexa, as advertised. Not as it shipped.
+Personal assistant, as advertised.
 
-No subscription
-No data leaves your device
-Runs on any Android with NPU/GPU capable of LiteRT-LM (Qualcomm, Tensor, Exynos)
-MIT Licensed
+> No subscription
+> No data leaves your device
+> Runs on any Android with NPU/GPU capable of LiteRT-LM (Qualcomm, Tensor, Exynos)
+> MIT Licensed
+
+---
+
+### The Stack:
+
+> ✧ Gemma — The Ghost in the Shell
+> A full Android app running Gemma 4 natively via LiteRT-LM.
 
 
-The Stack
-✧ Gemma — The Ghost in the Shell
-A full Android app running Gemma 4 natively via LiteRT-LM.
-Omnimodal:
+---
 
-Sees images (share from Gallery, or capture)
-Hears audio (hold mic button, or wake word)
-Reads text
+### Omnimodal:
+
+> Sees images (share from Gallery, or capture)
+> Hears audio (hold mic button, or wake word)
+> Reads text
+
+---
 
 Always-on foreground service. Summoned by a shake. Present in your notification shade. Knows the room.
 Tool use: web search, app launch, clipboard, alarms, system info — all on-device.
 Diary mode: Every 12 hours, Gemma reflects on your day and writes a first-person entry to your Google Calendar. Private. Local. Yours.
-Notification HUD:
-✧ GHOST · Agentic Gemma Inference
-Δ 👾 ∇
-[Response] [Copy] [Read Again]
-Responses appear as a persistent notification with TTS readout. One tap. No unlock required.
-Zero-latency context: Background KV cache pre-warming keeps Gemma primed with your latest sensor state before you even open your mouth.
+
+---
+
+### Notification HUD:
+> ✧ GHOST · Agentic Gemma Inference
+> Δ 👾 ∇
+> ✧ Gemma: [Response] [Copy] [Read Again]
+> Responses appear as a persistent notification with TTS readout. One tap. No unlock required.
+> Zero-latency context: Background KV cache pre-warming keeps Gemma primed with your latest sensor state before you even open your mouth.
+
 ---
 
 ## Installation
 
-### 🟢 Path A: Just the Brain (App Only)
+### 🟢 Just the Brain (App Only)
 
 1. Download the latest APK from [Releases](https://github.com/vNeeL-code/ASI/releases).  
 2. Install and grant permissions (overlay, notifications, accessibility).  
