@@ -7,15 +7,15 @@ plugins {
 }
 
 android {
-    namespace = "com.gemma.api"
+    namespace = "com.ghost.api"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.gemma.api"
+        applicationId = "com.ghost.api"
         minSdk = 31
         targetSdk = 36
         versionCode = 5
-        versionName = "2.1.0"
+        versionName = "4.0.0"
 
         ndk {
             abiFilters.add("arm64-v8a")
@@ -28,7 +28,7 @@ android {
             if (ksFile != null && File(ksFile).exists()) {
                 storeFile = File(ksFile)
                 storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
-                keyAlias = System.getenv("KEY_ALIAS") ?: "oracle_os"
+                keyAlias = System.getenv("KEY_ALIAS") ?: "GHOST"
                 keyPassword = System.getenv("KEY_PASSWORD") ?: ""
             }
         }

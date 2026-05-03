@@ -2,6 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     
     <!-- SYSTEM-LEVEL PERMISSIONS -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.FLASHLIGHT" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
@@ -57,7 +58,7 @@
 
     <application
         android:name=".GemmaApp"
-        android:label="Oracle_OS"
+        android:label="GHOST"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:allowBackup="true"
@@ -115,9 +116,9 @@
             android:exported="true"
             android:foregroundServiceType="microphone|mediaPlayback|dataSync|connectedDevice">
             <intent-filter>
-                <action android:name="com.gemma.api.ACTION_START_SERVICE" />
-                <action android:name="com.gemma.api.ACTION_SHARE_MEDIA" />
-                <action android:name="com.gemma.api.ACTION_QUERY" />
+                <action android:name="com.ghost.api.ACTION_START_SERVICE" />
+                <action android:name="com.ghost.api.ACTION_SHARE_MEDIA" />
+                <action android:name="com.ghost.api.ACTION_QUERY" />
             </intent-filter>
         </service>
 
@@ -210,8 +211,8 @@
             android:name=".ui.NotificationActionReceiver"
             android:exported="false">
             <intent-filter>
-                <action android:name="com.gemma.api.ACTION_COPY" />
-                <action android:name="com.gemma.api.ACTION_TTS_REPLAY" />
+                <action android:name="com.ghost.api.ACTION_COPY" />
+                <action android:name="com.ghost.api.ACTION_TTS_REPLAY" />
             </intent-filter>
         </receiver>
 
