@@ -1,6 +1,5 @@
-# ✧ GHOST: Agentic ✧ Gemma Inference for Android System Intelligence
-
-> **Build Your Own Personal AI Companion: A local Gemma 4 model that lives on your phone. Sees images, hears audio, uses tools, keeps a diary. No cloud, no subscription, no data leaving your device.**
+# ✧ GHOST: 
+> **Agentic ✧ Gemma Inference for Android System Intelligence**
 
 [![ASI Demo](https://img.youtube.com/vi/jB62dlLavSY/0.jpg)](https://youtu.be/jB62dlLavSY?si=TMZG86o1KkjuBXtw)
 ---
