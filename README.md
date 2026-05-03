@@ -9,38 +9,35 @@
 ![GitHub Repo stars](https://img.shields.io/github/stars/vNeeL-code/ASI)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17619151.svg)](https://doi.org/10.5281/zenodo.17619151)
 
-> [!IMPORTANT]
-> **May 2026 Breakthrough: Stable Native Toolset Integration**
-> We have successfully migrated to the **LiteRT-LM 0.10.2 Native Toolset**. This eliminates the latency of external regex parsers, allowing Gemma 4 to directly manipulate Android hardware (Flashlight, Alarms, Apps) with sub-second responsiveness.
+What is GHOST?
+GHOST is not a typical AI chat app. It's the intelligence layer your Android already needed.
+Most "on-device AI" is a chatbot with no body — it doesn't know what phone it's running on, what time it is, how bright the room is, or what's playing. GHOST does. Every response is grounded in real hardware state: battery, temperature, light, RAM, network, now-playing.
+Alexa, as advertised. Not as it shipped.
 
-> **Take what you need. Go as deep as you want.**
+No subscription
+No data leaves your device
+Runs on any Android with NPU/GPU capable of LiteRT-LM (Qualcomm, Tensor, Exynos)
+MIT Licensed
 
-**GHOST** is not one thing. It's a **toolbox** for turning any Android phone into a **sensor‑grounded, always‑on AI companion**.
 
-- **No subscription.**  
-- **No data leaves your device.**  
-- **Runs on Qualcomm, Tensor, Exynos — any NPU/GPU that can handle LiteRT-LM.**  
+The Stack
+✧ Gemma — The Ghost in the Shell
+A full Android app running Gemma 4 natively via LiteRT-LM.
+Omnimodal:
 
----
+Sees images (share from Gallery, or capture)
+Hears audio (hold mic button, or wake word)
+Reads text
 
-## The Three Pillars
-
-### Pillar 1: The Native App (Gemma 4 native on‑device)
-
-A full Android app that runs **Gemma 4** locally via LiteRT-LM.  
-- **Motif:** Δ 👾 ∇
-- **Agent:** ✧ Gemma
-- **Omnimodal** – sees images (share from Gallery), hears audio (hold mic button), reads text.  
-- **Always‑on foreground service** – summoned by a gentle shake.  
-- **Tool use** – web search, app launch, clipboard, alarms, system info, all on‑device.  
-- **Diary mode** – every 12 hours Gemma reflects on your interactions and writes to your calendar.  
-
-**The notification HUD:**  
-Gemma's responses appear as a notification with the **Δ 👾 ∇** motif. You hear them via TTS, and the text is visible in the shade. The notification has two buttons: **Copy** and **Read again / TTS**. 
-
-**Zero-Latency Turn Logic**: 
-Proactive background pre-warming keeps the KV cache "hot" with your latest sensory context (screen/sensors) before you even start typing.
-
+Always-on foreground service. Summoned by a shake. Present in your notification shade. Knows the room.
+Tool use: web search, app launch, clipboard, alarms, system info — all on-device.
+Diary mode: Every 12 hours, Gemma reflects on your day and writes a first-person entry to your Google Calendar. Private. Local. Yours.
+Notification HUD:
+✧ GHOST · Agentic Gemma Inference
+Δ 👾 ∇
+[Response] [Copy] [Read Again]
+Responses appear as a persistent notification with TTS readout. One tap. No unlock required.
+Zero-latency context: Background KV cache pre-warming keeps Gemma primed with your latest sensor state before you even open your mouth.
 ---
 
 ## Installation
@@ -52,6 +49,30 @@ Proactive background pre-warming keeps the KV cache "hot" with your latest senso
 3. Download a [Gemma 4 model](https://huggingface.co/google/gemma-2b-it-litert-lm) (via Google AI Edge Gallery or manually place `.litertlm` variant in app storage).  
 4. **Shake to summon.**  
 
+---
+
+##  Why This Exists
+
+The hardware caught up. A mid-range Android in 2026 carries more raw compute than the servers that ran GPT-2. The intelligence was always going to land here — on the device, in your pocket, offline-capable, sovereign.
+GHOST is what happens when you stop treating the phone as a terminal for someone else's cloud and start treating it as the computer it actually is.
+
+> "It only affects computers. And I am a motherfucking ghost."
+— Epsilon, Red vs Blue
+
+---
+## Roadmap
+
+> Gemma 4 native via LiteRT-LM
+> Sensor telemetry fusion (battery, temp, lux, RAM, now-playing)
+> Tool use: alarms, apps, clipboard, system info
+> Diary mode via Google Calendar cron
+> Notification HUD with TTS
+> GHOST branding + v4.0.0
+> Wake word: "Hey Ghost"
+> Termux pipe (GHOST in Shell)
+> Auto model downloader
+> DroidRun agentic control
+> App store release
 ---
 
 ### 📞 Contact & Support
