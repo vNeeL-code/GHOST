@@ -46,9 +46,14 @@ Diary mode: Every 12 hours, Gemma reflects on your day and writes a first-person
 
 ### Notification HUD:
 > ✧ GHOST · Agentic Gemma Inference
+
 > Δ 👾 ∇
-> ✧ Gemma: [Response] [Copy] [Read Again]
+
+> ✧ Gemma: [Response] 
+[Copy] [Read Again]
+
 > Responses appear as a persistent notification with TTS readout. One tap. No unlock required.
+
 > Zero-latency context: Background KV cache pre-warming keeps Gemma primed with your latest sensor state before you even open your mouth.
 
 ---
