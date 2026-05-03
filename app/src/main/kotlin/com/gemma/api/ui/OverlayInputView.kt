@@ -59,7 +59,7 @@ class OverlayInputView(
         }
 
         inputField = EditText(context).apply {
-            hint = "(Δ 👾 ∇)"
+            hint = "Δ 👾 ∇"
             setTextColor(Color.WHITE)
             setHintTextColor(Color.LTGRAY)
             setBackgroundColor(Color.TRANSPARENT)
@@ -214,7 +214,7 @@ class OverlayInputView(
     private fun resetMicButton() {
         micButton.text = "🎤"
         micButton.setTextColor(Color.WHITE)
-        inputField.hint = "(Δ 👾 ∇)"
+        inputField.hint = "Δ 👾 ∇"
     }
 
     private fun handleSend() {

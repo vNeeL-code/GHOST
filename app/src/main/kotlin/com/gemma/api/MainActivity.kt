@@ -264,7 +264,7 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
         }
         
         // 10. Complete
-        showState("(Δ 👾 ∇)\n\nStatus: online", "LAUNCHING...") { }
+        showState("Δ 👾 ∇\n\nStatus: online", "LAUNCHING...") { }
         completeRitual()
     }
     

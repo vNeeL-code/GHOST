@@ -18,5 +18,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "Oracle_OS"
+rootProject.name = "GHOST"
 include(":app")

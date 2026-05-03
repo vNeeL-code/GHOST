@@ -74,7 +74,7 @@ class ChatAdapter(private val messages: MutableList<ChatMessage> = mutableListOf
         // Header Motifs
         holder.textHeader.apply {
             text = when {
-                isUser -> "∇ 🦑 Δ"
+                isUser -> "Δ 🦑 ∇"
                 message.eventType != null -> "Δ ${message.eventType} ∇"
                 else -> "Δ 👾 ∇"
             }

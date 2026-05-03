@@ -42,4 +42,7 @@ interface AgentPlatformCallbacks {
 
     /** Write a calendar event (title, description) at current time */
     fun createCalendarEvent(title: String, description: String)
+
+    /** Get the list of available skills and macros */
+    fun getSkillsList(): String
 }

@@ -273,4 +273,24 @@ class SystemToolSet(private val context: Context) : ToolSet {
         val dump = com.gemma.api.GemmaAccessibilityService.instance?.getSemanticScreenDump() ?: "Accessibility Service not bound."
         return mapOf("result" to "success", "screen_state" to dump)
     }
+
+    @Tool(description = "Executes a bash/shell command on the device and returns the output.")
+    fun bash(
+        @ToolParam(description = "The command to execute (e.g., 'id', 'ls /sdcard', 'curl -I google.com')") command: String
+    ): Map<String, String> {
+        return try {
+            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
+            val output = process.inputStream.bufferedReader().readText()
+            val error = process.errorStream.bufferedReader().readText()
+            val exitCode = process.waitFor()
+            
+            if (exitCode == 0) {
+                mapOf("result" to "success", "output" to output.take(4000))
+            } else {
+                mapOf("result" to "error", "message" to "Exit code $exitCode", "output" to output, "error" to error)
+            }
+        } catch (e: Exception) {
+            mapOf("result" to "error", "message" to (e.message ?: "Execution failed"))
+        }
+    }
 }

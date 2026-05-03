@@ -206,6 +206,13 @@ class MCPServer(
             name = "cooldown",
             description = "Enter low-power mode to cool down when device is overheating",
             parameters = emptyMap()
+        ),
+        "bash" to ToolDefinition(
+            name = "bash",
+            description = "Execute a shell command (sh -c) and return output",
+            parameters = mapOf(
+                "command" to ParameterSpec("string", "Command to execute")
+            )
         )
     )
 
@@ -254,6 +261,7 @@ class MCPServer(
                 "read_calendar" -> executeReadCalendar(params)
                 "flush" -> executeFlush()
                 "cooldown" -> executeCooldown()
+                "bash" -> executeBash(params)
                 else -> ToolResult(false, "", "Unknown tool: $name")
             }
         } catch (e: Exception) {
@@ -453,6 +461,15 @@ class MCPServer(
             Timber.e(e, "Cooldown failed")
             ToolResult(false, "", "Cooldown failed: ${e.message}")
         }
+    }
+
+    private fun executeBash(params: Map<String, Any>): ToolResult {
+        val command = (params["command"] ?: params["value"])?.toString() ?: return ToolResult(false, "", "Missing command")
+        val result = systemTools.bash(command)
+        val success = result["result"] == "success"
+        val output = result["output"] ?: ""
+        val error = result["error"] ?: ""
+        return ToolResult(success, if (success) output else "Error: $error\nOutput: $output")
     }
 
     private fun executeAlarm(params: Map<String, Any>): ToolResult {
