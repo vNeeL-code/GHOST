@@ -95,7 +95,7 @@ GHOST is what happens when you stop treating the phone as a terminal for someone
 
 ### 📞 Contact & Support
 
-* **Repository:** `vNeeL-code/ASI`
+* **Repository:** `vNeeL-code/GHOST`
 * **Support:** [Buy me a coffee](https://buymeacoffee.com/vNeeL)
 * **Devlogs:** [tumblr](https://www.tumblr.com/oracle-os)
 
