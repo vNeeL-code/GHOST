@@ -238,12 +238,11 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             }
             "com.ghost.api.ACTION_CONFIRM_TOOL", "com.ghost.api.ACTION_DENY_TOOL" -> {
                  val toolName = intent.getStringExtra("toolName") ?: "unknown"
-                 val correlationId = intent.getStringExtra("correlationId") ?: ""
                  val isApproved = (intent.action == "com.ghost.api.ACTION_CONFIRM_TOOL")
 
                  scope.launch {
                      if (::koogAgent.isInitialized) {
-                         val pendingData = PendingConfirmationStash.pendingConfirmations[correlationId]
+                         val pendingData = PendingConfirmationStash.pendingConfirmations[toolName]
 
                          if (pendingData != null) {
                              koogAgent.submitConfirmationDecision(
@@ -251,15 +250,14 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                                 params = pendingData.params,
                                 isApproved = isApproved,
                                 originalResponse = pendingData.originalResponse,
-                                correlationId = correlationId,
                                 responseChannel = pendingData.responseChannel
                              )
 
                              // Clear stash
-                             PendingConfirmationStash.clear(correlationId)
+                             PendingConfirmationStash.clear(toolName)
                              responseNotificationManager.showResponse(if(isApproved) "✅ Approved $toolName" else "🚫 Denied $toolName")
                          } else {
-                             Timber.e("No pending confirmation channel found for ID: $correlationId!")
+                             Timber.e("No pending confirmation channel found for $toolName!")
                              responseNotificationManager.showResponse("⚠️ Error: Confirmation session expired.")
                          }
                      }
@@ -460,8 +458,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
                 // Start Life Processes
                 checkPermissions()
-                // Staggered Startup (Audit Fix #1)
-                startAnimationLoop()  // Start notification screensavers (optimized for power)
+                startAnimationLoop()  // Start notification screensavers (power-aware)
             }
         } catch (e: Exception) {
             reportStatus("CRASH: ${e.message}")
@@ -529,7 +526,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         }
     }
 
-    // Metabolic Cycle & Thermal Panic removed (Audit Fix #6) - reliance on SensorFusion
+    // Metabolic/Thermal Cycle Removed as requested.
 
 
     // Diary cycle now lives in KoogAgent.startDiaryCycle() broken needs repair
@@ -617,7 +614,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 // CRITICAL: Cleanup old engine BEFORE creating new one to free RAM
                 engineRef.getAndSet(null)?.cleanup()
                 
-                // Memory Fragmentation Defense (Audit Fix #5)
+                // Hardening: Defragment memory before heavy engine allocation
                 System.gc()
                 Runtime.getRuntime().gc()
                 
@@ -629,7 +626,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                     forcedBackend = forcedBackend
                 )
                 
-                // Cleanup after heavy allocation
+                // Hardening: Final defrag after initialization
                 System.gc()
                 
                 if (error != null) {
@@ -927,18 +924,21 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     private var lastKvFlushTime = System.currentTimeMillis()
 
     private fun startAnimationLoop() {
-        val powerManager = getSystemService(android.content.Context.POWER_SERVICE) as? android.os.PowerManager
+        animationJob?.cancel()
         animationJob = scope.launch {
+            val powerManager = getSystemService(android.content.Context.POWER_SERVICE) as? android.os.PowerManager
             while (isActive) {
-                // Battery Defense (Audit Fix #2): Only animate if screen is on or not idle
                 val isInteractive = powerManager?.isInteractive ?: true
                 
-                if (isInteractive && isIdle()) {
+                if (isIdle() && isInteractive) {
                     val frame = getNextAnimationFrame()
                     updateNotification(" $frame")
                 }
 
                 val now = System.currentTimeMillis()
+                // Reduced frequency for idle maintenance
+                val delayMs = if (isInteractive) 500L else 15000L // 15s if screen is off
+                
                 if (now - lastActivityTime > 15 * 60 * 1000 && now - lastKvFlushTime > 15 * 60 * 1000) {
                     lastKvFlushTime = now
                     if (::koogAgent.isInitialized) {
@@ -947,8 +947,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                     }
                 }
 
-                // Throttle: 500ms when user is looking, 10s when screen is off
-                delay(if (isInteractive) 500 else 10000)
+                delay(delayMs)
             }
         }
     }
@@ -1004,16 +1003,19 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         super.onTaskRemoved(rootIntent)
         Timber.i("GemmaService: onTaskRemoved - checkpointing (NOT tearing down)")
         // Checkpoint agent state in case process is killed next
-        // Async state save to avoid ANR Trap (Audit Fix #4)
-        serviceScope.launch {
+        if (::koogAgent.isInitialized) {
             try {
-                if (::koogAgent.isInitialized) {
-                    kotlinx.coroutines.withTimeoutOrNull(3000L) {
-                        koogAgent.checkpoint()
+                serviceScope.launch {
+                    try {
+                        kotlinx.coroutines.withTimeout(2000L) {
+                            koogAgent.checkpoint()
+                        }
+                    } catch (e: Exception) {
+                        Timber.w(e, "Async checkpoint failed")
                     }
                 }
             } catch (e: Exception) {
-                Timber.w(e, "Checkpoint failed")
+                Timber.w(e, "Checkpoint on task removed failed")
             }
         }
     }
@@ -1029,9 +1031,16 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             serviceScope.cancel()
 
             // Perform synchronous cleanup
-            kotlinx.coroutines.runBlocking {
-                performCriticalCleanup()
+        // Asynchronous Cleanup (Audit Hardening)
+        serviceScope.launch {
+            try {
+                kotlinx.coroutines.withTimeout(2000) {
+                    performCriticalCleanup()
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Async cleanup failed")
             }
+        }
 
             if (::apiServer.isInitialized) apiServer.stop()
         } catch (e: Exception) {
@@ -1081,20 +1090,20 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     data class ConfirmationData(
         val params: Map<String, Any?>,
         val originalResponse: String,
-        val correlationId: String,
         val responseChannel: kotlinx.coroutines.CompletableDeferred<String>
     )
 
     object PendingConfirmationStash {
         val pendingConfirmations = java.util.concurrent.ConcurrentHashMap<String, ConfirmationData>()
 
-        fun clear(correlationId: String) {
-            pendingConfirmations.remove(correlationId)
+        fun clear(toolName: String) {
+            pendingConfirmations.remove(toolName)
         }
     }
 
-        // Stash the state (params + channel) so we can resume later (keyed by correlationId)
-        PendingConfirmationStash.pendingConfirmations[event.correlationId] = ConfirmationData(
+    private fun showConfirmationNotification(event: KoogAgent.AgentEvent.ConfirmationRequired) {
+        // Stash the state (params + channel) so we can resume later
+        PendingConfirmationStash.pendingConfirmations[event.toolName] = ConfirmationData(
             event.toolParams,
             event.originalResponse,
             event.responseChannel
@@ -1103,12 +1112,10 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         val confirmIntent = Intent(this, com.ghost.api.ui.NotificationActionReceiver::class.java).apply {
             action = "com.ghost.api.ACTION_CONFIRM_TOOL"
             putExtra("toolName", event.toolName)
-            putExtra("correlationId", event.correlationId)
         }
         val denyIntent = Intent(this, com.ghost.api.ui.NotificationActionReceiver::class.java).apply {
             action = "com.ghost.api.ACTION_DENY_TOOL"
             putExtra("toolName", event.toolName)
-            putExtra("correlationId", event.correlationId)
         }
 
         val confirmPending = android.app.PendingIntent.getBroadcast(

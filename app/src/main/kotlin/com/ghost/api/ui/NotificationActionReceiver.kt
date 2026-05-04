@@ -50,14 +50,12 @@ class NotificationActionReceiver : BroadcastReceiver() {
             "com.ghost.api.ACTION_CONFIRM_TOOL", "com.ghost.api.ACTION_DENY_TOOL" -> {
                 Timber.d("Confirmation action: ${intent.action}")
                 val toolName = intent.getStringExtra("toolName") ?: return
-                val correlationId = intent.getStringExtra("correlationId") ?: ""
                 val isApproved = (intent.action == "com.ghost.api.ACTION_CONFIRM_TOOL")
                 
                 // Forward to Service
                 val serviceIntent = Intent(context, GemmaService::class.java).apply {
                     action = intent.action
                     putExtra("toolName", toolName)
-                    putExtra("correlationId", correlationId)
                 }
                 try {
                     context.startService(serviceIntent)

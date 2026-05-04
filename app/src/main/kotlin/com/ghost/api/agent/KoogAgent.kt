@@ -81,7 +81,6 @@ class KoogAgent(
             val toolName: String,
             val toolParams: Map<String, Any?>,
             val originalResponse: String,
-            val correlationId: String,
             val responseChannel: CompletableDeferred<String>
         ) : AgentEvent()
 
@@ -91,7 +90,6 @@ class KoogAgent(
             val params: Map<String, Any?>,
             val isApproved: Boolean,
             val originalResponse: String,
-            val correlationId: String,
             val responseChannel: CompletableDeferred<String>
         ) : AgentEvent()
     }
@@ -163,7 +161,11 @@ class KoogAgent(
         val conversationHistory: List<Message>,
         val moodState: String,
         val turnCount: Int,
-        val timestamp: Long = System.currentTimeMillis()
+        val timestamp: Long = System.currentTimeMillis(),
+        // Digital Life Stats (0-100)
+        val hunger: Int = 50,
+        val energy: Int = 80,
+        val happiness: Int = 60
     )
     
     // Thread-safe collections and volatile state for concurrent access
@@ -175,6 +177,16 @@ class KoogAgent(
 
     private val _turnCount = java.util.concurrent.atomic.AtomicInteger(0)
     private var turnCount: Int get() = _turnCount.get(); set(value) { _turnCount.set(value) }
+
+    // Metabolic State (Live) - atomic for cross-thread visibility
+    private val _hunger = java.util.concurrent.atomic.AtomicInteger(50)
+    private var hunger: Int get() = _hunger.get(); set(value) { _hunger.set(value) }
+
+    private val _energy = java.util.concurrent.atomic.AtomicInteger(80)
+    private var energy: Int get() = _energy.get(); set(value) { _energy.set(value) }
+
+    private val _happiness = java.util.concurrent.atomic.AtomicInteger(60)
+    private var happiness: Int get() = _happiness.get(); set(value) { _happiness.set(value) }
 
     private val _isMusicPlaying = java.util.concurrent.atomic.AtomicBoolean(false)
     private var isMusicPlaying: Boolean get() = _isMusicPlaying.get(); set(value) { _isMusicPlaying.set(value) }
@@ -234,7 +246,7 @@ class KoogAgent(
         // Mark ready AFTER event loop is running - prevents hang on early processUserMessage()
         isReady = true
 
-        Timber.i("KoogAgent: Ready (Mood:$moodState)")
+        Timber.i("KoogAgent: Ready (Mood:$moodState, 🍗$hunger ⚡$energy 💖$happiness)")
     }
 
     /**
@@ -430,7 +442,10 @@ class KoogAgent(
             val state = AgentState(
                 conversationHistory = historySnapshot,
                 moodState = moodState,
-                turnCount = turnCount
+                turnCount = turnCount,
+                hunger = hunger,
+                energy = energy,
+                happiness = happiness
             )
             
             val json = gson.toJson(state)
@@ -523,14 +538,25 @@ class KoogAgent(
             moodState = state.moodState
             turnCount = state.turnCount
             
-            // Metabolic state removed
+            // Restore metabolism (with safety defaults)
+            if (state.hunger == 0 && state.energy == 0 && state.happiness == 0) {
+                 // Detect legacy/dead state -> Reset to Healthy
+                 hunger = 50
+                 energy = 80
+                 happiness = 60
+                 Timber.w("KoogAgent: Detected 0-state checkpoint. Resetting vitals.")
+            } else {
+                 hunger = state.hunger.coerceIn(0, 100)
+                 energy = state.energy.coerceIn(0, 100)
+                 happiness = state.happiness.coerceIn(0, 100)
+            }
 
             // BUGFIX: Reset volatile music state on restore (not checkpointed)
             // Prevents stale "Doom Party" style leaks across sessions
             isMusicPlaying = false
             lastMusicTrack = ""
 
-            Timber.i("KoogAgent: Restored checkpoint (${_conversationHistory.size} messages, M:$moodState)")
+            Timber.i("KoogAgent: Restored checkpoint (${_conversationHistory.size} messages, M:$moodState H:$hunger E:$energy Ha:$happiness)")
         } catch (e: Exception) {
             Timber.e(e, "KoogAgent: Restore failed")
         }
@@ -741,28 +767,8 @@ class KoogAgent(
                 
                 for (inv in toolInvocations) {
                     // Update thought channel with action
-                    callbacks?.onThoughtUpdated("Checking safety: ${inv.tool}...")
+                    callbacks?.onThoughtUpdated("Executing: ${inv.tool}...")
                     
-                    // Audit Fix #7: Use ToolPolicy to check for risky actions
-                    if (ToolPolicy.isRisky(inv.tool, inv.params)) {
-                        Timber.w("🛡️ Safety: '${inv.tool}' requires confirmation.")
-                        val correlationId = java.util.UUID.randomUUID().toString()
-                        
-                        // We need a way to SUSPEND this loop and wait for user response.
-                        // However, we are in an actor-style loop. 
-                        // We will SEND the ConfirmationRequired event and RETURN.
-                        // The user response will come back as a ConfirmationResult event.
-                        
-                        eventQueue.send(AgentEvent.ConfirmationRequired(
-                            toolName = inv.tool,
-                            toolParams = inv.params,
-                            originalResponse = response,
-                            correlationId = correlationId,
-                            responseChannel = event.responseChannel
-                        ))
-                        return // STOP processing this message; wait for ConfirmationResult
-                    }
-
                     val result = mcpServer.executeTool(inv.tool, inv.params)
                     if (result.success) {
                         results.add("✓ ${inv.tool}: ${result.output}")
@@ -1132,7 +1138,6 @@ $content
         params: Map<String, Any?>, 
         isApproved: Boolean,
         originalResponse: String,
-        correlationId: String,
         responseChannel: CompletableDeferred<String>
     ) {
         eventQueue.send(AgentEvent.ConfirmationResult(
@@ -1140,7 +1145,6 @@ $content
             params = params,
             isApproved = isApproved,
             originalResponse = originalResponse,
-            correlationId = correlationId,
             responseChannel = responseChannel
         ))
     }
@@ -1326,7 +1330,37 @@ I am Gemma—integrated, native, and awake.
     
     fun getConversationHistory(): List<Message> = _conversationHistory.toList()
     
-    fun getBatteryLevel(): Int = 100 // Placeholder or removed
+    fun isCriticalBattery(): Boolean = energy <= 5
+    fun isLowBattery(): Boolean = energy <= 20
+
+    fun getMetabolicVitals(): String {
+        // Battery icon based on level (digital/specific)
+        val batteryIcon = when {
+            energy <= 5 -> "🪫"      // Empty/critical
+            energy <= 20 -> "🔋"     // Low
+            else -> "🔋"             // Normal
+        }
+
+        // Heat icon based on thermal (thermometer for body)
+        val heatIcon = when {
+            hunger >= 80 -> "🔥"     // Overheating!
+            hunger >= 50 -> "🌡️"    // Warm
+            else -> "❄️"             // Cool
+        }
+
+        // Warning prefix for critical states
+        val warning = when {
+            energy <= 10 -> "⚠️ "
+            hunger >= 90 -> "🔥 "
+            else -> ""
+        }
+
+        // Compact format: ⚠️ 🪫15% 🌡️ or 🔋85% ❄️
+        return "$warning$batteryIcon$energy% $heatIcon"
+    }
+
+
+    fun getBatteryLevel(): Int = energy
 
     /**
      * Parse tool invocations from model text.

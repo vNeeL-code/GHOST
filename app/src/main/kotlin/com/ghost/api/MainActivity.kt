@@ -156,11 +156,58 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
             return
         }
 
-        // 2. JIT Permisisons: We only block on Notifications (essential for service)
-        // Others (Camera, Mic, etc.) will be requested JIT when the tool is called.
-        // For now, we skip the blocking ritual for all other hardware perms.
-        
-        // Check for previous crashes and show forensic alert
+        // 2. Camera
+        if (checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            showState(
+                "❌ Vision Offline\n\nI need camera access to see.",
+                "Grant Camera"
+            ) { requestPermissions(arrayOf(android.Manifest.permission.CAMERA), 101) }
+            return
+        }
+
+        // 3. Audio
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+             showState(
+                "❌ Hearing Offline\n\nI need microphone access to hear.",
+                "Grant Mic"
+            ) { requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 102) }
+            return
+        }
+
+        // 4. Calendar (for diary sync)
+        if (checkSelfPermission(android.Manifest.permission.WRITE_CALENDAR) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            showState(
+                "❌ Memory Offline\n\nI need calendar access to keep my diary.",
+                "Grant Calendar"
+            ) { requestPermissions(arrayOf(
+                android.Manifest.permission.READ_CALENDAR,
+                android.Manifest.permission.WRITE_CALENDAR
+            ), 103) }
+            return
+        }
+
+        // 5. Location (for context awareness)
+        if (checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            showState(
+                "❌ GPS Offline\n\nI need location access to know where we are.",
+                "Grant Location"
+            ) { requestPermissions(arrayOf(
+                android.Manifest.permission.ACCESS_FINE_LOCATION,
+                android.Manifest.permission.ACCESS_COARSE_LOCATION
+            ), 104) }
+            return
+        }
+
+        // 6. Phone state (for context awareness)
+        if (checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            showState(
+                "❌ Phone Offline\n\nI need phone access to know call state.",
+                "Grant Phone"
+            ) { requestPermissions(arrayOf(android.Manifest.permission.READ_PHONE_STATE), 105) }
+            return
+        }
+
+        // 6b. Check for previous crashes and show forensic alert
         val crashLogDir = File(filesDir, "logs/crashes")
         if (crashLogDir.exists()) {
             val latestCrash = crashLogDir.listFiles()?.maxByOrNull { f -> f.lastModified() }
@@ -184,6 +231,16 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
                 }
                 return
             }
+        }
+
+        // 7. Bluetooth (nearby devices)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S &&
+            checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            showState(
+                "❌ Bluetooth Offline\n\nI need Bluetooth access for nearby devices.",
+                "Grant Bluetooth"
+            ) { requestPermissions(arrayOf(android.Manifest.permission.BLUETOOTH_CONNECT), 106) }
+            return
         }
 
         // 8. Accessibility (non-blocking)
