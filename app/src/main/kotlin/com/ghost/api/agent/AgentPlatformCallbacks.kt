@@ -25,7 +25,7 @@ interface AgentPlatformCallbacks {
     fun writeDiaryEntry(eventType: String, content: String, thermalState: String)
 
     // === Engine Lifecycle ===
-    fun unloadEngine()
+    suspend fun unloadEngine()
     suspend fun reloadEngine()
     fun isEngineLoaded(): Boolean
 

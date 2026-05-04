@@ -791,8 +791,8 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
             val ctx = getContextSnapshot()
             buildContextString(ctx)
         } catch (e: Exception) {
-            Timber.e(e, "Context string failed - returning minimal")
-            "🔋 ??% 🌡️ ??°C\n⚠️ Sensors unavailable"
+            Timber.e(e, "CRITICAL: buildContextString failed!")
+            "🔋 ??% 🌡️ ??°C\n⚠️ Sensors unavailable: ${e.message}"
         }
     }
 

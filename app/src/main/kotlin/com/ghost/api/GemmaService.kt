@@ -569,6 +569,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             Timber.e("🚨 WATCHDOG: Previous initialization crashed! (Count: $newCount)")
         }
 
+        // PRE-INIT CLEANUP: Kill old engine and sensors to prevent memory leaks (95% RAM fix)
+        performCriticalCleanup()
+
         // Mark as initializing
         prefs.edit().putBoolean("is_initializing", true).apply()
 
@@ -619,29 +622,40 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
             // Determine backend
             val forcedBackend = if (prefs.getInt("init_crash_count", 0) >= 2) {
-                Timber.w("?? Forcing CPU backend due to repeated crashes")
+                Timber.w("🚨 Forcing CPU backend due to repeated crashes")
                 updateNotification("Safe Mode: Forcing CPU")
                 "CPU"
             } else if (prefs.getBoolean("force_cpu", false)) {
                 "CPU"
             } else null
 
-            val newEngine: LlmBackend = GemmaEngine(applicationContext).apply {
+            // Engine Creation (Locked to prevent double allocation)
+            val newEngine = engineMutex.withLock {
                 val tools = listOf(hardwareToolSet, networkToolSet, systemToolSet,
                     com.ghost.api.skills.SkillToolSet(skillManager))
-                val error = initialize(modelFile.absolutePath, "", toolSets = tools, forcedBackend = forcedBackend)
+                
+                val engineInstance = GemmaEngine(applicationContext)
+                val error = engineInstance.initialize(
+                    modelFile.absolutePath, 
+                    "", 
+                    toolSets = tools, 
+                    forcedBackend = forcedBackend
+                )
+                
                 if (error != null) {
+                    engineInstance.cleanup()
                     val hint = when {
-                            error.contains("memory", ignoreCase = true) || error.contains("OOM", ignoreCase = true) ->
-                                " (Try quantizing device backend)"
-                            error.contains("GPU", ignoreCase = true) ->
-                                " (GPU init failed — device may not support this model natively)"
-                            else -> ""
-                        }
-                        Timber.e("Model load failed: $error")
-                        updateNotification("Load Error: ${error.take(80)}$hint")
-                        return
+                        error.contains("memory", ignoreCase = true) || error.contains("OOM", ignoreCase = true) ->
+                            " (Try quantizing device backend)"
+                        error.contains("GPU", ignoreCase = true) ->
+                            " (GPU init failed — device may not support this model natively)"
+                        else -> ""
                     }
+                    Timber.e("Model load failed: $error")
+                    updateNotification("Load Error: ${error.take(80)}$hint")
+                    return@initialize
+                }
+                engineInstance
             }
 
             // Atomic set (Kimi K2 Fix)
@@ -1024,7 +1038,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             serviceScope.cancel()
 
             // Perform synchronous cleanup
-            performCriticalCleanup()
+            kotlinx.coroutines.runBlocking {
+                performCriticalCleanup()
+            }
 
             if (::apiServer.isInitialized) apiServer.stop()
         } catch (e: Exception) {
@@ -1035,15 +1051,24 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     }
 
 
-    private fun performCriticalCleanup() {
-        // Fast cleanup (non-blocking)
+    private suspend fun performCriticalCleanup() {
+        // Fast cleanup
         try {
             if (::koogAgent.isInitialized) koogAgent.shutdown()
+            
+            // Clean up sensors properly to stop threads and listeners (RAM leak fix)
+            if (::sensorFusionManager.isInitialized) {
+                sensorFusionManager.close()
+            }
+            
+            if (::ttsManager.isInitialized) ttsManager.shutdown()
+            
             unloadEngine()
+            
             if (::shakeDetector.isInitialized) shakeDetector.stop()
             if (::overlayManager.isInitialized) overlayManager.hideOverlay()
             if (::apiServer.isInitialized) apiServer.stop()
-            if (::sensorFusionManager.isInitialized) sensorFusionManager.close()
+            if (::sensorFusionManager.isInitialized) sensorFusionManager.close() // Redundant but safe
         } catch (e: Exception) {
             Timber.w(e, "Fast cleanup error")
         }
@@ -1175,7 +1200,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         }
     }
 
-    override fun unloadEngine() {
+    override suspend fun unloadEngine() {
         val oldEngine = engineRef.getAndSet(null)
         oldEngine?.cleanup()
         System.gc()

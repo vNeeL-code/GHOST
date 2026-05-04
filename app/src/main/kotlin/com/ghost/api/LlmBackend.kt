@@ -4,9 +4,9 @@ import android.graphics.Bitmap
 
 interface LlmBackend {
     val activeBackend: String?
-    fun softReset(systemPrompt: String)
-    fun hardReset()
-    fun cleanup()
+    suspend fun softReset(systemPrompt: String)
+    suspend fun hardReset()
+    suspend fun cleanup()
     
     suspend fun generateOneShot(prompt: String): String
     
@@ -16,7 +16,7 @@ interface LlmBackend {
         audioData: ByteArray? = null
     ): String
     
-    fun streamResponse(
+    suspend fun streamResponse(
         prompt: String,
         images: List<Bitmap> = emptyList(),
         audioData: ByteArray? = null,

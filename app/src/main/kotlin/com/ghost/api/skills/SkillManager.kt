@@ -4,6 +4,8 @@ import android.content.Context
 import android.os.Environment
 import timber.log.Timber
 import java.io.File
+import com.ghost.api.GemmaService
+import kotlinx.coroutines.*
 
 data class Skill(
     val name: String,
@@ -90,7 +92,15 @@ class SkillManager(private val context: Context) {
             // Trigger a soft reset so the new skill appears in the next turn.
             // No need for reflection — softReset marks the engine for reset on next query.
             try {
-                com.ghost.api.GemmaService.instance?.engine?.softReset("")
+                val eng = GemmaService.instance?.engine
+                if (eng != null) {
+                    @OptIn(DelicateCoroutinesApi::class)
+                    GlobalScope.launch(Dispatchers.Default) {
+                        try {
+                            eng.softReset("")
+                        } catch (_: Exception) {}
+                    }
+                }
             } catch (_: Exception) {}
             return true
         } catch (e: Exception) {

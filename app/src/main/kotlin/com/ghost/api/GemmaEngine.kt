@@ -57,7 +57,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
     private var lastAudioEnabled: Boolean = true
 
     @OptIn(ExperimentalApi::class)
-    fun initialize(
+    suspend fun initialize(
         modelPath: String,
         systemPrompt: String,
         enableVision: Boolean = true,
@@ -72,57 +72,55 @@ class GemmaEngine(private val context: Context) : LlmBackend {
         this.lastAudioEnabled = enableAudio
         this.toolSets = toolSets
 
-        return runBlocking {
-            sessionMutex.withLock {
-                runCatching {
-                    Timber.i("Initializing Gemma Engine...")
-                    Engine.setNativeMinLogSeverity(LogSeverity.INFO)
+        return sessionMutex.withLock {
+            runCatching {
+                Timber.i("Initializing Gemma Engine...")
+                Engine.setNativeMinLogSeverity(LogSeverity.INFO)
 
-                    val backendsToTry = when (forcedBackend?.uppercase()) {
-                        "CPU" -> listOf("CPU" to Backend.CPU())
-                        "GPU" -> listOf("GPU" to Backend.GPU())
-                        else -> listOf("GPU" to Backend.GPU(), "CPU" to Backend.CPU())
+                val backendsToTry = when (forcedBackend?.uppercase()) {
+                    "CPU" -> listOf("CPU" to Backend.CPU())
+                    "GPU" -> listOf("GPU" to Backend.GPU())
+                    else -> listOf("GPU" to Backend.GPU(), "CPU" to Backend.CPU())
+                }
+                var lastError: String? = null
+
+                for ((backendName, backend) in backendsToTry) {
+                    try {
+                        val engineConfig = EngineConfig(
+                            modelPath = modelPath,
+                            backend = backend,
+                            visionBackend = if (enableVision && backendName == "GPU") Backend.GPU() else null,
+                            audioBackend = if (enableAudio) Backend.CPU() else null,
+                            maxNumTokens = Constants.MAX_TOKENS,
+                            cacheDir = context.cacheDir.absolutePath
+                        )
+
+                        val newEngine = Engine(engineConfig)
+                        newEngine.initialize()
+
+                        val conversationConfig = ConversationConfig(
+                            samplerConfig = samplerConfig,
+                            systemInstruction = if (systemPrompt.isNotBlank()) Contents.of(systemPrompt) else null,
+                            channels = listOf(Channel(channelName = "thought", start = "<think>", end = "</think>")),
+                            tools = toolSets.map { tool(it) }
+                        )
+
+                        val newConversation = newEngine.createConversation(conversationConfig)
+
+                        engine?.close()
+                        conversation?.close()
+                        engine = newEngine
+                        conversation = newConversation
+
+                        activeBackend = "LiteRT-LM ($backendName)"
+                        return@runCatching null
+                    } catch (e: Exception) {
+                        lastError = e.message
+                        Timber.w("$backendName backend failed: $lastError")
                     }
-                    var lastError: String? = null
-
-                    for ((backendName, backend) in backendsToTry) {
-                        try {
-                            val engineConfig = EngineConfig(
-                                modelPath = modelPath,
-                                backend = backend,
-                                visionBackend = if (enableVision && backendName == "GPU") Backend.GPU() else null,
-                                audioBackend = if (enableAudio) Backend.CPU() else null,
-                                maxNumTokens = Constants.MAX_TOKENS,
-                                cacheDir = context.cacheDir.absolutePath
-                            )
-
-                            val newEngine = Engine(engineConfig)
-                            newEngine.initialize()
-
-                            val conversationConfig = ConversationConfig(
-                                samplerConfig = samplerConfig,
-                                systemInstruction = if (systemPrompt.isNotBlank()) Contents.of(systemPrompt) else null,
-                                channels = listOf(Channel(channelName = "thought", start = "<think>", end = "</think>")),
-                                tools = toolSets.map { tool(it) }
-                            )
-
-                            val newConversation = newEngine.createConversation(conversationConfig)
-
-                            engine?.close()
-                            conversation?.close()
-                            engine = newEngine
-                            conversation = newConversation
-
-                            activeBackend = "LiteRT-LM ($backendName)"
-                            return@runCatching null
-                        } catch (e: Exception) {
-                            lastError = e.message
-                            Timber.w("$backendName backend failed: $lastError")
-                        }
-                    }
-                    lastError ?: "All backends failed"
-                }.getOrElse { it.message ?: "Unknown fatal error" }
-            }
+                }
+                lastError ?: "All backends failed"
+            }.getOrElse { it.message ?: "Unknown fatal error" }
         }
     }
 
@@ -131,19 +129,21 @@ class GemmaEngine(private val context: Context) : LlmBackend {
         images: List<Bitmap>,
         audioData: ByteArray?
     ): String {
-        return suspendCancellableCoroutine { continuation ->
-            streamResponse(
-                prompt = prompt,
-                images = images,
-                audioData = audioData,
-                onToken = {},
-                onComplete = { continuation.resume(it) },
-                onError = { continuation.resumeWithException(Exception(it)) }
-            )
-        }
+        var finalResponse = ""
+        var error: String? = null
+        streamResponse(
+            prompt = prompt,
+            images = images,
+            audioData = audioData,
+            onToken = {},
+            onComplete = { finalResponse = it },
+            onError = { error = it }
+        )
+        error?.let { throw Exception(it) }
+        return finalResponse
     }
 
-    override fun streamResponse(
+    override suspend fun streamResponse(
         prompt: String,
         images: List<Bitmap>,
         audioData: ByteArray?,
@@ -151,99 +151,93 @@ class GemmaEngine(private val context: Context) : LlmBackend {
         onComplete: (String) -> Unit,
         onError: (String) -> Unit
     ) {
-        runBlocking {
-            sessionMutex.withLock {
-                val conv = conversation
-                if (conv == null) {
-                    onError("Engine not initialized")
-                    return@withLock
+        sessionMutex.withLock {
+            val conv = conversation
+            if (conv == null) {
+                onError("Engine not initialized")
+                return@withLock
+            }
+
+            val deferred = CompletableDeferred<Unit>()
+            try {
+                val contents = mutableListOf<Content>()
+                for (image in images) {
+                    contents.add(Content.ImageBytes(image.toPngByteArray()))
+                }
+                audioData?.let {
+                    contents.add(Content.AudioBytes(it))
+                }
+                if (prompt.isNotBlank()) {
+                    contents.add(Content.Text(prompt))
                 }
 
-                val deferred = CompletableDeferred<Unit>()
-                try {
-                    val contents = mutableListOf<Content>()
-                    for (image in images) {
-                        contents.add(Content.ImageBytes(image.toPngByteArray()))
-                    }
-                    audioData?.let {
-                        contents.add(Content.AudioBytes(it))
-                    }
-                    if (prompt.isNotBlank()) {
-                        contents.add(Content.Text(prompt))
-                    }
-
-                    var fullResponse = ""
-                    conv.sendMessageAsync(
-                        Contents.of(contents),
-                        object : MessageCallback {
-                            override fun onMessage(message: Message) {
-                                val token = message.toString()
-                                fullResponse += token
-                                onToken(token)
-                            }
-                            override fun onDone() {
-                                try {
-                                    onComplete(truncateRepetition(decodeHexTokens(fullResponse)))
-                                } finally {
-                                    deferred.complete(Unit)
-                                }
-                            }
-                            override fun onError(throwable: Throwable) {
-                                try {
-                                    onError(throwable.message ?: "Stream error")
-                                } finally {
-                                    deferred.complete(Unit)
-                                }
+                var fullResponse = ""
+                conv.sendMessageAsync(
+                    Contents.of(contents),
+                    object : MessageCallback {
+                        override fun onMessage(message: Message) {
+                            val token = message.toString()
+                            fullResponse += token
+                            onToken(token)
+                        }
+                        override fun onDone() {
+                            try {
+                                onComplete(truncateRepetition(decodeHexTokens(fullResponse)))
+                            } finally {
+                                deferred.complete(Unit)
                             }
                         }
-                    )
-                    // Hold the mutex until the streaming is finished
-                    // Added a 2-minute safety timeout to prevent deadlocks if native hangs
-                    withTimeout(120000) {
-                        deferred.await()
+                        override fun onError(throwable: Throwable) {
+                            try {
+                                onError(throwable.message ?: "Stream error")
+                            } finally {
+                                deferred.complete(Unit)
+                            }
+                        }
                     }
-                } catch (e: Exception) {
-                    onError(e.message ?: "Unknown failure")
-                    deferred.complete(Unit)
+                )
+                // Hold the mutex until the streaming is finished
+                // Added a 2-minute safety timeout to prevent deadlocks if native hangs
+                withTimeout(120000) {
+                    deferred.await()
                 }
+            } catch (e: Exception) {
+                onError(e.message ?: "Unknown failure")
+                deferred.complete(Unit)
             }
         }
     }
 
-    override fun softReset(systemPrompt: String) {
+    override suspend fun softReset(systemPrompt: String) {
         lastSystemPrompt = systemPrompt
-        runBlocking {
-            sessionMutex.withLock {
-                val eng = engine ?: return@withLock
-                try {
-                    conversation?.close()
-                    val config = ConversationConfig(
-                        samplerConfig = samplerConfig,
-                        systemInstruction = if (systemPrompt.isNotBlank()) Contents.of(systemPrompt) else null,
-                        tools = toolSets.map { tool(it) }
-                    )
-                    conversation = eng.createConversation(config)
-                    Timber.i("Soft reset complete.")
-                } catch (e: Exception) {
-                    Timber.e(e, "Soft reset failed")
-                }
+        sessionMutex.withLock {
+            val eng = engine ?: return@withLock
+            try {
+                conversation?.close()
+                val config = ConversationConfig(
+                    samplerConfig = samplerConfig,
+                    systemInstruction = if (systemPrompt.isNotBlank()) Contents.of(systemPrompt) else null,
+                    tools = toolSets.map { tool(it) }
+                )
+                conversation = eng.createConversation(config)
+                Timber.i("Soft reset complete.")
+            } catch (e: Exception) {
+                Timber.e(e, "Soft reset failed")
             }
         }
     }
 
-    override fun hardReset() {
+    override suspend fun hardReset() {
         if (lastModelPath.isBlank()) return
-        runBlocking {
-            sessionMutex.withLock {
-                try {
-                    conversation?.close()
-                    engine?.close()
-                    conversation = null
-                    engine = null
-                    initialize(lastModelPath, lastSystemPrompt, lastVisionEnabled, lastAudioEnabled, toolSets)
-                } catch (e: Exception) {
-                    Timber.e(e, "Hard reset failure")
-                }
+        sessionMutex.withLock {
+            try {
+                conversation?.close()
+                engine?.close()
+                conversation = null
+                engine = null
+                initialize(lastModelPath, lastSystemPrompt, lastVisionEnabled, lastAudioEnabled, toolSets)
+            } catch (e: Exception) {
+                Timber.e(e, "Hard reset failure")
             }
         }
     }
@@ -306,12 +300,10 @@ class GemmaEngine(private val context: Context) : LlmBackend {
         }
     }
 
-    override fun cleanup() {
-        runBlocking {
-            sessionMutex.withLock {
-                conversation?.close()
-                engine?.close()
-            }
+    override suspend fun cleanup() {
+        sessionMutex.withLock {
+            conversation?.close()
+            engine?.close()
         }
     }
 
