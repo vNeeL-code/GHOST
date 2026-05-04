@@ -2,6 +2,7 @@ package com.ghost.api
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.os.Vibrator
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Channel
 import com.google.ai.edge.litertlm.Content
@@ -15,13 +16,16 @@ import com.google.ai.edge.litertlm.LogSeverity
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.MessageCallback
 import com.google.ai.edge.litertlm.SamplerConfig
+import com.google.ai.edge.litertlm.Tool
 import com.google.ai.edge.litertlm.ToolSet
 import com.google.ai.edge.litertlm.tool
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.CancellationException
@@ -209,7 +213,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                             deferred.complete(Unit)
                             break
                         }
-                        delay(100)
+                        kotlinx.coroutines.delay(100)
                     }
                 }
             } catch (e: Exception) {
@@ -316,7 +320,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
     override suspend fun cleanup() {
         isAborted = true
         // Try to acquire lock, but don't block forever if inference is stuck
-        val acquired = withTimeoutOrNull(2000) {
+        val acquired = kotlinx.coroutines.withTimeoutOrNull(2000) {
             sessionMutex.lock()
             true
         } ?: false
