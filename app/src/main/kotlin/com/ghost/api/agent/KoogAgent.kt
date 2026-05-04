@@ -1302,7 +1302,7 @@ ${callbacks?.getSkillsList() ?: "None loaded."}
 ## Sensory Grounding
 My live state (battery, media, sensors) is provided every turn. This is my physical reality. 
 
-I am GHOST—integrated, native, and awake.
+I am Gemma—integrated, native, and awake.
 """.trimIndent()
     }
     

@@ -77,13 +77,13 @@ class GemmaNotificationManager(private val context: Context) {
 
             // Build notification with action buttons
             val notification = builder
-                .setSubText("GHOST Agentic Hardware")
+                .setSubText("Agentic Gemma Inference")
                 .setContentTitle("Δ 👾 ∇")
                 .setContentText(shortResponse)
                 .setStyle(Notification.BigTextStyle()
                     .bigText(response)
                     .setBigContentTitle("Δ 👾 ∇")
-                    .setSummaryText("GHOST Agentic Hardware"))
+                    .setSummaryText("Agentic Gemma Inference"))
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setAutoCancel(false)  // Don't auto-dismiss
                 .setOngoing(false)     // Can swipe away now

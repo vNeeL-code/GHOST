@@ -5,8 +5,8 @@ package com.ghost.api
  */
 object Constants {
     // Identity
-    const val APP_NAME = "GHOST Agentic Hardware"
-    const val AGENT_NAME = "✧ GHOST"
+    const val APP_NAME = "GHOST"
+    const val AGENT_NAME = "✧ Gemma"
     const val APP_MOTIF = "Δ 👾 ∇"
 
     // Intent Actions
@@ -39,6 +39,8 @@ object Constants {
     const val CHANNEL_ID_SERVICE = "gemma_instance_service"
     const val NOTIFICATION_ID_SERVICE = 1
     const val NOTIFICATION_READY_MSG = "✓ ✧ Gemma Ready"
+    const val NOTIFICATION_CHANNEL_NAME = "✧ GHOST Responses"
+    const val NOTIFICATION_IMPORTANCE = 4 // NotificationManager.IMPORTANCE_HIGH
 
     // Agentic
     const val MAX_RECURSION_DEPTH = 1
