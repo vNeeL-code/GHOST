@@ -297,9 +297,13 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         // Initialize Global Crash Handler
         CrashHandler.install(this)
 
-        // Force Watchdog Reset: Restore GPU/NPU performance every boot
-        getSharedPreferences("gemma_instance_settings", android.content.Context.MODE_PRIVATE)
-            .edit().putInt("init_crash_count", 0).apply()
+        // Watchdog check: If we crashed during last initialization, increment count
+        val prefs = getSharedPreferences("gemma_instance_settings", android.content.Context.MODE_PRIVATE)
+        if (prefs.getBoolean("is_initializing", false)) {
+            val newCount = prefs.getInt("init_crash_count", 0) + 1
+            prefs.edit().putInt("init_crash_count", newCount).apply()
+            Timber.e("Detected crash during last init! Crash count: $newCount")
+        }
 
 
         // Removed Secondary Telemetry (Backup) (pollution)
@@ -627,7 +631,13 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             updateNotification("Running Full System Diagnostics...")
 
             // Determine backend
-            val forcedBackend = "GPU" // FORCE GPU
+            val forcedBackend = if (prefs.getInt("init_crash_count", 0) >= 2) {
+                Timber.w("🚨 Forcing CPU backend due to repeated crashes")
+                updateNotification("Safe Mode: Forcing CPU")
+                "CPU"
+            } else if (prefs.getBoolean("force_cpu", false)) {
+                "CPU"
+            } else null
 
             // Engine Creation (Locked to prevent double allocation)
             val newEngine = engineMutex.withLock {
