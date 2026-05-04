@@ -296,14 +296,16 @@ class GemmaEngine(private val context: Context) : LlmBackend {
     private fun truncateRepetition(response: String): String {
         if (response.length < 500) return response
         val sentences = response.split(Regex("""(?<=[.!?])\s+""")).filter { it.length >= 15 }
-        if (sentences.size < 6) return response
-        val seen = mutableMapOf<String, Int>()
+        if (sentences.size < 10) return response
+        val seen = HashSet<String>()
         var cutIndex = -1
         for ((i, sentence) in sentences.withIndex()) {
             val normalized = sentence.trim().lowercase()
-            val count = (seen[normalized] ?: 0) + 1
-            seen[normalized] = count
-            if (count >= 4 && cutIndex == -1) cutIndex = i
+            if (!seen.add(normalized) && i > 5) {
+                 // Second occurrence of same sentence after some variety
+                 cutIndex = i
+                 break
+            }
         }
         return if (cutIndex > 0) sentences.take(cutIndex).joinToString(" ") + "\n\n(...loop detected)" else response
     }

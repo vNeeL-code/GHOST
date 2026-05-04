@@ -799,11 +799,6 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
     private fun buildContextString(ctx: DeviceContext): String {
         val sb = StringBuilder()
 
-        val formatter = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
-        sb.append("🕒 System Time: ${java.time.LocalDateTime.now().format(formatter)}\n")
-        sb.append("📱 Device: ${ctx.system.manufacturer} ${ctx.system.model} (Android ${ctx.system.osVersion})\n")
-
-        // Battery - clear label format (Her Body Energy)
         val battIcon = when {
             ctx.battery.level <= 5 -> "🪫"
             ctx.battery.level <= 20 -> "🔋"
