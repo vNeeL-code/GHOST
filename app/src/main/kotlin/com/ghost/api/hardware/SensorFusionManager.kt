@@ -228,7 +228,8 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
         current = current.copy(
             network = getNetworkState(),
             connectivity = getConnectivityState(),
-            system = getSystemState() // Includes storage which can be slow
+            system = getSystemState(), // Includes storage (slow)
+            motion = getMotionState()   // Includes location (slow/heavy)
         )
         
         slowPollState = current
@@ -243,8 +244,7 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
             timestamp = System.currentTimeMillis(),
             battery = getBatteryState(),
             audio = getAudioState(),
-            environment = getEnvironmentState(),
-            motion = getMotionState()
+            environment = getEnvironmentState() // Official Thermal API
         )
         _contextState.value = newContext
     }
@@ -531,20 +531,28 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
 
     private fun getEnvironmentState(): EnvironmentState {
         return try {
-            // Read thermal zones from /sys/class/thermal/
-            // Common zones: thermal_zone0 = CPU, others vary by device
-            val cpuTemp = readThermalZone("thermal_zone0")  // Usually CPU
-            val gpuTemp = readThermalZone("thermal_zone1")  // Often GPU on some devices
-            val skinTemp = readThermalZone("thermal_zone3") // Sometimes skin/battery area
+            // Use HardwarePropertiesManager for portable thermal reads (Audit 2.0 Hardening)
+            val cpuTemps = hardwarePropertiesManager?.getDeviceTemperatures(
+                HardwarePropertiesManager.DEVICE_TEMPERATURE_CPU,
+                HardwarePropertiesManager.TEMPERATURE_CURRENT
+            )
+            val gpuTemps = hardwarePropertiesManager?.getDeviceTemperatures(
+                HardwarePropertiesManager.DEVICE_TEMPERATURE_GPU,
+                HardwarePropertiesManager.TEMPERATURE_CURRENT
+            )
+            val skinTemps = hardwarePropertiesManager?.getDeviceTemperatures(
+                HardwarePropertiesManager.DEVICE_TEMPERATURE_SKIN,
+                HardwarePropertiesManager.TEMPERATURE_CURRENT
+            )
 
             EnvironmentState(
-                ambientTemp = cachedAmbientTemp,    // From TYPE_AMBIENT_TEMPERATURE sensor
-                cpuTemp = cpuTemp,
-                gpuTemp = gpuTemp,
-                skinTemp = skinTemp,
-                pressure = cachedPressure,          // Barometric pressure
-                humidity = cachedHumidity,          // Relative humidity
-                light = cachedLight                 // Ambient light in lux
+                ambientTemp = cachedAmbientTemp,
+                cpuTemp = cpuTemps?.firstOrNull() ?: readThermalZone("thermal_zone0"), // Fallback to sysfs if API returns empty
+                gpuTemp = gpuTemps?.firstOrNull() ?: readThermalZone("thermal_zone1"),
+                skinTemp = skinTemps?.firstOrNull() ?: readThermalZone("thermal_zone3"),
+                pressure = cachedPressure,
+                humidity = cachedHumidity,
+                light = cachedLight
             )
         } catch (e: Exception) {
             Timber.e(e, "Environment state read failed")

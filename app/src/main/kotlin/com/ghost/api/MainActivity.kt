@@ -505,11 +505,16 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
     private fun handlePickedImage(uri: Uri) {
         scope.launch {
             try {
-                val inputStream = contentResolver.openInputStream(uri)
-                val bitmap = android.graphics.BitmapFactory.decodeStream(inputStream)
-                inputStream?.close()
+                val bitmap = withContext(Dispatchers.IO) {
+                    contentResolver.openInputStream(uri)?.use { inputStream ->
+                        android.graphics.BitmapFactory.decodeStream(inputStream)
+                    }
+                }
+                
                 if (bitmap != null) {
-                    val downsampled = downsampleBitmap(bitmap, 1024)
+                    val downsampled = withContext(Dispatchers.Default) {
+                        downsampleBitmap(bitmap, 1024)
+                    }
                     gemmaService?.processMultimodalFromUi("Please analyze this image.", images = listOf(downsampled))
                 }
             } catch (e: Exception) {

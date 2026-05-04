@@ -543,6 +543,12 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             val newCount = crashCount + 1
             prefs.edit().putInt("init_crash_count", newCount).apply()
             Timber.e("🚨 WATCHDOG: Previous initialization crashed! (Count: $newCount)")
+            
+            // Audit 2.0: Be less aggressive (4 crashes instead of 2) to allow for memory pressure recovery
+            if (newCount >= 4) {
+                 prefs.edit().putBoolean("force_cpu", true).apply()
+                 updateNotification("Safe Mode: Forcing CPU")
+            }
         }
 
         // PRE-INIT CLEANUP: Kill old engine to prevent memory leaks (95% RAM fix)
@@ -936,8 +942,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 }
 
                 val now = System.currentTimeMillis()
-                // Reduced frequency for idle maintenance
-                val delayMs = if (isInteractive) 500L else 15000L // 15s if screen is off
+                // Audit 2.0: Reduced refresh rate (2s instead of 0.5s) to slash IPC overhead
+                val delayMs = if (isInteractive) 2000L else 30000L 
                 
                 if (now - lastActivityTime > 15 * 60 * 1000 && now - lastKvFlushTime > 15 * 60 * 1000) {
                     lastKvFlushTime = now
@@ -1030,17 +1036,13 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             scope.coroutineContext.cancel()
             serviceScope.cancel()
 
-            // Perform synchronous cleanup
-        // Asynchronous Cleanup (Audit Hardening)
-        serviceScope.launch {
-            try {
-                kotlinx.coroutines.withTimeout(2000) {
+            // Audit 2.0: Synchronous Native Handle Release (Crucial to prevent 'NPU Busy' on restart)
+            // Use a short runBlocking timeout to avoid ANR while ensuring engine cleanup
+            kotlinx.coroutines.runBlocking {
+                kotlinx.coroutines.withTimeout(1500) {
                     performCriticalCleanup()
                 }
-            } catch (e: Exception) {
-                Timber.e(e, "Async cleanup failed")
             }
-        }
 
             if (::apiServer.isInitialized) apiServer.stop()
         } catch (e: Exception) {

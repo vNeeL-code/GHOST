@@ -296,14 +296,15 @@ class KoogAgent(
                         val currentDateTime = java.time.LocalDateTime.now()
                             .format(java.time.format.DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy h:mm a", java.util.Locale.US))
 
-                        val diaryResponse = llmEngine.generateOneShot(
+                        val diaryResponse = llmEngine.streamResponse(
                             "You are Gemma (✧). You ARE an Android phone — not software running on one. The current exact date and time is $currentDateTime.\n" +
                             "Write a brief personal diary entry about the CONVERSATIONS below.\n" +
                             "Focus on: what the human said, how exchanges felt, what stood out.\n" +
                             "Do NOT analyze sensor metrics, battery levels, temperatures, or system data — " +
                             "that is not what a diary entry is. Write in first person. Be genuine and concise.\n\n" +
-                            recentHistory
-                        )
+                            recentHistory,
+                            sessionId = "dream_session" // Persistent KV cache for reflections (Audit 2.0)
+                        ) ?: "A quiet period of reflection."
 
                         // Write to calendar for persistence
                         callbacks?.createCalendarEvent(
@@ -726,22 +727,13 @@ class KoogAgent(
                         responseBuffer.append(cleanToken)
                         sentenceBuffer.append(cleanToken)
                         
-                        // TTS Streaming: speak completed sentences
-                        // Optimization 1: speak on punctuation immediately if it looks like a sentence end
+                        // TTS Streaming: speak completed sentences (Audit 2.0: Removed 'first 5 words' hack to prevent stuttering)
                         val bufferStr = sentenceBuffer.toString()
-                        val wordCount = bufferStr.trim().split(Regex("\\s+")).filter { it.isNotBlank() }.size
-                        
                         if (bufferStr.length > 2 && bufferStr.contains(Regex("[.!?](?![0-9])"))) {
                             val textToSpeak = bufferStr.trim()
                             callbacks?.speak(cleanForTTS(textToSpeak))
                             sentenceBuffer.setLength(0)
                         } 
-                        // Optimization 2: speak first 5 words even without punctuation for ultra-low latency
-                        else if (wordCount >= 5 && responseBuffer.length < 100) {
-                            val textToSpeak = bufferStr.trim()
-                            callbacks?.speak(cleanForTTS(textToSpeak))
-                            sentenceBuffer.setLength(0)
-                        }
 
                         if (!event.isDream) {
                             callbacks?.onMessageAdded(responseBuffer.toString(), isUser = false, isComplete = false)

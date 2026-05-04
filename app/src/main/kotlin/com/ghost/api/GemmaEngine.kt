@@ -192,7 +192,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                         }
                         override fun onDone() {
                             try {
-                                onComplete(truncateRepetition(decodeHexTokens(fullResponse)))
+                                onComplete(truncateRepetition(fullResponse))
                             } finally {
                                 deferred.complete(Unit)
                             }
@@ -278,7 +278,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                             override fun onDone() {
                                 val resp = responseBuilder.toString()
                                 tempConv.close()
-                                continuation.resume(decodeHexTokens(resp))
+                                continuation.resume(resp)
                             }
                             override fun onError(throwable: Throwable) {
                                 tempConv.close()
@@ -310,15 +310,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
         return if (cutIndex > 0) sentences.take(cutIndex).joinToString(" ") + "\n\n(...loop detected)" else response
     }
 
-    private fun decodeHexTokens(response: String): String {
-        val regex = """(<0x[0-9A-Fa-f]{2}>)+""".toRegex()
-        return regex.replace(response) { match ->
-            try {
-                val bytes = match.value.split("<0x").filter { it.isNotBlank() }.map { it.replace(">", "").toInt(16).toByte() }.toByteArray()
-                String(bytes, Charsets.UTF_8)
-            } catch (e: Exception) { match.value }
-        }
-    }
+    // Audit 2.0: decodeHexTokens removed.
 
     override suspend fun cleanup() {
         isAborted = true
