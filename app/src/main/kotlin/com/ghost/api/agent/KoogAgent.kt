@@ -1163,19 +1163,9 @@ $content
     ): String {
 
         // KV cache holds conversation history natively.
-        // We only inject context (body/sensors) here. Identity is in the native system instruction slot.
-        val historyRecap = if (!skipNextRecap && turnsSinceKvFlush < 2) {
-            synchronized(_conversationHistory) {
-                val recent = _conversationHistory.takeLast(3)
-                if (recent.isNotEmpty()) {
-                    val recap = recent.joinToString("\n") { msg ->
-                        val label = if (msg.role == "user") "Human" else "Me"
-                        "$label: ${msg.content.take(500)}"
-                    }
-                    "\n[Prior exchanges]\n$recap\n[New message]\n"
-                } else ""
-            }
-        } else ""
+        // We only inject context (body/sensors) here. 
+        // OPTIMIZATION: Zero redundant history recap. The Engine's Conversation object handles this.
+        val historyRecap = ""
 
         if (skipNextRecap) {
             skipNextRecap = false
