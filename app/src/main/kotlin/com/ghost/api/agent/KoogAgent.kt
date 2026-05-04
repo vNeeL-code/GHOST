@@ -1174,17 +1174,11 @@ $content
         _turnsSinceKvFlush.incrementAndGet()
 
         val contextBlock = context
-        val fullPrompt = "$contextBlock\n$historyRecap\n$userMessage"
+        val contextBlock = context
+        val fullPrompt = "$contextBlock\n$userMessage"
         
         // Proactive Smooth Restart: Flush KV cache if context is saturating (Approx 10 turns)
-        if (turnsSinceKvFlush >= 10) {
-            Timber.i("🌊 Context saturation detected. Performing proactive Smooth Restart.")
-            callbacks?.onThoughtUpdated("Optimizing neural context for long-term stability...")
-            llmEngine.softReset(buildSystemPrompt())
-            _turnsSinceKvFlush.set(0)
-            // We want to force a recap here to bridge the "seam"
-            skipNextRecap = false 
-        }
+        // Removed: Proactive Smooth Restart (It was destroying KV cache and causing 20s latency)
 
         Timber.d("KoogAgent: Thinking... (${fullPrompt.length} chars)")
         Timber.d("Prompt preview: ${fullPrompt.takeLast(500)}")
@@ -1278,12 +1272,11 @@ $content
                 "- ${tool.name}: $desc [$params]"
             }
 
-        return """
+return """
 ${com.ghost.api.logic.ContextManager.BASE_SYSTEM_PROMPT}
 
 ## Motor Functions (Tools)
-I call these tools to act upon the world. These are my physical capabilities:
-$tools
+I call native tools to act upon the world. 
 
 ## Discovery (Skills)
 I have specialized skills in my registry. If I need a skill from this list, I fetch its instructions with `loadSkill(name)`:

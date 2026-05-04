@@ -644,6 +644,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 val tools = listOf(hardwareToolSet, networkToolSet, systemToolSet,
                     com.ghost.api.skills.SkillToolSet(skillManager))
                 
+                // CRITICAL: Cleanup old engine BEFORE creating new one to free RAM
+                engineRef.getAndSet(null)?.cleanup()
+                
                 val engineInstance = GemmaEngine(applicationContext)
                 val error = engineInstance.initialize(
                     modelFile.absolutePath, 
@@ -668,10 +671,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 engineInstance
             }
 
-            // Atomic set (Kimi K2 Fix)
-            engineMutex.withLock {
-                engineRef.getAndSet(newEngine)?.cleanup() // Cleanup old if any
-            }
+            engineRef.set(newEngine)
 
             // Init Cognitive Layer (now that engine is ready)
             reportStatus("Init: KoogAgent...")
