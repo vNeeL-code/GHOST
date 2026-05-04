@@ -217,20 +217,19 @@ class GemmaEngine(private val context: Context) : LlmBackend {
             )
             
             // Wait for completion outside the mutex
-            withTimeout(120000) {
+            kotlinx.coroutines.withTimeout(120000) {
                 while (!deferred.isCompleted) {
                     if (isAborted) {
-                        isBusy.set(false)
                         deferred.complete(Unit)
                         break
                     }
                     kotlinx.coroutines.delay(100)
                 }
             }
-        } catch (e: Exception) {
+        } finally {
+            // Audit 3.1: Guaranteed Busy Release
             isBusy.set(false)
-            onError(e.message ?: "Unknown failure")
-            deferred.complete(Unit)
+            if (!deferred.isCompleted) deferred.complete(Unit)
         }
     }
 

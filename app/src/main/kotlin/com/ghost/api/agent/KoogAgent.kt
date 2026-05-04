@@ -680,10 +680,8 @@ class KoogAgent(
                     if (isThinking) {
                         thoughtBuffer.append(cleanToken)
                         callbacks?.onThoughtUpdated(thoughtBuffer.toString())
-                        // We do NOT suppress tool calls from chat, only <think> blocks
-                        if (cleanToken.contains("<") || cleanToken.contains(">")) {
-                            cleanToken = "" 
-                        }
+                        // Audit 3.1: Strictly suppress ALL thinking tokens from chat response
+                        cleanToken = ""
                     }
                     
                     // Identity Stripping (Ruthless Purge of Δ and ∇ from start of response)
