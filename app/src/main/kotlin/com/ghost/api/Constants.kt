@@ -22,9 +22,9 @@ object Constants {
     const val THERMAL_LIMIT_CELSIUS = 65
 
     // Token budgets tuned for stability (Balanced profile)
-    const val MAX_TOKENS_NPU = 8192
-    const val MAX_TOKENS_GPU = 8192
-    const val MAX_TOKENS_CPU = 8192
+    const val MAX_TOKENS_NPU = 5120
+    const val MAX_TOKENS_GPU = 5120
+    const val MAX_TOKENS_CPU = 5120
     const val MAX_TOKENS = MAX_TOKENS_GPU
 
     // Backend selection: "CPU", "GPU", or "NPU"
