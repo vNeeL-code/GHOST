@@ -26,7 +26,7 @@ class GemmaNotificationManager(private val context: Context) {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "\u2727 Gemma Responses",
+                "\u2727 GHOST Responses",
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "On-device AI assistant responses"
@@ -77,13 +77,13 @@ class GemmaNotificationManager(private val context: Context) {
 
             // Build notification with action buttons
             val notification = builder
-                .setSubText("Agentic Gemma Inference")
+                .setSubText("GHOST Agentic Hardware")
                 .setContentTitle("Δ 👾 ∇")
                 .setContentText(shortResponse)
                 .setStyle(Notification.BigTextStyle()
                     .bigText(response)
                     .setBigContentTitle("Δ 👾 ∇")
-                    .setSummaryText("Agentic Gemma Inference"))
+                    .setSummaryText("GHOST Agentic Hardware"))
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setAutoCancel(false)  // Don't auto-dismiss
                 .setOngoing(false)     // Can swipe away now
