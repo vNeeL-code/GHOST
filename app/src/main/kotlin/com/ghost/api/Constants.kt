@@ -5,8 +5,8 @@ package com.ghost.api
  */
 object Constants {
     // Identity
-    const val APP_NAME = "Agentic Gemma Inference"
-    const val AGENT_NAME = "✧ Gemma"
+    const val APP_NAME = "GHOST Agentic Hardware"
+    const val AGENT_NAME = "✧ GHOST"
     const val APP_MOTIF = "Δ 👾 ∇"
 
     // Intent Actions

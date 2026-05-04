@@ -156,6 +156,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
         onError: (String) -> Unit
     ) {
         sessionMutex.withLock {
+            isAborted = false // Reset abortion flag for new stream
             val conv = conversation
             if (conv == null) {
                 onError("Engine not initialized")

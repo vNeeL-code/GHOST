@@ -27,7 +27,7 @@ class ShakeDetector(
     private var lastUpdate = 0L
 
     // Tuning
-    private val shakeThreshold = 15f  // Acceleration delta to trigger
+    private val shakeThreshold = 12f  // Lowered for "gentle" detection
     private val shakeCooldown = 1500L // ms between shakes
     private val updateInterval = 100L // ms between sensor reads
 

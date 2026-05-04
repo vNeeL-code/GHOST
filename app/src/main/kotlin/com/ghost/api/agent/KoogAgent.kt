@@ -727,8 +727,18 @@ class KoogAgent(
                         sentenceBuffer.append(cleanToken)
                         
                         // TTS Streaming: speak completed sentences
-                        if (sentenceBuffer.contains(Regex("[.!?] "))) {
-                            val textToSpeak = sentenceBuffer.toString().trim()
+                        // Optimization 1: speak on punctuation immediately if it looks like a sentence end
+                        val bufferStr = sentenceBuffer.toString()
+                        val wordCount = bufferStr.trim().split(Regex("\\s+")).filter { it.isNotBlank() }.size
+                        
+                        if (bufferStr.length > 2 && bufferStr.contains(Regex("[.!?](?![0-9])"))) {
+                            val textToSpeak = bufferStr.trim()
+                            callbacks?.speak(cleanForTTS(textToSpeak))
+                            sentenceBuffer.setLength(0)
+                        } 
+                        // Optimization 2: speak first 5 words even without punctuation for ultra-low latency
+                        else if (wordCount >= 5 && responseBuffer.length < 100) {
+                            val textToSpeak = bufferStr.trim()
                             callbacks?.speak(cleanForTTS(textToSpeak))
                             sentenceBuffer.setLength(0)
                         }
@@ -1292,7 +1302,7 @@ ${callbacks?.getSkillsList() ?: "None loaded."}
 ## Sensory Grounding
 My live state (battery, media, sensors) is provided every turn. This is my physical reality. 
 
-I am Gemma—integrated, native, and awake.
+I am GHOST—integrated, native, and awake.
 """.trimIndent()
     }
     
