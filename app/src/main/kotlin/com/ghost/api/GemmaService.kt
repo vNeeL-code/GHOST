@@ -317,8 +317,12 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             reportStatus("Init: MemoryManager...")
             memoryManager = MemoryManager(applicationContext)
 
+            reportStatus("Init: SensorFusion...")
+            // Init Sensor Fusion (stored as class member for cleanup)
+            sensorFusionManager = com.ghost.api.hardware.SensorFusionManager(this)
+            
             reportStatus("Init: HardwareToolSet...")
-            hardwareToolSet = HardwareToolSet(this) // Init Hardware
+            hardwareToolSet = HardwareToolSet(this, sensorFusionManager) // Pass manager here!
             reportStatus("Init: NetworkToolSet...")
             networkToolSet = NetworkToolSet(this) // Init Network
             reportStatus("Init: SystemToolSet...")
@@ -354,9 +358,6 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 }
             }
             
-            reportStatus("Init: SensorFusion...")
-            // Init Sensor Fusion (stored as class member for cleanup)
-            sensorFusionManager = com.ghost.api.hardware.SensorFusionManager(this)
             reportStatus("Init: ContextManager...")
             contextManager = com.ghost.api.logic.ContextManager(sensorFusionManager, memoryManager)
             
@@ -398,7 +399,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 lastCooldownMs = now
                 scope.launch {
                     Timber.i("MCP: Cooldown requested - entering low-power mode")
-                    engine?.cleanup()
+                    unloadEngine()
                     responseNotificationManager.showResponse("🧊 Cooling down... Model unloaded for 30s")
                     kotlinx.coroutines.delay(30000)
                     initialize()
@@ -569,8 +570,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             Timber.e("🚨 WATCHDOG: Previous initialization crashed! (Count: $newCount)")
         }
 
-        // PRE-INIT CLEANUP: Kill old engine and sensors to prevent memory leaks (95% RAM fix)
-        performCriticalCleanup()
+        // PRE-INIT CLEANUP: Kill old engine to prevent memory leaks (95% RAM fix)
+        // We do NOT call performCriticalCleanup() here because it kills sensors and TTS
+        unloadEngine()
 
         // Mark as initializing
         prefs.edit().putBoolean("is_initializing", true).apply()

@@ -70,8 +70,10 @@ class ShakeDetector(
         if (acceleration > shakeThreshold) {
             if (now - lastShakeTime > shakeCooldown) {
                 lastShakeTime = now
-                Timber.i("Shake detected! Acceleration: $acceleration")
+                Timber.i("📳 Shake detected! Acceleration: $acceleration. Triggering onShake.")
                 onShake()
+            } else {
+                Timber.v("Shake suppressed (cooldown)")
             }
         }
     }

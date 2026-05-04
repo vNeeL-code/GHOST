@@ -158,6 +158,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                 return@withLock
             }
 
+            val startTime = System.currentTimeMillis()
             val deferred = CompletableDeferred<Unit>()
             try {
                 val contents = mutableListOf<Content>()
@@ -177,6 +178,10 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                     object : MessageCallback {
                         override fun onMessage(message: Message) {
                             val token = message.toString()
+                            val now = System.currentTimeMillis()
+                            if (fullResponse.isEmpty()) {
+                                Timber.i("⏱️ First token received after ${now - startTime}ms")
+                            }
                             fullResponse += token
                             onToken(token)
                         }
@@ -199,7 +204,13 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                 // Hold the mutex until the streaming is finished
                 // Added a 2-minute safety timeout to prevent deadlocks if native hangs
                 withTimeout(120000) {
-                    deferred.await()
+                    while (!deferred.isCompleted) {
+                        if (isAborted) {
+                            deferred.complete(Unit)
+                            break
+                        }
+                        delay(100)
+                    }
                 }
             } catch (e: Exception) {
                 onError(e.message ?: "Unknown failure")
@@ -207,6 +218,8 @@ class GemmaEngine(private val context: Context) : LlmBackend {
             }
         }
     }
+
+    private var isAborted = false
 
     override suspend fun softReset(systemPrompt: String) {
         lastSystemPrompt = systemPrompt
@@ -301,9 +314,22 @@ class GemmaEngine(private val context: Context) : LlmBackend {
     }
 
     override suspend fun cleanup() {
-        sessionMutex.withLock {
+        isAborted = true
+        // Try to acquire lock, but don't block forever if inference is stuck
+        val acquired = withTimeoutOrNull(2000) {
+            sessionMutex.lock()
+            true
+        } ?: false
+
+        try {
             conversation?.close()
             engine?.close()
+        } catch (e: Exception) {
+            Timber.w(e, "Error closing engine/conversation")
+        } finally {
+            conversation = null
+            engine = null
+            if (acquired) sessionMutex.unlock()
         }
     }
 

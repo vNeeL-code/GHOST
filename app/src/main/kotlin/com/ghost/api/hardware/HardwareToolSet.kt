@@ -49,15 +49,22 @@ class HardwareToolSet(
                 else -> pattern.replace("[", "").replace("]", "").split(",").map { it.trim().toLong() }
             }
             val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-            
+            if (!vibrator.hasVibrator()) {
+                Timber.w("Vibration failed: Device has no vibrator")
+                return mapOf("result" to "error", "message" to "No vibrator hardware")
+            }
+
+            Timber.i("Executing vibration pattern: $pattern")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val effect = VibrationEffect.createWaveform(patternList.toLongArray(), -1)
                 vibrator.vibrate(effect)
             } else {
+                @Suppress("DEPRECATION")
                 vibrator.vibrate(patternList.toLongArray(), -1)
             }
             mapOf("result" to "success", "message" to "Vibration executed")
         } catch (e: Exception) {
+            Timber.e(e, "Vibration tool error")
             mapOf("result" to "error", "message" to (e.message ?: "Pattern error"))
         }
     }
