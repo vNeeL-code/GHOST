@@ -791,11 +791,19 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         if (!isDream) markActivity()
 
         return kotlinx.coroutines.withTimeoutOrNull(120000) {
-            koogAgent.processUserMessage(
+            val response = koogAgent.processUserMessage(
                 message = userPrompt,
                 sessionId = sessionId ?: java.util.UUID.randomUUID().toString(),
                 isDream = isDream
-            ) ?: "Error: Agent returned null."
+            )
+            
+            // Watchdog Fix (Audit 3.0): Reset crash counter on successful inference
+            if (response != null && !response.contains("Error:")) {
+                getSharedPreferences("ghost_prefs", android.content.Context.MODE_PRIVATE)
+                    .edit().putInt("init_crash_count", 0).apply()
+            }
+            
+            response ?: "Error: Agent returned null."
         }
     }
 

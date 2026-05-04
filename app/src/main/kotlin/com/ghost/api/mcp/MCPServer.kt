@@ -30,7 +30,7 @@ class MCPServer(
     private val systemTools: SystemToolSet,
 
     private val audioRecorder: AudioRecorder,
-    private val sensorManager: SensorFusionManager,
+    val sensorManager: SensorFusionManager,
     private val memoryManager: MemoryManager,
     private val skillManager: com.ghost.api.skills.SkillManager
 ) {

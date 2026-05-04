@@ -44,6 +44,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
 
     @Volatile private var isResetting = false
     private var toolSets: List<ToolSet> = emptyList()
+    private val isBusy = java.util.concurrent.atomic.AtomicBoolean(false)
     
     // Sampler config using Double as expected by the environment
     private var samplerConfig: SamplerConfig = SamplerConfig(
@@ -155,72 +156,81 @@ class GemmaEngine(private val context: Context) : LlmBackend {
         onComplete: (String) -> Unit,
         onError: (String) -> Unit
     ) {
+        val startTime = System.currentTimeMillis()
+        val deferred = CompletableDeferred<Unit>()
+        
+        // Use a lock ONLY to start the stream and verify state
         sessionMutex.withLock {
-            isAborted = false // Reset abortion flag for new stream
-            val conv = conversation
-            if (conv == null) {
+            if (isBusy.getAndSet(true)) {
+                onError("Engine is currently busy with another inference.")
+                return@withLock
+            }
+            isAborted = false 
+            if (conversation == null) {
+                isBusy.set(false)
                 onError("Engine not initialized")
                 return@withLock
             }
+        }
 
-            val startTime = System.currentTimeMillis()
-            val deferred = CompletableDeferred<Unit>()
-            try {
-                val contents = mutableListOf<Content>()
-                for (image in images) {
-                    contents.add(Content.ImageBytes(image.toPngByteArray()))
-                }
-                audioData?.let {
-                    contents.add(Content.AudioBytes(it))
-                }
-                if (prompt.isNotBlank()) {
-                    contents.add(Content.Text(prompt))
-                }
-
-                var fullResponse = ""
-                conv.sendMessageAsync(
-                    Contents.of(contents),
-                    object : MessageCallback {
-                        override fun onMessage(message: Message) {
-                            val token = message.toString()
-                            val now = System.currentTimeMillis()
-                            if (fullResponse.isEmpty()) {
-                                Timber.i("⏱️ First token received after ${now - startTime}ms")
-                            }
-                            fullResponse += token
-                            onToken(token)
-                        }
-                        override fun onDone() {
-                            try {
-                                onComplete(truncateRepetition(fullResponse))
-                            } finally {
-                                deferred.complete(Unit)
-                            }
-                        }
-                        override fun onError(throwable: Throwable) {
-                            try {
-                                onError(throwable.message ?: "Stream error")
-                            } finally {
-                                deferred.complete(Unit)
-                            }
-                        }
-                    }
-                )
-                // Hold the mutex until the streaming is finished
-                // Added a 2-minute safety timeout to prevent deadlocks if native hangs
-                withTimeout(120000) {
-                    while (!deferred.isCompleted) {
-                        if (isAborted) {
-                            deferred.complete(Unit)
-                            break
-                        }
-                        kotlinx.coroutines.delay(100)
-                    }
-                }
-            } catch (e: Exception) {
-                onError(e.message ?: "Unknown failure")
-                deferred.complete(Unit)
+        try {
+            val contents = mutableListOf<Content>()
+            for (image in images) {
+                contents.add(Content.ImageBytes(image.toJpegByteArray()))
             }
+            audioData?.let {
+                contents.add(Content.AudioBytes(it))
+            }
+            if (prompt.isNotBlank()) {
+                contents.add(Content.Text(prompt))
+            }
+
+            var fullResponse = ""
+            conversation?.sendMessageAsync(
+                Contents.of(contents),
+                object : MessageCallback {
+                    override fun onMessage(message: Message) {
+                        val token = message.toString()
+                        if (fullResponse.isEmpty()) {
+                            Timber.i("⏱️ First token received after ${System.currentTimeMillis() - startTime}ms")
+                        }
+                        fullResponse += token
+                        onToken(token)
+                    }
+                    override fun onDone() {
+                        try {
+                            onComplete(truncateRepetition(fullResponse))
+                        } finally {
+                            isBusy.set(false)
+                            deferred.complete(Unit)
+                        }
+                    }
+                    override fun onError(throwable: Throwable) {
+                        try {
+                            onError(throwable.message ?: "Stream error")
+                        } finally {
+                            isBusy.set(false)
+                            deferred.complete(Unit)
+                        }
+                    }
+                }
+            )
+            
+            // Wait for completion outside the mutex
+            withTimeout(120000) {
+                while (!deferred.isCompleted) {
+                    if (isAborted) {
+                        isBusy.set(false)
+                        deferred.complete(Unit)
+                        break
+                    }
+                    kotlinx.coroutines.delay(100)
+                }
+            }
+        } catch (e: Exception) {
+            isBusy.set(false)
+            onError(e.message ?: "Unknown failure")
+            deferred.complete(Unit)
         }
     }
 
@@ -332,9 +342,9 @@ class GemmaEngine(private val context: Context) : LlmBackend {
         }
     }
 
-    private fun Bitmap.toPngByteArray(): ByteArray {
-        val stream = ByteArrayOutputStream()
-        this.compress(Bitmap.CompressFormat.PNG, 100, stream)
+    private fun Bitmap.toJpegByteArray(): ByteArray {
+        val stream = java.io.ByteArrayOutputStream()
+        this.compress(Bitmap.CompressFormat.JPEG, 80, stream)
         return stream.toByteArray()
     }
 }
