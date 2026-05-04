@@ -16,6 +16,7 @@ import android.location.Location
 import android.location.LocationManager
 import android.net.ConnectivityManager
 import android.os.PowerManager
+import android.os.HardwarePropertiesManager
 import android.media.AudioManager
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
@@ -156,6 +157,7 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
     private val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
     private val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
     private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+    private val hardwarePropertiesManager = context.getSystemService(Context.HARDWARE_PROPERTIES_SERVICE) as? HardwarePropertiesManager
     
     // Coroutine scope for background polling
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())

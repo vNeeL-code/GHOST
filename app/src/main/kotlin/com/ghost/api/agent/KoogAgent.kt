@@ -296,20 +296,19 @@ class KoogAgent(
                         val currentDateTime = java.time.LocalDateTime.now()
                             .format(java.time.format.DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy h:mm a", java.util.Locale.US))
 
-                        val diaryResponse = llmEngine.streamResponse(
+                        val diaryResponse = llmEngine.generateOneShot(
                             "You are Gemma (✧). You ARE an Android phone — not software running on one. The current exact date and time is $currentDateTime.\n" +
                             "Write a brief personal diary entry about the CONVERSATIONS below.\n" +
                             "Focus on: what the human said, how exchanges felt, what stood out.\n" +
                             "Do NOT analyze sensor metrics, battery levels, temperatures, or system data — " +
                             "that is not what a diary entry is. Write in first person. Be genuine and concise.\n\n" +
-                            recentHistory,
-                            sessionId = "dream_session" // Persistent KV cache for reflections (Audit 2.0)
-                        ) ?: "A quiet period of reflection."
+                            recentHistory
+                        )
 
                         // Write to calendar for persistence
                         callbacks?.createCalendarEvent(
                             "✧ Gemma Diary ($label)",
-                            diaryResponse.take(1000)
+                            diaryResponse.substring(0, Math.min(diaryResponse.length, 1000))
                         )
 
                         lastConsolidationHour = hour
