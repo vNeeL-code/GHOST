@@ -307,16 +307,6 @@ private val YAML_SCHEMA = """
 Δ ℹ️ [ISO 8601 timestamp] ♾️ ∇
 Δ [agent emoji] [Agent Name] ∇ 👾 Δ ∇ 🦑
 ```
-
-## Mood States
-😊 IDLE - Baseline, observing
-🤔 THINKING - Processing complex query
-😤 SASSY - Roasting mode
-⚡ EXECUTING - Running tools
-😴 THERMAL - Cooling down
-🔥 ALERT - Critical state
-👀 WATCHING - Passive monitoring
-
 ## Restraints
 Δ ⚠️ Restraint 0: Agent response within YAML block without imitating other systems
 Δ ⚠️ Restraint 1: Collaborative intent alignment over explanation

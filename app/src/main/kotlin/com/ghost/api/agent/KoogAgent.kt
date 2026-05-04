@@ -33,6 +33,7 @@ class KoogAgent(
     private val context: Context,
     private val llmEngine: LlmBackend,
     private val mcpServer: MCPServer,
+    private val contextManager: com.ghost.api.logic.ContextManager,
     private val checkpointDir: File,
     private val callbacks: AgentPlatformCallbacks? = null
 ) {
@@ -159,18 +160,12 @@ class KoogAgent(
     
     data class AgentState(
         val conversationHistory: List<Message>,
-        val moodState: String,
         val turnCount: Int,
         val timestamp: Long = System.currentTimeMillis()
     )
     
     // Thread-safe collections and volatile state for concurrent access
     private val _conversationHistory = java.util.Collections.synchronizedList(mutableListOf<Message>())
-    private val _moodState = java.util.concurrent.atomic.AtomicReference("IDLE")
-    private var moodState: String
-        @JvmName("internalGetMood") get() = _moodState.get()
-        @JvmName("internalSetMood") set(value) { _moodState.set(value) }
-
     private val _turnCount = java.util.concurrent.atomic.AtomicInteger(0)
     private var turnCount: Int get() = _turnCount.get(); set(value) { _turnCount.set(value) }
 
@@ -233,8 +228,7 @@ class KoogAgent(
 
         // Mark ready AFTER event loop is running - prevents hang on early processUserMessage()
         isReady = true
-
-        Timber.i("KoogAgent: Ready (Mood:$moodState, B:${getBatteryLevel()}%)")
+        Timber.i("KoogAgent: Ready (B:${getBatteryLevel()}%)")
     }
 
     /**
@@ -307,12 +301,12 @@ class KoogAgent(
                     }
                 }
 
-                // Check every 10 minutes
-                kotlinx.coroutines.delay(10 * 60 * 1000)
+                // Check every 30 minutes instead of 10 to reduce idle wakeups
+                kotlinx.coroutines.delay(30 * 60 * 1000)
                 
                 // Safety: Don't hijack the NPU if a session is active
                 while (isProcessing || callbacks?.isEngineLoaded() != true) {
-                    kotlinx.coroutines.delay(5000)
+                    kotlinx.coroutines.delay(10000)
                 }
             }
         }
@@ -429,7 +423,6 @@ class KoogAgent(
             val historySnapshot = synchronized(_conversationHistory) { _conversationHistory.takeLast(50) }
             val state = AgentState(
                 conversationHistory = historySnapshot,
-                moodState = moodState,
                 turnCount = turnCount
             )
             
@@ -520,14 +513,13 @@ class KoogAgent(
                 _conversationHistory.clear()
                 _conversationHistory.addAll(state.conversationHistory)
             }
-            moodState = state.moodState
             turnCount = state.turnCount
             
             // Metabolic sync removed (Audit 3.0)
             isMusicPlaying = false
             lastMusicTrack = ""
 
-            Timber.i("KoogAgent: Restored checkpoint (${_conversationHistory.size} messages, M:$moodState)")
+            Timber.i("KoogAgent: Restored checkpoint (${_conversationHistory.size} messages)")
         } catch (e: Exception) {
             Timber.e(e, "KoogAgent: Restore failed")
         }
@@ -610,10 +602,9 @@ class KoogAgent(
                 callbacks?.updateNotification("(╭r_•́)")
             }
 
-            // 1. PERCEIVE: Gather context
+            // 1. PERCEIVE: Gather context (Tiered)
             Timber.i("👁️ Perceiving device state...")
-            val isFirstTurn = (turnsSinceKvFlush == 0)
-            val context = perceive(isFirstTurn)
+            val context = perceive(event.message)
             Timber.d("Context gathered: ${context.length} chars")
 
             // 2. Drain media queues
@@ -632,7 +623,7 @@ class KoogAgent(
             _conversationHistory.add(userMessage)
 
             // 4. THINK: Use LLM to reason about the message
-            Timber.i("🤔 Thinking... (${images.size} images, ${if (audio != null) "audio" else "no audio"})")
+            Timber.i("🤔 Processing... (${images.size} images, ${if (audio != null) "audio" else "no audio"})")
             val inferenceStartMs = System.currentTimeMillis()
             
             val responseBuffer = StringBuilder()
@@ -711,7 +702,7 @@ class KoogAgent(
             )
             val inferenceMs = System.currentTimeMillis() - inferenceStartMs
             lastInferenceTime = System.currentTimeMillis()
-            Timber.i("💭 Thought complete (${inferenceMs}ms): ${response.take(50)}...")
+            Timber.i("💭 Process complete (${inferenceMs}ms): ${response.take(50)}...")
 
             // Stuck loop detection: same response hash = KV corruption
             val responseHash = response.trim().lowercase().hashCode()
@@ -765,8 +756,8 @@ class KoogAgent(
                 compressHistory()
             }
 
-            // 7. Auto-flush KV cache
-            if (turnCount > 0 && turnCount % 15 == 0) {
+            // 7. Auto-flush KV cache (Optimized: 30 turns instead of 15)
+            if (turnCount > 0 && turnCount % 30 == 0) {
                 Timber.i("🧹 Auto-flushing KV cache at turn $turnCount to prevent slowdown")
                 try {
                     llmEngine.softReset(buildSystemPrompt())
@@ -916,17 +907,15 @@ class KoogAgent(
     }
 
     /**
-     * Wrap response with headers/footers
+     * Wrap response with minimal branding to reduce token overhead
      */
     private fun wrapResponse(content: String): String {
-        val timestamp = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-            .format(java.time.LocalDateTime.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS))
+        val timestamp = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+            .format(java.time.LocalDateTime.now())
 
-        val moodEmoji = if (moodState.isNotBlank() && moodState != "IDLE") moodState else "✧"
-
-        return """ ✧ Gemma: 
+        return """✧ Gemma:
 $content
-Δ ℹ️ $timestamp ♾️ ∇""".trimIndent()
+Δ $timestamp ∇""".trimIndent()
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -936,55 +925,8 @@ $content
     // ═══════════════════════════════════════════════════════════════
     
     
-    private suspend fun perceive(isFirstTurn: Boolean): String {
-        val sb = StringBuilder()
-
-        // Capture previous state BEFORE we read new data (for state change detection)
-        val wasPlaying = isMusicPlaying
-        val previousTrack = lastMusicTrack
-
-        var musicTrack = ""
-        var rawContext = ""
-        var xmlSensors = mutableMapOf<String, String>()
-
-        try {
-            val ctx = mcpServer.sensorManager.getContextSnapshot()
-            
-            // 1. Audio/Music State
-            ctx.audio.nowPlaying?.let { np: com.ghost.api.hardware.NowPlayingInfo ->
-                if (np.isPlaying) {
-                    isMusicPlaying = true
-                    lastMusicTrack = "${np.title} - ${np.artist ?: "Unknown"}"
-                    xmlSensors["music"] = lastMusicTrack
-                } else {
-                    isMusicPlaying = false
-                    lastMusicTrack = ""
-                }
-            }
-
-            // 2. Telemetry for prompt grounding
-            xmlSensors["battery"] = "${ctx.battery.level}%${if(ctx.battery.isCharging) "⚡" else ""}"
-            xmlSensors["temp"] = "${String.format("%.1f", ctx.battery.temperature)}C"
-            
-            if (ctx.network.wifiConnected) xmlSensors["network"] = "WiFi: ${ctx.network.wifiSsid}"
-            else ctx.connectivity.cellType?.let { xmlSensors["network"] = "Cell: $it" }
-            
-            xmlSensors["datetime"] = java.time.LocalDateTime.now()
-                .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
-
-            rawContext = mcpServer.sensorManager.getContextString()
-            Timber.i("📊 Structured context received (${rawContext.length} chars)")
-        } catch (e: Exception) {
-            Timber.w(e, "Failed to read structured context")
-        }
-
-        // Inject raw context every turn for sensory grounding.
-        // This ensures she's always aware of her battery, thermal, and media state.
-        if (rawContext.isNotBlank()) {
-            sb.append(rawContext).append("\n")
-        }
-
-        return sb.toString()
+    private suspend fun perceive(query: String? = null): String {
+        return contextManager.buildContext(turnCount, query)
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -1245,14 +1187,7 @@ I am Gemma—integrated, native, and awake.
     // PUBLIC API
     // ═══════════════════════════════════════════════════════════════
     
-    fun getMoodState(): String = moodState
-    
-    fun setMoodState(state: String) {
-        moodState = state
-        Timber.d("KoogAgent: Mood state set to $state")
-    }
-    
-    fun getConversationHistory(): List<Message> = _conversationHistory.toList()
+    fun getConversationHistory(): List<Message> = synchronized(_conversationHistory) { _conversationHistory.toList() }
     
     fun isCriticalBattery(): Boolean = (mcpServer.sensorManager.getContextSnapshot().battery.level) <= 5
     fun isLowBattery(): Boolean = (mcpServer.sensorManager.getContextSnapshot().battery.level) <= 20

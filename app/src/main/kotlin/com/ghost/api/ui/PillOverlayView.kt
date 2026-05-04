@@ -355,7 +355,7 @@ class PillOverlayView(
                 expandedContainer.visibility = View.VISIBLE
                 thinkingIndicator.visibility = View.VISIBLE
                 responseArea.visibility = View.GONE
-                statusText.text = "Thinking..."
+                statusText.text = "Processing..."
                 statusText.setTextColor(colorPrimary)
             }
             State.RESPONSE -> {

@@ -41,7 +41,7 @@ class GemmaNotificationManager(private val context: Context) {
             val notification = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                 Notification.Builder(context, CHANNEL_ID)
                     .setContentTitle("Δ 👾 ∇")
-                    .setContentText("Δ ✧ 🧠 ✧ Thinking...")
+                    .setContentText("Δ ✧ ∇ Processing...")
                     .setSmallIcon(android.R.drawable.ic_popup_sync)
                     .setProgress(0, 0, true)
                     .setOngoing(true)  // Can't swipe away while thinking
@@ -49,7 +49,7 @@ class GemmaNotificationManager(private val context: Context) {
             } else {
                 Notification.Builder(context)
                     .setContentTitle("Δ 👾 ∇")
-                    .setContentText("Δ ✧ 🧠 ✧ Thinking...")
+                    .setContentText("Δ ✧ ∇ Processing...")
                     .setSmallIcon(android.R.drawable.ic_popup_sync)
                     .setProgress(0, 0, true)
                     .setOngoing(true)

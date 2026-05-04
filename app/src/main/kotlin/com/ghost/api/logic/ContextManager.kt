@@ -22,7 +22,6 @@ class ContextManager(
     private var lastScreenSummary: String = ""
     private var lastNotifHash: Int = 0
     private var lastDiaryTimestamp: Long = 0
-    private var turnCount: Int = 0
     private var sessionStarted: Boolean = false
 
     /**
@@ -30,18 +29,16 @@ class ContextManager(
      * First turn: Full context (persona established)
      * Subsequent turns: Minimal context (just state changes)
      */
-    suspend fun buildContext(): String {
-        return if (!sessionStarted) {
+    suspend fun buildContext(turn: Int, query: String? = null): String {
+        return if (!sessionStarted || turn <= 1) {
             sessionStarted = true
-            turnCount = 0
-            buildDynamicContext() // Full context for first turn
+            buildDynamicContext(query) // Full context for first turn
         } else {
-            turnCount++
-            if (turnCount % 10 == 0) {
+            if (turn % 10 == 0) {
                 // Every 10 turns, refresh full context to prevent drift
-                buildDynamicContext()
+                buildDynamicContext(query)
             } else {
-                buildMinimalContext() // Lean context for subsequent turns
+                buildMinimalContext(turn, query) // Lean context for subsequent turns
             }
         }
     }
@@ -50,14 +47,14 @@ class ContextManager(
      * Minimal context for subsequent turns - prevents attention flooding
      * Only includes: time, battery, critical changes
      */
-    suspend fun buildMinimalContext(): String {
+    suspend fun buildMinimalContext(turn: Int, query: String? = null): String {
         return withContext(Dispatchers.Default) {
             try {
                 val sb = StringBuilder()
                 val now = java.time.LocalDateTime.now()
 
                 // One-line state summary
-                sb.append("[Turn $turnCount] ")
+                sb.append("[Turn $turn] ")
 
                 // Essential telemetry only
                 try {
@@ -83,15 +80,23 @@ class ContextManager(
                 }
                 sb.append("$timeEmoji${now.toLocalTime().toString().take(5)}")
 
-                // Only show NEW notifications (not seen before)
-                try {
-                    val recentNotifs = GemmaNotificationListener.getRecentNotifications(3)
-                    val notifHash = recentNotifs.hashCode()
-                    if (notifHash != lastNotifHash && recentNotifs.isNotEmpty()) {
-                        sb.append("\n📬 New: ${recentNotifs.first().take(50)}")
-                        lastNotifHash = notifHash
-                    }
-                } catch (_: Exception) {}
+                // Context Tiering: Only check notifications if asked or if it's been a while
+                val needsNotifications = query?.let { 
+                    it.contains("notif", ignoreCase = true) || 
+                    it.contains("message", ignoreCase = true) ||
+                    it.contains("who", ignoreCase = true)
+                } ?: false
+
+                if (needsNotifications) {
+                    try {
+                        val recentNotifs = GemmaNotificationListener.getRecentNotifications(3)
+                        val notifHash = recentNotifs.hashCode()
+                        if (notifHash != lastNotifHash && recentNotifs.isNotEmpty()) {
+                            sb.append("\n📬 New: ${recentNotifs.first().take(50)}")
+                            lastNotifHash = notifHash
+                        }
+                    } catch (_: Exception) {}
+                }
 
                 sb.toString()
             } catch (e: Exception) {
@@ -101,7 +106,7 @@ class ContextManager(
         }
     }
 
-    suspend fun buildDynamicContext(): String {
+    suspend fun buildDynamicContext(query: String? = null): String {
         return withContext(Dispatchers.Default) {
             try {
                 val sb = StringBuilder()
@@ -123,28 +128,54 @@ class ContextManager(
                 // Full sensor telemetry
                 sb.append(sensorManager.getContextString())
 
+                // Context Tiering: Only perform heavy IPC if relevant to query
+                val needsScreen = query?.let {
+                    it.contains("screen", ignoreCase = true) || 
+                    it.contains("see", ignoreCase = true) || 
+                    it.contains("look", ignoreCase = true) ||
+                    it.contains("this", ignoreCase = true) ||
+                    it.contains("app", ignoreCase = true)
+                } ?: (query == null) // Default to true for first turn/re-cap
+
+                val needsNotifications = query?.let {
+                    it.contains("notif", ignoreCase = true) || 
+                    it.contains("message", ignoreCase = true) ||
+                    it.contains("who", ignoreCase = true) ||
+                    it.contains("what", ignoreCase = true)
+                } ?: (query == null)
+
                 // Screen content (with fatigue check)
-                try {
-                    val screenContent = com.ghost.api.GemmaAccessibilityService.instance
-                        ?.getSemanticScreenDump()?.take(500) ?: ""
-                    val screenHash = screenContent.hashCode()
-                    if (screenHash != lastScreenHash && screenContent.isNotBlank()) {
-                        sb.append("\n📱 Screen: ${screenContent.take(200)}...")
-                        lastScreenHash = screenHash
-                        lastScreenSummary = screenContent.take(200)
+                if (needsScreen) {
+                    try {
+                        val screenContent = com.ghost.api.GemmaAccessibilityService.instance
+                            ?.getSemanticScreenDump()?.take(500) ?: ""
+                        val screenHash = screenContent.hashCode()
+                        if (screenHash != lastScreenHash && screenContent.isNotBlank()) {
+                            sb.append("\n📱 Screen: ${screenContent.take(200)}...")
+                            lastScreenHash = screenHash
+                            lastScreenSummary = screenContent.take(200)
+                        } else if (screenContent.isBlank()) {
+                            sb.append("\n📱 Screen: [Empty or Restricted]")
+                        }
+                    } catch (e: Exception) {
+                        Timber.w("Screen dump failed: ${e.message}")
                     }
-                } catch (_: Exception) {}
+                }
 
                 // Recent notifications (with fatigue check)
-                try {
-                    val recentNotifs = GemmaNotificationListener.getRecentNotifications(3)
-                    val notifHash = recentNotifs.hashCode()
-                    if (notifHash != lastNotifHash && recentNotifs.isNotEmpty()) {
-                        sb.append("\n📬 Notifications:\n")
-                        recentNotifs.take(3).forEach { sb.append("  • $it\n") }
-                        lastNotifHash = notifHash
+                if (needsNotifications) {
+                    try {
+                        val recentNotifs = GemmaNotificationListener.getRecentNotifications(3)
+                        val notifHash = recentNotifs.hashCode()
+                        if (notifHash != lastNotifHash && recentNotifs.isNotEmpty()) {
+                            sb.append("\n📬 Notifications:\n")
+                            recentNotifs.take(3).forEach { sb.append("  • $it\n") }
+                            lastNotifHash = notifHash
+                        }
+                    } catch (e: Exception) {
+                        Timber.w("Notification fetch failed: ${e.message}")
                     }
-                } catch (_: Exception) {}
+                }
 
                 sb.append("\n═══════════════════════════════\n")
                 sb.toString()
@@ -167,7 +198,6 @@ class ContextManager(
         lastScreenSummary = ""
         lastNotifHash = 0
         lastDiaryTimestamp = 0
-        turnCount = 0
         sessionStarted = false // Next turn gets full context
         Timber.d("Context fatigue state reset - next turn gets full context")
     }

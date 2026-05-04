@@ -298,7 +298,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         CrashHandler.install(this)
 
         // Watchdog check: If we crashed during last initialization, increment count
-        val prefs = getSharedPreferences("gemma_instance_settings", android.content.Context.MODE_PRIVATE)
+        val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
         if (prefs.getBoolean("is_initializing", false)) {
             val newCount = prefs.getInt("init_crash_count", 0) + 1
             prefs.edit().putInt("init_crash_count", newCount).apply()
@@ -516,6 +516,20 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     // === THERMAL SAFETY SYSTEM (SILENT) ===
 
     private enum class ThermalSafetyState { COOL, WARM, HOT, CRITICAL }
+    
+    /**
+     * Clear all crash counters and force-CPU states.
+     * Restores GPU/NPU performance.
+     */
+    fun resetRecoveryState() {
+        val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        prefs.edit()
+            .putInt("init_crash_count", 0)
+            .putBoolean("is_initializing", false)
+            .putBoolean("force_cpu", false)
+            .apply()
+        Timber.i("🧹 Recovery state cleared via service")
+    }
 
     private fun getThermalSafetyState(thermalState: HardwarePropertiesManager.ThermalState): ThermalSafetyState {
         return when (thermalState) {
@@ -604,8 +618,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             updateNotification("Running Full System Diagnostics...")
 
             // Determine backend
-            val forcedBackend = if (prefs.getInt("init_crash_count", 0) >= 2) {
-                Timber.w("🚨 Forcing CPU backend due to repeated crashes")
+            val forcedBackend = if (prefs.getInt("init_crash_count", 0) >= 4) {
+                Timber.w("🚨 Forcing CPU backend due to repeated crashes (threshold 4)")
                 updateNotification("Safe Mode: Forcing CPU")
                 "CPU"
             } else if (prefs.getBoolean("force_cpu", false)) {
@@ -666,6 +680,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 context = applicationContext,
                 llmEngine = newEngine,
                 mcpServer = mcpServer,
+                contextManager = contextManager,
                 checkpointDir = getExternalFilesDir(null) ?: filesDir,
                 callbacks = this@GemmaService
             )

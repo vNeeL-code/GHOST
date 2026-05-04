@@ -24,6 +24,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
@@ -174,15 +176,18 @@ class GemmaEngine(private val context: Context) : LlmBackend {
         }
 
         try {
-            val contents = mutableListOf<Content>()
-            for (image in images) {
-                contents.add(Content.ImageBytes(image.toJpegByteArray()))
-            }
-            audioData?.let {
-                contents.add(Content.AudioBytes(it))
-            }
-            if (prompt.isNotBlank()) {
-                contents.add(Content.Text(prompt))
+            val contents = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val list = mutableListOf<Content>()
+                for (image in images) {
+                    list.add(Content.ImageBytes(image.toJpegByteArray()))
+                }
+                audioData?.let {
+                    list.add(Content.AudioBytes(it))
+                }
+                if (prompt.isNotBlank()) {
+                    list.add(Content.Text(prompt))
+                }
+                list
             }
 
             var fullResponse = ""
@@ -216,15 +221,9 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                 }
             )
             
-            // Wait for completion outside the mutex
+            // Wait for completion outside the mutex - using await() instead of polling
             kotlinx.coroutines.withTimeout(120000) {
-                while (!deferred.isCompleted) {
-                    if (isAborted) {
-                        deferred.complete(Unit)
-                        break
-                    }
-                    kotlinx.coroutines.delay(100)
-                }
+                deferred.await()
             }
         } finally {
             // Audit 3.1: Guaranteed Busy Release

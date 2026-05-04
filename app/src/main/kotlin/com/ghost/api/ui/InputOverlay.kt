@@ -449,7 +449,7 @@ class InputOverlay(
     fun setThinking(thinking: Boolean) {
         if (thinking) {
             inputField.isEnabled = false
-            inputField.hint = "Gemma is thinking..."
+            inputField.hint = "Gemma is processing..."
             sparkleButton.setTextColor(Color.parseColor("#F59E0B")) // Amber sparkle
             startPulse()
         } else {
