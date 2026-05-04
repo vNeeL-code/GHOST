@@ -1174,7 +1174,6 @@ $content
         _turnsSinceKvFlush.incrementAndGet()
 
         val contextBlock = context
-        val contextBlock = context
         val fullPrompt = "$contextBlock\n$userMessage"
         
         // Proactive Smooth Restart: Flush KV cache if context is saturating (Approx 10 turns)
