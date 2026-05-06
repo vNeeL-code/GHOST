@@ -11,9 +11,9 @@
 
 ### What is even a GHOST?
 
-GHOST is not your typical AI chat app. Gemma Hosted Operating System Terminal is the intelligence layer your Android already had but needed an operator.
-Most "on-device AI" is a chatbot with no body — it doesn't know what phone it's running on, what time it is, how bright the room is, or what's playing. GHOST does. Every response is grounded in real hardware state: battery, temperature, light, RAM, network, now-playing.
-Personal assistant, as advertised.
+GHOST is not a chatbot. Gemma Host is the AI layer your Android device needed for a fully local assistant.
+Most "on-device AI" is a chatbot with no hardware feedback — it doesn't know what phone it's running on, what time it is, how bright the room is, or what's playing. GHOST does. Every response is grounded in real hardware state: battery, temperature, light, RAM, network, now-playing.
+Personal, device bound, native assistant.
 
 > No subscription
 > No data leaves your device
