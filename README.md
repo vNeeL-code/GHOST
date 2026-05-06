@@ -7,7 +7,6 @@
 
 ![Static Badge](https://img.shields.io/badge/Status-Production-green)
 ![GitHub Repo stars](https://img.shields.io/github/stars/vNeeL-code/ASI)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17619151.svg)](https://doi.org/10.5281/zenodo.17619151)
 
 ### What is even a ✧ GHOST?
 
