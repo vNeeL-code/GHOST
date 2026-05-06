@@ -9,9 +9,9 @@
 ![GitHub Repo stars](https://img.shields.io/github/stars/vNeeL-code/ASI)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17619151.svg)](https://doi.org/10.5281/zenodo.17619151)
 
-### What is even a GHOST?
+### What is even a ✧ GHOST?
 
-GHOST is not a chatbot. ✧ Gemma Host is the AI integraition layer (harness) your Android device needed for a fully local integrated assistant powered by Gemma models.
+✧ GHOST is not a chatbot. ✧ Gemma Host is the AI integraition layer (harness) your Android device needed for a fully local integrated assistant powered by Gemma models.
 Most "on-device AI" is a chatbot with no hardware feedback — it doesn't know what phone it's running on, what time it is, how bright the room is, or what's playing. GHOST does. Every response is grounded in real hardware state: battery, temperature, light, RAM, network, now-playing.
 Personal, device bound, native assistant.
 
@@ -32,15 +32,14 @@ Personal, device bound, native assistant.
 
 ### Omnimodal:
 
-> Sees images (share from Gallery, or capture)
-> Hears audio (hold mic button, or wake word)
-> Reads text
+> Sees images (share from Gallery, or share screenshots)
+> Hears audio (tap mic button to record, shake to cancel)
+> Reads text (accessibility)
 
 ---
 
 Always-on foreground service. Summoned by a shake. Present in your notification shade. Knows the room.
 Tool use: web search, app launch, clipboard, alarms, system info — all on-device.
-Diary mode: Every 12 hours, Gemma reflects on your day and writes a first-person entry to your Google Calendar. Private. Local. Yours.
 
 ---
 
@@ -58,13 +57,11 @@ Diary mode: Every 12 hours, Gemma reflects on your day and writes a first-person
 
 ---
 
-## Installation
-
-### 🟢 Just the Brain (App Only)
+### Get your ✧ GHOST
 
 1. Download the latest APK from [Releases](https://github.com/vNeeL-code/ASI/releases).  
 2. Install and grant permissions (overlay, notifications, accessibility).  
-3. Download a [Gemma 4 model](https://huggingface.co/google/gemma-2b-it-litert-lm) (via Google AI Edge Gallery or manually place `.litertlm` variant in app storage).  
+3. Download a [Gemma 4 model](https://huggingface.co/google/gemma-2b-it-litert-lm) (via Google AI Edge Gallery or manually place `.litertlm` variant in app storage via drag and drop.).  
 4. **Shake to summon.**  
 
 ---
