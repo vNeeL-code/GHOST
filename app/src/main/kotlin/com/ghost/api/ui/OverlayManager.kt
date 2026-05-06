@@ -157,9 +157,10 @@ class OverlayManager(private val context: Context) {
             }
         )
 
-        val params = getPassiveLayoutParams().apply {
+        // Switch to interactive params so we can actually tap the pill!
+        val params = getInteractiveLayoutParams().apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            this.y = 100 // Top margin
+            this.y = dpToPx(10) // Small top margin
             width = WindowManager.LayoutParams.WRAP_CONTENT
         }
 

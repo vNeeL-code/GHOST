@@ -63,6 +63,9 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
     private val handler = Handler(Looper.getMainLooper())
     private var isRitualComplete = false
     private var isShowingDiary = false
+    // Streaming state: tracks whether a streaming assistant bubble is currently in-flight
+    // Prevents double-bubbles when token updates arrive before the initial add completes
+    private var streamingBubbleActive = false
 
     // Multimodal
     private val imagePicker = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri: Uri? ->
@@ -466,14 +469,26 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
 
     override fun onMessageAdded(message: String, isUser: Boolean, isComplete: Boolean) {
         runOnUiThread {
-            if (isUser || isComplete) {
-                chatAdapter.addMessage(ChatMessage(message, isFromUser = isUser))
-            } else {
-                // Streaming update
-                if (chatAdapter.itemCount > 0 && !isUser) {
+            if (isUser) {
+                // User messages always add a new bubble
+                chatAdapter.addMessage(ChatMessage(message, isFromUser = true))
+                streamingBubbleActive = false
+            } else if (isComplete) {
+                // Final assistant message: add or replace the streaming bubble
+                if (streamingBubbleActive) {
                     chatAdapter.updateLastMessage(message)
                 } else {
-                    chatAdapter.addMessage(ChatMessage(message, isFromUser = isUser))
+                    chatAdapter.addMessage(ChatMessage(message, isFromUser = false))
+                }
+                streamingBubbleActive = false
+            } else {
+                // Streaming token update
+                if (streamingBubbleActive) {
+                    chatAdapter.updateLastMessage(message)
+                } else {
+                    // First token of a new stream - add the bubble, then track it
+                    chatAdapter.addMessage(ChatMessage(message, isFromUser = false))
+                    streamingBubbleActive = true
                 }
             }
             chatRecyclerView?.scrollToPosition(chatAdapter.itemCount - 1)
@@ -481,8 +496,12 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
     }
 
     override fun onThoughtUpdated(thought: String) {
-        if (isShowingDiary) {
-            runOnUiThread {
+        runOnUiThread {
+            // Always show think content in thinkingText during reasoning
+            // (visible in both diary mode and normal chat)
+            thinkingText?.text = "δ ${thought.take(120).replace('\n', ' ')}..."
+            // In diary mode, also render as a chat bubble for full visibility
+            if (isShowingDiary) {
                 if (chatAdapter.itemCount > 0) {
                     chatAdapter.updateLastMessage(thought)
                 } else {

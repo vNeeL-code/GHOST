@@ -66,7 +66,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     
     internal var uiCallback: UiCallback? = null
 
-    private val serviceScope = CoroutineScope(Dispatchers.Default + Job())
+    internal val serviceScope = CoroutineScope(Dispatchers.Default + Job())
 
     // Mandatory Service implementation
     override fun onBind(intent: Intent?): IBinder? {
@@ -822,6 +822,24 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         }
     }
 
+    /**
+     * Streaming entry point for the OpenAI SSE endpoint.
+     * Feeds tokens to [onToken] as they arrive from the engine.
+     * Used by ApiServer /v1/chat/completions when stream=true.
+     */
+    suspend fun streamQueryTokens(prompt: String, onToken: (String) -> Unit) {
+        if (!::koogAgent.isInitialized || !koogAgent.isReady) {
+            onToken("System is still initializing.")
+            return
+        }
+        markActivity()
+        // Register a temporary token observer, then run inference
+        koogAgent.streamUserMessageTokens(
+            message = prompt,
+            sessionId = java.util.UUID.randomUUID().toString(),
+            onToken = onToken
+        )
+    }
 
 
     private fun buildNotification(textToNotify: String): Notification {

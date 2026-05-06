@@ -40,11 +40,16 @@ class InputOverlay(
 
     private val inputField: EditText
     private val sparkleButton: TextView
+    private lateinit var voiceSendButton: TextView
     private val audioRecorder = AudioRecorder(context)
 
     private var isRecording = false
     private var recordingJob: Job? = null
     private var pulseAnimator: ObjectAnimator? = null
+
+    private enum class VoiceState { IDLE, RECORDING, CONFIRM }
+    private var voiceState = VoiceState.IDLE
+    private var pendingAudioData: ByteArray? = null
 
     // Colors
     private val colorSurface = Color.parseColor("#1E1E1E")
@@ -91,7 +96,7 @@ class InputOverlay(
             setPadding(dpToPx(8), dpToPx(4), dpToPx(12), dpToPx(4))
         }
 
-        // ✧ Sparkle button — HOLD to record audio, release to send
+        // ✧ Sparkle button — Tap to open app, HOLD for slots
         sparkleButton = TextView(context).apply {
             text = "\u2727"
             textSize = 28f
@@ -99,18 +104,62 @@ class InputOverlay(
             gravity = Gravity.CENTER
             layoutParams = LinearLayout.LayoutParams(dpToPx(44), dpToPx(44))
             background = createCircleBackground(Color.TRANSPARENT)
-            setOnTouchListener { _, event ->
+            
+            var isSwiping = false
+            var startX = 0f
+            var startY = 0f
+            var wasLongClicked = false
+            
+            setOnClickListener {
+                val intent = android.content.Intent(context, com.ghost.api.MainActivity::class.java).apply {
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                }
+                context.startActivity(intent)
+                onDismiss()
+            }
+            
+            setOnLongClickListener {
+                if (!isSwiping) {
+                    wasLongClicked = true
+                    hapticPulse()
+                    expandSparkleSubMenu(this)
+                }
+                true
+            }
+            
+            setOnTouchListener { v, event ->
+                val threshold = 50f
                 when (event.action) {
                     android.view.MotionEvent.ACTION_DOWN -> {
-                        if (!isRecording) startRecording()
-                        true
+                        startX = event.rawX
+                        startY = event.rawY
+                        isSwiping = false
+                        wasLongClicked = false
+                        v.animate().scaleX(1.2f).scaleY(1.2f).setDuration(100).start()
                     }
-                    android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
-                        if (isRecording) stopRecording()
-                        true
+                    android.view.MotionEvent.ACTION_MOVE -> {
+                        if (Math.abs(event.rawX - startX) > threshold || Math.abs(event.rawY - startY) > threshold) {
+                            isSwiping = true
+                        }
                     }
-                    else -> false
+                    android.view.MotionEvent.ACTION_UP -> {
+                        v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(100).start()
+                        if (wasLongClicked) {
+                            wasLongClicked = false // consume the up event
+                        } else if (isSwiping) {
+                            val dy = event.rawY - startY
+                            val direction = if (dy > 0) "DOWN" else "UP"
+                            launchBoundApp("Sparkle", direction)
+                        } else {
+                            v.performClick()
+                        }
+                    }
+                    android.view.MotionEvent.ACTION_CANCEL -> {
+                        v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(100).start()
+                        wasLongClicked = false
+                    }
                 }
+                false // Let long click fire if hold
             }
         }
 
@@ -136,29 +185,29 @@ class InputOverlay(
             }
         }
 
-        // Send button (only shows when text entered)
-        val sendButton = TextView(context).apply {
-            text = "➤"
+        // Voice / Send button
+        voiceSendButton = TextView(context).apply {
+            text = "🟣"
             textSize = 20f
             setTextColor(colorAccent)
             gravity = Gravity.CENTER
             layoutParams = LinearLayout.LayoutParams(dpToPx(36), dpToPx(36))
-            visibility = GONE
-            setOnClickListener { sendTextQuery() }
+            visibility = VISIBLE
+            setOnClickListener { handleVoiceSendTap() }
         }
 
         // Show/hide send button based on text
         inputField.addTextChangedListener(object : android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                sendButton.visibility = if (s?.isNotBlank() == true) VISIBLE else GONE
+                syncVoiceSendButton()
             }
             override fun afterTextChanged(s: android.text.Editable?) {}
         })
 
         bar.addView(sparkleButton)
         bar.addView(inputField)
-        bar.addView(sendButton)
+        bar.addView(voiceSendButton)
 
         // Tap outside to dismiss (Escape Hatch)
         setOnClickListener { 
@@ -326,6 +375,59 @@ class InputOverlay(
         Toast.makeText(context, "Slot expansion: $parentLabel", Toast.LENGTH_SHORT).show()
     }
 
+    private fun expandSparkleSubMenu(parent: View) {
+        Timber.i("Radial: Expanding submenu for Sparkle")
+        parent.animate().scaleX(1.4f).scaleY(1.4f).setDuration(250).start()
+        
+        val parentGroup = this@InputOverlay
+        val slotSize = dpToPx(32)
+        val distance = dpToPx(60)
+
+        // Only UP and DOWN for sparkle
+        val slots = listOf(
+            Pair(0f, -distance.toFloat()), // UP
+            Pair(0f, distance.toFloat())   // DOWN
+        )
+        val directions = listOf("UP", "DOWN")
+
+        val parentLoc = IntArray(2)
+        parent.getLocationInWindow(parentLoc)
+        val overlayLoc = IntArray(2)
+        this@InputOverlay.getLocationInWindow(overlayLoc)
+        
+        val centerX = (parentLoc[0] - overlayLoc[0]) + parent.width / 2f
+        val centerY = (parentLoc[1] - overlayLoc[1]) + parent.height / 2f
+
+        slots.forEachIndexed { index, pos ->
+            val slot = TextView(context).apply {
+                text = "+"
+                textSize = 14f
+                setTextColor(Color.GRAY)
+                gravity = Gravity.CENTER
+                background = createCircleBackground(Color.parseColor("#3D3D3D"))
+                
+                layoutParams = LayoutParams(slotSize, slotSize).apply {
+                    gravity = Gravity.TOP or Gravity.START
+                }
+                
+                x = centerX - slotSize / 2f + pos.first
+                y = centerY - slotSize / 2f + pos.second
+                
+                alpha = 0f
+                scaleX = 0f
+                scaleY = 0f
+                
+                setOnClickListener {
+                    hapticPulse()
+                    showAppPicker("Sparkle", directions[index])
+                }
+            }
+            parentGroup.addView(slot)
+            activeSlots.add(slot)
+            slot.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(300).setStartDelay((index * 50).toLong()).start()
+        }
+    }
+
     private fun dismissSubMenus() {
         activeSlots.forEach { it.animate().alpha(0f).scaleX(0f).scaleY(0f).setDuration(200).withEndAction { removeView(it) }.start() }
         activeSlots.clear()
@@ -392,18 +494,43 @@ class InputOverlay(
         addView(container)
     }
 
+    private fun handleVoiceSendTap() {
+        val hasText = inputField.text.isNotBlank()
+        if (hasText) {
+            sendTextQuery()
+            return
+        }
+        when (voiceState) {
+            VoiceState.IDLE      -> startRecording()
+            VoiceState.RECORDING -> stopRecordingToConfirm()
+            VoiceState.CONFIRM   -> sendPendingAudio()
+        }
+    }
+
+    private fun syncVoiceSendButton() {
+        val hasText = inputField.text.isNotBlank()
+        voiceSendButton.text = when {
+            hasText               -> "➤"
+            voiceState == VoiceState.RECORDING -> "🔴"
+            voiceState == VoiceState.CONFIRM   -> "🟠"
+            else                  -> "🟣"
+        }
+    }
+
     private fun startRecording() {
-        Timber.i("InputOverlay: Hold-to-record started")
+        Timber.i("InputOverlay: Tap-to-record started")
         if (!audioRecorder.hasPermission()) {
             Timber.w("InputOverlay: No audio permission")
             Toast.makeText(context, "Microphone permission required", Toast.LENGTH_SHORT).show()
             return
         }
 
-        // Immediate start — no countdown. 30s max (Gemma 3n audio cap, only ~132 tokens)
         hapticPulse()
+        voiceState = VoiceState.RECORDING
+        pendingAudioData = null
         isRecording = true
         updateRecordingUI(true)
+        syncVoiceSendButton()
 
         recordingJob = CoroutineScope(Dispatchers.Main).launch {
             Timber.i("InputOverlay: Recording up to 30s audio...")
@@ -411,26 +538,64 @@ class InputOverlay(
                 audioRecorder.record(30, false)
             }
 
-            // Recording finished (either released or hit 30s cap)
-            hapticPulse()
             isRecording = false
             updateRecordingUI(false)
 
             if (audio != null && audio.isNotEmpty()) {
                 val header = audio.take(4).map { it.toInt().toChar() }.joinToString("")
                 Timber.i("InputOverlay: Got ${audio.size} bytes (${audio.size / 32000}s), header='$header'")
-                onAudioQuery(audio)
+                transitionToConfirm(audio)
             } else {
                 Timber.w("InputOverlay: Recording failed or empty")
+                resetVoiceState()
             }
         }
     }
 
+    private fun stopRecordingToConfirm() {
+        hapticPulse()
+        audioRecorder.stopRecording()
+        // The coroutine in startRecording will pick up the partial audio and transition
+    }
+
+    private fun transitionToConfirm(audio: ByteArray) {
+        pendingAudioData = audio
+        voiceState = VoiceState.CONFIRM
+        hapticPulse()
+        
+        sparkleButton.setTextColor(Color.parseColor("#EA580C")) // Orange star
+        startPulse()
+        
+        inputField.hint = "Tap \uD83D\uDFE0 to send"
+        inputField.isEnabled = false
+        syncVoiceSendButton()
+    }
+
+    private fun sendPendingAudio() {
+        val audio = pendingAudioData
+        if (audio != null && audio.isNotEmpty()) {
+            setThinking(true)
+            dismissSubMenus()
+            onAudioQuery(audio)
+        }
+        resetVoiceState()
+    }
+
+    private fun resetVoiceState() {
+        voiceState = VoiceState.IDLE
+        pendingAudioData = null
+        stopPulse()
+        inputField.hint = "Δ \uD83D\uDC7E ∇"
+        inputField.isEnabled = true
+        sparkleButton.setTextColor(colorAccent)
+        syncVoiceSendButton()
+    }
+
     private fun hapticPulse() {
         try {
-            val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                vibrator?.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
+            val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                vibrator?.vibrate(android.os.VibrationEffect.createOneShot(50, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
             } else {
                 @Suppress("DEPRECATION")
                 vibrator?.vibrate(50)
@@ -438,12 +603,6 @@ class InputOverlay(
         } catch (e: Exception) {
             Timber.w(e, "Haptic failed")
         }
-    }
-
-    private fun stopRecording() {
-        // Stop the AudioRecorder mid-recording (triggers early return with what was captured)
-        audioRecorder.stopRecording()
-        // The coroutine in startRecording will pick up the partial audio and send it
     }
 
     fun setThinking(thinking: Boolean) {
@@ -516,7 +675,7 @@ class InputOverlay(
     }
 
     fun cleanup() {
-        stopRecording()
+        audioRecorder.stopRecording()
         pulseAnimator?.cancel()
     }
 

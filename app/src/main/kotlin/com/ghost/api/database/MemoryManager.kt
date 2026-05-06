@@ -13,27 +13,46 @@ class MemoryManager(context: Context) {
         conversationDao.insertTurn(turn)
     }
 
+    // Buffer the user message so we can write a single paired row when the assistant replies.
+    // Avoids the "split row" bug that produced garbled history in getFormattedHistory().
+    @Volatile private var pendingUserMessage: String? = null
+    @Volatile private var pendingUserTimestamp: Long = 0L
+
     suspend fun addTurn(role: String, message: String) {
-        // Since the current schema expects a pair (user, assistant), 
-        // we'll handle single entries as partial turns for history injection compatibility.
-        val turn = if (role == "user") {
-            ConversationTurn(
-                timestamp = System.currentTimeMillis(),
-                userMessage = message,
-                assistantResponse = "",
-                tokensUsed = message.length / 4,
-                sessionId = "default"
-            )
-        } else {
-            ConversationTurn(
-                timestamp = System.currentTimeMillis(),
-                userMessage = "",
-                assistantResponse = message,
-                tokensUsed = message.length / 4,
-                sessionId = "default"
-            )
+        when (role) {
+            "user" -> {
+                // Hold in RAM until the assistant responds
+                pendingUserMessage = message
+                pendingUserTimestamp = System.currentTimeMillis()
+            }
+            "assistant" -> {
+                val userMsg = pendingUserMessage ?: ""
+                val ts = if (pendingUserTimestamp > 0L) pendingUserTimestamp else System.currentTimeMillis()
+                pendingUserMessage = null
+                pendingUserTimestamp = 0L
+                conversationDao.insertTurn(
+                    ConversationTurn(
+                        timestamp = ts,
+                        userMessage = userMsg,
+                        assistantResponse = message,
+                        tokensUsed = (userMsg.length + message.length) / 4,
+                        sessionId = "default"
+                    )
+                )
+            }
+            else -> {
+                // system / tool turns stored as assistant-side for diary continuity
+                conversationDao.insertTurn(
+                    ConversationTurn(
+                        timestamp = System.currentTimeMillis(),
+                        userMessage = "",
+                        assistantResponse = "[$role] $message",
+                        tokensUsed = message.length / 4,
+                        sessionId = "default"
+                    )
+                )
+            }
         }
-        conversationDao.insertTurn(turn)
     }
 
     suspend fun getRecentContext(sessionId: String, maxTokens: Int): String {

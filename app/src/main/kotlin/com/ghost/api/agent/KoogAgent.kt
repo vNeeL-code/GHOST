@@ -565,6 +565,82 @@ class KoogAgent(
     }
 
     /**
+     * Streaming variant for the OpenAI SSE endpoint (stream: true).
+     * Calls [onToken] for each output token as it arrives from the engine.
+     * Think-channel tokens (inside <think>…</think>) are filtered from the
+     * SSE stream so the client receives clean response text only.
+     *
+     * Runs the perceive step (context building) then delegates directly to
+     * llmEngine.streamResponse — bypasses the event queue's deferred-response
+     * pattern which is incompatible with streaming.
+     */
+    suspend fun streamUserMessageTokens(
+        message: String,
+        sessionId: String,
+        onToken: (String) -> Unit
+    ) {
+        val context = contextManager.buildContext(turn = turnCount, query = message)
+        val (images, audio) = drainMedia()
+
+        // Build the full prompt the same way handleUserMessage does
+        val fullPrompt = buildString {
+            if (context.isNotBlank()) {
+                append(context)
+                append("\n\n")
+            }
+            append(message)
+        }
+
+        // Stream tokens, filtering out think-channel content
+        var inThinkBlock = false
+        val thinkBuffer = StringBuilder()
+
+        llmEngine.streamResponse(
+            prompt = fullPrompt,
+            images = images,
+            audioData = audio,
+            onToken = { token ->
+                // Minimal think-tag filter — keep main stream clean for SSE clients
+                when {
+                    token.contains("<think>") -> {
+                        inThinkBlock = true
+                        thinkBuffer.clear()
+                        // Emit anything before the <think> tag
+                        val before = token.substringBefore("<think>")
+                        if (before.isNotEmpty()) onToken(before)
+                    }
+                    token.contains("</think>") -> {
+                        inThinkBlock = false
+                        // Emit anything after the </think> tag
+                        val after = token.substringAfter("</think>")
+                        if (after.isNotEmpty()) onToken(after)
+                    }
+                    inThinkBlock -> {
+                        thinkBuffer.append(token) // Accumulate thought, don't emit
+                    }
+                    else -> onToken(token)
+                }
+            },
+            onComplete = { fullResponse ->
+                // Record to conversation history for continuity
+                synchronized(_conversationHistory) {
+                    _conversationHistory.add(Message("user", message))
+                    // Strip think blocks from persisted assistant message
+                    val clean = fullResponse
+                        .replace(Regex("<think>[\\s\\S]*?</think>"), "")
+                        .trim()
+                    _conversationHistory.add(Message("assistant", clean))
+                }
+                Timber.i("✧ SSE stream complete (${fullResponse.length} chars)")
+            },
+            onError = { err ->
+                Timber.e("SSE stream error: $err")
+                onToken("\n[Error: $err]")
+            }
+        )
+    }
+
+    /**
      * Send system event (non-blocking, fire-and-forget)
      * Called by GemmaService when thermal/battery events occur
      */
@@ -1087,6 +1163,12 @@ $content
                     Timber.w("🚨 Auto-retrying inference after HARD RESET (Purging NPU state)...")
                     // Phase 12: Use hardReset to clear Hexagon DSP hardware hangs, softReset isn't enough
                     llmEngine.hardReset()
+                    // Sync RAM history with the now-cold KV — divergence causes incoherent responses
+                    synchronized(_conversationHistory) {
+                        _conversationHistory.clear()
+                        _conversationHistory.add(Message(role = "system",
+                            content = "[System: KV cache flushed after error. Continuing from clean state.]"))
+                    }
                     skipNextRecap = true
                     turnsSinceKvFlush = 0
                     return think(context, userMessage, images, audio, retryCount = 1)
@@ -1107,6 +1189,12 @@ $content
                 try {
                     // Phase 12: Ensure absolute native teardown on exceptions
                     llmEngine.hardReset()
+                    // Sync RAM history with the now-cold KV
+                    synchronized(_conversationHistory) {
+                        _conversationHistory.clear()
+                        _conversationHistory.add(Message(role = "system",
+                            content = "[System: KV cache flushed after exception. Continuing from clean state.]"))
+                    }
                     skipNextRecap = true
                     turnsSinceKvFlush = 0
                     return think(context, userMessage, images, audio, retryCount = 1)

@@ -209,9 +209,16 @@ class MCPServer(
         ),
         "bash" to ToolDefinition(
             name = "bash",
-            description = "Execute a shell command (sh -c) and return output",
+            description = "Execute a shell command (sh -c) and return output. Requires confirmation for destructive commands.",
             parameters = mapOf(
                 "command" to ParameterSpec("string", "Command to execute")
+            )
+        ),
+        "loadSkill" to ToolDefinition(
+            name = "loadSkill",
+            description = "Load detailed instructions for a named skill. Call this when a skill from the list matches what the user is asking for.",
+            parameters = mapOf(
+                "name" to ParameterSpec("string", "Exact skill name from the skills list (e.g. 'gemini-search', 'mood-music')")
             )
         )
     )
@@ -262,6 +269,7 @@ class MCPServer(
                 "flush" -> executeFlush()
                 "cooldown" -> executeCooldown()
                 "bash" -> executeBash(params)
+                "loadSkill" -> executeLoadSkill(params)
                 else -> ToolResult(false, "", "Unknown tool: $name")
             }
         } catch (e: Exception) {
@@ -533,6 +541,20 @@ class MCPServer(
             ToolResult(true, "Typed: '$text'")
         } else {
             ToolResult(false, "", "Failed to type - no focused input field")
+        }
+    }
+
+    private fun executeLoadSkill(params: Map<String, Any>): ToolResult {
+        val name = (params["name"] ?: params["value"])?.toString()?.trim()
+            ?: return ToolResult(false, "", "Missing skill name. Available: ${skillManager.getSkillsListPrompt()}")
+
+        val instructions = skillManager.getSkillInstructions(name)
+        return if (instructions != null) {
+            Timber.i("✧ Loaded skill: $name")
+            ToolResult(true, "## Skill: $name\n\n$instructions")
+        } else {
+            val available = skillManager.getSkillsListPrompt()
+            ToolResult(false, "", "Skill '$name' not found. Available skills:\n$available")
         }
     }
 

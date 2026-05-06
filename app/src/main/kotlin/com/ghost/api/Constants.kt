@@ -54,4 +54,16 @@ object Constants {
 
     // API Server
     const val API_PORT = 8080
+    /**
+     * Shared secret for the local REST API (X-Ghost-Token header).
+     * TODO: Generate this at first launch and persist to SharedPreferences/Keystore
+     * so each install has a unique token. This constant is the bootstrap value.
+     */
+    const val API_TOKEN = "ghost-local-token-changeme"
+
+    // Bubble API
+    /** Notification channel ID for the chat bubble. Separate from the service channel
+     *  so setAllowBubbles(true) can be scoped only to this channel. */
+    const val CHANNEL_ID_BUBBLE = "gemma_bubble_channel"
+    const val NOTIFICATION_ID_BUBBLE = 2
 }

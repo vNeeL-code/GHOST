@@ -92,10 +92,10 @@ class SkillManager(private val context: Context) {
             // Trigger a soft reset so the new skill appears in the next turn.
             // No need for reflection — softReset marks the engine for reset on next query.
             try {
-                val eng = GemmaService.instance?.engine
+                val service = GemmaService.instance
+                val eng = service?.engine
                 if (eng != null) {
-                    @OptIn(DelicateCoroutinesApi::class)
-                    GlobalScope.launch(Dispatchers.Default) {
+                    service.serviceScope.launch(Dispatchers.Default) {
                         try {
                             eng.softReset("")
                         } catch (_: Exception) {}

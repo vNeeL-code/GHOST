@@ -13,7 +13,9 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel as KChannel
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import timber.log.Timber
 import java.util.UUID
 
@@ -28,7 +30,34 @@ class ApiServer(
     fun start() {
         server = embeddedServer(Netty, port = Constants.API_PORT) {
             routing {
+
+                // ── Auth helper ───────────────────────────────────────────────
+                // All routes except the browser chat UI require X-Ghost-Token or
+                // Authorization: Bearer <token> matching Constants.API_TOKEN.
+                fun ApplicationCall.isAuthorized(): Boolean {
+                    val header = request.header("X-Ghost-Token")
+                        ?: request.header("Authorization")?.removePrefix("Bearer ")?.trim()
+                    return header == Constants.API_TOKEN
+                }
+
+                // ── OpenAI models list (required by Claude Code / openai clients) ──
+                get("/v1/models") {
+                    if (!call.isAuthorized()) {
+                        call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Invalid or missing X-Ghost-Token"))
+                        return@get
+                    }
+                    val models = mapOf("object" to "list", "data" to listOf(
+                        mapOf("id" to "gemma", "object" to "model", "owned_by" to "ghost-local",
+                              "created" to 0)
+                    ))
+                    call.respondText(gson.toJson(models), ContentType.Application.Json)
+                }
+
                 post("/api/generate") {
+                    if (!call.isAuthorized()) {
+                        call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Invalid or missing X-Ghost-Token"))
+                        return@post
+                    }
                     try {
                         val request = call.receiveText()
                         val parsed = gson.fromJson(request, Map::class.java)
@@ -60,76 +89,107 @@ class ApiServer(
                     }
                 }
                 
-                // STANDARD OPENAI-COMPATIBLE ENDPOINT FOR OPENCLAW / HONCHO
+                // STANDARD OPENAI-COMPATIBLE ENDPOINT FOR OPENCLAW / CLAUDE CODE / TERMUX
                 post("/v1/chat/completions") {
+                    if (!call.isAuthorized()) {
+                        call.respond(HttpStatusCode.Unauthorized,
+                            mapOf("error" to mapOf("message" to "Invalid or missing X-Ghost-Token",
+                                "type" to "invalid_request_error", "code" to 401)))
+                        return@post
+                    }
                     try {
                         val request = call.receiveText()
                         val parsed = gson.fromJson(request, Map::class.java)
-                        
+
                         @Suppress("UNCHECKED_CAST")
                         val messages = parsed["messages"] as? List<Map<String, Any>> ?: emptyList()
-                        
-                        // Extract the query. For our stateful agent, we ideally just want the latest user message
-                        // since we maintain our own KV cache and SQLite history natively.
-                        val lastMessage = messages.lastOrNull()
-                        val content = lastMessage?.get("content")?.toString() ?: ""
-                        
-                        // Fallback: If it's a completely stateless external request, we might need all messages.
-                        // But Oracle_OS is inherently stateful. Let's just pass the payload contents.
-                        val promptBuilder = StringBuilder()
-                        if (messages.size > 1) {
-                            // If they passed history, let's concatenate loosely just in case
-                            for (msg in messages) {
+                        val stream = parsed["stream"] as? Boolean ?: false
+
+                        // Extract prompt — pass full history if provided, else just last message
+                        val prompt = if (messages.size > 1) {
+                            messages.joinToString("\n") { msg ->
                                 val role = msg["role"]?.toString() ?: "user"
                                 val text = msg["content"]?.toString() ?: ""
-                                promptBuilder.append("[\${role.uppercase()}]: \$text\n")
+                                "[${role.uppercase()}]: $text"
+                            }.trim()
+                        } else {
+                            messages.lastOrNull()?.get("content")?.toString() ?: ""
+                        }
+
+                        val modelId = parsed["model"]?.toString() ?: "gemma"
+                        val completionId = "chatcmpl-${UUID.randomUUID()}"
+                        val created = System.currentTimeMillis() / 1000
+
+                        if (stream) {
+                            // ── SSE Streaming (Claude Code / openai stream:true) ──────
+                            call.response.header(HttpHeaders.ContentType, "text/event-stream")
+                            call.response.header(HttpHeaders.CacheControl, "no-cache")
+                            call.response.header("X-Accel-Buffering", "no")
+                            call.respondTextWriter(contentType = ContentType.Text.EventStream) {
+                                val tokenChannel = KChannel<String>(capacity = 256)
+                                // Launch inference in background, feed tokens into channel
+                                launch(Dispatchers.Default) {
+                                    try {
+                                        gemmaService.streamQueryTokens(prompt) { token ->
+                                            tokenChannel.trySend(token)
+                                        }
+                                    } finally {
+                                        tokenChannel.close()
+                                    }
+                                }
+                                // Drain channel and write SSE chunks
+                                for (token in tokenChannel) {
+                                    val chunk = gson.toJson(mapOf(
+                                        "id" to completionId, "object" to "chat.completion.chunk",
+                                        "created" to created, "model" to modelId,
+                                        "choices" to listOf(mapOf(
+                                            "index" to 0,
+                                            "delta" to mapOf("content" to token),
+                                            "finish_reason" to null
+                                        ))
+                                    ))
+                                    write("data: $chunk\n\n")
+                                    flush()
+                                }
+                                // Final done sentinel
+                                val doneChunk = gson.toJson(mapOf(
+                                    "id" to completionId, "object" to "chat.completion.chunk",
+                                    "created" to created, "model" to modelId,
+                                    "choices" to listOf(mapOf(
+                                        "index" to 0, "delta" to emptyMap<String,Any>(),
+                                        "finish_reason" to "stop"
+                                    ))
+                                ))
+                                write("data: $doneChunk\n\n")
+                                write("data: [DONE]\n\n")
+                                flush()
                             }
                         } else {
-                            promptBuilder.append(content)
-                        }
-                        
-                        val prompt = promptBuilder.toString().trim()
-                        val sessionId = "openclaw_session"
-
-                        Timber.d("OpenAI API: \${prompt.take(50)}...")
-
-                        val aiResponse = withContext(Dispatchers.Default) {
-                            gemmaService.processQuery(prompt, sessionId) ?: "Error: No response generated"
-                        }
-
-                        // Build OpenAI Schema conformant response
-                        val responseMap = mapOf(
-                            "id" to "chatcmpl-\${UUID.randomUUID()}",
-                            "object" to "chat.completion",
-                            "created" to (System.currentTimeMillis() / 1000),
-                            "model" to (parsed["model"]?.toString() ?: "gemma-local"),
-                            "choices" to listOf(
-                                mapOf(
+                            // ── Standard blocking response ────────────────────────────
+                            val aiResponse = withContext(Dispatchers.Default) {
+                                gemmaService.processQuery(prompt, "api_session") ?: "Error: No response"
+                            }
+                            val responseMap = mapOf(
+                                "id" to completionId, "object" to "chat.completion",
+                                "created" to created, "model" to modelId,
+                                "choices" to listOf(mapOf(
                                     "index" to 0,
-                                    "message" to mapOf(
-                                        "role" to "assistant",
-                                        "content" to aiResponse
-                                    ),
+                                    "message" to mapOf("role" to "assistant", "content" to aiResponse),
                                     "finish_reason" to "stop"
+                                )),
+                                "usage" to mapOf(
+                                    "prompt_tokens" to prompt.length / 4,
+                                    "completion_tokens" to aiResponse.length / 4,
+                                    "total_tokens" to (prompt.length + aiResponse.length) / 4
                                 )
-                            ),
-                            "usage" to mapOf(
-                                "prompt_tokens" to prompt.length / 4,
-                                "completion_tokens" to aiResponse.length / 4,
-                                "total_tokens" to (prompt.length + aiResponse.length) / 4
                             )
-                        )
-
-                        call.respondText(gson.toJson(responseMap), ContentType.Application.Json)
+                            call.respondText(gson.toJson(responseMap), ContentType.Application.Json)
+                        }
                     } catch (e: Exception) {
                         Timber.e(e, "OpenAI API error")
                         val errorJson = gson.toJson(mapOf(
-                            "error" to mapOf(
-                                "message" to (e.message ?: "Unknown error"),
-                                "type" to "server_error",
-                                "code" to 500
-                            )
-                        ))
+                            "error" to mapOf("message" to (e.message ?: "Unknown error"),
+                                "type" to "server_error", "code" to 500)))
                         call.respondText(errorJson, ContentType.Application.Json, HttpStatusCode.InternalServerError)
                     }
                 }
@@ -334,7 +394,7 @@ private val chatHtml = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>✦ Gemma Terminal</title>
+    <title>✧ Gemma Terminal</title>
     <style>
         * { box-sizing: border-box; }
         body { font-family: 'SF Mono', 'Fira Code', monospace; margin: 0; padding: 0; background: #0a0a0a; color: #e0e0e0; height: 100vh; display: flex; flex-direction: column; }
@@ -348,7 +408,7 @@ private val chatHtml = """
         .message { padding: 12px 16px; border-radius: 12px; max-width: 90%; line-height: 1.5; word-wrap: break-word; white-space: pre-wrap; font-size: 0.9em; }
         .user { background: #1e3a5f; color: #93c5fd; align-self: flex-end; border: 1px solid #3b82f633; }
         .bot { background: #1a1a1a; color: #e0e0e0; align-self: flex-start; border: 1px solid #ff6b0033; }
-        .bot::before { content: '✦ '; color: #ff6b00; }
+        .bot::before { content: '✧ '; color: #ff6b00; }
         .error { background: #2d1b1b; color: #fca5a5; align-self: center; border: 1px solid #dc262633; font-size: 0.85em; }
         .thinking { background: #1a1a1a; color: #666; align-self: flex-start; border: 1px dashed #333; animation: pulse 1.5s infinite; }
         .internal-thought { 
@@ -384,7 +444,7 @@ private val chatHtml = """
 <body>
     <div id="chat-container">
         <div id="header">
-            <h1>✦ Gemma</h1>
+            <h1>✧ Gemma</h1>
             <span id="status" class="status-err">...</span>
         </div>
         <div id="messages"></div>
