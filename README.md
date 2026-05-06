@@ -60,7 +60,7 @@ Tool use: web search, app launch, clipboard, alarms, system info — all on-devi
 
 1. Download the latest APK from [Releases](https://github.com/vNeeL-code/ASI/releases).  
 2. Install and grant permissions (overlay, notifications, accessibility).  
-3. Download a [Gemma 4 model](https://huggingface.co/google/gemma-2b-it-litert-lm) (via Google AI Edge Gallery or manually place `.litertlm` variant in app storage via drag and drop.).  
+3. Download a [Gemma 4 model](https://huggingface.co/google/gemma-4-E2B-it) (via Google AI Edge Gallery or manually place `.litertlm` variant in app storage via drag and drop.).  
 4. **Shake to summon.**  
 
 ---
