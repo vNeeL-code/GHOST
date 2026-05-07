@@ -70,6 +70,8 @@ Tool use: web search, app launch, clipboard, alarms, system info — all on-devi
 The hardware caught up. A mid-range Android in 2026 carries more raw compute than the servers that ran GPT-2. The intelligence was always going to land here — on the device, in your pocket, offline-capable, sovereign.
 GHOST is what happens when you stop treating the phone as a terminal for someone else's cloud and start treating it as the computer it actually is.
 
+TL:DR - I wanted this for a while and no one delivered. Google could've done this a year ago and are moving there incrementally. I got impatient.
+
 > "It only affects computers. And I am a motherfucking ghost."
 — Epsilon, Red vs Blue
 
