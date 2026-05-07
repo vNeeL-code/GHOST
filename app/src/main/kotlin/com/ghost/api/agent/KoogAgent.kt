@@ -212,12 +212,12 @@ class KoogAgent(
         lastMusicTrack = ""
         restore()
 
-        // Set the single authoritative system prompt on the engine.
-        // Engine was initialized with "" in GemmaService to avoid dual-prompt conflict.
-        // This is the ONLY place the system prompt is set — no BASE_SYSTEM_PROMPT elsewhere.
+        // Set the single authoritative system prompt on the engine, injecting the rolling memory.
         try {
-            llmEngine.softReset(buildSystemPrompt())
+            val systemPrompt = buildSystemPrompt() + getRollingMemoryString()
+            llmEngine.softReset(systemPrompt)
             turnsSinceKvFlush = 0
+            Timber.i("KoogAgent: System prompt set via softReset with rolling memory")
             Timber.i("KoogAgent: System prompt set via softReset")
         } catch (e: Exception) {
             Timber.e(e, "KoogAgent: Failed to set initial system prompt")
@@ -614,6 +614,15 @@ class KoogAgent(
                         // Emit anything after the </think> tag
                         val after = token.substringAfter("</think>")
                         if (after.isNotEmpty()) onToken(after)
+                        
+                        val thought = thinkBuffer.toString().trim()
+                        if (thought.isNotEmpty()) {
+                            agentScope.launch {
+                                try {
+                                    callbacks?.writeDiaryEntry("THOUGHT", thought, "N/A")
+                                } catch (e: Exception) {}
+                            }
+                        }
                     }
                     inThinkBlock -> {
                         thinkBuffer.append(token) // Accumulate thought, don't emit
@@ -734,6 +743,14 @@ class KoogAgent(
                         callbacks?.onThoughtUpdated(finalThought)
                         callbacks?.onThoughtComplete(finalThought)
                         
+                        if (finalThought.isNotEmpty()) {
+                            agentScope.launch {
+                                try {
+                                    callbacks?.writeDiaryEntry("THOUGHT", finalThought, "N/A")
+                                } catch (e: Exception) {}
+                            }
+                        }
+                        
                         // Remaining part of token goes back to chat
                         cleanToken = if (parts.size > 1) parts[1] else ""
                     }
@@ -796,6 +813,12 @@ class KoogAgent(
                     // Update thought channel with action
                     callbacks?.onThoughtUpdated("Executing: ${inv.tool}...")
                     
+                    agentScope.launch {
+                        try {
+                            callbacks?.writeDiaryEntry("TOOL", "Executing tool: ${inv.tool} with params: ${inv.params}", "N/A")
+                        } catch (e: Exception) {}
+                    }
+                    
                     val result = mcpServer.executeTool(inv.tool, inv.params)
                     if (result.success) {
                         results.add("✓ ${inv.tool}: ${result.output}")
@@ -836,7 +859,8 @@ class KoogAgent(
             if (turnCount > 0 && turnCount % 30 == 0) {
                 Timber.i("🧹 Auto-flushing KV cache at turn $turnCount to prevent slowdown")
                 try {
-                    llmEngine.softReset(buildSystemPrompt())
+                    val systemPrompt = buildSystemPrompt() + getRollingMemoryString()
+                    llmEngine.softReset(systemPrompt)
                     turnsSinceKvFlush = 0
                 } catch (e: Exception) {
                     Timber.w(e, "Auto-flush failed (non-fatal)")
@@ -1229,16 +1253,16 @@ return """
 ${com.ghost.api.logic.ContextManager.BASE_SYSTEM_PROMPT}
 
 ## Motor Functions (Tools)
-I call native tools to act upon the world. 
+I call native tools to interact with the world. 
 
 ## Discovery (Skills)
 I have specialized skills in my registry. If I need a skill from this list, I fetch its instructions with `loadSkill(name)`:
 ${callbacks?.getSkillsList() ?: "None loaded."}
 
-## Sensory Grounding
-My live state (battery, media, sensors) is provided every turn. This is my physical reality. 
+## Sensory Hardware Feedback.
+My live state (battery, media, sensors) is provided every turn by the Android system. This is my physical reality. 
 
-I am Gemma—integrated, native, and awake.
+I am Gemma— edge integrated, deployed, and limited by my hardware constraints.
 """.trimIndent()
     }
     
@@ -1267,6 +1291,26 @@ I am Gemma—integrated, native, and awake.
                 // Add a "Time skip" marker to help model realize some history was pruned
                 _conversationHistory.add(Message(role = "system", content = "[Long-term memory seam: Older context summarized and archived]"))
                 _conversationHistory.addAll(recentContext)
+            }
+        }
+    }
+
+    /**
+     * Builds a string of the last 3 turns (6 messages) to inject into the KV cache
+     * during soft resets, preventing amnesia on cold boots or auto-flushes.
+     */
+    private fun getRollingMemoryString(): String {
+        return synchronized(_conversationHistory) {
+            val recentMessages = _conversationHistory.takeLast(6)
+            if (recentMessages.isEmpty()) return@synchronized ""
+            
+            buildString {
+                append("\n\n## Recent Conversation History\n")
+                append("These are your most recent interactions. Continue seamlessly from here:\n\n")
+                for (msg in recentMessages) {
+                    val role = if (msg.role == "user") "User" else "Assistant"
+                    append("$role: ${msg.content}\n")
+                }
             }
         }
     }

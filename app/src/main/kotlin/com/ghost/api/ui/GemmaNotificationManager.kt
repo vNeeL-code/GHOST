@@ -75,7 +75,22 @@ class GemmaNotificationManager(private val context: Context) {
             // Clean text for TTS (strip think tags, tool markers)
             val ttsText = cleanForTTS(response)
 
-            // Build notification with action buttons
+            // Build Bubble Metadata to activate the floating presence
+            val targetIntent = Intent(context, com.ghost.api.BubbleActivity::class.java)
+            val bubbleIntent = PendingIntent.getActivity(
+                context, 0, targetIntent,
+                PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            
+            val bubbleData = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                Notification.BubbleMetadata.Builder(bubbleIntent, android.graphics.drawable.Icon.createWithResource(context, android.R.drawable.ic_dialog_info))
+                    .setDesiredHeight(600)
+                    .setAutoExpandBubble(true)
+                    .setSuppressNotification(false)
+                    .build()
+            } else null
+
+            // Build notification with action buttons and bubble metadata
             val notification = builder
                 .setSubText("Agentic Gemma Inference")
                 .setContentTitle("Δ 👾 ∇")
@@ -89,6 +104,11 @@ class GemmaNotificationManager(private val context: Context) {
                 .setOngoing(false)     // Can swipe away now
                 .addAction(buildCopyAction(response))
                 .addAction(buildReadAgainAction(ttsText))
+                .apply {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q && bubbleData != null) {
+                        setBubbleMetadata(bubbleData)
+                    }
+                }
                 .build()
 
             notificationManager.notify(RESPONSE_NOTIF_ID, notification)

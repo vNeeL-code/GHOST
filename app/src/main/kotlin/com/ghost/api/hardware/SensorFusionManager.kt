@@ -107,9 +107,11 @@ data class SystemState(
 )
 
 data class NetworkState(
+    val isOnline: Boolean,
     val wifiConnected: Boolean,
     val wifiSsid: String?,
-    val wifiSignalPercent: Int   // 0-100
+    val wifiSignalPercent: Int,  // 0-100
+    val type: String             // "WiFi", "Cell", "None"
 )
 
 data class EnvironmentState(
@@ -228,8 +230,6 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
         var current = slowPollState ?: _contextState.value
         
         current = current.copy(
-            network = getNetworkState(),
-            connectivity = getConnectivityState(),
             system = getSystemState(), // Includes storage (slow)
             motion = getMotionState()   // Includes location (slow/heavy)
         )
@@ -246,6 +246,8 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
             timestamp = System.currentTimeMillis(),
             battery = getBatteryState(),
             audio = getAudioState(),
+            network = getNetworkState(),       // Moved to fast loop (5s)
+            connectivity = getConnectivityState(), // Moved to fast loop (5s)
             environment = getEnvironmentState() // Official Thermal API
         )
         _contextState.value = newContext
@@ -351,7 +353,7 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
             battery = BatteryState(50, false, 25f, 3.7f, 0),
             audio = AudioState(false, 0, 0, 0, 0, 15, null),
             system = SystemState(128, 50, 0, 0, 0, 0f, 0f, 0, 0, 30, Build.MODEL, Build.MANUFACTURER, Build.VERSION.RELEASE),
-            network = NetworkState(false, null, 0),
+            network = NetworkState(false, false, null, 0, "None"),
             environment = EnvironmentState(null, null, null, null, null, null, null),
             connectivity = ConnectivityState(null, null, null, false, false, null),
             motion = MotionState(null, null, null, false, null, null, null, null)
@@ -487,45 +489,50 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
 
     private fun getNetworkState(): NetworkState {
         return try {
-            val wm = wifiManager ?: return NetworkState(false, null, 0)
+            val cm = connectivityManager ?: return NetworkState(false, false, null, 0, "None")
+            val wm = wifiManager ?: return NetworkState(false, false, null, 0, "None")
+            
+            val activeNetwork = cm.activeNetwork
+            val capabilities = cm.getNetworkCapabilities(activeNetwork)
+            
+            val isOnline = capabilities?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+            val isWifi = capabilities?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) == true
+            val isCell = capabilities?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) == true
+            
+            val type = when {
+                isWifi -> "WiFi"
+                isCell -> "Cell"
+                isOnline -> "Ethernet"
+                else -> "None"
+            }
+
             @Suppress("DEPRECATION")
             val wifiInfo = wm.connectionInfo
-
-            val isConnected = wm.isWifiEnabled && wifiInfo.networkId != -1
-            val ssid = if (isConnected) {
-                wifiInfo.ssid?.removeSurrounding("\"") ?: "Unknown"
+            val wifiConnected = isWifi && wifiInfo.networkId != -1
+            val ssid = if (wifiConnected) {
+                wifiInfo.ssid?.removeSurrounding("\"")?.takeIf { it != "<unknown ssid>" } ?: "Connected"
             } else null
 
             // Signal strength as percentage (0-100)
-            val signalPercent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                // Modern API (31+)
-                val network = connectivityManager?.activeNetwork
-                val capabilities = connectivityManager?.getNetworkCapabilities(network)
-                if (capabilities?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) == true) {
-                    // We still need WifiInfo for signal level, but it's restricted
+            val signalPercent = if (wifiConnected) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    wm.calculateSignalLevel(wifiInfo.rssi) * 100 / 4
+                } else {
                     @Suppress("DEPRECATION")
-                    val wifiInfo = wm.connectionInfo
-                    wm.calculateSignalLevel(wifiInfo.rssi) * 100 / 4 // Scale 0-4 to 0-100
-                } else 0
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                @Suppress("DEPRECATION")
-                val wifiInfo = wm.connectionInfo
-                wm.calculateSignalLevel(wifiInfo.rssi) * 100 / wm.maxSignalLevel.coerceAtLeast(1)
-            } else {
-                @Suppress("DEPRECATION")
-                val wifiInfo = wm.connectionInfo
-                @Suppress("DEPRECATION")
-                WifiManager.calculateSignalLevel(wifiInfo.rssi, 100)
-            }
+                    WifiManager.calculateSignalLevel(wifiInfo.rssi, 100)
+                }
+            } else 0
 
             NetworkState(
-                wifiConnected = isConnected,
+                isOnline = isOnline,
+                wifiConnected = wifiConnected,
                 wifiSsid = ssid,
-                wifiSignalPercent = signalPercent
+                wifiSignalPercent = signalPercent,
+                type = type
             )
         } catch (e: Exception) {
             Timber.e(e, "Network state read failed")
-            NetworkState(false, null, 0)
+            NetworkState(false, false, null, 0, "Error")
         }
     }
 
@@ -623,10 +630,37 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
                 Timber.w("Cell read failed: ${e.message}")
             }
 
-            // Bluetooth - quick check only
+            // Bluetooth - check connection status
             try {
                 bluetoothManager?.adapter?.let { adapter ->
                     btEnabled = adapter.isEnabled
+                    if (btEnabled) {
+                        // Check for connected devices (requires high-level profile check)
+                        val proxyListener = object : android.bluetooth.BluetoothProfile.ServiceListener {
+                            override fun onServiceConnected(profile: Int, proxy: android.bluetooth.BluetoothProfile) {
+                                val devices = proxy.connectedDevices
+                                if (devices.isNotEmpty()) {
+                                    btConnected = true
+                                    btDeviceName = devices[0].name
+                                }
+                                adapter.closeProfileProxy(profile, proxy)
+                            }
+                            override fun onServiceDisconnected(profile: Int) {}
+                        }
+                        
+                        // We do a quick check of common profiles
+                        adapter.getProfileProxy(context, proxyListener, android.bluetooth.BluetoothProfile.A2DP)
+                        adapter.getProfileProxy(context, proxyListener, android.bluetooth.BluetoothProfile.HEADSET)
+                        
+                        // Bonded devices check as fallback for "is something paired and active"
+                        if (!btConnected) {
+                            val bonded = adapter.bondedDevices
+                            if (bonded?.isNotEmpty() == true) {
+                                // This is loose, but better than nothing
+                                // btConnected = true // Only set true if really active
+                            }
+                        }
+                    }
                 }
             } catch (t: Throwable) {
                 Timber.w("BT read failed: ${t.message}")
@@ -842,19 +876,24 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
         sb.append("🧠 RAM: ${ctx.system.ramAvailableMB}MB free / ${ctx.system.ramTotalMB}MB total (${ctx.system.ramUsedPercent}% used)\n")
         sb.append("💿 Storage: ${String.format(java.util.Locale.US, "%.1f", ctx.system.storageFreeGB)}GB free / ${String.format(java.util.Locale.US, "%.1f", ctx.system.storageTotalGB)}GB total\n")
 
-        // Network (WiFi + Cell)
-        val netParts = mutableListOf<String>()
-        if (ctx.network.wifiConnected) {
-            netParts.add("📶 WiFi: ${ctx.network.wifiSsid} (${ctx.network.wifiSignalPercent}%)")
-        }
-        ctx.connectivity.cellType?.let { type ->
-            val signal = ctx.connectivity.cellSignalPercent?.let { " $it%" } ?: ""
-            netParts.add("📱 Cell: $type$signal (${ctx.connectivity.carrierName ?: "Unknown"})")
-        }
-        if (netParts.isEmpty()) {
+        // Network (Unified Online Check)
+        if (!ctx.network.isOnline) {
             sb.append("📵 Network: Offline\n")
         } else {
-            sb.append(netParts.joinToString(" | ") + "\n")
+            val netParts = mutableListOf<String>()
+            if (ctx.network.wifiConnected) {
+                netParts.add("📶 WiFi: ${ctx.network.wifiSsid} (${ctx.network.wifiSignalPercent}%)")
+            }
+            ctx.connectivity.cellType?.let { type ->
+                val signal = ctx.connectivity.cellSignalPercent?.let { " $it%" } ?: ""
+                netParts.add("📱 Cell: $type$signal (${ctx.connectivity.carrierName ?: "Unknown"})")
+            }
+            if (netParts.isEmpty()) {
+                // If it's online but neither WiFi nor Cell reported, it might be Ethernet or VPN
+                sb.append("🌐 Online: ${ctx.network.type}\n")
+            } else {
+                sb.append(netParts.joinToString(" | ") + "\n")
+            }
         }
 
         // Bluetooth

@@ -194,6 +194,33 @@ class ApiServer(
                     }
                 }
                 
+                // TERMUX CLI ENDPOINT
+                post("/query") {
+                    if (!call.isAuthorized()) {
+                        call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Invalid or missing X-Ghost-Token"))
+                        return@post
+                    }
+                    try {
+                        val request = call.receiveText()
+                        val parsed = gson.fromJson(request, Map::class.java)
+                        val message = parsed["message"]?.toString() ?: ""
+                        if (message.isBlank()) {
+                            call.respondText("""{"error": "Missing message field"}""", ContentType.Application.Json, HttpStatusCode.BadRequest)
+                            return@post
+                        }
+                        
+                        val aiResponse = withContext(Dispatchers.Default) {
+                            gemmaService.processQuery(message, "termux_session") ?: "Error: No response generated"
+                        }
+                        
+                        val jsonResponse = gson.toJson(mapOf("response" to aiResponse))
+                        call.respondText(jsonResponse, ContentType.Application.Json)
+                    } catch (e: Exception) {
+                        Timber.e(e, "Termux API error")
+                        call.respondText(gson.toJson(mapOf("error" to (e.message ?: "Unknown error"))), ContentType.Application.Json, HttpStatusCode.InternalServerError)
+                    }
+                }
+                
                 // ... (Keep existing GET routes) ...
                 
                 get("/context") {

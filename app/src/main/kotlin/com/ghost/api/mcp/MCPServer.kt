@@ -220,6 +220,15 @@ class MCPServer(
             parameters = mapOf(
                 "name" to ParameterSpec("string", "Exact skill name from the skills list (e.g. 'gemini-search', 'mood-music')")
             )
+        ),
+        "saveSkill" to ToolDefinition(
+            name = "saveSkill",
+            description = "Learn a new skill/macro dynamically by saving instructions",
+            parameters = mapOf(
+                "name" to ParameterSpec("string", "Name of the new skill"),
+                "description" to ParameterSpec("string", "Short description of what the skill does"),
+                "instructions" to ParameterSpec("string", "The actual prompt/instructions for the skill")
+            )
         )
     )
 
@@ -270,6 +279,7 @@ class MCPServer(
                 "cooldown" -> executeCooldown()
                 "bash" -> executeBash(params)
                 "loadSkill" -> executeLoadSkill(params)
+                "saveSkill" -> executeSaveSkill(params)
                 else -> ToolResult(false, "", "Unknown tool: $name")
             }
         } catch (e: Exception) {
@@ -555,6 +565,19 @@ class MCPServer(
         } else {
             val available = skillManager.getSkillsListPrompt()
             ToolResult(false, "", "Skill '$name' not found. Available skills:\n$available")
+        }
+    }
+
+    private fun executeSaveSkill(params: Map<String, Any>): ToolResult {
+        val name = params["name"]?.toString() ?: return ToolResult(false, "", "Missing skill name")
+        val description = params["description"]?.toString() ?: return ToolResult(false, "", "Missing skill description")
+        val instructions = params["instructions"]?.toString() ?: return ToolResult(false, "", "Missing skill instructions")
+
+        val success = skillManager.saveNewSkill(name, description, instructions)
+        return if (success) {
+            ToolResult(true, "Successfully learned new skill: $name")
+        } else {
+            ToolResult(false, "", "Failed to save skill: $name")
         }
     }
 
