@@ -13,6 +13,7 @@
 ✧ GHOST is not an entertainment chatbot. ✧ Gemma Host is the AI integraition layer (harness) your Android device needed for a fully local integrated assistant features powered by Gemma models.
 Most "on-device AI" is a chatbot with no hardware feedback — it doesn't know what phone it's running on, what time it is, how bright the room is, or what's playing. GHOST does. Every response is grounded in real hardware state: battery, temperature, light, RAM, network, now-playing.
 Personal, device bound, native assistant.
+Even without a model the app still functions as an app launcher, system telemetry display, and camera wallpaper app rolled into one.
 
 > No subscription
 > No data leaves your device
