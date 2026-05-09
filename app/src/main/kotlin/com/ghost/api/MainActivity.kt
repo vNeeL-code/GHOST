@@ -470,24 +470,34 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
     override fun onMessageAdded(message: String, isUser: Boolean, isComplete: Boolean) {
         runOnUiThread {
             if (isUser) {
-                // User messages always add a new bubble
                 chatAdapter.addMessage(ChatMessage(message, isFromUser = true))
                 streamingBubbleActive = false
             } else if (isComplete) {
-                // Final assistant message: add or replace the streaming bubble
                 if (streamingBubbleActive) {
-                    chatAdapter.updateLastMessage(message)
+                    chatAdapter.updateLastMessage(message, true)
                 } else {
-                    chatAdapter.addMessage(ChatMessage(message, isFromUser = false))
+                    // Safety: if we got a complete message but weren't "streaming", 
+                    // check if the last message is already from assistant to avoid double-entry
+                    val lastMsg = chatAdapter.getLastMessage()
+                    if (lastMsg != null && !lastMsg.isFromUser && !lastMsg.isComplete) {
+                        chatAdapter.updateLastMessage(message, true)
+                    } else {
+                        chatAdapter.addMessage(ChatMessage(message, isFromUser = false, isComplete = true))
+                    }
                 }
                 streamingBubbleActive = false
             } else {
                 // Streaming token update
                 if (streamingBubbleActive) {
-                    chatAdapter.updateLastMessage(message)
+                    chatAdapter.updateLastMessage(message, false)
                 } else {
-                    // First token of a new stream - add the bubble, then track it
-                    chatAdapter.addMessage(ChatMessage(message, isFromUser = false))
+                    // First token of a new stream - check if we already have a pending assistant bubble
+                    val lastMsg = chatAdapter.getLastMessage()
+                    if (lastMsg != null && !lastMsg.isFromUser) {
+                        chatAdapter.updateLastMessage(message, false)
+                    } else {
+                        chatAdapter.addMessage(ChatMessage(message, isFromUser = false, isComplete = false))
+                    }
                     streamingBubbleActive = true
                 }
             }

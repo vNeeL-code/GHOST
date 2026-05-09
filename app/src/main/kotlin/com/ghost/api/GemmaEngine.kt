@@ -108,7 +108,6 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                         val conversationConfig = ConversationConfig(
                             samplerConfig = samplerConfig,
                             systemInstruction = if (systemPrompt.isNotBlank()) Contents.of(systemPrompt) else null,
-                            channels = listOf(Channel(channelName = "thought", start = "<think>", end = "</think>")),
                             tools = toolSets.map { tool(it) }
                         )
 

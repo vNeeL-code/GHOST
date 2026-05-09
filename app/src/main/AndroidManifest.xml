@@ -160,7 +160,7 @@
 
         <!-- Launcher Activity (starts service and exits) -->
         <activity
-            android:name=".MainActivity"
+            android:name=".MainActivity" android:resizeableActivity="true" android:supportsPictureInPicture="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density"
             android:windowSoftInputMode="adjustResize"
             android:exported="true">
             <intent-filter>

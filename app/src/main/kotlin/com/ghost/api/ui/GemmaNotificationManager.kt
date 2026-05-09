@@ -83,8 +83,9 @@ class GemmaNotificationManager(private val context: Context) {
             )
             
             val bubbleData = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                Notification.BubbleMetadata.Builder(bubbleIntent, android.graphics.drawable.Icon.createWithResource(context, android.R.drawable.ic_dialog_info))
-                    .setDesiredHeight(600)
+                Notification.BubbleMetadata.Builder(bubbleIntent, 
+                    android.graphics.drawable.Icon.createWithResource(context, android.R.drawable.ic_dialog_info))
+                    .setDesiredHeight(dpToPx(context, 600))
                     .setAutoExpandBubble(true)
                     .setSuppressNotification(false)
                     .build()
@@ -173,5 +174,9 @@ class GemmaNotificationManager(private val context: Context) {
 
     fun cancel() {
         notificationManager.cancel(RESPONSE_NOTIF_ID)
+    }
+
+    private fun dpToPx(context: Context, dp: Int): Int {
+        return (dp * context.resources.displayMetrics.density).toInt()
     }
 }

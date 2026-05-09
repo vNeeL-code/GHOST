@@ -84,13 +84,21 @@ class NetworkToolSet(private val context: Context) : ToolSet {
         @ToolParam(description = "Search query") query: String, 
         @ToolParam(description = "Max results to return") maxResults: Int = 5
     ): Map<String, String> = runBlocking(Dispatchers.IO) {
-        val googleResult = try { fetchGoogleResults(query, maxResults) } catch (_: Exception) { null }
+        Timber.i("Performing silent search for: $query")
+        
+        val googleResult = try { fetchGoogleResults(query, maxResults) } catch (e: Exception) { 
+            Timber.w("Google search failed: ${e.message}")
+            null 
+        }
         if (googleResult != null) return@runBlocking mapOf("result" to "success", "content" to googleResult)
 
-        val ddgResult = try { fetchDuckDuckGoResults(query, maxResults) } catch (_: Exception) { null }
+        val ddgResult = try { fetchDuckDuckGoResults(query, maxResults) } catch (e: Exception) { 
+            Timber.w("DuckDuckGo search failed: ${e.message}")
+            null 
+        }
         if (ddgResult != null) return@runBlocking mapOf("result" to "success", "content" to ddgResult)
 
-        mapOf("result" to "error", "message" to "Search failed for '$query'")
+        mapOf("result" to "error", "message" to "Search failed for '$query'. Try 'googleSearch' to use the browser bubble.")
     }
 
     private fun fetchGoogleResults(query: String, maxResults: Int): String? {
@@ -98,13 +106,18 @@ class NetworkToolSet(private val context: Context) : ToolSet {
         val url = URL("https://www.google.com/search?q=$encoded&num=$maxResults&hl=en")
         val connection = url.openConnection() as HttpURLConnection
         connection.requestMethod = "GET"
-        connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
+        // Modern mobile User-Agent to avoid immediate block
+        connection.setRequestProperty("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1")
+        connection.setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
         connection.setRequestProperty("Accept-Language", "en-US,en;q=0.9")
         connection.connectTimeout = 10000
         connection.readTimeout = 10000
         connection.instanceFollowRedirects = true
 
-        if (connection.responseCode != 200) return null
+        if (connection.responseCode != 200) {
+            Timber.w("Google returned HTTP ${connection.responseCode}")
+            return null
+        }
 
         val html = connection.inputStream.bufferedReader().readText()
         connection.disconnect()
@@ -124,10 +137,11 @@ class NetworkToolSet(private val context: Context) : ToolSet {
 
     private fun fetchDuckDuckGoResults(query: String, maxResults: Int): String? {
         val encoded = URLEncoder.encode(query, "UTF-8")
+        // Use the 'lite' or 'html' version of DDG for easier parsing
         val url = URL("https://html.duckduckgo.com/html/?q=$encoded")
         val connection = url.openConnection() as HttpURLConnection
         connection.requestMethod = "GET"
-        connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) Gemma/1.0")
+        connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
         connection.connectTimeout = 10000
         connection.readTimeout = 10000
 

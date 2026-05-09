@@ -333,9 +333,18 @@ class InputOverlay(
         parent.animate().scaleX(1.4f).scaleY(1.4f).setDuration(250).start()
         
         // Add 4 mini-slots around the button (North, South, East, West)
-        val parentGroup = parent.parent as? ViewGroup ?: return
+        val parentGroup = this@InputOverlay
         val slotSize = dpToPx(32)
         val distance = dpToPx(60)
+
+        // Calculate center of parent relative to this overlay
+        val parentLoc = IntArray(2)
+        parent.getLocationInWindow(parentLoc)
+        val overlayLoc = IntArray(2)
+        this@InputOverlay.getLocationInWindow(overlayLoc)
+        
+        val centerX = (parentLoc[0] - overlayLoc[0]) + parent.width / 2f
+        val centerY = (parentLoc[1] - overlayLoc[1]) + parent.height / 2f
 
         val slots = listOf(
             Pair(0f, -distance.toFloat()), // North
@@ -353,14 +362,17 @@ class InputOverlay(
                 setTextColor(Color.GRAY)
                 gravity = Gravity.CENTER
                 background = createCircleBackground(Color.parseColor("#3D3D3D"))
-                translationX = px + pos.first
-                translationY = py + pos.second
+                
+                layoutParams = LayoutParams(slotSize, slotSize).apply {
+                    gravity = Gravity.TOP or Gravity.START
+                }
+                
+                x = centerX - slotSize / 2f + pos.first
+                y = centerY - slotSize / 2f + pos.second
+                
                 alpha = 0f
                 scaleX = 0f
                 scaleY = 0f
-                layoutParams = LayoutParams(slotSize, slotSize).apply {
-                    gravity = Gravity.CENTER
-                }
                 
                 setOnClickListener {
                     hapticPulse()
@@ -371,8 +383,6 @@ class InputOverlay(
             activeSlots.add(slot)
             slot.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(300).setStartDelay((index * 50).toLong()).start()
         }
-        
-        Toast.makeText(context, "Slot expansion: $parentLabel", Toast.LENGTH_SHORT).show()
     }
 
     private fun expandSparkleSubMenu(parent: View) {

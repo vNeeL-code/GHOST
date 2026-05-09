@@ -98,13 +98,15 @@ class ChatAdapter(private val messages: MutableList<ChatMessage> = mutableListOf
         notifyItemInserted(messages.size - 1)
     }
 
-    fun updateLastMessage(content: String) {
+    fun updateLastMessage(content: String, isComplete: Boolean = false) {
         if (messages.isNotEmpty()) {
             val last = messages.last()
-            messages[messages.size - 1] = last.copy(content = content)
+            messages[messages.size - 1] = last.copy(content = content, isComplete = isComplete)
             notifyItemChanged(messages.size - 1)
         }
     }
+
+    fun getLastMessage(): ChatMessage? = messages.lastOrNull()
     
     fun setMessages(newMessages: List<ChatMessage>) {
         messages.clear()
