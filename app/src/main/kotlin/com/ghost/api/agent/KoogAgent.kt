@@ -167,6 +167,7 @@ class KoogAgent(
     // Thread-safe collections and volatile state for concurrent access
     private val _conversationHistory = java.util.Collections.synchronizedList(mutableListOf<Message>())
     private val _turnCount = java.util.concurrent.atomic.AtomicInteger(0)
+    private var lastThought: String? = null
     private var turnCount: Int get() = _turnCount.get(); set(value) { _turnCount.set(value) }
 
     // Metabolic variables removed (Audit 3.0)
@@ -745,6 +746,7 @@ class KoogAgent(
                         val finalThought = thoughtBuffer.toString().trim()
                         callbacks?.onThoughtUpdated(finalThought)
                         callbacks?.onThoughtComplete(finalThought)
+                        lastThought = finalThought
                         
                         if (finalThought.isNotEmpty()) {
                             agentScope.launch {
@@ -1142,8 +1144,11 @@ $content
         }
         _turnsSinceKvFlush.incrementAndGet()
 
-        val contextBlock = context
+        val contextBlock = contextManager.buildContext(_turnCount.get(), userMessage, lastThought)
         val fullPrompt = "$contextBlock\n$userMessage"
+        
+        // Reset lastThought for the current turn (will be set when turn finishes)
+        lastThought = null
         
         // Proactive Smooth Restart: Flush KV cache if context is saturating (Approx 10 turns)
         // Removed: Proactive Smooth Restart (It was destroying KV cache and causing 20s latency)
@@ -1336,8 +1341,39 @@ I am Gemma— edge integrated, deployed, and limited by my hardware constraints.
     data class ToolInvocation(val tool: String, val params: Map<String, Any>)
 
     private fun extractTools(response: String): List<ToolInvocation> {
-        val toolRegex = Regex("\\[\\[([A-Z_a-z]+)(?::([^\\]]+))?\\]\\]")
-        return toolRegex.findAll(response).map { match ->
+        val invocations = mutableListOf<ToolInvocation>()
+        
+        // 1. Native Gemma 4 Support: <|tool_call|>call:name{key:<|"|>val<|"|>}<tool_call|>
+        val nativeRegex = Regex("<\\|tool_call\\|>call:([A-Z_a-z0-9]+)\\{(.*?)\\}\\s*<tool_call\\|>")
+        nativeRegex.findAll(response).forEach { match ->
+            val name = match.groupValues[1]
+            val argsStr = match.groupValues[2]
+            
+            // Parse arguments with support for <|"|> delimiter
+            val params = mutableMapOf<String, Any>()
+            val argRegex = Regex("(\\w+):(?:<\\|\"\\|>(.*?)<\\|\"\\|>|([^,}]*))")
+            argRegex.findAll(argsStr).forEach { argMatch ->
+                val key = argMatch.groupValues[1]
+                val valWithQuotes = argMatch.groupValues[2]
+                val valRaw = argMatch.groupValues[3]
+                val value = (if (valWithQuotes.isNotEmpty()) valWithQuotes else valRaw).trim()
+                
+                // Type casting
+                val castValue: Any = when {
+                    value.equals("true", true) -> true
+                    value.equals("false", true) -> false
+                    value.toIntOrNull() != null -> value.toInt()
+                    value.toDoubleOrNull() != null -> value.toDouble()
+                    else -> value
+                }
+                params[key] = castValue
+            }
+            invocations.add(ToolInvocation(name, params))
+        }
+
+        // 2. Legacy/GHOST Shorthand Support: [[Tool:Param]]
+        val legacyRegex = Regex("\\[\\[([A-Z_a-z]+)(?::([^\\]]+))?\\]\\]")
+        legacyRegex.findAll(response).forEach { match ->
             val name = match.groupValues[1]
             val paramStr = match.groupValues.getOrNull(2) ?: ""
             val params = if (paramStr.contains("=")) {
@@ -1346,21 +1382,29 @@ I am Gemma— edge integrated, deployed, and limited by my hardware constraints.
                     parts[0].trim() to (parts.getOrNull(1)?.trim() ?: "")
                 }
             } else if (paramStr.isNotBlank()) {
-                // Positional or shorthand: map to "query" or "cmd"
-                mapOf("query" to paramStr.trim(), "cmd" to paramStr.trim(), "name" to paramStr.trim())
+                mapOf("query" to paramStr.trim(), "cmd" to paramStr.trim())
             } else emptyMap()
-            ToolInvocation(name, params)
-        }.toList()
+            invocations.add(ToolInvocation(name, params))
+        }
+
+        return invocations
     }
 
     /**
      * Clean response text for TTS output.
-     * Strips think tags and tool call tags — everything else is speakable.
+     * Strips all internal reasoning and control tokens.
      */
     fun cleanForTTS(response: String): String {
         return response
             .replace(Regex("<think>.*?</think>", RegexOption.DOT_MATCHES_ALL), "")
+            .replace(Regex("<\\|channel>thought.*?</channel\\|>", RegexOption.DOT_MATCHES_ALL), "")
+            .replace(Regex("<\\|tool_call\\|>.*?<tool_call\\|>", RegexOption.DOT_MATCHES_ALL), "")
             .replace(Regex("\\[\\[([A-Z_a-z0-9]+)(?::([^\\]]+))?\\]\\]"), "")
+            .replace("<|channel>thought", "")
+            .replace("<channel|>", "")
+            .replace("<|think|>", "")
+            .replace("<|turn>", "").replace("<turn|>", "")
+            .replace("system", "").replace("user", "").replace("model", "")
             .trim()
     }
 }

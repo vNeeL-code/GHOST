@@ -491,11 +491,13 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
         return try {
             val cm = connectivityManager ?: return NetworkState(false, false, null, 0, "None")
             val wm = wifiManager ?: return NetworkState(false, false, null, 0, "None")
-            
             val activeNetwork = cm.activeNetwork
             val capabilities = cm.getNetworkCapabilities(activeNetwork)
             
-            val isOnline = capabilities?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+            // Audit 4.1: NET_CAPABILITY_VALIDATED ensures the internet is ACTUALLY reachable
+            val isOnline = capabilities?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true &&
+                           capabilities?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+            
             val isWifi = capabilities?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) == true
             val isCell = capabilities?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) == true
             
@@ -506,10 +508,18 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
                 else -> "None"
             }
 
+            // Modern SSID retrieval (if available/permitted)
+            var ssid: String? = null
+            if (isWifi && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // On Q+, SSID is often redacted unless specific permissions are granted.
+                // We'll try to get it from NetworkCapabilities if possible.
+                // For now, fall back to WifiManager but with sanity checks.
+            }
+
             @Suppress("DEPRECATION")
             val wifiInfo = wm.connectionInfo
-            val wifiConnected = isWifi && wifiInfo.networkId != -1
-            val ssid = if (wifiConnected) {
+            val wifiConnected = isWifi && (wifiInfo != null && wifiInfo.networkId != -1)
+            ssid = if (wifiConnected) {
                 wifiInfo.ssid?.removeSurrounding("\"")?.takeIf { it != "<unknown ssid>" } ?: "Connected"
             } else null
 
