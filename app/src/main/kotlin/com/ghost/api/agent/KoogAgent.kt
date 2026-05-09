@@ -602,17 +602,19 @@ class KoogAgent(
             onToken = { token ->
                 // Minimal think-tag filter — keep main stream clean for SSE clients
                 when {
-                    token.contains("<think>") -> {
+                    token.contains("<think>") || token.contains("<|channel>thought") -> {
                         inThinkBlock = true
                         thinkBuffer.clear()
-                        // Emit anything before the <think> tag
-                        val before = token.substringBefore("<think>")
+                        // Emit anything before the marker
+                        val marker = if (token.contains("<think>")) "<think>" else "<|channel>thought"
+                        val before = token.substringBefore(marker)
                         if (before.isNotEmpty()) onToken(before)
                     }
-                    token.contains("</think>") -> {
+                    token.contains("</think>") || token.contains("<channel|>") -> {
                         inThinkBlock = false
-                        // Emit anything after the </think> tag
-                        val after = token.substringAfter("</think>")
+                        // Emit anything after the marker
+                        val marker = if (token.contains("</think>")) "</think>" else "<channel|>"
+                        val after = token.substringAfter(marker)
                         if (after.isNotEmpty()) onToken(after)
                         
                         val thought = thinkBuffer.toString().trim()
@@ -725,18 +727,19 @@ class KoogAgent(
                     var cleanToken = token
                     
                     // Start Markers (Divert to Diary)
-                    if (cleanToken.contains("<think>") || cleanToken.contains("[Monologue]") || cleanToken.contains("🔴")) {
+                    if (cleanToken.contains("<think>") || cleanToken.contains("<|channel>thought") || cleanToken.contains("[Monologue]") || cleanToken.contains("🔴")) {
                         isThinking = true
                         cleanToken = cleanToken
                             .replace("<think>", "")
+                            .replace("<|channel>thought", "")
                             .replace("[Monologue]", "")
                             .replace("🔴", "")
                     }
                     
                     // End Markers (Return to Chat)
-                    if (isThinking && (cleanToken.contains("</think>") || cleanToken.contains("[OUTPUT]") || cleanToken.contains("🟦"))) {
+                    if (isThinking && (cleanToken.contains("</think>") || cleanToken.contains("<channel|>") || cleanToken.contains("[OUTPUT]") || cleanToken.contains("🟦"))) {
                         isThinking = false
-                        val parts = cleanToken.split(Regex("</think>|\\[OUTPUT\\]|🟦"), limit = 2)
+                        val parts = cleanToken.split(Regex("</think>|<channel\\|>|\\[OUTPUT\\]|🟦"), limit = 2)
                         val endThought = parts[0]
                         thoughtBuffer.append(endThought)
                         val finalThought = thoughtBuffer.toString().trim()

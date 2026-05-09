@@ -108,7 +108,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                         val conversationConfig = ConversationConfig(
                             samplerConfig = samplerConfig,
                             systemInstruction = if (systemPrompt.isNotBlank()) Contents.of(systemPrompt) else null,
-                            tools = toolSets.map { tool(it) }
+                            tools = toolSets.map { tool(it) }, channels = listOf(Channel(channelName = "thought", start = "<think>", end = "</think>"), Channel(channelName = "thought", start = "<|channel>thought", end = "<channel|>"))
                         )
 
                         val newConversation = newEngine.createConversation(conversationConfig)
@@ -195,6 +195,9 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                 object : MessageCallback {
                     override fun onMessage(message: Message) {
                         val token = message.toString()
+                        // Debug log to see if 'message' has channel info
+                        Timber.v("DEBUG: onMessage token='$token'") 
+                        
                         if (fullResponse.isEmpty()) {
                             Timber.i("⏱️ First token received after ${System.currentTimeMillis() - startTime}ms")
                         }
@@ -242,7 +245,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                 val config = ConversationConfig(
                     samplerConfig = samplerConfig,
                     systemInstruction = if (systemPrompt.isNotBlank()) Contents.of(systemPrompt) else null,
-                    tools = toolSets.map { tool(it) }
+                    tools = toolSets.map { tool(it) }, channels = listOf(Channel(channelName = "thought", start = "<think>", end = "</think>"), Channel(channelName = "thought", start = "<|channel>thought", end = "<channel|>"))
                 )
                 conversation = eng.createConversation(config)
                 Timber.i("Soft reset complete.")

@@ -8,5 +8,6 @@ data class ChatMessage(
     val isFromUser: Boolean,
     val timestamp: Long = System.currentTimeMillis(),
     val eventType: String? = null,
-    val isComplete: Boolean = true
+    val isComplete: Boolean = true,
+    val thought: String? = null
 )

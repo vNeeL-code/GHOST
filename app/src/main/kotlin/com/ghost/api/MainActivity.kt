@@ -467,36 +467,36 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
 
     // --- GEMMA SERVICE CALLBACKS ---
 
+    private var currentThought: String? = null
+
     override fun onMessageAdded(message: String, isUser: Boolean, isComplete: Boolean) {
         runOnUiThread {
             if (isUser) {
                 chatAdapter.addMessage(ChatMessage(message, isFromUser = true))
                 streamingBubbleActive = false
+                currentThought = null
             } else if (isComplete) {
                 if (streamingBubbleActive) {
-                    chatAdapter.updateLastMessage(message, true)
+                    chatAdapter.updateLastMessage(message, true, currentThought)
                 } else {
-                    // Safety: if we got a complete message but weren't "streaming", 
-                    // check if the last message is already from assistant to avoid double-entry
                     val lastMsg = chatAdapter.getLastMessage()
                     if (lastMsg != null && !lastMsg.isFromUser && !lastMsg.isComplete) {
-                        chatAdapter.updateLastMessage(message, true)
+                        chatAdapter.updateLastMessage(message, true, currentThought)
                     } else {
-                        chatAdapter.addMessage(ChatMessage(message, isFromUser = false, isComplete = true))
+                        chatAdapter.addMessage(ChatMessage(message, isFromUser = false, isComplete = true, thought = currentThought))
                     }
                 }
                 streamingBubbleActive = false
+                currentThought = null // Reset for next turn
             } else {
-                // Streaming token update
                 if (streamingBubbleActive) {
-                    chatAdapter.updateLastMessage(message, false)
+                    chatAdapter.updateLastMessage(message, false, currentThought)
                 } else {
-                    // First token of a new stream - check if we already have a pending assistant bubble
                     val lastMsg = chatAdapter.getLastMessage()
                     if (lastMsg != null && !lastMsg.isFromUser) {
-                        chatAdapter.updateLastMessage(message, false)
+                        chatAdapter.updateLastMessage(message, false, currentThought)
                     } else {
-                        chatAdapter.addMessage(ChatMessage(message, isFromUser = false, isComplete = false))
+                        chatAdapter.addMessage(ChatMessage(message, isFromUser = false, isComplete = false, thought = currentThought))
                     }
                     streamingBubbleActive = true
                 }
@@ -507,18 +507,15 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
 
     override fun onThoughtUpdated(thought: String) {
         runOnUiThread {
-            // Always show think content in thinkingText during reasoning
-            // (visible in both diary mode and normal chat)
+            currentThought = thought
             thinkingText?.text = "δ ${thought.take(120).replace('\n', ' ')}..."
-            // In diary mode, also render as a chat bubble for full visibility
-            if (isShowingDiary) {
-                if (chatAdapter.itemCount > 0) {
-                    chatAdapter.updateLastMessage(thought)
-                } else {
-                    chatAdapter.addMessage(ChatMessage(thought, isFromUser = false))
-                }
-                chatRecyclerView?.scrollToPosition(chatAdapter.itemCount - 1)
+            if (streamingBubbleActive) {
+                chatAdapter.updateLastMessage(chatAdapter.getLastMessage()?.content ?: "", false, thought)
             }
+            if (isShowingDiary) {
+                // ... diary update logic ...
+            }
+            chatRecyclerView?.scrollToPosition(chatAdapter.itemCount - 1)
         }
     }
 

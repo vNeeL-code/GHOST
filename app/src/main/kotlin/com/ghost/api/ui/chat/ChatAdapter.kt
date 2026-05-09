@@ -30,6 +30,10 @@ class ChatAdapter(private val messages: MutableList<ChatMessage> = mutableListOf
         val textHeader: TextView = view.findViewById(R.id.textHeader)
         val textTimestamp: TextView = view.findViewById(R.id.textTimestamp)
         val btnCopy: View = view.findViewById(R.id.btnCopy)
+        
+        val layoutThinking: View = view.findViewById(R.id.layoutThinking)
+        val btnToggleThinking: TextView = view.findViewById(R.id.btnToggleThinking)
+        val textThinking: TextView = view.findViewById(R.id.textThinking)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): MessageViewHolder {
@@ -89,6 +93,24 @@ class ChatAdapter(private val messages: MutableList<ChatMessage> = mutableListOf
             clipboard.setPrimaryClip(clip)
             android.widget.Toast.makeText(context, "Copied to clipboard", android.widget.Toast.LENGTH_SHORT).show()
         }
+
+        // Thinking Fold logic
+        if (!isUser && !message.thought.isNullOrBlank()) {
+            holder.layoutThinking.visibility = View.VISIBLE
+            holder.textThinking.text = message.thought
+            
+            holder.btnToggleThinking.setOnClickListener {
+                if (holder.textThinking.visibility == View.VISIBLE) {
+                    holder.textThinking.visibility = View.GONE
+                    holder.btnToggleThinking.text = "▼ Thinking Process"
+                } else {
+                    holder.textThinking.visibility = View.VISIBLE
+                    holder.btnToggleThinking.text = "▲ Hide Thinking"
+                }
+            }
+        } else {
+            holder.layoutThinking.visibility = View.GONE
+        }
     }
 
     override fun getItemCount(): Int = messages.size
@@ -98,10 +120,14 @@ class ChatAdapter(private val messages: MutableList<ChatMessage> = mutableListOf
         notifyItemInserted(messages.size - 1)
     }
 
-    fun updateLastMessage(content: String, isComplete: Boolean = false) {
+    fun updateLastMessage(content: String, isComplete: Boolean = false, thought: String? = null) {
         if (messages.isNotEmpty()) {
             val last = messages.last()
-            messages[messages.size - 1] = last.copy(content = content, isComplete = isComplete)
+            messages[messages.size - 1] = last.copy(
+                content = content, 
+                isComplete = isComplete,
+                thought = thought ?: last.thought
+            )
             notifyItemChanged(messages.size - 1)
         }
     }
