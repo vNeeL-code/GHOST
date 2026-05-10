@@ -26,7 +26,7 @@ class StreamProtocolParser(
         buffer += token
 
         // Check for block markers
-        if (buffer.contains("Δ 🟦") || buffer.contains("<|thought|>")) {
+        if (buffer.contains(" Δ 🟦") || buffer.contains("<|thought|>")) {
             currentChannel = Channel.THOUGHT
             buffer = if (buffer.contains("Δ 🟦")) buffer.substringAfter("Δ 🟦") else buffer.substringAfter("<|thought|>")
         } else if (buffer.contains("Δ 🔴") || buffer.contains("<|response|>")) {

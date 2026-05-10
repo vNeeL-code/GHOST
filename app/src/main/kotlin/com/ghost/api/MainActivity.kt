@@ -48,7 +48,8 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
     // UI Elements - Chat Phase
     private var chatRecyclerView: RecyclerView? = null
     private var chatInputText: EditText? = null
-    private var btnSend: Button? = null
+    private var btnSend: TextView? = null
+    private var btnSparkle: TextView? = null
     private var thinkingProgress: ProgressBar? = null
     private var thinkingText: TextView? = null
     
@@ -355,7 +356,7 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
                     R.id.action_toggle_diary -> {
                         isShowingDiary = !isShowingDiary
                         item.title = if (isShowingDiary) "Show Main Chat" else "Show Gemma's Internal Diary"
-                        findViewById<TextView>(R.id.titleText)?.text = if (isShowingDiary) "Δ 📔 ∇" else "Δ ✧ ∇"
+                        findViewById<TextView>(R.id.titleText)?.text = if (isShowingDiary) "Δ \uD83D\uDC7E ∇" else "Δ ✧ ∇"
                         chatAdapter.isDiaryMode = isShowingDiary
                         loadHistoricalChat()
                         true
@@ -396,6 +397,21 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
             adapter = chatAdapter
         }
         
+        val btnSparkle = findViewById<TextView>(R.id.btnSparkle)
+        val btnMic = findViewById<TextView>(R.id.btnMic)
+        val btnSend = findViewById<TextView>(R.id.btnSend)
+        
+        // Dynamic visibility like a modern chat app
+        chatInputText?.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                val hasText = !s.isNullOrBlank()
+                btnSend?.visibility = if (hasText) android.view.View.VISIBLE else android.view.View.GONE
+                btnMic?.visibility = if (hasText) android.view.View.GONE else android.view.View.VISIBLE
+            }
+            override fun afterTextChanged(s: android.text.Editable?) {}
+        })
+
         btnSend?.setOnClickListener {
             val text = chatInputText?.text?.toString()?.trim()
             if (!text.isNullOrEmpty() && gemmaService != null) {
@@ -404,10 +420,8 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
             }
         }
         
-        val btnAddMedia = findViewById<android.view.View>(R.id.btnAddMedia)
-        val btnMic = findViewById<android.view.View>(R.id.btnMic)
-
-        btnAddMedia?.setOnClickListener {
+        btnSparkle?.setOnClickListener {
+            // Match Overlay Sparkle: Default to Media/Skill picker
             imagePicker.launch("image/*")
         }
 

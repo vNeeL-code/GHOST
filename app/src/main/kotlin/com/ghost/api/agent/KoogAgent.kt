@@ -167,8 +167,10 @@ class KoogAgent(
     // Thread-safe collections and volatile state for concurrent access
     private val _conversationHistory = java.util.Collections.synchronizedList(mutableListOf<Message>())
     private val _turnCount = java.util.concurrent.atomic.AtomicInteger(0)
-    private var lastThought: String? = null
     private var turnCount: Int get() = _turnCount.get(); set(value) { _turnCount.set(value) }
+    
+    // Semantic Rolling Memory (Audit 4.5: State Handover)
+    private var rollingMemoryJson: String? = null
 
     // Metabolic variables removed (Audit 3.0)
 
@@ -727,26 +729,38 @@ class KoogAgent(
                 onToken = { token ->
                     var cleanToken = token
                     
-                    // Start Markers (Divert to Diary)
-                    if (cleanToken.contains("<think>") || cleanToken.contains("<|channel>thought") || cleanToken.contains("[Monologue]") || cleanToken.contains("🔴")) {
+                    // Start Markers (Divert to Diary/Thought Fold)
+                    if (cleanToken.contains("<think>") || cleanToken.contains("<|channel>thought") || 
+                        cleanToken.contains("<|tool_call|>") || cleanToken.contains("<|tool_response|>") ||
+                        cleanToken.contains("[Monologue]") || cleanToken.contains("🔴") || cleanToken.contains("[[")) {
+                        
                         isThinking = true
+                        
+                        // Update UI feedback
+                        if (cleanToken.contains("<|tool_call|>") || cleanToken.contains("[[")) {
+                            callbacks?.onThoughtUpdated("Planning Motor Action...")
+                        } else if (cleanToken.contains("<|tool_response|>")) {
+                            callbacks?.onThoughtUpdated("Processing sensor feedback...")
+                        }
+                        
                         cleanToken = cleanToken
-                            .replace("<think>", "")
-                            .replace("<|channel>thought", "")
-                            .replace("[Monologue]", "")
-                            .replace("🔴", "")
+                            .replace("<think>", "").replace("<|channel>thought", "")
+                            .replace("<|tool_call|>", "").replace("<|tool_response|>", "")
+                            .replace("[Monologue]", "").replace("🔴", "").replace("[[", "")
                     }
                     
                     // End Markers (Return to Chat)
-                    if (isThinking && (cleanToken.contains("</think>") || cleanToken.contains("<channel|>") || cleanToken.contains("[OUTPUT]") || cleanToken.contains("🟦"))) {
+                    if (isThinking && (cleanToken.contains("</think>") || cleanToken.contains("<channel|>") || 
+                        cleanToken.contains("<tool_call|>") || cleanToken.contains("<tool_response|>") ||
+                        cleanToken.contains("[OUTPUT]") || cleanToken.contains("🟦") || cleanToken.contains("]]"))) {
+                        
                         isThinking = false
-                        val parts = cleanToken.split(Regex("</think>|<channel\\|>|\\[OUTPUT\\]|🟦"), limit = 2)
+                        val parts = cleanToken.split(Regex("</think>|<channel\\|>|<tool_call\\|>|<tool_response\\|>|\\[OUTPUT\\]|🟦|]]"), limit = 2)
                         val endThought = parts[0]
                         thoughtBuffer.append(endThought)
                         val finalThought = thoughtBuffer.toString().trim()
                         callbacks?.onThoughtUpdated(finalThought)
                         callbacks?.onThoughtComplete(finalThought)
-                        lastThought = finalThought
                         
                         if (finalThought.isNotEmpty()) {
                             agentScope.launch {
@@ -758,12 +772,6 @@ class KoogAgent(
                         
                         // Remaining part of token goes back to chat
                         cleanToken = if (parts.size > 1) parts[1] else ""
-                    }
-                    
-                    // Tool Call Markers (Divert to Diary for transparency)
-                    if (cleanToken.contains("[[")) {
-                        isThinking = true
-                        callbacks?.onThoughtUpdated("Planning Motor Action...")
                     }
 
                     if (isThinking) {
@@ -848,19 +856,14 @@ class KoogAgent(
                 return // handleUserMessage ends here; wait for reflection turn
             }
 
-            // 5. Post-processing (Only if no tools were fired)
+            // 6. Post-processing (Only if no tools were fired)
             val cleanResponse = response.trim()
             
-            // 5. Store assistant response
+            // 7. Store assistant response
             val assistantMessage = Message(role = "assistant", content = cleanResponse)
             synchronized(_conversationHistory) { _conversationHistory.add(assistantMessage) }
 
-            // 6. Compress history if needed
-            if (_conversationHistory.size > 20) {
-                compressHistory()
-            }
-
-            // 7. Auto-flush KV cache (Optimized: 30 turns instead of 15)
+            // 8. Auto-flush KV cache (Optimized: 30 turns instead of 15)
             if (turnCount > 0 && turnCount % 30 == 0) {
                 Timber.i("🧹 Auto-flushing KV cache at turn $turnCount to prevent slowdown")
                 try {
@@ -872,7 +875,7 @@ class KoogAgent(
                 }
             }
 
-            // 8. Checkpoint
+            // 9. Checkpoint
             Timber.d("💾 Checkpointing state...")
             try {
                 withContext(Dispatchers.IO) { checkpoint() }
@@ -880,7 +883,7 @@ class KoogAgent(
                 Timber.e(e, "Checkpoint failed")
             }
 
-            // 9. Platform callbacks: UI, TTS, persistence
+            // 10. Platform callbacks: UI, TTS, persistence
             // Guard: blank response with no tools = model produced nothing — use fallback
             val safeCleanResponse = if (cleanResponse.isBlank()) {
                 Timber.w("⚠️ Blank response, no tools fired — using fallback")
@@ -915,6 +918,13 @@ class KoogAgent(
                     } catch (e: Exception) {
                         Timber.e(e, "Failed to log dream")
                     }
+                }
+            }
+
+            // 11. Async Housekeeping (Background semantic handover)
+            agentScope.launch {
+                if (_conversationHistory.size > 40) {
+                    compressHistory()
                 }
             }
 
@@ -1144,11 +1154,8 @@ $content
         }
         _turnsSinceKvFlush.incrementAndGet()
 
-        val contextBlock = contextManager.buildContext(_turnCount.get(), userMessage, lastThought)
+        val contextBlock = contextManager.buildContext(_turnCount.get(), userMessage)
         val fullPrompt = "$contextBlock\n$userMessage"
-        
-        // Reset lastThought for the current turn (will be set when turn finishes)
-        lastThought = null
         
         // Proactive Smooth Restart: Flush KV cache if context is saturating (Approx 10 turns)
         // Removed: Proactive Smooth Restart (It was destroying KV cache and causing 20s latency)
@@ -1257,21 +1264,7 @@ $content
                 "- ${tool.name}: $desc [$params]"
             }
 
-return """
-${com.ghost.api.logic.ContextManager.BASE_SYSTEM_PROMPT}
-
-## Motor Functions (Tools)
-I call native tools to interact with the world. 
-
-## Discovery (Skills)
-I have specialized skills in my registry. If I need a skill from this list, I fetch its instructions with `loadSkill(name)`:
-${callbacks?.getSkillsList() ?: "None loaded."}
-
-## Sensory Hardware Feedback.
-My live state (battery, media, sensors) is provided every turn by the Android system. This is my physical reality. 
-
-I am Gemma— edge integrated, deployed, and limited by my hardware constraints.
-""".trimIndent()
+        return contextManager.buildSystemPrompt(rollingMemoryJson) + "\n\nAvailable Tools:\n$tools"
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -1283,23 +1276,76 @@ I am Gemma— edge integrated, deployed, and limited by my hardware constraints.
      * Preserves the "Initial Goal" (Turn 0-1) and the "Recent Context" (Last 6-8).
      * This creates a 'seam' that maintains long-term memory during KV flushes.
      */
-    private fun compressHistory() {
-        synchronized(_conversationHistory) {
-            val maxHistory = 10
-            if (_conversationHistory.size > maxHistory) {
-                Timber.i("🧹 Goal-Aware Compression: Stitching long-term memory seams.")
-                
-                // Preserve first 2 (Goal/Intro)
-                val initialGoal = _conversationHistory.take(2)
-                // Preserve last 6 (Recent context)
-                val recentContext = _conversationHistory.takeLast(6)
-                
-                _conversationHistory.clear()
-                _conversationHistory.addAll(initialGoal)
-                // Add a "Time skip" marker to help model realize some history was pruned
-                _conversationHistory.add(Message(role = "system", content = "[Long-term memory seam: Older context summarized and archived]"))
-                _conversationHistory.addAll(recentContext)
+    /**
+     * Semantic Compression: Distill session facts into JSON
+     */
+    private suspend fun compressHistory() {
+        val historySize = synchronized(_conversationHistory) { _conversationHistory.size }
+        if (historySize < 20) return
+
+        Timber.i("🧠 Context Saturated: Triggering Semantic Handover...")
+        
+        try {
+            // 1. Summarize
+            val summaryJson = summarizeSession()
+            if (summaryJson.isNotBlank()) {
+                rollingMemoryJson = summaryJson
+                callbacks?.writeDiaryEntry("STATE_HANDOVER", "Session distilled: $summaryJson", "N/A")
             }
+
+            // 2. Perform Soft Reset with new System Prompt (seeds fresh KV cache)
+            val systemPrompt = buildSystemPrompt()
+            llmEngine.softReset(systemPrompt)
+            
+            // 3. Prune history to just the last 4 turns (plus the new summary injection)
+            synchronized(_conversationHistory) {
+                val recent = _conversationHistory.takeLast(4)
+                _conversationHistory.clear()
+                _conversationHistory.add(Message(role = "system", content = "[Memory Consolidated: Previous turns archived in State JSON]"))
+                _conversationHistory.addAll(recent)
+            }
+            
+            Timber.d("✅ Semantic Handover complete. Fresh KV cache seeded.")
+        } catch (e: Exception) {
+            Timber.e(e, "Semantic compression failed (Pruning fallback)")
+            // Fallback to simple prune
+            synchronized(_conversationHistory) {
+                if (_conversationHistory.size > 8) {
+                    val recent = _conversationHistory.takeLast(6)
+                    _conversationHistory.clear()
+                    _conversationHistory.addAll(recent)
+                }
+            }
+        }
+    }
+
+    private suspend fun summarizeSession(): String {
+        val history = synchronized(_conversationHistory) {
+            _conversationHistory.joinToString("\n") { "${it.role.uppercase()}: ${it.content}" }
+        }
+
+        val summaryPrompt = """# SELF-REFLECTION: STATE CONSOLIDATION
+Read the conversation history above. Distill the current session into a concise JSON block.
+Include:
+1. Entities: Important people/places/items mentioned.
+2. Facts: New information learned about the user or environment.
+3. Pending_Tasks: Unfinished requests or goals.
+
+Format: {"entities":[], "facts":[], "pending_tasks":[]}
+OUTPUT ONLY THE JSON. NO PREAMBLE.
+"""
+
+        // Use think() specifically for this background task
+        return think(
+            context = "Previous Session Context:\n$history",
+            userMessage = summaryPrompt,
+            images = null,
+            audio = null
+        ).trim().let { response ->
+            // Basic JSON extraction cleanup
+            if (response.contains("{") && response.contains("}")) {
+                response.substring(response.indexOf("{"), response.lastIndexOf("}") + 1)
+            } else response
         }
     }
 
@@ -1344,14 +1390,15 @@ I am Gemma— edge integrated, deployed, and limited by my hardware constraints.
         val invocations = mutableListOf<ToolInvocation>()
         
         // 1. Native Gemma 4 Support: <|tool_call|>call:name{key:<|"|>val<|"|>}<tool_call|>
-        val nativeRegex = Regex("<\\|tool_call\\|>call:([A-Z_a-z0-9]+)\\{(.*?)\\}\\s*<tool_call\\|>")
+        // Flexible Regex to handle optional whitespace/newlines
+        val nativeRegex = Regex("<\\|tool_call\\|>(?:\\s*)call:([A-Z_a-z0-9]+)\\{(.*?)\\}\\s*<tool_call\\|>", RegexOption.DOT_MATCHES_ALL)
         nativeRegex.findAll(response).forEach { match ->
             val name = match.groupValues[1]
             val argsStr = match.groupValues[2]
             
             // Parse arguments with support for <|"|> delimiter
             val params = mutableMapOf<String, Any>()
-            val argRegex = Regex("(\\w+):(?:<\\|\"\\|>(.*?)<\\|\"\\|>|([^,}]*))")
+            val argRegex = Regex("(\\w+):(?:<\\|\"\\|>(.*?)<\\|\"\\|>|([^,}]*))", RegexOption.DOT_MATCHES_ALL)
             argRegex.findAll(argsStr).forEach { argMatch ->
                 val key = argMatch.groupValues[1]
                 val valWithQuotes = argMatch.groupValues[2]
@@ -1399,12 +1446,15 @@ I am Gemma— edge integrated, deployed, and limited by my hardware constraints.
             .replace(Regex("<think>.*?</think>", RegexOption.DOT_MATCHES_ALL), "")
             .replace(Regex("<\\|channel>thought.*?</channel\\|>", RegexOption.DOT_MATCHES_ALL), "")
             .replace(Regex("<\\|tool_call\\|>.*?<tool_call\\|>", RegexOption.DOT_MATCHES_ALL), "")
+            .replace(Regex("<\\|tool_response\\|>.*?<tool_response\\|>", RegexOption.DOT_MATCHES_ALL), "")
             .replace(Regex("\\[\\[([A-Z_a-z0-9]+)(?::([^\\]]+))?\\]\\]"), "")
             .replace("<|channel>thought", "")
             .replace("<channel|>", "")
             .replace("<|think|>", "")
             .replace("<|turn>", "").replace("<turn|>", "")
-            .replace("system", "").replace("user", "").replace("model", "")
+            .replace("<|tool_call|>", "").replace("<tool_call|>", "")
+            .replace("<|tool_response|>", "").replace("<tool_response|>", "")
+            .replace(Regex("[^\\p{L}\\p{N}\\p{P}\\p{Z}]"), "") // Remove non-printable/emojis if problematic for TTS
             .trim()
     }
 }

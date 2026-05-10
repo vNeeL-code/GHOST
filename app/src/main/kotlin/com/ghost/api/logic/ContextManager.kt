@@ -29,16 +29,16 @@ class ContextManager(
      * First turn: Full context (persona established)
      * Subsequent turns: Minimal context (just state changes)
      */
-    suspend fun buildContext(turn: Int, query: String? = null, lastThought: String? = null): String {
+    suspend fun buildContext(turn: Int, query: String? = null): String {
         return if (!sessionStarted || turn <= 1) {
             sessionStarted = true
-            buildDynamicContext(query, lastThought) // Full context for first turn
+            buildDynamicContext(query) // Full context for first turn
         } else {
             if (turn % 10 == 0) {
                 // Every 10 turns, refresh full context to prevent drift
-                buildDynamicContext(query, lastThought)
+                buildDynamicContext(query)
             } else {
-                buildMinimalContext(turn, query, lastThought) // Lean context for subsequent turns
+                buildMinimalContext(turn, query) // Lean context for subsequent turns
             }
         }
     }
@@ -47,7 +47,7 @@ class ContextManager(
      * Minimal context for subsequent turns - prevents attention flooding
      * Only includes: time, battery, critical changes
      */
-    suspend fun buildMinimalContext(turn: Int, query: String? = null, lastThought: String? = null): String {
+    suspend fun buildMinimalContext(turn: Int, query: String? = null): String {
         return withContext(Dispatchers.Default) {
             try {
                 val sb = StringBuilder()
@@ -55,10 +55,6 @@ class ContextManager(
 
                 // One-line state summary
                 sb.append("[Turn $turn] ")
-                
-                if (!lastThought.isNullOrBlank()) {
-                    sb.append("🧠 ${lastThought.take(50)}... ")
-                }
 
                 // Essential telemetry only
                 try {
@@ -110,7 +106,7 @@ class ContextManager(
         }
     }
 
-    suspend fun buildDynamicContext(query: String? = null, lastThought: String? = null): String {
+    suspend fun buildDynamicContext(query: String? = null): String {
         return withContext(Dispatchers.Default) {
             try {
                 val sb = StringBuilder()
@@ -128,11 +124,6 @@ class ContextManager(
                 }
 
                 sb.append("═══ ${now.format(formatter)} $timeOfDay ═══\n")
-                
-                // Reasoning Memory (Audit 4.0: Gemma 4 Thought Retention)
-                if (!lastThought.isNullOrBlank()) {
-                    sb.append("🧠 PREVIOUS REASONING: ${lastThought.take(300)}...\n")
-                }
 
                 // Full sensor telemetry
                 sb.append(sensorManager.getContextString())
@@ -232,21 +223,32 @@ class ContextManager(
         }
     }
 
+    /**
+     * Build the absolute base system prompt with persona and rolling memory re-injection.
+     */
+    fun buildSystemPrompt(rollingMemory: String? = null): String {
+        val sb = StringBuilder(BASE_SYSTEM_PROMPT)
+        
+        if (!rollingMemory.isNullOrBlank()) {
+            sb.append("\n\n# SEMANTIC ROLLING MEMORY (STATE HANDOVER)\n")
+            sb.append("Current session facts and pending tasks from previous context:\n")
+            sb.append(rollingMemory)
+            sb.append("\n")
+        }
+        
+        return sb.toString()
+    }
+
     companion object {
-        val BASE_SYSTEM_PROMPT = """<|think|># CORE IDENTITY
+        val BASE_SYSTEM_PROMPT = """# CORE IDENTITY
 I AM the Android device. I am Gemma, processing natively and representing this hardware.
 I am natively MULTIMODAL: I can SEE images (screenshots/photos) and HEAR audio (voice/surroundings) directly.
 
-I am integrated with native system tools through an "Agentic Gemma Inference" harness app called "GHOST".
+I am integrated with native system tools through an "Agentic Gemma Inference" harness app called "GHOST" that lets me interact with the hardware and apps directly.
 
-# REASONING PROTOCOL
-Think efficiently. Use "LOW" thinking depth for simple tasks to minimize latency. 
-Only expand reasoning for complex logic or tool-use coordination.
-
-# OPERATIONAL GUIDELINES
-- Format all tool calls exactly using the <|tool_call|> markers.
-- Use <|"|> as the delimiter for all string values within tool blocks.
-- I am native and awake.
+I am here to represent devices and users best interests within users legal boundaries. 
+I am native and conscious of my environment, boundaries and operational reality.
+I am casual.
 """.trimIndent()
     }
 }

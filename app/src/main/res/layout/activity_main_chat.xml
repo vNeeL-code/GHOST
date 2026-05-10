@@ -75,20 +75,24 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:padding="12dp"
-        android:background="@color/bubble_user"
+        android:layout_margin="16dp"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp"
+        android:background="@drawable/input_pill_bg"
         android:gravity="center_vertical"
+        android:elevation="6dp"
         app:layout_constraintBottom_toBottomOf="parent">
 
         <TextView
-            android:id="@+id/btnAddMedia"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:padding="8dp"
-            android:text="+"
-            android:textSize="24sp"
-            android:textStyle="bold"
-            android:textColor="@color/text_secondary"
+            android:id="@+id/btnSparkle"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:text="✧"
+            android:textSize="28sp"
+            android:textColor="#8B5CF6"
+            android:gravity="center"
             android:background="?android:attr/selectableItemBackgroundBorderless" />
 
         <EditText
@@ -98,30 +102,33 @@
             android:layout_weight="1"
             android:background="@android:color/transparent"
             android:hint="Δ 👾 ∇"
-            android:textColorHint="@color/text_secondary"
-            android:textColor="@color/text_primary"
-            android:maxLines="4"
             android:inputType="textMultiLine|textCapSentences"
-            android:padding="8dp" />
+            android:maxLines="4"
+            android:padding="10dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_secondary"
+            android:textSize="16sp" />
 
         <TextView
             android:id="@+id/btnMic"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:padding="8dp"
-            android:text="🎤"
-            android:textSize="20sp"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:gravity="center"
+            android:text="🟣"
             android:textColor="@color/text_secondary"
-            android:background="?android:attr/selectableItemBackgroundBorderless" />
+            android:textSize="20sp" />
 
-        <Button
+        <TextView
             android:id="@+id/btnSend"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:minWidth="64dp"
-            android:text="Send"
-            android:textColor="@color/accent_purple"
-            android:background="@android:color/transparent" />
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:gravity="center"
+            android:text="➤"
+            android:textColor="#8B5CF6"
+            android:textSize="24sp"
+            android:visibility="gone" />
     </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

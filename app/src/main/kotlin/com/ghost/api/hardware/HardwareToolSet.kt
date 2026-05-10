@@ -79,14 +79,4 @@ class HardwareToolSet(
     fun cooldown(): Map<String, String> {
         return mapOf("result" to "success", "message" to "Cooldown requested. Reducing brain activity.")
     }
-
-    @Tool(description = "Reads all device sensory telemetry (battery, temperature, environment, motion) as a string. Call this when checking 'sensors'.")
-    fun getDeviceSensors(): Map<String, String> {
-        return try {
-            val data = sensorFusionManager?.getContextString() ?: "Sensors unavailable"
-            mapOf("result" to "success", "data" to data)
-        } catch (e: Exception) {
-            mapOf("result" to "error", "message" to (e.message ?: "Sensor read failed"))
-        }
-    }
 }

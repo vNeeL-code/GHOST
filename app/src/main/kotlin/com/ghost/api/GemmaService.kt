@@ -1070,27 +1070,52 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
 
     override fun onDestroy() {
-        instance = null
-        Timber.i("GemmaService: onDestroy called")
+        Timber.i("🛑 GemmaService: Shutting down system...")
+        
+        // 1. Immediate UI/Foregound Release
         try {
-            // Cancel coroutines first
-            scope.coroutineContext.cancel()
-            serviceScope.cancel()
-
-            // Audit 2.0: Synchronous Native Handle Release (Crucial to prevent 'NPU Busy' on restart)
-            // Use a short runBlocking timeout to avoid ANR while ensuring engine cleanup
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } catch (e: Exception) {
+            Timber.w("stopForeground failed: ${e.message}")
+        }
+        
+        // 2. Critical Native Cleanup (Must be synchronous/prioritized to release NPU)
+        try {
             kotlinx.coroutines.runBlocking {
                 kotlinx.coroutines.withTimeout(1500) {
                     performCriticalCleanup()
                 }
             }
-
-            if (::apiServer.isInitialized) apiServer.stop()
         } catch (e: Exception) {
-            Timber.e(e, "Error during service shutdown")
+            Timber.e(e, "Critical native cleanup failed")
         }
+
+        // 3. Background cleanup of sensory/network resources
+        serviceScope.launch {
+            try {
+                if (::sensorFusionManager.isInitialized) {
+                    sensorFusionManager.stop()
+                }
+                
+                if (::shakeDetector.isInitialized) {
+                    shakeDetector.stop()
+                }
+                
+                if (::apiServer.isInitialized) {
+                    apiServer.stop()
+                }
+                
+                Timber.i("✅ GemmaService: Shutdown complete")
+            } catch (e: Exception) {
+                Timber.e(e, "Error during GemmaService shutdown")
+            } finally {
+                serviceScope.cancel()
+                scope.cancel()
+                instance = null
+            }
+        }
+        
         super.onDestroy()
-        Timber.i("GemmaService: onDestroy complete")
     }
 
 

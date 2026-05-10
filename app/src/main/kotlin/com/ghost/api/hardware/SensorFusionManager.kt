@@ -225,6 +225,22 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
         }
     }
     
+    fun stop() {
+        Timber.i("🌀 Stopping SensorFusion loops and releasing listeners...")
+        isClosed = true
+        isLoopRunning = false
+        
+        try {
+            scope.cancel()
+            sensorListener?.let { 
+                sensorManager?.unregisterListener(it)
+            }
+            sensorThread?.quitSafely()
+        } catch (e: Exception) {
+            Timber.e(e, "Error stopping SensorFusion")
+        }
+    }
+    
     private suspend fun updateSlowState() {
         // Update the heavy/fragile parts
         var current = slowPollState ?: _contextState.value
@@ -874,17 +890,17 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
         env.light?.let { sb.append("💡 Light: ${it.toInt()} lux\n") }
 
         // Music
-        ctx.audio.nowPlaying?.let { np ->
-            if (np.isPlaying) {
-                sb.append("🎵 Now Playing: \"${np.title}\"")
-                np.artist?.let { sb.append(" by $it") }
-                sb.append("\n")
-            }
+        val np = ctx.audio.nowPlaying
+        if (np != null && np.isPlaying) {
+            sb.append("🎵 Now Playing: \"${np.title}\"")
+            np.artist?.let { sb.append(" by $it") }
+            sb.append("\n")
+        } else if (ctx.audio.isMusicActive) {
+            sb.append("🎵 Media Active (No Metadata)\n")
         }
 
-        // System resources (With Totals)
-        sb.append("🧠 RAM: ${ctx.system.ramAvailableMB}MB free / ${ctx.system.ramTotalMB}MB total (${ctx.system.ramUsedPercent}% used)\n")
-        sb.append("💿 Storage: ${String.format(java.util.Locale.US, "%.1f", ctx.system.storageFreeGB)}GB free / ${String.format(java.util.Locale.US, "%.1f", ctx.system.storageTotalGB)}GB total\n")
+        // System resources (Consolidated to save vertical space)
+        sb.append("🧠 RAM: ${ctx.system.ramUsedPercent}% | 💿 Storage: ${String.format(java.util.Locale.US, "%.1f", ctx.system.storageFreeGB)}GB free\n")
 
         // Network (Unified Online Check)
         if (!ctx.network.isOnline) {
@@ -896,10 +912,9 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
             }
             ctx.connectivity.cellType?.let { type ->
                 val signal = ctx.connectivity.cellSignalPercent?.let { " $it%" } ?: ""
-                netParts.add("📱 Cell: $type$signal (${ctx.connectivity.carrierName ?: "Unknown"})")
+                netParts.add("📱 Cell: $type$signal")
             }
             if (netParts.isEmpty()) {
-                // If it's online but neither WiFi nor Cell reported, it might be Ethernet or VPN
                 sb.append("🌐 Online: ${ctx.network.type}\n")
             } else {
                 sb.append(netParts.joinToString(" | ") + "\n")
@@ -908,13 +923,13 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
 
         // Bluetooth
         if (ctx.connectivity.bluetoothEnabled) {
-            sb.append("🔵 Bluetooth: ")
+            sb.append("🔵 BT: ")
             if (ctx.connectivity.bluetoothConnected) {
                 sb.append(ctx.connectivity.bluetoothDeviceName ?: "Connected")
             } else {
-                sb.append("On (Scanning)")
+                sb.append("On")
             }
-            sb.append("\n")
+            sb.append(" | ")
         }
 
         // Motion / Orientation
@@ -925,27 +940,24 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
                 "flat" -> "📱⬇️"
                 else -> "📱"
             }
-            sb.append("📐 Orientation: $orientIcon $orient")
+            sb.append("📐 $orientIcon $orient")
         }
-        if (ctx.motion.isMoving) {
-            sb.append(" (🏃 moving)")
-        }
+        if (ctx.motion.isMoving) sb.append(" 🏃")
         sb.append("\n")
 
-        // Location (Privacy preserved - coordinates truncated in display if needed, but here raw is fine for Agent)
+        // Uptime + Location (Privacy preserved)
+        val hours = ctx.system.uptimeMinutes / 60
+        val mins = ctx.system.uptimeMinutes % 60
+        sb.append("⏱️ ${hours}h${mins}m")
+
         ctx.motion.lastLocationLat?.let { lat ->
             ctx.motion.lastLocationLon?.let { lon ->
                 val age = ctx.motion.locationAgeMinutes ?: 999
                 if (age < 60) {
-                    sb.append("📍 Location: ${String.format("%.4f", lat)}, ${String.format("%.4f", lon)} (${age}m ago)")
+                    sb.append(" | 📍 ${String.format("%.3f", lat)}, ${String.format("%.3f", lon)}")
                 }
             }
         }
-
-        // Uptime
-        val hours = ctx.system.uptimeMinutes / 60
-        val mins = ctx.system.uptimeMinutes % 60
-        sb.append("⏱️ ${hours}h${mins}m")
 
         return sb.toString()
     }

@@ -108,7 +108,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                         val conversationConfig = ConversationConfig(
                             samplerConfig = samplerConfig,
                             systemInstruction = if (systemPrompt.isNotBlank()) Contents.of(systemPrompt) else null,
-                            tools = toolSets.map { tool(it) }, channels = listOf(Channel(channelName = "thought", start = "<think>", end = "</think>"), Channel(channelName = "thought", start = "<|channel>thought", end = "<channel|>"))
+                            tools = toolSets.map { tool(it) }
                         )
 
                         val newConversation = newEngine.createConversation(conversationConfig)
@@ -245,7 +245,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                 val config = ConversationConfig(
                     samplerConfig = samplerConfig,
                     systemInstruction = if (systemPrompt.isNotBlank()) Contents.of(systemPrompt) else null,
-                    tools = toolSets.map { tool(it) }, channels = listOf(Channel(channelName = "thought", start = "<think>", end = "</think>"), Channel(channelName = "thought", start = "<|channel>thought", end = "<channel|>"))
+                    tools = toolSets.map { tool(it) }
                 )
                 conversation = eng.createConversation(config)
                 Timber.i("Soft reset complete.")

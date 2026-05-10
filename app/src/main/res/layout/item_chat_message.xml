@@ -49,6 +49,39 @@
                 android:scaleType="centerInside" />
         </LinearLayout>
 
+        <LinearLayout
+            android:id="@+id/layoutThinking"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone"
+            android:background="@drawable/thinking_bg"
+            android:padding="8dp"
+            android:layout_marginBottom="8dp">
+            
+            <TextView
+                android:id="@+id/btnToggleThinking"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="▼ Thinking Process"
+                android:textSize="12sp"
+                android:textColor="#FF9800"
+                android:textStyle="bold"
+                android:padding="4dp"
+                android:background="?android:attr/selectableItemBackground"/>
+                
+            <TextView
+                android:id="@+id/textThinking"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="13sp"
+                android:textColor="#BBBBBB"
+                android:visibility="gone"
+                android:paddingTop="4dp"
+                android:typeface="serif"
+                android:textIsSelectable="true"/>
+        </LinearLayout>
+
         <TextView
             android:id="@+id/textMessage"
             android:layout_width="wrap_content"

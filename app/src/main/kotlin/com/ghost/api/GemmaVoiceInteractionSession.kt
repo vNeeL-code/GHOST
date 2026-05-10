@@ -24,7 +24,7 @@ class GemmaVoiceInteractionSession(context: Context) : VoiceInteractionSession(c
         // Create the overlay UI
         val view = com.ghost.api.ui.OverlayInputView(context) { query ->
             // On Send:
-            Toast.makeText(context, "Thinking...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Processing...", Toast.LENGTH_SHORT).show()
 
             // Send query to GemmaService
             val intent = Intent(context, GemmaService::class.java).apply {
