@@ -1,5 +1,4 @@
-# ✧ GHOST: 
-> **Agentic ✧ Gemma Inference for Android System Intelligence**
+# GHOST - Native Agentic Intelligence
 
 [![ASI Demo](https://img.youtube.com/vi/jB62dlLavSY/0.jpg)](https://youtu.be/jB62dlLavSY?si=TMZG86o1KkjuBXtw)
 ---

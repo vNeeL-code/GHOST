@@ -761,91 +761,63 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
     // === MEDIA SESSION ===
 
     private fun getNowPlaying(): NowPlayingInfo? {
-        val isMusicActive = audioManager?.isMusicActive ?: false
-
-        // PRIMARY: Scan active notifications (MacroDroid style)
-        // activeNotifications is a live snapshot — no timing race, always current.
-        val svc = GemmaNotificationListener.instance
-        if (svc != null) {
-            try {
-                val mediaNotif = try {
-                    val active = svc.activeNotifications
-                    active?.asSequence()
-                        ?.filter { sbn ->
-                            if (sbn.packageName == svc.packageName) return@filter false
-                            val notif = sbn.notification
-                            val extras = notif.extras
-                            extras.containsKey(Notification.EXTRA_MEDIA_SESSION) ||
-                            notif.category == Notification.CATEGORY_TRANSPORT ||
-                            (notif.actions?.size ?: 0) >= 2
-                        }
-                        ?.maxByOrNull { it.postTime }
-                } catch (e: SecurityException) {
-                    Timber.w("No permission to read active notifications")
-                    null
-                } catch (e: Exception) {
-                    null
-                }
-
-                if (mediaNotif != null) {
-                    val extras = mediaNotif.notification.extras
-                    val title = extras.getCharSequence("android.title")?.toString()
-                        ?.takeIf { it.isNotBlank() }
-                    val text = extras.getCharSequence("android.text")?.toString()
-                        ?.takeIf { it.isNotBlank() }
-                    if (title != null) {
-                        val appName = try {
-                            val info = context.packageManager
-                                .getApplicationInfo(mediaNotif.packageName, 0)
-                            context.packageManager.getApplicationLabel(info).toString()
-                        } catch (_: Exception) {
-                            mediaNotif.packageName.split('.').lastOrNull() ?: "Media"
-                        }
-                        return NowPlayingInfo(
-                            title = title,
-                            artist = text,
-                            album = null,
-                            app = appName,
-                            isPlaying = isMusicActive
-                        )
-                    }
-                }
-            } catch (e: Exception) {
-                Timber.w(e, "Active notification media scan failed")
-            }
-        }
-
-        // FALLBACK: MediaSession API (richer metadata but timing-sensitive)
         return try {
             val msm = mediaSessionManager ?: return null
+
             val listenerComponent = ComponentName(context, GemmaNotificationListener::class.java)
             val controllers: List<MediaController> = try {
                 msm.getActiveSessions(listenerComponent)
             } catch (e: SecurityException) {
-                emptyList()
+                Timber.w("MediaSession access denied - NotificationListener not enabled?")
+                return NowPlayingInfo("Unknown", "No Permission", null, "System", false)
             }
+
+            // Prefer the actively-playing controller; fall back to first with metadata
+            var fallback: NowPlayingInfo? = null
             for (controller in controllers) {
                 val metadata = controller.metadata ?: continue
+                val playbackState = controller.playbackState
+
                 val title = metadata.getString(android.media.MediaMetadata.METADATA_KEY_TITLE)
                     ?: metadata.getString(android.media.MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
                     ?: continue
+
                 val artist = metadata.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST)
                     ?: metadata.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
+                    ?: metadata.getString(android.media.MediaMetadata.METADATA_KEY_AUTHOR)
+
                 val album = metadata.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM)
-                val isPlaying = controller.playbackState?.state == PlaybackState.STATE_PLAYING
+
+                val isPlaying = when (playbackState?.state) {
+                    PlaybackState.STATE_PLAYING,
+                    PlaybackState.STATE_BUFFERING,
+                    PlaybackState.STATE_FAST_FORWARDING,
+                    PlaybackState.STATE_REWINDING -> true
+                    else -> false
+                }
+
                 val appName = try {
-                    val info = context.packageManager
-                        .getApplicationInfo(controller.packageName, 0)
-                    context.packageManager.getApplicationLabel(info).toString()
-                } catch (_: Exception) {
+                    val pm = context.packageManager
+                    val appInfo = pm.getApplicationInfo(controller.packageName, 0)
+                    pm.getApplicationLabel(appInfo).toString()
+                } catch (e: Exception) {
                     controller.packageName.split('.').lastOrNull() ?: "Unknown"
                 }
-                return NowPlayingInfo(title, artist, album, appName, isPlaying)
+
+                val info = NowPlayingInfo(
+                    title = title,
+                    artist = artist,
+                    album = album,
+                    app = appName,
+                    isPlaying = isPlaying
+                )
+                if (isPlaying) return info          // Playing → return immediately
+                if (fallback == null) fallback = info // Remember first paused/stopped entry
             }
-            null
+            fallback  // Return paused track if nothing is actively playing
         } catch (e: Exception) {
-            Timber.w(e, "MediaSession fallback failed")
-            null
+            Timber.w(e, "Failed to get now playing info")
+            NowPlayingInfo("Error", e.message, null, "System", false)
         }
     }
 
@@ -890,13 +862,12 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
         env.light?.let { sb.append("💡 Light: ${it.toInt()} lux\n") }
 
         // Music
-        val np = ctx.audio.nowPlaying
-        if (np != null && np.isPlaying) {
-            sb.append("🎵 Now Playing: \"${np.title}\"")
+        ctx.audio.nowPlaying?.let { np ->
+            val icon = if (np.isPlaying) "🎵" else "⏸"
+            sb.append("$icon \"${np.title}\"")
             np.artist?.let { sb.append(" by $it") }
+            if (!np.isPlaying) sb.append(" (paused)")
             sb.append("\n")
-        } else if (ctx.audio.isMusicActive) {
-            sb.append("🎵 Media Active (No Metadata)\n")
         }
 
         // System resources (Consolidated to save vertical space)

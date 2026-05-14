@@ -46,7 +46,13 @@ class ChatAdapter(private val messages: MutableList<ChatMessage> = mutableListOf
         val message = messages[position]
         val context = holder.itemView.context
         
-        holder.textMessage.text = message.content
+        // Strip <think>...</think> blocks — captured separately in message.thought.
+        // Also strip orphan tags from partial streams (e.g. streaming mid-think).
+        val displayContent = message.content
+            .replace(Regex("<think>.*?</think>", RegexOption.DOT_MATCHES_ALL), "")
+            .replace(Regex("</?think>"), "")
+            .trim()
+        holder.textMessage.text = displayContent
         holder.textTimestamp.text = timeFormat.format(Date(message.timestamp))
         holder.textTimestamp.visibility = View.VISIBLE
 

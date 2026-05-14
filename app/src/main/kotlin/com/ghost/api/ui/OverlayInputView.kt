@@ -30,8 +30,15 @@ class OverlayInputView(
     private var isListening = false
 
     init {
-        setBackgroundColor(Color.parseColor("#EE202020")) // Semi-transparent dark
-        setPadding(16, 16, 16, 16)
+        // Premium glassmorphism-style background
+        setBackgroundResource(com.ghost.api.R.drawable.thinking_bg)
+        setPadding(24, 24, 24, 24)
+        
+        // Ensure rounded corners are clipped
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+            clipToOutline = true
+            elevation = 8f
+        }
 
         val container = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL

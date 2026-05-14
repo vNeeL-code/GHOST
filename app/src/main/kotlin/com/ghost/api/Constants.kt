@@ -39,7 +39,7 @@ object Constants {
     const val CHANNEL_ID_SERVICE = "gemma_instance_service"
     const val NOTIFICATION_ID_SERVICE = 1
     const val NOTIFICATION_READY_MSG = "✓ ✧ Gemma Ready"
-    const val NOTIFICATION_CHANNEL_NAME = "✧ GHOST Responses"
+    const val NOTIFICATION_CHANNEL_NAME = "Δ \uD83D\uDC7E ∇"
     const val NOTIFICATION_IMPORTANCE = 4 // NotificationManager.IMPORTANCE_HIGH
 
     // Agentic

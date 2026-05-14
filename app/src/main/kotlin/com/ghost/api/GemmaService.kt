@@ -8,17 +8,22 @@ import android.app.Service
 import android.content.Intent
 import android.os.IBinder
 import com.ghost.api.database.MemoryManager
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import timber.log.Timber
-import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.util.UUID
 import com.ghost.api.hardware.HardwareToolSet
@@ -81,7 +86,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     // REPLACE: private lateinit var engine: GemmaEngine
     // WITH:
     private val engineRef = AtomicReference<LlmBackend?>(null)
-    private val engineMutex = kotlinx.coroutines.sync.Mutex()
+    private val engineMutex = Mutex()
+    private val _isSystemReady = MutableStateFlow(false)
+    val isSystemReady = _isSystemReady.asStateFlow()
 
     val engine: LlmBackend?
         get() = engineRef.get()
@@ -106,6 +113,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     internal lateinit var mcpServer: MCPServer
     internal lateinit var koogAgent: KoogAgent
     internal lateinit var ttsManager: com.ghost.api.services.TTSManager
+    internal lateinit var diaryManager: com.ghost.api.hardware.DiaryManager
     internal lateinit var sensorFusionManager: com.ghost.api.hardware.SensorFusionManager
     internal lateinit var hardwarePropertiesManager: HardwarePropertiesManager
     internal lateinit var skillManager: com.ghost.api.skills.SkillManager
@@ -134,7 +142,6 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                  startForeground(NOTIFICATION_ID, notification,
                     android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK or
                     android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
-                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
                     android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
              } else {
                  startForeground(NOTIFICATION_ID, notification)
@@ -148,8 +155,11 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 val query = intent.getStringExtra(Constants.EXTRA_QUERY)
                 if (!query.isNullOrEmpty()) {
                     scope.launch {
-                        val sessionId = UUID.randomUUID().toString()
-                        processQuery(query, sessionId)
+                        if (!_isSystemReady.value) {
+                            Timber.w("Query received while initializing, waiting...")
+                            _isSystemReady.first { it }
+                        }
+                        processQuery(query)
                     }
                 }
             }
@@ -320,8 +330,11 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
             reportStatus("Init: TTS...")
             ttsManager = com.ghost.api.services.TTSManager(this)
+            reportStatus("Init: Diary...")
+            diaryManager = com.ghost.api.hardware.DiaryManager(this)
             reportStatus("Init: NotificationManager...")
             responseNotificationManager = com.ghost.api.ui.GemmaNotificationManager(this)
+            responseNotificationManager.pushStartupShortcut()
             reportStatus("Init: MemoryManager...")
             memoryManager = MemoryManager(applicationContext)
 
@@ -451,10 +464,13 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 initialize()
                 reportStatus("Model Loaded & Ready (${engine?.activeBackend})")
 
+                // FINAL: System Ready
+                _isSystemReady.value = true
+                Timber.i("GHOST: All systems green 🟢")
+
                 // Re-broadcast backend status after a short delay to ensure UI sees it
                 kotlinx.coroutines.delay(2000)
                 reportStatus("Running on ${engine?.activeBackend} Backend")
-
 
                 // Start Life Processes
                 checkPermissions()
@@ -693,7 +709,6 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
             scope.launch {
                 koogAgent.initialize()
-                koogAgent.startDiaryCycle()
                 Timber.i("KoogAgent ready")
             }
 
@@ -797,10 +812,10 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     /**
      * Core orchestrator: Context gathering + LLM reasoning + Tool execution
      */
-    suspend fun processQuery(userPrompt: String, sessionId: String? = null, isDream: Boolean = false): String? {
+    suspend fun processQuery(userPrompt: String, sessionId: String? = null, isDream: Boolean = false): String? = engineMutex.withLock {
         if (!::koogAgent.isInitialized || !koogAgent.isReady) {
             responseNotificationManager.showResponse("⚠️ System still starting up... try again in a moment")
-            return "System is still initializing. Please wait a moment and try again."
+            return@withLock "System is still initializing. Please wait a moment and try again."
         }
 
         if (!isDream) markActivity()
@@ -827,10 +842,10 @@ class GemmaService : Service(), AgentPlatformCallbacks {
      * Feeds tokens to [onToken] as they arrive from the engine.
      * Used by ApiServer /v1/chat/completions when stream=true.
      */
-    suspend fun streamQueryTokens(prompt: String, onToken: (String) -> Unit) {
+    suspend fun streamQueryTokens(prompt: String, onToken: (String) -> Unit) = engineMutex.withLock {
         if (!::koogAgent.isInitialized || !koogAgent.isReady) {
             onToken("System is still initializing.")
-            return
+            return@withLock
         }
         markActivity()
         // Register a temporary token observer, then run inference
@@ -917,6 +932,22 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             "  ⚡🐑⚡    ",
             " ⚡🐑⚡     "
         ),
+        // gem loading
+        listOf(
+            "✧✧✧✧✧✧✧✧✧✧✧✧",
+            "✦✧✧✧✧✧✧✧✧✧✧✧",
+            "✦✦✧✧✧✧✧✧✧✧✧✧",
+            "✦✦✦✧✧✧✧✧✧✧✧✧",
+            "✦✦✦✦✧✧✧✧✧✧✧✧",
+            "✦✦✦✦✦✧✧✧✧✧✧✧",
+            "✦✦✦✦✦✦✧✧✧✧✧✧",
+            "✦✦✦✦✦✦✦✧✧✧✧✧",
+            "✦✦✦✦✦✦✦✦✧✧✧✧",
+            "✦✦✦✦✦✦✦✦✦✧✧✧",
+            "✦✦✦✦✦✦✦✦✦✦✧✧",
+            "✦✦✦✦✦✦✦✦✦✦✦✧",
+            "✦✦✦✦✦✦✦✦✦✦✦✦"
+        ),
         // Space Invaders - Wide Invasion
         listOf(
             " \uD83C\uDFB6 \uD83D\uDC7E \uD83C\uDFB5     ",
@@ -959,7 +990,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             "     ☁\uFE0F✴\uFE0F☁\uFE0F ",
             "    ☁\uFE0F✴\uFE0F☁\uFE0F  ",
             "   ☁\uFE0F✴\uFE0F☁\uFE0F   ",
-            "  ☁️✴️☁️    ",
+            "  ☁️✴️You're absolutely right☁️",
             " ☁\uFE0F✴\uFE0F☁\uFE0F     "
         )
     )
@@ -1071,6 +1102,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
     override fun onDestroy() {
         Timber.i("🛑 GemmaService: Shutting down system...")
+        instance = null // Set early to prevent leaks
         
         // 1. Immediate UI/Foregound Release
         try {
@@ -1082,12 +1114,13 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         // 2. Critical Native Cleanup (Must be synchronous/prioritized to release NPU)
         try {
             kotlinx.coroutines.runBlocking {
-                kotlinx.coroutines.withTimeout(1500) {
+                // Short timeout to ensure we don't block the OS too long
+                kotlinx.coroutines.withTimeout(1000) {
                     performCriticalCleanup()
                 }
             }
         } catch (e: Exception) {
-            Timber.e(e, "Critical native cleanup failed")
+            Timber.e(e, "Critical native cleanup failed or timed out")
         }
 
         // 3. Background cleanup of sensory/network resources
@@ -1111,7 +1144,6 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             } finally {
                 serviceScope.cancel()
                 scope.cancel()
-                instance = null
             }
         }
         
@@ -1218,6 +1250,10 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
     override fun showThinking() {
         responseNotificationManager.showThinking()
+    }
+
+    override fun cancelThinking() {
+        responseNotificationManager.cancelThinking()
     }
 
     override fun showResponse(text: String) {
@@ -1361,3 +1397,4 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     }
 
 }
+

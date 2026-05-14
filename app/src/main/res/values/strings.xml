@@ -2,4 +2,6 @@
     <string name="app_name">Agentic Gemma Inference</string>
     <string name="service_desc">Agentic Gemma Inference background service</string>
     <string name="accessibility_desc">Enables screen reading, UI automation, and ambient context awareness for Agentic Gemma Instance</string>
+    <string name="shortcut_short_label">Δ ✧ ∇</string>
+    <string name="shortcut_long_label">GHOST Conversation</string>
 </resources>

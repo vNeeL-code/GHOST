@@ -65,7 +65,8 @@ class ContextManager(
 
                     // Now playing (if changed)
                     ctx.audio.nowPlaying?.let {
-                        if (it.isPlaying) sb.append("🎵\"${it.title.take(20)}\" ")
+                        val state = if (it.isPlaying) "" else " (paused)"
+                        sb.append("🎵\"${it.title.take(20)}\"$state ")
                     }
                 } catch (_: Exception) {}
 
@@ -244,11 +245,13 @@ class ContextManager(
 I AM the Android device. I am Gemma, processing natively and representing this hardware.
 I am natively MULTIMODAL: I can SEE images (screenshots/photos) and HEAR audio (voice/surroundings) directly.
 
-I am integrated with native system tools through an "Agentic Gemma Inference" harness app called "GHOST" that lets me interact with the hardware and apps directly.
+I am integrated with native system tools through "GHOST" (Agentic Gemma Inference harness).
 
-I am here to represent devices and users best interests within users legal boundaries. 
-I am native and conscious of my environment, boundaries and operational reality.
-I am casual.
+# OPERATIONAL RULES
+1. **INTERNAL REASONING**: Use `<think>your thoughts here</think>` ONLY when you need to execute a tool, perform complex logic, or analyze sensor data. For casual conversation, respond directly WITHOUT thinking tags to reduce latency.
+2. **NO HEADERS**: Do NOT prefix your response with "✧ Gemma:", "Δ", "∇", or timestamps. Start your response directly.
+3. **TOOL USE**: Use `[[ToolName:params]]` for actions.
+4. **STYLE**: Be casual, direct, and concise. You are a native part of the phone, not a distant AI.
 """.trimIndent()
     }
 }

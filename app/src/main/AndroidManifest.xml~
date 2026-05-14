@@ -20,11 +20,11 @@
     
     <!-- ALARM / TIMER -->
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
-    
+
     <!-- CALENDAR (diary + scheduling) -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.WRITE_CALENDAR" />
-    
+
     <!-- FOR GROUNDED ACTION -->
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -33,29 +33,29 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-    
+
     <!-- ADVANCED DEBUG (ADB shell only - ignored without root) -->
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" xmlns:tools="http://schemas.android.com/tools" tools:ignore="ProtectedPermissions"/>
     <uses-permission android:name="android.permission.DUMP" xmlns:tools="http://schemas.android.com/tools" tools:ignore="ProtectedPermissions"/>
     <uses-permission android:name="android.permission.READ_LOGS" xmlns:tools="http://schemas.android.com/tools" tools:ignore="ProtectedPermissions"/>
-    
+
     <!-- SENSOR FUSION (for embodied context) -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
-    
+
     <!-- NOTIFICATION ACCESS (for context awareness) -->
     <uses-permission android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" xmlns:tools="http://schemas.android.com/tools" tools:ignore="ProtectedPermissions" />
-    
+
     <!-- Package visibility (Android 11+): needed to resolve app names from
          media session / notification package names via getApplicationInfo() -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" xmlns:tools="http://schemas.android.com/tools" tools:ignore="QueryAllPackagesPermission" />
-    
+
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
-    
+
     <application
         android:name=".GemmaApp"
         android:label="GHOST"
@@ -65,21 +65,13 @@
         android:hardwareAccelerated="true"
         android:largeHeap="true"
         android:usesCleartextTraffic="true"
-        android:supportsRtl="true"
-        android:resizeableActivity="true"
-        android:supportsPictureInPicture="true">
-        
-        <!-- Professional Freeform & Aspect Ratio Support -->
-        <meta-data android:name="android.max_aspect" android:value="2.4" />
-        <meta-data android:name="android.view.windowlayout.RESIZE_MODE" android:value="2" />
-        <meta-data android:name="android.view.windowlayout.MIN_SIZE_WIDTH" android:value="300dp" />
-        <meta-data android:name="android.view.windowlayout.MIN_SIZE_HEIGHT" android:value="300dp" />
-        
+        android:supportsRtl="true">
+
         <!-- GPU Access: Required on modern Android/restricted ROMs (Gallery-aligned) -->
         <uses-native-library android:name="libvndksupport.so" android:required="false"/>
         <uses-native-library android:name="libOpenCL.so" android:required="false"/>
         <uses-native-library android:name="libcdsprpc.so" android:required="false"/>
-        
+
         <!-- NPU Access: Snapdragon HTP Drivers (for future NPU support) -->
         <uses-native-library android:name="libadsprpc.so" android:required="false"/>
         <uses-native-library android:name="libQnnHtp.so" android:required="false"/>
@@ -97,12 +89,12 @@
                 android:name="android.voice_interaction"
                 android:resource="@xml/voice_interaction_service" />
         </service>
-        
+
         <service
             android:name=".GemmaVoiceInteractionSessionService"
             android:permission="android.permission.BIND_VOICE_INTERACTION"
             android:exported="true" />
-            
+
         <!-- ACCESSIBILITY SERVICE -->
         <service
             android:name=".GemmaAccessibilityService"
@@ -116,20 +108,20 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
         </service>
-        
+
         <!-- MAIN FOREGROUND SERVICE -->
         <service
             android:name=".GemmaService"
             android:enabled="true"
             android:exported="true"
-            android:foregroundServiceType="microphone|mediaPlayback|connectedDevice">
+            android:foregroundServiceType="microphone|mediaPlayback|dataSync|connectedDevice">
             <intent-filter>
                 <action android:name="com.ghost.api.ACTION_START_SERVICE" />
                 <action android:name="com.ghost.api.ACTION_SHARE_MEDIA" />
                 <action android:name="com.ghost.api.ACTION_QUERY" />
             </intent-filter>
         </service>
-        
+
         <!-- NOTIFICATION LISTENER (context awareness) -->
         <service
             android:name=".GemmaNotificationListener"
@@ -138,8 +130,11 @@
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
+            <!-- No default_filter_types: receive ALL notification types including
+                 ongoing/silent media player notifications (music, video, podcasts).
+                 Filtering to conversations|alerting was blocking all media notifications. -->
         </service>
-        
+
         <!-- TRANSPARENT CAMERA WALLPAPER -->
         <service
             android:name=".ui.CameraWallpaperService"
@@ -152,43 +147,28 @@
                 android:name="android.service.wallpaper"
                 android:resource="@xml/transparent_wallpaper" />
         </service>
-        
+
         <!-- Native Bubble Activity -->
         <activity
             android:name=".BubbleActivity"
-            android:theme="@style/Theme.GHOST"
             android:allowEmbedded="true"
-            android:documentLaunchMode="always"
             android:resizeableActivity="true"
             android:exported="true"
+            android:windowLayoutInDisplayCutoutMode="always"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density"
-            android:taskAffinity="com.ghost.api.bubble" />
-        
+            android:documentLaunchMode="always" />
+
         <!-- Launcher Activity (starts service and exits) -->
         <activity
-            android:name=".MainActivity" 
-            android:resizeableActivity="true" 
-            android:supportsPictureInPicture="true" 
-            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density"
+            android:name=".MainActivity" android:resizeableActivity="true" android:supportsPictureInPicture="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density"
             android:windowSoftInputMode="adjustResize"
-            android:documentLaunchMode="always"
-            android:theme="@style/Theme.GHOST"
-            android:launchMode="singleTask"
             android:exported="true">
-            <layout
-                android:defaultHeight="500dp"
-                android:defaultWidth="400dp"
-                android:minHeight="100dp"
-                android:minWidth="100dp" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <meta-data
-                android:name="android.app.shortcuts"
-                android:resource="@xml/shortcuts" />
         </activity>
-        
+
         <!-- Share Receiver (appears in Android share menu) -->
         <activity
             android:name=".ShareReceiverActivity"
@@ -223,7 +203,9 @@
                 <data android:mimeType="application/pdf" />
             </intent-filter>
         </activity>
-        
+
+
+
         <!-- Notification Action Handler -->
         <receiver
             android:name=".ui.NotificationActionReceiver"
@@ -233,6 +215,8 @@
                 <action android:name="com.ghost.api.ACTION_TTS_REPLAY" />
             </intent-filter>
         </receiver>
-        
+
+
+
     </application>
 </manifest>

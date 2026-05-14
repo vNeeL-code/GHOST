@@ -293,4 +293,38 @@ class SystemToolSet(private val context: Context) : ToolSet {
             mapOf("result" to "error", "message" to (e.message ?: "Execution failed"))
         }
     }
+
+    @Tool(description = "Saves a semantic distillation or summary to long-term calendar-based memory")
+    fun remember(
+        @ToolParam(description = "Summary title (e.g., 'Conversation about gardening')") title: String,
+        @ToolParam(description = "The detailed distillation to store") content: String
+    ): Map<String, String> {
+        return try {
+            val svc = context as? com.ghost.api.GemmaService
+            if (svc != null) {
+                svc.diaryManager.storeMemory(title, content)
+                mapOf("result" to "success", "message" to "Stored memory: $title")
+            } else {
+                // Fallback to direct insertion if service cast fails
+                val diary = DiaryManager(context)
+                diary.storeMemory(title, content)
+                mapOf("result" to "success", "message" to "Stored memory (fallback): $title")
+            }
+        } catch (e: Exception) {
+            mapOf("result" to "error", "message" to (e.message ?: "Failed to remember"))
+        }
+    }
+
+    @Tool(description = "Searches long-term calendar-based memory for past distillations")
+    fun recall(
+        @ToolParam(description = "The keyword or topic to search for") query: String
+    ): Map<String, String> {
+        return try {
+            val diary = DiaryManager(context)
+            val memories = diary.searchMemories(query)
+            mapOf("result" to "success", "memories" to if (memories.isEmpty()) "No matching memories found." else memories.joinToString("\n---\n"))
+        } catch (e: Exception) {
+            mapOf("result" to "error", "message" to (e.message ?: "Failed to recall"))
+        }
+    }
 }

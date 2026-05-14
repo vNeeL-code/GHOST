@@ -1,26 +1,14 @@
 package com.ghost.api.ui
 
-import android.animation.ObjectAnimator
-import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
-import android.os.Build
-import android.os.VibrationEffect
-import android.os.Vibrator
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.*
 import com.ghost.api.Constants
-import com.ghost.api.hardware.AudioRecorder
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import timber.log.Timber
 
 /**
@@ -41,17 +29,11 @@ class InputOverlay(
     private val inputField: EditText
     private val sparkleButton: TextView
     private lateinit var voiceSendButton: TextView
-    private val audioRecorder = AudioRecorder(context)
+    private val voiceController: VoiceInputController
 
-    private var isRecording = false
-    private var recordingJob: Job? = null
-    private var pulseAnimator: ObjectAnimator? = null
+    private var isThinkingState = false
 
-    private enum class VoiceState { IDLE, RECORDING, CONFIRM }
-    private var voiceState = VoiceState.IDLE
-    private var pendingAudioData: ByteArray? = null
-
-    // Colors
+    // Colors (still needed for sparkle menu / thinking state)
     private val colorSurface = Color.parseColor("#1E1E1E")
     private val colorSurfaceVariant = Color.parseColor("#2D2D2D")
     private val colorOnSurface = Color.WHITE
@@ -179,13 +161,13 @@ class InputOverlay(
 
             setOnEditorActionListener { _, actionId, _ ->
                 if (actionId == EditorInfo.IME_ACTION_SEND) {
-                    sendTextQuery()
+                    voiceController.handleTap()
                     true
                 } else false
             }
         }
 
-        // Voice / Send button
+        // Voice / Send button — wired to VoiceInputController
         voiceSendButton = TextView(context).apply {
             text = "🟣"
             textSize = 20f
@@ -193,17 +175,25 @@ class InputOverlay(
             gravity = Gravity.CENTER
             layoutParams = LinearLayout.LayoutParams(dpToPx(36), dpToPx(36))
             visibility = VISIBLE
-            setOnClickListener { handleVoiceSendTap() }
         }
 
-        // Show/hide send button based on text
-        inputField.addTextChangedListener(object : android.text.TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                syncVoiceSendButton()
+        // Build controller AFTER voiceSendButton and inputField exist
+        // (assigned to val so it can be referenced in cleanup)
+        voiceController = VoiceInputController(
+            context = context,
+            micButton = voiceSendButton,
+            inputField = inputField,
+            sparkleOrNull = sparkleButton,
+            onAudioReady = { audio ->
+                onAudioQuery(audio)
+                onDismiss()
+            },
+            onTextReady = { text ->
+                setThinking(true)
+                dismissSubMenus()
+                onTextQuery(text)
             }
-            override fun afterTextChanged(s: android.text.Editable?) {}
-        })
+        )
 
         bar.addView(sparkleButton)
         bar.addView(inputField)
@@ -504,103 +494,8 @@ class InputOverlay(
         addView(container)
     }
 
-    private fun handleVoiceSendTap() {
-        val hasText = inputField.text.isNotBlank()
-        if (hasText) {
-            sendTextQuery()
-            return
-        }
-        when (voiceState) {
-            VoiceState.IDLE      -> startRecording()
-            VoiceState.RECORDING -> stopRecordingToConfirm()
-            VoiceState.CONFIRM   -> sendPendingAudio()
-        }
-    }
 
-    private fun syncVoiceSendButton() {
-        val hasText = inputField.text.isNotBlank()
-        voiceSendButton.text = when {
-            hasText               -> "➤"
-            voiceState == VoiceState.RECORDING -> "🔴"
-            voiceState == VoiceState.CONFIRM   -> "🟠"
-            else                  -> "🟣"
-        }
-    }
-
-    private fun startRecording() {
-        Timber.i("InputOverlay: Tap-to-record started")
-        if (!audioRecorder.hasPermission()) {
-            Timber.w("InputOverlay: No audio permission")
-            Toast.makeText(context, "Microphone permission required", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        hapticPulse()
-        voiceState = VoiceState.RECORDING
-        pendingAudioData = null
-        isRecording = true
-        updateRecordingUI(true)
-        syncVoiceSendButton()
-
-        recordingJob = CoroutineScope(Dispatchers.Main).launch {
-            Timber.i("InputOverlay: Recording up to 30s audio...")
-            val audio: ByteArray? = withContext(Dispatchers.IO) {
-                audioRecorder.record(30, false)
-            }
-
-            isRecording = false
-            updateRecordingUI(false)
-
-            if (audio != null && audio.isNotEmpty()) {
-                val header = audio.take(4).map { it.toInt().toChar() }.joinToString("")
-                Timber.i("InputOverlay: Got ${audio.size} bytes (${audio.size / 32000}s), header='$header'")
-                transitionToConfirm(audio)
-            } else {
-                Timber.w("InputOverlay: Recording failed or empty")
-                resetVoiceState()
-            }
-        }
-    }
-
-    private fun stopRecordingToConfirm() {
-        hapticPulse()
-        audioRecorder.stopRecording()
-        // The coroutine in startRecording will pick up the partial audio and transition
-    }
-
-    private fun transitionToConfirm(audio: ByteArray) {
-        pendingAudioData = audio
-        voiceState = VoiceState.CONFIRM
-        hapticPulse()
-        
-        sparkleButton.setTextColor(Color.parseColor("#EA580C")) // Orange star
-        startPulse()
-        
-        inputField.hint = "Tap \uD83D\uDFE0 to send"
-        inputField.isEnabled = false
-        syncVoiceSendButton()
-    }
-
-    private fun sendPendingAudio() {
-        val audio = pendingAudioData
-        if (audio != null && audio.isNotEmpty()) {
-            setThinking(true)
-            dismissSubMenus()
-            onAudioQuery(audio)
-        }
-        resetVoiceState()
-    }
-
-    private fun resetVoiceState() {
-        voiceState = VoiceState.IDLE
-        pendingAudioData = null
-        stopPulse()
-        inputField.hint = "Δ \uD83D\uDC7E ∇"
-        inputField.isEnabled = true
-        sparkleButton.setTextColor(colorAccent)
-        syncVoiceSendButton()
-    }
-
+    // Haptic pulse — used by sparkle and radial button interactions
     private fun hapticPulse() {
         try {
             val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
@@ -616,16 +511,12 @@ class InputOverlay(
     }
 
     fun setThinking(thinking: Boolean) {
+        isThinkingState = thinking
+        voiceController.setThinking(thinking)
         if (thinking) {
-            inputField.isEnabled = false
-            inputField.hint = "✧ Gemma is processing..."
-            sparkleButton.setTextColor(Color.parseColor("#F59E0B")) // Amber sparkle
-            startPulse()
+            sparkleButton.setTextColor(Color.parseColor("#F59E0B")) // Amber
         } else {
-            inputField.isEnabled = true
-            inputField.hint = "Δ \uD83D\uDC7E ∇"
             sparkleButton.setTextColor(colorAccent)
-            stopPulse()
         }
     }
 
@@ -637,56 +528,24 @@ class InputOverlay(
             sparkleButton.alpha = 0.5f
         } else {
             inputField.isEnabled = true
-            inputField.hint = "Δ \uD83D\uDC7E ∇"
+            inputField.hint = "Δ 👾 ∇"
             sparkleButton.setTextColor(colorAccent)
             sparkleButton.alpha = 1f
         }
     }
 
-    private fun updateRecordingUI(recording: Boolean) {
-        if (recording) {
-            sparkleButton.setTextColor(colorRecording)
-            startPulse()
-            inputField.hint = "Listening..."
-            inputField.isEnabled = false
-        } else {
-            sparkleButton.setTextColor(colorAccent)
-            stopPulse()
-            inputField.hint = "Δ \uD83D\uDC7E ∇"
-            inputField.isEnabled = true
-        }
-    }
 
-    private fun startPulse() {
-        pulseAnimator?.cancel()
-        pulseAnimator = ObjectAnimator.ofFloat(sparkleButton, "alpha", 1f, 0.3f, 1f).apply {
-            duration = 600
-            repeatCount = ValueAnimator.INFINITE
-            start()
-        }
-    }
-
-    private fun stopPulse() {
-        pulseAnimator?.cancel()
-        sparkleButton.alpha = 1f
-    }
-
-    private fun sendTextQuery() {
-        val text = inputField.text.toString().trim()
-        if (text.isEmpty()) return
-
-        setThinking(true)
-        dismissSubMenus()
-        onTextQuery(text)
-    }
 
     fun focusInput() {
         inputField.requestFocus()
     }
 
+    fun appendText(text: String) {
+        inputField.append(text)
+    }
+
     fun cleanup() {
-        audioRecorder.stopRecording()
-        pulseAnimator?.cancel()
+        voiceController.cleanup()
     }
 
     // === Drawing helpers ===

@@ -108,8 +108,21 @@ class OverlayManager(private val context: Context) {
         )
 
         val params = getInteractiveLayoutParams().apply {
-            gravity = Gravity.CENTER
-            y = dpToPx(-100)  // Offset upward from center
+            // Anchor to TOP to prevent keyboard resize 'jumps'
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            // Use physical screen height from WindowManager — NOT context.resources.displayMetrics
+            // which tracks the app *window* size and drifts when bubbles/freeform windows resize.
+            val screenHeight = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                windowManager!!.currentWindowMetrics.bounds.height()
+            } else {
+                val dm = android.util.DisplayMetrics()
+                @Suppress("DEPRECATION")
+                windowManager!!.defaultDisplay.getRealMetrics(dm)
+                dm.heightPixels
+            }
+            val windowHeight = dpToPx(400)
+            // Centered vertically minus ergonomic offset
+            y = (screenHeight - windowHeight) / 2 - dpToPx(15)
         }
 
         windowManager?.addView(inputOverlay, params)
@@ -316,7 +329,8 @@ class OverlayManager(private val context: Context) {
 
     private fun getInteractiveLayoutParams(): WindowManager.LayoutParams {
         val type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        val flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+        val flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
         
         return WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
@@ -325,9 +339,7 @@ class OverlayManager(private val context: Context) {
             flags,
             android.graphics.PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.CENTER
-            // FIX: Use ADJUST_NOTHING to prevent keyboard from pushing the bar overlay
-            // Removed ALWAYS_VISIBLE to respect user's manual tap intent
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
             softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
         }
     }

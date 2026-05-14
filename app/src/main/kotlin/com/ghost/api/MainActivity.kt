@@ -55,6 +55,7 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
     
     private lateinit var chatAdapter: ChatAdapter
     private lateinit var ttsManager: TTSManager
+    private var voiceController: com.ghost.api.ui.VoiceInputController? = null
     
     // Service Binding
     private var gemmaService: GemmaService? = null
@@ -97,7 +98,6 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        actionBar?.hide()
         Timber.i("🌀 Entering the System Check...")
         
         // Init Voice
@@ -266,6 +266,20 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
             }
             return
         }
+
+        // 9.5 Notification Listener (Required for Media metadata)
+        val expectedListener = android.content.ComponentName(this, GemmaNotificationListener::class.java).flattenToString()
+        val enabledListeners = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
+        if (enabledListeners == null || !enabledListeners.contains(expectedListener)) {
+            showState(
+                "❌ Media Blindspot\n\nI need 'Device & App Notifications' access to read media and notification contents.",
+                "Enable Access"
+            ) {
+                val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                startActivity(intent)
+            }
+            return
+        }
         
         // 10. Complete
         showState("Δ 👾 ∇\n\nStatus: online", "LAUNCHING...") { }
@@ -397,36 +411,55 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
             adapter = chatAdapter
         }
         
-        val btnSparkle = findViewById<TextView>(R.id.btnSparkle)
         val btnMic = findViewById<TextView>(R.id.btnMic)
         val btnSend = findViewById<TextView>(R.id.btnSend)
-        
-        // Dynamic visibility like a modern chat app
+
+        // Build shared voice controller — same behaviour as overlay bar
+        voiceController = com.ghost.api.ui.VoiceInputController(
+            context = this,
+            micButton = btnMic ?: return,
+            inputField = chatInputText ?: return,
+            sparkleOrNull = null, // no sparkle in main chat bar
+            onAudioReady = { audio ->
+                gemmaService?.let { svc ->
+                    scope.launch {
+                        svc.koogAgent.offerAudio(audio)
+                        svc.processQueryFromUi("[User sent voice message — listen and respond to the audio]")
+                    }
+                }
+            },
+            onTextReady = { text ->
+                gemmaService?.processQueryFromUi(text)
+            }
+        )
+
+        // Send button visibility driven by controller's syncButton()
         chatInputText?.addTextChangedListener(object : android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                 val hasText = !s.isNullOrBlank()
                 btnSend?.visibility = if (hasText) android.view.View.VISIBLE else android.view.View.GONE
-                btnMic?.visibility = if (hasText) android.view.View.GONE else android.view.View.VISIBLE
+                btnMic?.visibility  = if (hasText) android.view.View.GONE  else android.view.View.VISIBLE
             }
             override fun afterTextChanged(s: android.text.Editable?) {}
         })
 
         btnSend?.setOnClickListener {
-            val text = chatInputText?.text?.toString()?.trim()
-            if (!text.isNullOrEmpty() && gemmaService != null) {
-                chatInputText?.setText("")
-                gemmaService?.processQueryFromUi(text)
-            }
+            voiceController?.handleTap()
         }
-        
+
+        val btnSparkle = findViewById<TextView>(R.id.btnSparkle)
         btnSparkle?.setOnClickListener {
-            // Match Overlay Sparkle: Default to Media/Skill picker
             imagePicker.launch("image/*")
         }
 
         btnMic?.setOnClickListener {
-            handleMicClick()
+            voiceController?.handleTap()
+        }
+
+        findViewById<View>(R.id.btnMinimize)?.setOnClickListener {
+            gemmaService?.responseNotificationManager?.showResponse("Minimizing to bubble...")
+            moveTaskToBack(true)
         }
         
         loadHistoricalChat()
@@ -564,28 +597,7 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
     }
 
     private fun handleMicClick() {
-        if (gemmaService == null) return
-        
-        scope.launch {
-            try {
-                onThinkingStateChanged(true)
-                thinkingText?.text = "Δ Listening... ∇"
-                
-                // Record 5s of voice
-                val audioBytes = gemmaService?.recordAudio(5)
-                
-                if (audioBytes != null) {
-                    thinkingText?.text = "Δ Processing... ∇"
-                    gemmaService?.processMultimodalFromUi("I am speaking to you now.", audio = audioBytes)
-                } else {
-                    onThinkingStateChanged(false)
-                    android.widget.Toast.makeText(this@MainActivity, "Failed to record audio or permission denied", android.widget.Toast.LENGTH_SHORT).show()
-                }
-            } catch (e: Exception) {
-                Timber.e(e, "Mic error")
-                onThinkingStateChanged(false)
-            }
-        }
+        voiceController?.handleTap()
     }
 
     private fun downsampleBitmap(bitmap: android.graphics.Bitmap, maxDim: Int): android.graphics.Bitmap {

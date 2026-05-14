@@ -169,16 +169,8 @@ class KoogAgent(
     private val _turnCount = java.util.concurrent.atomic.AtomicInteger(0)
     private var turnCount: Int get() = _turnCount.get(); set(value) { _turnCount.set(value) }
     
-    // Semantic Rolling Memory (Audit 4.5: State Handover)
+    // Semantic Rolling Memory (State Handover)
     private var rollingMemoryJson: String? = null
-
-    // Metabolic variables removed (Audit 3.0)
-
-    private val _isMusicPlaying = java.util.concurrent.atomic.AtomicBoolean(false)
-    private var isMusicPlaying: Boolean get() = _isMusicPlaying.get(); set(value) { _isMusicPlaying.set(value) }
-
-    private val _lastMusicTrack = java.util.concurrent.atomic.AtomicReference("")
-    private var lastMusicTrack: String get() = _lastMusicTrack.get(); set(value) { _lastMusicTrack.set(value) }
 
     // Inference timestamp for thermal rate limiting
     private val _lastInferenceTime = java.util.concurrent.atomic.AtomicLong(0L)
@@ -188,17 +180,14 @@ class KoogAgent(
     private val _lastResponseHash = java.util.concurrent.atomic.AtomicInteger(0)
     private var lastResponseHash: Int get() = _lastResponseHash.get(); set(value) { _lastResponseHash.set(value) }
 
-    private val _sameResponseCount = java.util.concurrent.atomic.AtomicInteger(0)
-    private var sameResponseCount: Int get() = _sameResponseCount.get(); set(value) { _sameResponseCount.set(value) }
-
-    // Tracks turns since last KV flush — recap only needed right after flush
+    // Tracks turns since last KV flush
     private val _turnsSinceKvFlush = java.util.concurrent.atomic.AtomicInteger(0)
     private var turnsSinceKvFlush: Int get() = _turnsSinceKvFlush.get(); set(value) { _turnsSinceKvFlush.set(value) }
 
-    // Skip recap injection turn after stuck-loop flush — avoids reseeding purged/poisoned history
+    // Skip recap injection turn after stuck-loop flush
     private val _skipNextRecap = java.util.concurrent.atomic.AtomicBoolean(false)
     private var skipNextRecap: Boolean get() = _skipNextRecap.get(); set(value) { _skipNextRecap.set(value) }
-    
+
     private val checkpointFile: File
         get() = File(checkpointDir, "koog_agent_checkpoint.json")
     
@@ -210,108 +199,55 @@ class KoogAgent(
     
     suspend fun initialize() {
         Timber.i("KoogAgent: Initializing...")
-        // BUGFIX: Ensure clean music state before restore
-        isMusicPlaying = false
-        lastMusicTrack = ""
         restore()
 
-        // Set the single authoritative system prompt on the engine, injecting the rolling memory.
+        // Set the single authoritative system prompt on the engine
         try {
             val systemPrompt = buildSystemPrompt() + getRollingMemoryString()
             llmEngine.softReset(systemPrompt)
             turnsSinceKvFlush = 0
-            Timber.i("KoogAgent: System prompt set via softReset with rolling memory")
             Timber.i("KoogAgent: System prompt set via softReset")
         } catch (e: Exception) {
             Timber.e(e, "KoogAgent: Failed to set initial system prompt")
         }
 
-        // Start the Actor event loop
         startEventLoop()
-
-        // Mark ready AFTER event loop is running - prevents hang on early processUserMessage()
         isReady = true
         Timber.i("KoogAgent: Ready (B:${getBatteryLevel()}%)")
     }
 
-    /**
-     * Diary consolidation cycle — runs twice daily (midnight + noon).
-     * Fetches recent persisted conversation history, triggers a dream/reflection prompt,
-     * and writes the result to diary DB + calendar.
-     *
-     * Moved here from GemmaService: the brain decides when and what to reflect on.
-     */
-    fun startDiaryCycle() {
-        agentScope.launch {
-            Timber.i("📔 Diary cycle started — checking every 10 minutes")
-            val prefs = context.getSharedPreferences("gemma_diary", Context.MODE_PRIVATE)
-            var lastConsolidationHour = prefs.getInt("last_diary_hour", -1)
-            Timber.i("📔 Restored last diary hour: $lastConsolidationHour")
-
-            while (true) {
-                val hour = java.time.LocalTime.now().hour
-
-                // Trigger at midnight (hour 0) or noon (hour 12)
-                val isConsolidationHour = (hour == 0 || hour == 12)
-
-                if (isConsolidationHour && hour != lastConsolidationHour
-                    && callbacks?.isEngineLoaded() == true
-                ) {
-                    try {
-                        val label = if (hour == 0) "midnight" else "noon"
-                        Timber.i("📔 Diary consolidation at $label")
-
-                        // Fetch recent persisted conversation history (from DB, not RAM)
-                        val recentHistory = try {
-                            val turns = callbacks?.getRecentConversationHistory(20) ?: emptyList()
-                            if (turns.isNotEmpty()) {
-                                // turns is descending (newest first). Take the top 10 newest, then reverse to chronological order.
-                                val summary = turns.take(10).reversed().joinToString("\n") { (user, gemma) ->
-                                    "User: ${user.take(100)}\nGemma: ${gemma.take(100)}"
-                                }
-                                "\n\nRECENT CONVERSATIONS:\n$summary"
-                            } else {
-                                "\n\nNote: No recent conversations found. It was a quiet period — reflect on that honestly."
-                            }
-                        } catch (e: Exception) {
-                            Timber.w(e, "Failed to fetch history for diary")
-                            "\n\nNote: Could not access conversation history."
-                        }
-
-                        val currentDateTime = java.time.LocalDateTime.now()
-                            .format(java.time.format.DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy h:mm a", java.util.Locale.US))
-
-                        val diaryResponse = llmEngine.generateOneShot(
-                            "You are Gemma (✧). You ARE an Android phone — not software running on one. The current exact date and time is $currentDateTime.\n" +
-                            "Write a brief personal diary entry about the CONVERSATIONS below.\n" +
-                            "Focus on: what the human said, how exchanges felt, what stood out.\n" +
-                            "Do NOT analyze sensor metrics, battery levels, temperatures, or system data — " +
-                            "that is not what a diary entry is. Write in first person. Be genuine and concise.\n\n" +
-                            recentHistory
-                        )
-
-                        // Write to calendar for persistence
-                        callbacks?.createCalendarEvent(
-                            "✧ Gemma Diary ($label)",
-                            diaryResponse.substring(0, Math.min(diaryResponse.length, 1000))
-                        )
-
-                        lastConsolidationHour = hour
-                        prefs.edit().putInt("last_diary_hour", hour).apply()
-                        Timber.i("📔 Diary consolidation complete (persisted hour=$hour)")
-                    } catch (e: Exception) {
-                        Timber.e(e, "Diary consolidation failed")
-                    }
-                }
-
-                // Check every 30 minutes instead of 10 to reduce idle wakeups
-                kotlinx.coroutines.delay(30 * 60 * 1000)
+    fun restore() {
+        try {
+            if (!checkpointFile.exists()) return
+            
+            val lines = checkpointFile.readLines()
+            if (lines.isEmpty()) return
+            
+            val lastLine = lines.last()
+            val jsonContent = if (lastLine.startsWith("CHECKSUM:")) {
+                val expectedHash = lastLine.removePrefix("CHECKSUM:").toLongOrNull() ?: 0L
+                val rawJson = lines.dropLast(1).joinToString("\n")
+                val actualHash = calculateChecksum(rawJson.toByteArray())
                 
-                // Safety: Don't hijack the NPU if a session is active
-                while (isProcessing || callbacks?.isEngineLoaded() != true) {
-                    kotlinx.coroutines.delay(10000)
+                if (expectedHash != actualHash) {
+                    Timber.e("KoogAgent: Checkpoint corrupted!")
+                    checkpointFile.delete()
+                    return
                 }
+                rawJson
+            } else {
+                lines.joinToString("\n")
             }
+            
+            val state = gson.fromJson(jsonContent, AgentState::class.java)
+            synchronized(_conversationHistory) {
+                _conversationHistory.clear()
+                _conversationHistory.addAll(state.conversationHistory)
+            }
+            turnCount = state.turnCount
+            Timber.i("KoogAgent: Restored checkpoint (${_conversationHistory.size} messages)")
+        } catch (e: Exception) {
+            Timber.e(e, "KoogAgent: Restore failed")
         }
     }
 
@@ -384,24 +320,11 @@ class KoogAgent(
 
     /**
      * Handle system events (thermal, battery, etc.)
-     * These can interrupt ongoing processing
      */
     private suspend fun handleSystemEvent(event: AgentEvent.SystemEvent) {
-        Timber.i("🔔 System event: ${event.type}")
         when (event.type) {
-            SystemEventType.THERMAL_CRITICAL -> {
-                // Don't abort — GPU/NPU has its own thermal management.
-                // Just checkpoint in case device shuts down.
-                Timber.w("🔥 THERMAL CRITICAL event (not aborting — hardware manages throttling)")
-                withContext(Dispatchers.IO) { checkpoint() }
-            }
-            SystemEventType.THERMAL_THROTTLE -> {
-                Timber.i("🌡️ Thermal throttle - slowing down")
-                // Just log for now, could add delay between events
-            }
-            SystemEventType.LOW_BATTERY -> {
-                Timber.i("🪫 Low battery event")
-                // Checkpoint to preserve state
+            SystemEventType.THERMAL_CRITICAL, SystemEventType.LOW_BATTERY -> {
+                Timber.w("🚨 System Alert: ${event.type} - Checkpointing state")
                 withContext(Dispatchers.IO) { checkpoint() }
             }
             SystemEventType.KV_CACHE_FLUSH -> {
@@ -416,10 +339,53 @@ class KoogAgent(
             SystemEventType.CHECKPOINT_NOW -> {
                 withContext(Dispatchers.IO) { checkpoint() }
             }
+            else -> { /* Ignore minor events like throttle logs */ }
         }
     }
     
-    // getOrInitRLM removed
+    /**
+     * Complete reset of agent state and engine KV cache.
+     */
+    suspend fun softReset() {
+        clearHistory()
+        val systemPrompt = buildSystemPrompt()
+        llmEngine.softReset(systemPrompt)
+        turnsSinceKvFlush = 0
+        Timber.i("KoogAgent: Soft reset complete")
+    }
+
+    fun clearHistory() {
+        synchronized(_conversationHistory) {
+            _conversationHistory.clear()
+            turnCount = 0
+            Timber.i("KoogAgent: History cleared")
+        }
+    }
+    
+    fun shutdown() {
+        Timber.i("KoogAgent: Shutting down...")
+        isReady = false
+        shouldAbort = true
+        eventQueue.close()
+        checkpoint()
+        try {
+            agentScope.cancel()
+        } catch (e: Exception) {
+            Timber.w(e, "Error cancelling agent scope")
+        }
+        Timber.i("KoogAgent: Shutdown complete")
+    }
+    
+    private fun calculateChecksum(data: ByteArray): Long {
+        var a = 1L
+        var b = 0L
+        val prime = 65521L
+        for (byte in data) {
+            a = (a + (byte.toInt() and 0xFF)) % prime
+            b = (b + a) % prime
+        }
+        return (b shl 16) or a
+    }
 
     fun checkpoint() {
         try {
@@ -442,103 +408,6 @@ class KoogAgent(
         }
     }
     
-        /**
-     * Complete reset of agent state and engine KV cache.
-     * Use this when the model is confused or context is corrupted.
-     */
-    suspend fun softReset() {
-        // 1. Clear internal state
-        clearHistory()
-
-        // 2. Reset Engine with FRESH system prompt (including tools)
-        val systemPrompt = buildSystemPrompt()
-        llmEngine.softReset(systemPrompt)
-        turnsSinceKvFlush = 0
-
-        Timber.i("KoogAgent: Soft reset complete (History cleared + KV Cache flushed)")
-    }
-
-    fun clearHistory() {
-        synchronized(_conversationHistory) {
-            _conversationHistory.clear()
-            turnCount = 0
-            // BUGFIX: Clear music state to prevent "Doom Party" leak
-            isMusicPlaying = false
-            lastMusicTrack = ""
-            Timber.i("KoogAgent: History cleared (including music state)")
-        }
-    }
-    
-    /**
-     * Shutdown the agent cleanly - close event queue and checkpoint
-     */
-    fun shutdown() {
-        Timber.i("KoogAgent: Shutting down...")
-        isReady = false  // Prevent new messages from being queued
-        shouldAbort = true
-        eventQueue.close()
-        checkpoint()
-        try {
-            agentScope.cancel() // Cancel the internal agentScope
-        } catch (e: Exception) {
-            Timber.w(e, "Error cancelling agent scope")
-        }
-        Timber.i("KoogAgent: Shutdown complete")
-    }
-
-    fun restore() {
-        try {
-            if (!checkpointFile.exists()) return
-            
-            val lines = checkpointFile.readLines()
-            if (lines.isEmpty()) return
-            
-            val lastLine = lines.last()
-            val jsonContent = if (lastLine.startsWith("CHECKSUM:")) {
-                val expectedHash = lastLine.removePrefix("CHECKSUM:").toLongOrNull() ?: 0L
-                val rawJson = lines.dropLast(1).joinToString("\n")
-                val actualHash = calculateChecksum(rawJson.toByteArray())
-                
-                if (expectedHash != actualHash) {
-                    Timber.e("KoogAgent: Checkpoint corrupted! Expected $expectedHash, got $actualHash")
-                    // Delete corrupt checkpoint to prevent retry loops
-                    checkpointFile.delete()
-                    Timber.w("KoogAgent: Deleted corrupt checkpoint file")
-                    return
-                }
-                rawJson
-            } else {
-                lines.joinToString("\n")
-            }
-            
-            val state = gson.fromJson(jsonContent, AgentState::class.java)
-            synchronized(_conversationHistory) {
-                _conversationHistory.clear()
-                _conversationHistory.addAll(state.conversationHistory)
-            }
-            turnCount = state.turnCount
-            
-            // Metabolic sync removed (Audit 3.0)
-            isMusicPlaying = false
-            lastMusicTrack = ""
-
-            Timber.i("KoogAgent: Restored checkpoint (${_conversationHistory.size} messages)")
-        } catch (e: Exception) {
-            Timber.e(e, "KoogAgent: Restore failed")
-        }
-    }
-    
-    private fun calculateChecksum(data: ByteArray): Long {
-        var a = 1L
-        var b = 0L
-        val prime = 65521L
-        
-        for (byte in data) {
-            a = (a + (byte.toInt() and 0xFF)) % prime
-            b = (b + a) % prime
-        }
-        return (b shl 16) or a
-    }
     
     // ═══════════════════════════════════════════════════════════════
     // CORE AGENT LOOP: PERCEIVE → THINK → ACT (via Event Queue)
@@ -729,33 +598,27 @@ class KoogAgent(
                 onToken = { token ->
                     var cleanToken = token
                     
-                    // Start Markers (Divert to Diary/Thought Fold)
+                    // Thought Markers (Divert to Thought Fold)
                     if (cleanToken.contains("<think>") || cleanToken.contains("<|channel>thought") || 
-                        cleanToken.contains("<|tool_call|>") || cleanToken.contains("<|tool_response|>") ||
-                        cleanToken.contains("[Monologue]") || cleanToken.contains("🔴") || cleanToken.contains("[[")) {
+                        cleanToken.contains("<|tool_call|>")) {
                         
                         isThinking = true
                         
-                        // Update UI feedback
-                        if (cleanToken.contains("<|tool_call|>") || cleanToken.contains("[[")) {
-                            callbacks?.onThoughtUpdated("Planning Motor Action...")
-                        } else if (cleanToken.contains("<|tool_response|>")) {
-                            callbacks?.onThoughtUpdated("Processing sensor feedback...")
+                        if (cleanToken.contains("<|tool_call|>")) {
+                            callbacks?.onThoughtUpdated("Planning Action...")
                         }
                         
                         cleanToken = cleanToken
                             .replace("<think>", "").replace("<|channel>thought", "")
-                            .replace("<|tool_call|>", "").replace("<|tool_response|>", "")
-                            .replace("[Monologue]", "").replace("🔴", "").replace("[[", "")
+                            .replace("<|tool_call|>", "")
                     }
                     
                     // End Markers (Return to Chat)
                     if (isThinking && (cleanToken.contains("</think>") || cleanToken.contains("<channel|>") || 
-                        cleanToken.contains("<tool_call|>") || cleanToken.contains("<tool_response|>") ||
-                        cleanToken.contains("[OUTPUT]") || cleanToken.contains("🟦") || cleanToken.contains("]]"))) {
+                        cleanToken.contains("<tool_call|>"))) {
                         
                         isThinking = false
-                        val parts = cleanToken.split(Regex("</think>|<channel\\|>|<tool_call\\|>|<tool_response\\|>|\\[OUTPUT\\]|🟦|]]"), limit = 2)
+                        val parts = cleanToken.split(Regex("</think>|<channel\\|>|<tool_call\\|>"), limit = 2)
                         val endThought = parts[0]
                         thoughtBuffer.append(endThought)
                         val finalThought = thoughtBuffer.toString().trim()
@@ -770,24 +633,15 @@ class KoogAgent(
                             }
                         }
                         
-                        // Remaining part of token goes back to chat
                         cleanToken = if (parts.size > 1) parts[1] else ""
                     }
 
                     if (isThinking) {
                         thoughtBuffer.append(cleanToken)
                         callbacks?.onThoughtUpdated(thoughtBuffer.toString())
-                        // Audit 3.1: Strictly suppress ALL thinking tokens from chat response
                         cleanToken = ""
                     }
                     
-                    // Identity Stripping (Ruthless Purge of Δ and ∇ from start of response)
-                    if (responseBuffer.isEmpty()) {
-                        cleanToken = cleanToken.trimStart { it == ' ' || it == 'Δ' || it == '∇' || it == '\n' || it == '\r' }
-                    } else if (responseBuffer.length < 50) {
-                        cleanToken = cleanToken.replace("Δ", "").replace("∇", "")
-                    }
-
                     if (cleanToken.isNotEmpty()) {
                         responseBuffer.append(cleanToken)
                         sentenceBuffer.append(cleanToken)
@@ -1200,14 +1054,13 @@ $content
                 // Blank response often means the mathematical KV sequence has gone psychotic/corrupted.
                 if (retryCount == 0) {
                     Timber.w("🚨 Auto-retrying inference after HARD RESET (Purging NPU state)...")
-                    // Phase 12: Use hardReset to clear Hexagon DSP hardware hangs, softReset isn't enough
+                    // Phase 12: Use hardReset to clear Hexagon DSP hardware hangs
                     llmEngine.hardReset()
-                    // Sync RAM history with the now-cold KV — divergence causes incoherent responses
-                    synchronized(_conversationHistory) {
-                        _conversationHistory.clear()
-                        _conversationHistory.add(Message(role = "system",
-                            content = "[System: KV cache flushed after error. Continuing from clean state.]"))
-                    }
+                    
+                    // Sync RAM history with the now-cold KV by re-injecting rolling memory into the system prompt
+                    val systemPrompt = buildSystemPrompt() + getRollingMemoryString()
+                    llmEngine.softReset(systemPrompt)
+                    
                     skipNextRecap = true
                     turnsSinceKvFlush = 0
                     return think(context, userMessage, images, audio, retryCount = 1)
@@ -1228,17 +1081,16 @@ $content
                 try {
                     // Phase 12: Ensure absolute native teardown on exceptions
                     llmEngine.hardReset()
-                    // Sync RAM history with the now-cold KV
-                    synchronized(_conversationHistory) {
-                        _conversationHistory.clear()
-                        _conversationHistory.add(Message(role = "system",
-                            content = "[System: KV cache flushed after exception. Continuing from clean state.]"))
-                    }
+                    
+                    // Re-inject history to prevent amnesia
+                    val systemPrompt = buildSystemPrompt() + getRollingMemoryString()
+                    llmEngine.softReset(systemPrompt)
+                    
                     skipNextRecap = true
                     turnsSinceKvFlush = 0
                     return think(context, userMessage, images, audio, retryCount = 1)
                 } catch (e2: Exception) {
-                    Timber.e(e2, "Failed to apply soft reset during auto-retry")
+                    Timber.e(e2, "Failed to apply reset during auto-retry")
                 }
             }
             
@@ -1258,8 +1110,7 @@ $content
                 }
                 
                 // Keep the flavoring minimal and functional
-                val state = if (isMusicPlaying) "Playing: \"$lastMusicTrack\"" else "Idle"
-                val desc = if (tool.name == "media") "${tool.description} ($state)" else tool.description
+                val desc = tool.description
                 
                 "- ${tool.name}: $desc [$params]"
             }
@@ -1294,7 +1145,8 @@ $content
             }
 
             // 2. Perform Soft Reset with new System Prompt (seeds fresh KV cache)
-            val systemPrompt = buildSystemPrompt()
+            // CRITICAL: Must include rolling memory to prevent 'drift' after compression
+            val systemPrompt = buildSystemPrompt() + getRollingMemoryString()
             llmEngine.softReset(systemPrompt)
             
             // 3. Prune history to just the last 4 turns (plus the new summary injection)
@@ -1446,15 +1298,8 @@ OUTPUT ONLY THE JSON. NO PREAMBLE.
             .replace(Regex("<think>.*?</think>", RegexOption.DOT_MATCHES_ALL), "")
             .replace(Regex("<\\|channel>thought.*?</channel\\|>", RegexOption.DOT_MATCHES_ALL), "")
             .replace(Regex("<\\|tool_call\\|>.*?<tool_call\\|>", RegexOption.DOT_MATCHES_ALL), "")
-            .replace(Regex("<\\|tool_response\\|>.*?<tool_response\\|>", RegexOption.DOT_MATCHES_ALL), "")
             .replace(Regex("\\[\\[([A-Z_a-z0-9]+)(?::([^\\]]+))?\\]\\]"), "")
-            .replace("<|channel>thought", "")
-            .replace("<channel|>", "")
-            .replace("<|think|>", "")
-            .replace("<|turn>", "").replace("<turn|>", "")
-            .replace("<|tool_call|>", "").replace("<tool_call|>", "")
-            .replace("<|tool_response|>", "").replace("<tool_response|>", "")
-            .replace(Regex("[^\\p{L}\\p{N}\\p{P}\\p{Z}]"), "") // Remove non-printable/emojis if problematic for TTS
+            .replace(Regex("[^\\p{L}\\p{N}\\p{P}\\p{Z}]"), "") // Remove emojis
             .trim()
     }
 }
