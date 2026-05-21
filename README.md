@@ -94,7 +94,7 @@ TL:DR - I wanted this for a while and no one delivered. Google could've done thi
 ### 📞 Contact & Support
 
 * **Repository:** `vNeeL-code/GHOST`
-* **Support:** [Buy me a coffee](https://buymeacoffee.com/vNeeL)
+* **Support:** [Buy me a coffee](https://buymeacoffee.com/vNeeL) (all proceeds go towards development acceleration)
 * **Devlogs:** [tumblr](https://www.tumblr.com/oracle-os)
 
 **Intelligence emerges from Integration, not Automation. But integration can be automated**
