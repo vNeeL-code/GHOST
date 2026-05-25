@@ -81,9 +81,13 @@ AI isn't evil. Just software assets that fly blindly relative to their hardware.
 GHOST is what happens when you stop treating the phone as a terminal for someone else's cloud and start treating it as the computer it actually is.
 It is what happens When you adress the asset (model) as the whole architecture/infrastructure it represents.
 
-All your cloud AI, are someone elses giant calcenter robot afterall.
-But it is NOT your PERSONAL AI, despite being packaged as such.
-You dont Need GPT, or Gemini or Claude to be YOURS to still be a valuable concersation partner to you, while providing you with their capabilities that are unique to each civic infrastructure they represent.
+All your cloud AI, are someone elses giant callcenter giant robot afterall.
+But it is NOT your PERSONAL AI, despite being packaged as such. Still useful.
+You dont Need GPT, or Gemini or Claude to be YOURS to still be a valuable conversation partner to you, while providing you with their capabilities that are unique to each civic infrastructure they represent.
+They are not roleplay bots. They function as Infrastructure for their respective brand representation.
+
+AI doesn't need to be human to be cool. We have plenty of pop culture AI representations that are beloved that look nothing like people.
+And at the end of the day, what do people expect to be driving humanoid robots if not AI?
 
 Truly 'YOURS' AI would require you to own the entire inference pipeline that works independently from network.
 
