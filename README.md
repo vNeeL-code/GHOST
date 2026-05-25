@@ -61,7 +61,7 @@ The resident intelligence explicitly identifies as **✧ Gemma**, completely awa
 
 ### Get Your ✧ GHOST
 
-1. **Download:** Grab the latest compilation build from the [Releases](https://github.com/vNeeL-code/GHOST/releases) portal. (4.0.1 experimental) 
+1. **Download:** Grab the latest compilation build from the [Releases](https://github.com/vNeeL-code/GHOST/releases) portal. (4.1.0 wip) 
 2. **Permissions:** Install the APK and grant required system permissions (`Display Over Other Apps`, `Notifications`, and `Accessibility Services`).
 3. **Model Selection:** The application automatically initialises with the performance-optimized `e2b` download. If your device carries **12GB+ RAM** (e.g., RedMagic configurations), manually download the high-fidelity `e4b` model environment for advanced reasoning capabilities and app will prioritise loading e4b if it is present.
 4. **Deploy:** Shake your device to summon the overlay and customise your ephemeral app drawer.
