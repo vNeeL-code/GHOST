@@ -37,31 +37,38 @@ class ModelDownloader(
 
     /**
      * Start downloading a model from a HuggingFace repository.
-     * 
-     * @param hfRepo e.g., "google/gemma-3n-litert"
-     * @param fileName e.g., "gemma-3n-it.litertlm"
-     * @param hfToken Optional HuggingFace Access Token for gated models
      */
     fun startDownload(hfRepo: String, fileName: String, hfToken: String? = null) {
+        // 1. Check internal state first
         if (activeDownloadId != -1L) {
             _downloadStatus.value = DownloadState.Error("A download is already in progress.")
             return
         }
 
-        try {
-            val url = "https://huggingface.co/$hfRepo/resolve/main/$fileName?download=true"
-            Timber.i("Starting model download from: $url")
+        val url = "https://huggingface.co/$hfRepo/resolve/main/$fileName?download=true"
+        
+        // 2. Check DownloadManager for existing downloads of the same file
+        val existingId = findExistingDownloadId(fileName)
+        if (existingId != -1L) {
+            Timber.i("Found existing download for $fileName (ID: $existingId). Attaching...")
+            activeDownloadId = existingId
+            observeProgress(fileName)
+            return
+        }
 
+        try {
+            // Save to stable public dir — survives APK reinstalls/patches.
+            // App-private external dirs (getExternalFilesDir) are wiped on reinstall.
+            Timber.i("Starting model download → Downloads/$fileName")
             val uri = Uri.parse(url)
             val request = DownloadManager.Request(uri).apply {
-                setTitle("Gemma AI Model")
-                setDescription("Downloading $fileName securely")
+                setTitle("GHOST Model: $fileName")
+                setDescription("Downloading $fileName")
                 setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                setDestinationInExternalFilesDir(context, android.os.Environment.DIRECTORY_DOWNLOADS, fileName)
+                setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, fileName)
                 setAllowedOverMetered(true)
                 setAllowedOverRoaming(false)
 
-                // Inject HuggingFace Auth Token if provided
                 if (!hfToken.isNullOrBlank()) {
                     addRequestHeader("Authorization", "Bearer $hfToken")
                 }
@@ -70,13 +77,36 @@ class ModelDownloader(
             activeDownloadId = downloadManager.enqueue(request)
             _downloadStatus.value = DownloadState.Downloading(0, 0L, 0L)
             
-            // Kick off progress observer
             observeProgress(fileName)
-
         } catch (e: Exception) {
             Timber.e(e, "Download setup failed")
             _downloadStatus.value = DownloadState.Error(e.message ?: "Failed to start download")
         }
+    }
+
+    private fun findExistingDownloadId(fileName: String): Long {
+        val query = DownloadManager.Query().setFilterByStatus(
+            DownloadManager.STATUS_PENDING or 
+            DownloadManager.STATUS_RUNNING or 
+            DownloadManager.STATUS_PAUSED
+        )
+        val cursor = downloadManager.query(query)
+        if (cursor != null) {
+            while (cursor.moveToNext()) {
+                val titleColumn = cursor.getColumnIndex(DownloadManager.COLUMN_TITLE)
+                if (titleColumn != -1) {
+                    val title = cursor.getString(titleColumn)
+                    if (title != null && title.contains(fileName)) {
+                        val idColumn = cursor.getColumnIndex(DownloadManager.COLUMN_ID)
+                        val id = cursor.getLong(idColumn)
+                        cursor.close()
+                        return id
+                    }
+                }
+            }
+            cursor.close()
+        }
+        return -1L
     }
 
     private fun observeProgress(expectedFileName: String) {
@@ -104,7 +134,10 @@ class ModelDownloader(
                             DownloadManager.STATUS_SUCCESSFUL -> {
                                 isDownloading = false
                                 activeDownloadId = -1L
-                                val destinationFile = File(context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS), expectedFileName)
+                                val destinationFile = java.io.File(
+                                    android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+                                    expectedFileName
+                                )
                                 _downloadStatus.value = DownloadState.Success(destinationFile)
                             }
                             DownloadManager.STATUS_FAILED -> {
@@ -113,24 +146,23 @@ class ModelDownloader(
                                 val reason = cursor.getInt(cursor.getColumnIndex(DownloadManager.COLUMN_REASON))
                                 _downloadStatus.value = DownloadState.Error("Download failed with code: $reason")
                             }
+                            DownloadManager.STATUS_PAUSED -> {
+                                _downloadStatus.value = DownloadState.Downloading(0, bytesDownloaded, bytesTotal)
+                            }
                         }
                     }
                     cursor.close()
                 } else {
                     cursor?.close()
-                    // Download might have been manually cancelled from the notification bar
                     isDownloading = false
                     activeDownloadId = -1L
                     _downloadStatus.value = DownloadState.Error("Download cancelled or interrupted")
                 }
-                kotlinx.coroutines.delay(1000) // Poll every second
+                kotlinx.coroutines.delay(1000)
             }
         }
     }
 
-    /**
-     * Cancel the active download if one is running.
-     */
     fun cancelDownload() {
         if (activeDownloadId != -1L) {
             downloadManager.remove(activeDownloadId)

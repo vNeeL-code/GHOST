@@ -12,6 +12,7 @@ import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.ExperimentalApi
+import com.google.ai.edge.litertlm.ExperimentalFlags
 import com.google.ai.edge.litertlm.LogSeverity
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.MessageCallback
@@ -84,29 +85,33 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                 Timber.i("Initializing Gemma Engine...")
                 Engine.setNativeMinLogSeverity(LogSeverity.INFO)
 
+                val npuBackend = Backend.NPU(nativeLibraryDir = context.applicationInfo.nativeLibraryDir)
+                val sharedGpuBackend = Backend.GPU()
+                
                 val backendsToTry = when (forcedBackend?.uppercase()) {
                     "CPU" -> listOf("CPU" to Backend.CPU())
-                    "GPU" -> listOf("GPU" to Backend.GPU())
-                    else -> listOf("GPU" to Backend.GPU(), "CPU" to Backend.CPU())
+                    "GPU" -> listOf("GPU" to sharedGpuBackend)
+                    "NPU" -> listOf("NPU" to npuBackend)
+                    else -> listOf("NPU" to npuBackend, "GPU" to sharedGpuBackend, "CPU" to Backend.CPU())
                 }
-                var lastError: String? = null
+                
+                var lastError: Exception? = null
+                for ((backendName, preferredBackend) in backendsToTry) {
+                    val engineConfig = EngineConfig(
+                        modelPath = modelPath,
+                        backend = preferredBackend,  // Main inference backend
+                        visionBackend = if (enableVision) sharedGpuBackend else null,  // reuse same GPU instance to prevent OOM
+                        audioBackend = if (enableAudio) Backend.CPU() else null,    // must be CPU for Gemma 3n
+                        maxNumTokens = Constants.MAX_TOKENS,
+                        cacheDir = context.getExternalFilesDir(null)?.absolutePath
+                    )
 
-                for ((backendName, backend) in backendsToTry) {
                     try {
-                        val engineConfig = EngineConfig(
-                            modelPath = modelPath,
-                            backend = backend,
-                            visionBackend = if (enableVision && backendName == "GPU") Backend.GPU() else null,
-                            audioBackend = if (enableAudio) Backend.CPU() else null,
-                            maxNumTokens = Constants.MAX_TOKENS,
-                            cacheDir = context.cacheDir.absolutePath
-                        )
-
                         val newEngine = Engine(engineConfig)
                         newEngine.initialize()
 
                         val conversationConfig = ConversationConfig(
-                            samplerConfig = samplerConfig,
+                            samplerConfig = if (preferredBackend is Backend.NPU) null else samplerConfig,
                             systemInstruction = if (systemPrompt.isNotBlank()) Contents.of(systemPrompt) else null,
                             tools = toolSets.map { tool(it) }
                         )
@@ -119,13 +124,19 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                         conversation = newConversation
 
                         activeBackend = "LiteRT-LM ($backendName)"
-                        return@runCatching null
+                        Timber.i("GemmaEngine initialized successfully on $backendName")
+                        return null // Success!
                     } catch (e: Exception) {
-                        lastError = e.message
-                        Timber.w("$backendName backend failed: $lastError")
+                        Timber.w(e, "Native Engine Initialization Failed for $backendName")
+                        lastError = e
+                        // Continue to the next backend in the loop
                     }
                 }
-                lastError ?: "All backends failed"
+                
+                // If we exhausted all backends
+                val errorMsg = lastError?.message ?: "Unknown fatal error"
+                Timber.e("All backends failed to initialize. Last error: $errorMsg")
+                return errorMsg
             }.getOrElse { it.message ?: "Unknown fatal error" }
         }
     }
@@ -177,12 +188,14 @@ class GemmaEngine(private val context: Context) : LlmBackend {
         try {
             val contents = withContext(kotlinx.coroutines.Dispatchers.IO) {
                 val list = mutableListOf<Content>()
+                
                 for (image in images) {
                     list.add(Content.ImageBytes(image.toJpegByteArray()))
                 }
                 audioData?.let {
                     list.add(Content.AudioBytes(it))
                 }
+                // add the text after image and audio for the accurate last token
                 if (prompt.isNotBlank()) {
                     list.add(Content.Text(prompt))
                 }
@@ -344,7 +357,16 @@ class GemmaEngine(private val context: Context) : LlmBackend {
 
     private fun Bitmap.toJpegByteArray(): ByteArray {
         val stream = java.io.ByteArrayOutputStream()
-        this.compress(Bitmap.CompressFormat.JPEG, 80, stream)
+        // Rigid 1024 max dimension to prevent MAX_TOKENS OOM during native injection
+        val maxDim = 1024
+        val scaledBitmap = if (this.width > maxDim || this.height > maxDim) {
+            val ratio = Math.min(maxDim.toFloat() / this.width, maxDim.toFloat() / this.height)
+            Bitmap.createScaledBitmap(this, (this.width * ratio).toInt(), (this.height * ratio).toInt(), true)
+        } else {
+            this
+        }
+        scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 70, stream)
+        if (scaledBitmap != this) scaledBitmap.recycle()
         return stream.toByteArray()
     }
 }

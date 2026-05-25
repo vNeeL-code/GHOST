@@ -51,37 +51,55 @@ class GemmaAccessibilityService : AccessibilityService() {
         queue.add(root)
 
         var nodeCount = 0
-        val MAX_NODES = 120   // Hard cap — Chrome can have 2000+ nodes
-        val MAX_CHARS = 1500  // Keep prompt injection lean
+        val MAX_NODES = 300
+        val MAX_CHARS = 4000
 
         try {
-            while (queue.isNotEmpty() && nodeCount < MAX_NODES && sb.length < MAX_CHARS) {
-                val node = queue.poll() ?: continue
+            val allNodes = mutableListOf<AccessibilityNodeInfo>()
+            val searchQueue = java.util.ArrayDeque<AccessibilityNodeInfo>()
+            searchQueue.add(root)
+            
+            while (searchQueue.isNotEmpty() && allNodes.size < 1000) {
+                val node = searchQueue.poll() ?: continue
                 toRecycle.add(node)
-                nodeCount++
+                allNodes.add(node)
+                for (i in 0 until node.childCount) {
+                    node.getChild(i)?.let { searchQueue.add(it) }
+                }
+            }
+            
+            // Audit Fix: Drain remaining items in searchQueue to prevent memory leak
+            searchQueue.forEach { toRecycle.add(it) }
 
+            val prioritized = allNodes.sortedWith(compareByDescending<AccessibilityNodeInfo> { 
+                it.isClickable || it.isEditable || it.isFocusable 
+            }.thenByDescending { 
+                !(it.text ?: it.contentDescription).isNullOrBlank() 
+            })
+
+            for (node in prioritized) {
+                if (nodeCount >= MAX_NODES || sb.length >= MAX_CHARS) break
+                
                 val rawText = (node.text ?: node.contentDescription)?.toString()
-                val text = rawText?.trim()?.take(60)?.replace("\n", " ")
+                val text = rawText?.trim()?.take(100)?.replace("\n", " ")
                 val isClickable = node.isClickable
                 val isEditable = node.isEditable
+                val isFocusable = node.isFocusable
                 val role = node.className?.toString()?.split('.')?.lastOrNull() ?: "View"
 
-                // Only emit nodes that carry useful info
-                if (!text.isNullOrEmpty() || isClickable || isEditable) {
+                if (!text.isNullOrEmpty() || isClickable || isEditable || isFocusable) {
+                    nodeCount++
                     sb.append("[$role]")
                     if (!text.isNullOrEmpty()) sb.append(" \"$text\"")
                     if (isClickable) sb.append(" (tap)")
                     if (isEditable) sb.append(" (input)")
+                    if (isFocusable && !isClickable) sb.append(" (focus)")
                     sb.append("\n")
                 }
-
-                for (i in 0 until node.childCount) {
-                    node.getChild(i)?.let { queue.add(it) }
-                }
             }
+
         } finally {
-            queue.forEach { toRecycle.add(it) }
-            toRecycle.forEach { try { it.recycle() } catch (e: IllegalStateException) { Timber.v("Failed to recycle node: ${e.message}") } }
+            toRecycle.forEach { try { it.recycle() } catch (e: IllegalStateException) {} }
         }
 
         return if (sb.isEmpty()) "[[SCREEN: no readable content]]"
@@ -303,7 +321,7 @@ class GemmaAccessibilityService : AccessibilityService() {
         var instance: GemmaAccessibilityService? = null
         
         fun getSemantics(): String? = instance?.sensoryStream?.getUnifiedPerception() // Helper
-        
+
         fun safePerformGlobal(action: String): Boolean {
             return instance?.let { service ->
                 when (action.uppercase()) {

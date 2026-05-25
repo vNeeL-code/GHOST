@@ -163,11 +163,11 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
     
     // Coroutine scope for background polling
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-    
+
     // Reactive State
     private val _contextState = MutableStateFlow<DeviceContext>(getDefaultContext())
     val contextState: StateFlow<DeviceContext> = _contextState.asStateFlow()
-    
+
     // Split polling state
     private var slowPollState: DeviceContext? = null // Caches network/BT/Storage
 
@@ -187,52 +187,61 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
     private var sensorThread: android.os.HandlerThread? = null
     private var sensorHandler: android.os.Handler? = null
     private var isLoopRunning = false
+    private var fastIntervalMs = 30000L // 30s default
+    private var slowIntervalMs = 600000L // 10m default
+
+    private val stateReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                Intent.ACTION_SCREEN_ON -> {}
+                Intent.ACTION_SCREEN_OFF -> {}
+                Intent.ACTION_BATTERY_CHANGED -> { getContextSnapshot() }
+            }
+        }
+    }
 
     init {
         // Register sensor listeners for environment data
         registerEnvironmentSensors()
-        
+
         // Note: startFusionLoop() must be called explicitly by GemmaService after foreground setup
     }
 
     fun startFusionLoop() {
         if (isClosed || isLoopRunning) return
         isLoopRunning = true
-        
-        Timber.i("🌀 Starting SensorFusion background loops...")
-        // FAST LOOP: 5s (Battery, Thermal, RAM)
-        scope.launch {
-            while (!isClosed) {
-                try {
-                     updateFastState()
-                } catch (t: Throwable) {
-                    Timber.e(t, "Fast fusion loop error")
-                }
-                delay(5000) 
-            }
+
+        // Register receiver for critical event-driven updates
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_BATTERY_CHANGED)
+            addAction(Intent.ACTION_POWER_CONNECTED)
+            addAction(Intent.ACTION_POWER_DISCONNECTED)
         }
+        context.registerReceiver(stateReceiver, filter)
         
-        // SLOW LOOP: 30s (Network, Bluetooth, Storage - Heavy/Fragile)
-        scope.launch {
-            while (!isClosed) {
-                try {
-                    updateSlowState()
-                } catch (t: Throwable) {
-                    Timber.e(t, "Slow fusion loop error")
-                }
-                delay(30000)
-            }
-        }
+        Timber.i("🌀 SensorFusion active in Event-Driven mode (Polling disabled)")
+    }
+
+    private fun updateIntervals(isInteractive: Boolean) {
+        // No-op: Intervals removed to save battery
+    }
+
+    /** Trigger a one-shot perception refresh for context-aware inference */
+    fun refreshNow() {
+        getContextSnapshot()
     }
     
     fun stop() {
         Timber.i("🌀 Stopping SensorFusion loops and releasing listeners...")
         isClosed = true
         isLoopRunning = false
-        
+
         try {
+            context.unregisterReceiver(stateReceiver)
             scope.cancel()
-            sensorListener?.let { 
+            sensorListener?.let {
                 sensorManager?.unregisterListener(it)
             }
             sensorThread?.quitSafely()
@@ -240,34 +249,7 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
             Timber.e(e, "Error stopping SensorFusion")
         }
     }
-    
-    private suspend fun updateSlowState() {
-        // Update the heavy/fragile parts
-        var current = slowPollState ?: _contextState.value
-        
-        current = current.copy(
-            system = getSystemState(), // Includes storage (slow)
-            motion = getMotionState()   // Includes location (slow/heavy)
-        )
-        
-        slowPollState = current
-    }
-    
-    private suspend fun updateFastState() {
-        // Grab latest slow state or default
-        val base = slowPollState ?: _contextState.value
-        
-        // Update volatile/fast parts
-        val newContext = base.copy(
-            timestamp = System.currentTimeMillis(),
-            battery = getBatteryState(),
-            audio = getAudioState(),
-            network = getNetworkState(),       // Moved to fast loop (5s)
-            connectivity = getConnectivityState(), // Moved to fast loop (5s)
-            environment = getEnvironmentState() // Official Thermal API
-        )
-        _contextState.value = newContext
-    }
+
 
     /**
      * Cleanup all sensor listeners to prevent memory leaks.
@@ -357,21 +339,43 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
 
     /**
      * Get the latest cached snapshot.
-     * Starts monitoring if not already active? No, init does that.
+     * Performs a lazy refresh of all telemetry fields synchronously.
      */
+
     fun getContextSnapshot(): DeviceContext {
-        return _contextState.value
+        // Run synchronous update of all fields
+        val base = slowPollState ?: getDefaultContext()
+        val refreshed = base.copy(
+            timestamp = System.currentTimeMillis(),
+            battery = getBatteryState(),
+            audio = getAudioState(),
+            system = getSystemState(),
+            network = getNetworkState(),
+            connectivity = getConnectivityState(),
+            environment = getEnvironmentState(),
+            motion = getMotionState()
+        )
+        _contextState.value = refreshed
+        return refreshed
     }
 
+
     private fun getDefaultContext(): DeviceContext {
+        val memInfo = ActivityManager.MemoryInfo()
+        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+        am?.getMemoryInfo(memInfo)
+        val ramTotal = if (memInfo.totalMem > 0) memInfo.totalMem / (1024 * 1024) else 4096L
+        val ramAvail = memInfo.availMem / (1024 * 1024)
+        val ramUsed = (ramTotal - ramAvail).coerceAtLeast(128L)
+
         return DeviceContext(
             timestamp = System.currentTimeMillis(),
-            battery = BatteryState(50, false, 25f, 3.7f, 0),
-            audio = AudioState(false, 0, 0, 0, 0, 15, null),
-            system = SystemState(128, 50, 0, 0, 0, 0f, 0f, 0, 0, 30, Build.MODEL, Build.MANUFACTURER, Build.VERSION.RELEASE),
-            network = NetworkState(false, false, null, 0, "None"),
-            environment = EnvironmentState(null, null, null, null, null, null, null),
-            connectivity = ConnectivityState(null, null, null, false, false, null),
+            battery = BatteryState(100, false, 30f, 4.0f, 0),
+            audio = AudioState(false, 10, 5, 5, 5, 15, null),
+            system = SystemState(128, 50, ramTotal, ramTotal - ramUsed, (ramUsed * 100 / ramTotal).toInt(), 128f, 64f, 50, 0, 30, Build.MODEL, Build.MANUFACTURER, Build.VERSION.RELEASE),
+            network = NetworkState(true, false, null, 0, "Initial"),
+            environment = EnvironmentState(null, 35f, 35f, 35f, null, null, null),
+            connectivity = ConnectivityState(null, null, null, true, false, null),
             motion = MotionState(null, null, null, false, null, null, null, null)
         )
     }
@@ -509,14 +513,14 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
             val wm = wifiManager ?: return NetworkState(false, false, null, 0, "None")
             val activeNetwork = cm.activeNetwork
             val capabilities = cm.getNetworkCapabilities(activeNetwork)
-            
+
             // Audit 4.1: NET_CAPABILITY_VALIDATED ensures the internet is ACTUALLY reachable
             val isOnline = capabilities?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true &&
                            capabilities?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
-            
+
             val isWifi = capabilities?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) == true
             val isCell = capabilities?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) == true
-            
+
             val type = when {
                 isWifi -> "WiFi"
                 isCell -> "Cell"
@@ -673,11 +677,11 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
                             }
                             override fun onServiceDisconnected(profile: Int) {}
                         }
-                        
+
                         // We do a quick check of common profiles
                         adapter.getProfileProxy(context, proxyListener, android.bluetooth.BluetoothProfile.A2DP)
                         adapter.getProfileProxy(context, proxyListener, android.bluetooth.BluetoothProfile.HEADSET)
-                        
+
                         // Bonded devices check as fallback for "is something paired and active"
                         if (!btConnected) {
                             val bonded = adapter.bondedDevices
@@ -841,82 +845,77 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
     private fun buildContextString(ctx: DeviceContext): String {
         val sb = StringBuilder()
 
+        // --- ROW 1: POWER & THERMALS (Vital Signs) ---
+        val battLevel = ctx.battery.level
         val battIcon = when {
-            ctx.battery.level <= 5 -> "🪫"
-            ctx.battery.level <= 20 -> "🔋"
+            battLevel <= 10 -> "🪫"
+            battLevel <= 20 -> "🔋"
             else -> "🔋"
         }
-        sb.append("$battIcon Battery: ${ctx.battery.level}%")
-        if (ctx.battery.isCharging) sb.append(" (⚡ charging)")
+        sb.append("$battIcon $battLevel%")
+        if (ctx.battery.isCharging) sb.append("⚡")
         if (ctx.battery.currentNow < 0) sb.append(" (${ctx.battery.currentNow}mA drain)")
+
+        sb.append(" | 🌡️ ${String.format(java.util.Locale.US, "%.1f", ctx.battery.temperature)}°C")
+        sb.append(" | 🧠 ${ctx.system.ramUsedPercent}%")
+        sb.append(" | 💿 ${String.format(java.util.Locale.US, "%.1f", ctx.system.storageFreeGB)}GB free")
         sb.append("\n")
 
-        // Body temperature (Her Body Heat)
-        sb.append("🌡️ System Temp: ${String.format(java.util.Locale.US, "%.1f", ctx.battery.temperature)}°C\n")
-
-        // Environment / Thermal sensors
+        // --- ROW 2: ENVIRONMENT ---
         val env = ctx.environment
-        // cpuTemp removed — redundant with System Temp above + 🧠 emoji reserved for RAM
-        env.ambientTemp?.let { sb.append("🌤️ Weather Sensor: ${String.format(java.util.Locale.US, "%.1f", it)}°C\n") }
-        env.pressure?.let { sb.append("🎈 Pressure: ${String.format(java.util.Locale.US, "%.0f", it)} hPa\n") }
-        env.light?.let { sb.append("💡 Light: ${it.toInt()} lux\n") }
-
-        // Music
-        ctx.audio.nowPlaying?.let { np ->
-            val icon = if (np.isPlaying) "🎵" else "⏸"
-            sb.append("$icon \"${np.title}\"")
-            np.artist?.let { sb.append(" by $it") }
-            if (!np.isPlaying) sb.append(" (paused)")
-            sb.append("\n")
+        val envParts = mutableListOf<String>()
+        env.ambientTemp?.let { envParts.add("🌤️ ${String.format(java.util.Locale.US, "%.1f", it)}°C") }
+        env.pressure?.let { envParts.add("🎈 ${it.toInt()}hPa") }
+        env.light?.let { envParts.add("💡 ${it.toInt()}lx") }
+        if (envParts.isNotEmpty()) {
+            sb.append(envParts.joinToString(" | ") + "\n")
         }
 
-        // System resources (Consolidated to save vertical space)
-        sb.append("🧠 RAM: ${ctx.system.ramUsedPercent}% | 💿 Storage: ${String.format(java.util.Locale.US, "%.1f", ctx.system.storageFreeGB)}GB free\n")
-
-        // Network (Unified Online Check)
+        // --- ROW 3: NETWORK & CONNECTIVITY ---
+        val netParts = mutableListOf<String>()
         if (!ctx.network.isOnline) {
-            sb.append("📵 Network: Offline\n")
+            netParts.add("📵 Offline")
         } else {
-            val netParts = mutableListOf<String>()
             if (ctx.network.wifiConnected) {
-                netParts.add("📶 WiFi: ${ctx.network.wifiSsid} (${ctx.network.wifiSignalPercent}%)")
-            }
-            ctx.connectivity.cellType?.let { type ->
+                val signal = "${ctx.network.wifiSignalPercent}%"
+                netParts.add("📶 ${ctx.network.wifiSsid ?: "WiFi"} ($signal)")
+            } else if (ctx.connectivity.cellType != null) {
                 val signal = ctx.connectivity.cellSignalPercent?.let { " $it%" } ?: ""
-                netParts.add("📱 Cell: $type$signal")
-            }
-            if (netParts.isEmpty()) {
-                sb.append("🌐 Online: ${ctx.network.type}\n")
+                netParts.add("📱 ${ctx.connectivity.cellType}$signal")
             } else {
-                sb.append(netParts.joinToString(" | ") + "\n")
+                netParts.add("🌐 ${ctx.network.type}")
             }
         }
 
-        // Bluetooth
         if (ctx.connectivity.bluetoothEnabled) {
-            sb.append("🔵 BT: ")
-            if (ctx.connectivity.bluetoothConnected) {
-                sb.append(ctx.connectivity.bluetoothDeviceName ?: "Connected")
-            } else {
-                sb.append("On")
-            }
-            sb.append(" | ")
+            val btText = if (ctx.connectivity.bluetoothConnected) {
+                "🔵 ${ctx.connectivity.bluetoothDeviceName ?: "Connected"}"
+            } else "🔵 On"
+            netParts.add(btText)
         }
 
-        // Motion / Orientation
-        ctx.motion.orientation?.let { orient ->
-            val orientIcon = when (orient) {
-                "portrait" -> "📱"
-                "landscape-left", "landscape-right" -> "📱↔️"
-                "flat" -> "📱⬇️"
-                else -> "📱"
-            }
-            sb.append("📐 $orientIcon $orient")
+        if (netParts.isNotEmpty()) {
+            sb.append(netParts.joinToString(" | ") + "\n")
         }
-        if (ctx.motion.isMoving) sb.append(" 🏃")
-        sb.append("\n")
 
-        // Uptime + Location (Privacy preserved)
+        // --- ROW 4: MEDIA & MOTION (Contextual) ---
+        ctx.audio.nowPlaying?.let { np ->
+            if (np.isPlaying || np.title != "Unknown") {
+                val icon = if (np.isPlaying) "🎵" else "⏸"
+                val artist = if (np.artist != null) " - ${np.artist}" else ""
+                sb.append("$icon ${np.title.take(30)}$artist\n")
+            }
+        }
+
+        val motionParts = mutableListOf<String>()
+        ctx.motion.orientation?.let { motionParts.add("📐 $it") }
+        if (ctx.motion.isMoving) motionParts.add("🏃 Moving")
+
+        if (motionParts.isNotEmpty()) {
+            sb.append(motionParts.joinToString(" | ") + "\n")
+        }
+
+        // --- ROW 5: SYSTEM & LOCATION ---
         val hours = ctx.system.uptimeMinutes / 60
         val mins = ctx.system.uptimeMinutes % 60
         sb.append("⏱️ ${hours}h${mins}m")
@@ -925,10 +924,35 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
             ctx.motion.lastLocationLon?.let { lon ->
                 val age = ctx.motion.locationAgeMinutes ?: 999
                 if (age < 60) {
-                    sb.append(" | 📍 ${String.format("%.3f", lat)}, ${String.format("%.3f", lon)}")
+                    sb.append(" | 📍 ${String.format("%.4f", lat)}, ${String.format("%.4f", lon)}")
+                    if (age > 5) sb.append(" (${age}m ago)")
                 }
             }
         }
+
+        return sb.toString().trim()
+    }
+    
+    /**
+     * Concise single-line summary for the notification HUD.
+     * Format: 🔋 Level | 🌡️ Temp | 🧠 RAM | 💿 Storage
+     */
+    fun getNotificationSummary(): String {
+        val ctx = getContextSnapshot()
+        val sb = StringBuilder()
+
+        val battLevel = ctx.battery.level
+        val battIcon = when {
+            ctx.battery.level > 80 -> "🔋"
+            ctx.battery.level > 30 -> "🔋"
+            else -> "🪫"
+        }
+        sb.append("$battIcon $battLevel%")
+        if (ctx.battery.isCharging) sb.append("⚡")
+
+        sb.append(" | 🌡️ ${String.format(java.util.Locale.US, "%.1f", ctx.battery.temperature)}°C")
+        sb.append(" | 🧠 ${ctx.system.ramUsedPercent}%")
+        sb.append(" | 💿 ${String.format(java.util.Locale.US, "%.1f", ctx.system.storageFreeGB)}GB free")
 
         return sb.toString()
     }

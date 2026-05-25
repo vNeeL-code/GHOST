@@ -45,8 +45,12 @@ class VoiceInputController(
     private var recordingJob: Job? = null
     private var pulseAnimator: ObjectAnimator? = null
 
-    private val colorAccent  = Color.parseColor("#8B5CF6") // purple
-    private val colorRecording = Color.parseColor("#f79503") // orange (recording)
+    private val colorIdle      = Color.parseColor("#8B5CF6") // lavender purple — matches sparkle
+    private val colorRecording = Color.parseColor("#EF4444") // red — active recording
+    private val colorConfirm   = Color.parseColor("#F97316") // orange — confirm/send
+    private val colorSend      = Color.parseColor("#8B5CF6") // purple — send arrow reuses idle tint
+
+    private val CIRCLE = "\u2B24" // ⬤ U+2B24 BLACK LARGE CIRCLE — tintable, matches sparkle style
 
     init {
         micButton.setOnClickListener { handleTap() }
@@ -127,7 +131,7 @@ class VoiceInputController(
         haptic()
         syncButton()
         // Keep field enabled so a tap can cancel — hint explains both options
-        inputField.hint = "🟠 Send  ·  tap here to cancel"
+        inputField.hint = "Send OK  ·  tap here to cancel"
         inputField.isEnabled = true
         startPulse()
     }
@@ -147,14 +151,34 @@ class VoiceInputController(
         onTextReady(text)
     }
 
-    /** Sync button emoji to current state */
+    /** Sync button appearance to current state — ⬤ stays, color signals state */
     fun syncButton() {
         val hasText = inputField.text.isNotBlank()
-        micButton.text = when {
-            hasText                            -> "➤"
-            voiceState == VoiceState.RECORDING -> "🔴"
-            voiceState == VoiceState.CONFIRM   -> "🟠"
-            else                               -> "🟣"
+        when {
+            hasText -> {
+                // Has typed text: send arrow, idle colour
+                micButton.text = "➤"
+                micButton.setTextColor(colorSend)
+                micButton.alpha = 1f
+            }
+            voiceState == VoiceState.RECORDING -> {
+                // Recording: red circle
+                micButton.text = CIRCLE
+                micButton.setTextColor(colorRecording)
+                micButton.alpha = 1f
+            }
+            voiceState == VoiceState.CONFIRM -> {
+                // Confirm: orange circle, pulsing
+                micButton.text = CIRCLE
+                micButton.setTextColor(colorConfirm)
+                micButton.alpha = 1f
+            }
+            else -> {
+                // Idle: purple circle
+                micButton.text = CIRCLE
+                micButton.setTextColor(colorIdle)
+                micButton.alpha = 0.85f
+            }
         }
     }
 
@@ -163,7 +187,7 @@ class VoiceInputController(
         voiceState = VoiceState.IDLE
         pendingAudio = null
         stopPulse()
-        inputField.hint = "Δ 👾 ∇"
+        inputField.hint = "Ask GHOST..."
         inputField.isEnabled = true
         syncButton()
     }
@@ -171,7 +195,7 @@ class VoiceInputController(
     fun setThinking(thinking: Boolean) {
         micButton.isEnabled = !thinking
         inputField.isEnabled = !thinking
-        inputField.hint = if (thinking) "✧ Processing..." else "Δ 👾 ∇"
+        inputField.hint = if (thinking) "Processing..." else "Ask GHOST..."
     }
 
     fun cleanup() {
@@ -188,9 +212,9 @@ class VoiceInputController(
             inputField.hint = "Listening..."
             inputField.isEnabled = false
         } else {
-            sparkleOrNull?.setTextColor(colorAccent)
+            sparkleOrNull?.setTextColor(colorIdle)
             stopPulse()
-            inputField.hint = "Δ 👾 ∇"
+            inputField.hint = "Ask GHOST..."
             inputField.isEnabled = true
         }
     }

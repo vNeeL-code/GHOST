@@ -6,12 +6,13 @@ package com.ghost.api
 object Constants {
     // Identity
     const val APP_NAME = "GHOST"
-    const val AGENT_NAME = "✧ Gemma"
-    const val APP_MOTIF = "Δ 👾 ∇"
+    const val AGENT_NAME = "Gemma"
+    const val APP_MOTIF = "✧"
 
     // Intent Actions
     const val ACTION_QUERY = "com.ghost.api.ACTION_QUERY"
     const val ACTION_STATUS_UPDATE = "com.ghost.api.STATUS_UPDATE"
+    const val ACTION_RECOVER_MODEL = "com.ghost.api.ACTION_RECOVER_MODEL"
 
     // Intent Extras
     const val EXTRA_QUERY = "query"
@@ -25,21 +26,25 @@ object Constants {
     const val MAX_TOKENS_NPU = 5120
     const val MAX_TOKENS_GPU = 5120
     const val MAX_TOKENS_CPU = 5120
-    const val MAX_TOKENS = MAX_TOKENS_GPU
+    const val MAX_TOKENS = 5120
 
     // Backend selection: "CPU", "GPU", or "NPU"
-    const val PREFERRED_BACKEND = "GPU"
+    const val PREFERRED_BACKEND = "NPU"
+
+    // Non-Gated Community Model URLs (Adopted from PokeClaw Support Tier)
+    const val MODEL_URL_E2B = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm"
+    const val MODEL_URL_E4B = "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm"
 
     val DEFAULT_MODEL_NAMES = listOf(
-        "gemma-4-it-int4.litertlm",
-        "gemma-2b-it-int4.litertlm"
+        "gemma-4-E2B-it.litertlm",
+        "gemma-4-E4B-it.litertlm"
     )
 
     // Notification
     const val CHANNEL_ID_SERVICE = "gemma_instance_service"
     const val NOTIFICATION_ID_SERVICE = 1
-    const val NOTIFICATION_READY_MSG = "✓ ✧ Gemma Ready"
-    const val NOTIFICATION_CHANNEL_NAME = "Δ \uD83D\uDC7E ∇"
+    const val NOTIFICATION_READY_MSG = "✧ Gemma: Ready"
+    const val NOTIFICATION_CHANNEL_NAME = "✧ Gemma: Status"
     const val NOTIFICATION_IMPORTANCE = 4 // NotificationManager.IMPORTANCE_HIGH
 
     // Agentic

@@ -19,14 +19,14 @@ import timber.log.Timber
  * Supports three styles:
  * - CLASSIC: Original horizontal input bar (STT-based)
  * - PILL: Gemini-style expandable pill (STT-based)
- * - SPARKLE: Minimal bar with ✦ for direct audio recording (audio-first)
+ * - SPARKLE: Minimal bar with ✧ for direct audio recording (audio-first)
  */
 class OverlayManager(private val context: Context) {
 
     enum class OverlayStyle {
         CLASSIC,  // Original horizontal bar
         PILL,     // Gemini-style expandable pill
-        SPARKLE   // Minimal ✦ bar with direct audio recording
+        SPARKLE   // Minimal ✧ bar with direct audio recording
     }
 
     private var windowManager: WindowManager? = null
@@ -104,6 +104,9 @@ class OverlayManager(private val context: Context) {
             },
             onDismiss = {
                 hideOverlay()
+            },
+            onFocusRequest = {
+                requestOverlayFocus()
             }
         )
 
@@ -329,7 +332,10 @@ class OverlayManager(private val context: Context) {
 
     private fun getInteractiveLayoutParams(): WindowManager.LayoutParams {
         val type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        val flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+        // Audit 4.0: Added FLAG_NOT_FOCUSABLE by default to prevent "keyboard-without-network" regressions.
+        // This ensures the overlay exists but doesn't hijack input from underlying apps.
+        val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
         
         return WindowManager.LayoutParams(
@@ -341,6 +347,30 @@ class OverlayManager(private val context: Context) {
         ).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
             softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
+        }
+    }
+
+    fun requestOverlayFocus() {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            val view = inputOverlay ?: overlayView ?: return@post
+            val params = view.layoutParams as? WindowManager.LayoutParams ?: return@post
+            
+            // Remove NOT_FOCUSABLE to allow keyboard interaction
+            params.flags = params.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+            windowManager?.updateViewLayout(view, params)
+            Timber.d("Overlay focus requested")
+        }
+    }
+
+    fun releaseOverlayFocus() {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            val view = inputOverlay ?: overlayView ?: return@post
+            val params = view.layoutParams as? WindowManager.LayoutParams ?: return@post
+            
+            // Re-add NOT_FOCUSABLE to return focus to underlying apps
+            params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+            windowManager?.updateViewLayout(view, params)
+            Timber.d("Overlay focus released")
         }
     }
 

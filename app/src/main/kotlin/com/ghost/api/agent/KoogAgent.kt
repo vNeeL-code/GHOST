@@ -3,7 +3,8 @@ package com.ghost.api.agent
 import android.content.Context
 import android.graphics.Bitmap
 import com.ghost.api.LlmBackend
-import com.ghost.api.mcp.MCPServer
+import com.ghost.api.logic.IntentHandler
+import org.json.JSONObject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -32,8 +33,9 @@ import com.google.gson.Gson
 class KoogAgent(
     private val context: Context,
     private val llmEngine: LlmBackend,
-    private val mcpServer: MCPServer,
+    private val sensorManager: com.ghost.api.hardware.SensorFusionManager,
     private val contextManager: com.ghost.api.logic.ContextManager,
+    private val skillManager: com.ghost.api.skills.SkillManager,
     private val checkpointDir: File,
     private val callbacks: AgentPlatformCallbacks? = null
 ) {
@@ -451,11 +453,12 @@ class KoogAgent(
         sessionId: String,
         onToken: (String) -> Unit
     ) {
-        val context = contextManager.buildContext(turn = turnCount, query = message)
+        val context = contextManager.buildContext()
         val (images, audio) = drainMedia()
 
-        // Build the full prompt the same way handleUserMessage does
-        val fullPrompt = buildString {
+        try {
+            // Build the full prompt the same way handleUserMessage does
+            val fullPrompt = buildString {
             if (context.isNotBlank()) {
                 append(context)
                 append("\n\n")
@@ -521,6 +524,9 @@ class KoogAgent(
                 onToken("\n[Error: $err]")
             }
         )
+        } finally {
+            images.forEach { try { it.recycle() } catch (e: Exception) {} }
+        }
     }
 
     /**
@@ -545,6 +551,8 @@ class KoogAgent(
         _turnCount.incrementAndGet()
         Timber.i("🧠 KoogAgent: Turn $turnCount - Starting...")
 
+        var imagesToRecycle: List<Bitmap>? = null
+
         try {
             // 0. Thermal throttling — delay if device is warm/hot (never block)
             callbacks?.let { cb ->
@@ -563,11 +571,12 @@ class KoogAgent(
 
             // 1. PERCEIVE: Gather context (Tiered)
             Timber.i("👁️ Perceiving device state...")
-            val context = perceive(event.message)
+            val context = perceive()
             Timber.d("Context gathered: ${context.length} chars")
 
             // 2. Drain media queues
             val (images, audio) = drainMedia()
+            imagesToRecycle = images
 
             // 3. Add user message to history
             val currentDate = java.time.LocalDate.now().toString()
@@ -643,19 +652,31 @@ class KoogAgent(
                     }
                     
                     if (cleanToken.isNotEmpty()) {
-                        responseBuffer.append(cleanToken)
-                        sentenceBuffer.append(cleanToken)
+                        // Extract leading emoji for toast & strip identity markers on first token
+                        if (responseBuffer.isEmpty()) {
+                            val emojiMatch = Regex("^[\\s]*([\\x{1F300}-\\x{1F9FF}|\\x{2600}-\\x{26FF}|\\x{2700}-\\x{27BF}])").find(cleanToken)
+                            if (emojiMatch != null) {
+                                callbacks?.onEmotionSignal(emojiMatch.groupValues[1])
+                                cleanToken = cleanToken.replaceFirst(emojiMatch.groupValues[1], "")
+                            }
+                            cleanToken = cleanToken.trimStart { it == ' ' || it == 'Δ' || it == '∇' || it == '\n' || it == '\r' }
+                        }
                         
-                        // TTS Streaming: speak completed sentences (Audit 2.0: Removed 'first 5 words' hack to prevent stuttering)
-                        val bufferStr = sentenceBuffer.toString()
-                        if (bufferStr.length > 2 && bufferStr.contains(Regex("[.!?](?![0-9])"))) {
-                            val textToSpeak = bufferStr.trim()
-                            callbacks?.speak(cleanForTTS(textToSpeak))
-                            sentenceBuffer.setLength(0)
-                        } 
+                        if (cleanToken.isNotEmpty()) {
+                            responseBuffer.append(cleanToken)
+                            sentenceBuffer.append(cleanToken)
+                            
+                            // TTS Streaming: speak completed sentences (Audit 2.0: Removed 'first 5 words' hack to prevent stuttering)
+                            val bufferStr = sentenceBuffer.toString()
+                            if (bufferStr.length > 2 && bufferStr.contains(Regex("[.!?](?![0-9])"))) {
+                                val textToSpeak = bufferStr.trim()
+                                callbacks?.speak(cleanForTTS(textToSpeak))
+                                sentenceBuffer.setLength(0)
+                            } 
 
-                        if (!event.isDream) {
-                            callbacks?.onMessageAdded(responseBuffer.toString(), isUser = false, isComplete = false)
+                            if (!event.isDream) {
+                                callbacks?.onMessageAdded(responseBuffer.toString(), isUser = false, isComplete = false)
+                            }
                         }
                     }
                 }
@@ -670,52 +691,11 @@ class KoogAgent(
 
             _lastResponseHash.set(responseHash)
 
-            // 4. ACT: Parse and execute tools from response
-            val toolInvocations = extractTools(response)
-            if (toolInvocations.isNotEmpty()) {
-                Timber.i("🔧 Tool Invocations detected: ${toolInvocations.size}")
-                val results = mutableListOf<String>()
-                
-                for (inv in toolInvocations) {
-                    // Update thought channel with action
-                    callbacks?.onThoughtUpdated("Executing: ${inv.tool}...")
-                    
-                    agentScope.launch {
-                        try {
-                            callbacks?.writeDiaryEntry("TOOL", "Executing tool: ${inv.tool} with params: ${inv.params}", "N/A")
-                        } catch (e: Exception) {}
-                    }
-                    
-                    val result = mcpServer.executeTool(inv.tool, inv.params)
-                    if (result.success) {
-                        results.add("✓ ${inv.tool}: ${result.output}")
-                    } else {
-                        results.add("✗ ${inv.tool}: ${result.error}")
-                    }
-                }
-                
-                // Notify thought channel of completion
-                callbacks?.onThoughtComplete("Action sequence complete. Reflecting...")
-                
-                // Enqueue ToolResult to trigger reflection
-                eventQueue.send(AgentEvent.ToolResult(
-                    context = context,
-                    toolResults = results,
-                    originalResponse = response,
-                    responseChannel = event.responseChannel,
-                    userMessage = event.message,
-                    sessionId = event.sessionId,
-                    isDream = event.isDream
-                ))
-                return // handleUserMessage ends here; wait for reflection turn
-            }
-
-            // 6. Post-processing (Only if no tools were fired)
-            val cleanResponse = response.trim()
+            // The native C++ engine handles tools (run_intent/run_js) internally.
+            // When generateResponse returns, any tool invocations and reflections have already
+            // occurred seamlessly within the same inference turn.
             
-            // 7. Store assistant response
-            val assistantMessage = Message(role = "assistant", content = cleanResponse)
-            synchronized(_conversationHistory) { _conversationHistory.add(assistantMessage) }
+            _conversationHistory.add(Message(role = "assistant", content = response))
 
             // 8. Auto-flush KV cache (Optimized: 30 turns instead of 15)
             if (turnCount > 0 && turnCount % 30 == 0) {
@@ -739,10 +719,10 @@ class KoogAgent(
 
             // 10. Platform callbacks: UI, TTS, persistence
             // Guard: blank response with no tools = model produced nothing — use fallback
-            val safeCleanResponse = if (cleanResponse.isBlank()) {
-                Timber.w("⚠️ Blank response, no tools fired — using fallback")
+            val safeCleanResponse = if (response.isBlank()) {
+                Timber.w("⚠️ Blank response — using fallback")
                 "..."
-            } else cleanResponse
+            } else response
 
             callbacks?.let { cb ->
                 if (!event.isDream) {
@@ -791,6 +771,8 @@ class KoogAgent(
             val errorMsg = "(´°̥̥̥̥̥̥̥̥ω°̥̥̥̥̥̥̥̥`) brain.exe crashed: ${e.message}"
             callbacks?.showResponse(errorMsg)
             event.responseChannel.complete(errorMsg)
+        } finally {
+            imagesToRecycle?.forEach { try { it.recycle() } catch (e: Exception) {} }
         }
     }
 
@@ -879,12 +861,7 @@ class KoogAgent(
      * Wrap response with minimal branding to reduce token overhead
      */
     private fun wrapResponse(content: String): String {
-        val timestamp = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
-            .format(java.time.LocalDateTime.now())
-
-        return """✧ Gemma:
-$content
-Δ $timestamp ∇""".trimIndent()
+        return content
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -894,8 +871,8 @@ $content
     // ═══════════════════════════════════════════════════════════════
     
     
-    private suspend fun perceive(query: String? = null): String {
-        return contextManager.buildContext(turnCount, query)
+    private suspend fun perceive(): String {
+        return contextManager.buildContext()
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -931,13 +908,13 @@ $content
         if (event.isApproved) {
             try {
                  // RE-EXECUTE the specific tool
-                 // Note: We need the params. 
                  val safeParams = event.params.filterValues { it != null }.mapValues { it.value as Any }
-                 val result = mcpServer.executeTool(event.toolName, safeParams)
-                 if (result.success) {
-                     newToolResults.add("✓ ${event.toolName}: ${result.output}")
+                 val paramsJson = JSONObject(safeParams).toString()
+                 val success = IntentHandler.handleAction(context, event.toolName, paramsJson)
+                 if (success) {
+                     newToolResults.add("✓ ${event.toolName}: Intent triggered successfully.")
                  } else {
-                     newToolResults.add("✗ ${event.toolName}: ${result.error}")
+                     newToolResults.add("✗ ${event.toolName}: Intent missing or failed.")
                  }
             } catch (e: Exception) {
                  newToolResults.add("✗ ${event.toolName}: Failed after approval: ${e.message}")
@@ -1008,7 +985,7 @@ $content
         }
         _turnsSinceKvFlush.incrementAndGet()
 
-        val contextBlock = contextManager.buildContext(_turnCount.get(), userMessage)
+        val contextBlock = contextManager.buildContext()
         val fullPrompt = "$contextBlock\n$userMessage"
         
         // Proactive Smooth Restart: Flush KV cache if context is saturating (Approx 10 turns)
@@ -1103,19 +1080,7 @@ $content
     fun getSystemPrompt(): String = buildSystemPrompt()
 
     private fun buildSystemPrompt(): String {
-        val tools = mcpServer.listTools()
-            .joinToString("\n") { tool ->
-                val params = tool.parameters.entries.joinToString(", ") { (name, spec) ->
-                    "$name: ${spec.description}"
-                }
-                
-                // Keep the flavoring minimal and functional
-                val desc = tool.description
-                
-                "- ${tool.name}: $desc [$params]"
-            }
-
-        return contextManager.buildSystemPrompt(rollingMemoryJson) + "\n\nAvailable Tools:\n$tools"
+        return contextManager.buildSystemPrompt(rollingMemoryJson, skillManager)
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -1227,67 +1192,12 @@ OUTPUT ONLY THE JSON. NO PREAMBLE.
     
     fun getConversationHistory(): List<Message> = synchronized(_conversationHistory) { _conversationHistory.toList() }
     
-    fun isCriticalBattery(): Boolean = (mcpServer.sensorManager.getContextSnapshot().battery.level) <= 5
-    fun isLowBattery(): Boolean = (mcpServer.sensorManager.getContextSnapshot().battery.level) <= 20
+    fun isCriticalBattery(): Boolean = (sensorManager.getContextSnapshot().battery.level) <= 5
+    fun isLowBattery(): Boolean = (sensorManager.getContextSnapshot().battery.level) <= 20
 
-    fun getBatteryLevel(): Int = mcpServer.sensorManager.getContextSnapshot().battery.level
+    fun getBatteryLevel(): Int = sensorManager.getContextSnapshot().battery.level
 
-    /**
-     * Parse tool invocations from model text.
-     * Format: [[TOOL_NAME:param1=val1,param2=val2]]
-     */
-    data class ToolInvocation(val tool: String, val params: Map<String, Any>)
-
-    private fun extractTools(response: String): List<ToolInvocation> {
-        val invocations = mutableListOf<ToolInvocation>()
-        
-        // 1. Native Gemma 4 Support: <|tool_call|>call:name{key:<|"|>val<|"|>}<tool_call|>
-        // Flexible Regex to handle optional whitespace/newlines
-        val nativeRegex = Regex("<\\|tool_call\\|>(?:\\s*)call:([A-Z_a-z0-9]+)\\{(.*?)\\}\\s*<tool_call\\|>", RegexOption.DOT_MATCHES_ALL)
-        nativeRegex.findAll(response).forEach { match ->
-            val name = match.groupValues[1]
-            val argsStr = match.groupValues[2]
-            
-            // Parse arguments with support for <|"|> delimiter
-            val params = mutableMapOf<String, Any>()
-            val argRegex = Regex("(\\w+):(?:<\\|\"\\|>(.*?)<\\|\"\\|>|([^,}]*))", RegexOption.DOT_MATCHES_ALL)
-            argRegex.findAll(argsStr).forEach { argMatch ->
-                val key = argMatch.groupValues[1]
-                val valWithQuotes = argMatch.groupValues[2]
-                val valRaw = argMatch.groupValues[3]
-                val value = (if (valWithQuotes.isNotEmpty()) valWithQuotes else valRaw).trim()
-                
-                // Type casting
-                val castValue: Any = when {
-                    value.equals("true", true) -> true
-                    value.equals("false", true) -> false
-                    value.toIntOrNull() != null -> value.toInt()
-                    value.toDoubleOrNull() != null -> value.toDouble()
-                    else -> value
-                }
-                params[key] = castValue
-            }
-            invocations.add(ToolInvocation(name, params))
-        }
-
-        // 2. Legacy/GHOST Shorthand Support: [[Tool:Param]]
-        val legacyRegex = Regex("\\[\\[([A-Z_a-z]+)(?::([^\\]]+))?\\]\\]")
-        legacyRegex.findAll(response).forEach { match ->
-            val name = match.groupValues[1]
-            val paramStr = match.groupValues.getOrNull(2) ?: ""
-            val params = if (paramStr.contains("=")) {
-                paramStr.split(",").associate {
-                    val parts = it.split("=")
-                    parts[0].trim() to (parts.getOrNull(1)?.trim() ?: "")
-                }
-            } else if (paramStr.isNotBlank()) {
-                mapOf("query" to paramStr.trim(), "cmd" to paramStr.trim())
-            } else emptyMap()
-            invocations.add(ToolInvocation(name, params))
-        }
-
-        return invocations
-    }
+    // Tools are now parsed internally by LlmInference
 
     /**
      * Clean response text for TTS output.

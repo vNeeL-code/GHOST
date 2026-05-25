@@ -25,7 +25,7 @@ interface ConversationDao {
     suspend fun searchByKeyword(keyword: String): List<ConversationTurn>
 
     @Query("DELETE FROM conversations")
-    suspend fun deleteAll()
+    suspend fun deleteAll(): Int
 }
 
 @Dao
@@ -67,5 +67,5 @@ interface DiaryDao {
     suspend fun getEntriesByType(type: String): List<DiaryEntry>
 
     @Query("DELETE FROM diary_entries")
-    suspend fun deleteAll()
+    suspend fun deleteAll(): Int
 }

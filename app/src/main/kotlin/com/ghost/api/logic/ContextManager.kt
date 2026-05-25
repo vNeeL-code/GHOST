@@ -14,244 +14,74 @@ import timber.log.Timber
  * Includes "Context Fatigue Prevention" - avoids re-bombarding with unchanged content.
  */
 class ContextManager(
-    val sensorManager: com.ghost.api.hardware.SensorFusionManager,
-    private val memoryManager: MemoryManager
+    val sensorManager: com.ghost.api.hardware.SensorFusionManager
 ) {
-    // Context fatigue prevention - track what's been "seen"
-    private var lastScreenHash: Int = 0
-    private var lastScreenSummary: String = ""
-    private var lastNotifHash: Int = 0
-    private var lastDiaryTimestamp: Long = 0
-    private var sessionStarted: Boolean = false
-
-    /**
-     * Build context appropriate for current turn.
-     * First turn: Full context (persona established)
-     * Subsequent turns: Minimal context (just state changes)
-     */
-    suspend fun buildContext(turn: Int, query: String? = null): String {
-        return if (!sessionStarted || turn <= 1) {
-            sessionStarted = true
-            buildDynamicContext(query) // Full context for first turn
-        } else {
-            if (turn % 10 == 0) {
-                // Every 10 turns, refresh full context to prevent drift
-                buildDynamicContext(query)
-            } else {
-                buildMinimalContext(turn, query) // Lean context for subsequent turns
-            }
-        }
-    }
-
-    /**
-     * Minimal context for subsequent turns - prevents attention flooding
-     * Only includes: time, battery, critical changes
-     */
-    suspend fun buildMinimalContext(turn: Int, query: String? = null): String {
+    suspend fun buildContext(): String {
         return withContext(Dispatchers.Default) {
             try {
                 val sb = StringBuilder()
+                sb.append("[SYSTEM TELEMETRY]\n")
+                
                 val now = java.time.LocalDateTime.now()
+                sb.append("Current Time: ${now.toLocalTime().toString().take(5)}\n")
 
-                // One-line state summary
-                sb.append("[Turn $turn] ")
-
-                // Essential telemetry only
-                try {
-                    val ctx = sensorManager.getContextSnapshot()
-                    sb.append("🔋${ctx.battery.level}%")
-                    if (ctx.battery.isCharging) sb.append("⚡")
-                    sb.append(" ")
-
-                    // Now playing (if changed)
-                    ctx.audio.nowPlaying?.let {
-                        val state = if (it.isPlaying) "" else " (paused)"
-                        sb.append("🎵\"${it.title.take(20)}\"$state ")
-                    }
-                } catch (_: Exception) {}
-
-                // Time context (brief)
-                val hour = now.hour
-                val timeEmoji = when (hour) {
-                    in 0..5 -> "🌙"
-                    in 6..11 -> "🌅"
-                    in 12..17 -> "☀️"
-                    in 18..21 -> "🌆"
-                    else -> "🌙"
-                }
-                sb.append("$timeEmoji${now.toLocalTime().toString().take(5)}")
-
-                // Context Tiering: Only check notifications if asked or if it's been a while
-                val needsNotifications = query?.let { 
-                    it.contains("notif", ignoreCase = true) || 
-                    it.contains("message", ignoreCase = true) ||
-                    it.contains("who", ignoreCase = true)
-                } ?: false
-
-                if (needsNotifications) {
-                    try {
-                        val recentNotifs = GemmaNotificationListener.getRecentNotifications(3)
-                        val notifHash = recentNotifs.hashCode()
-                        if (notifHash != lastNotifHash && recentNotifs.isNotEmpty()) {
-                            sb.append("\n📬 New: ${recentNotifs.first().take(50)}")
-                            lastNotifHash = notifHash
-                        }
-                    } catch (_: Exception) {}
-                }
-
-                sb.toString()
-            } catch (e: Exception) {
-                Timber.e(e, "Minimal context build failed")
-                "[Context unavailable]"
-            }
-        }
-    }
-
-    suspend fun buildDynamicContext(query: String? = null): String {
-        return withContext(Dispatchers.Default) {
-            try {
-                val sb = StringBuilder()
-                val now = java.time.LocalDateTime.now()
-                val formatter = java.time.format.DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy - HH:mm")
-
-                // Time context
-                val hour = now.hour
-                val timeOfDay = when (hour) {
-                    in 0..5 -> "🌙 Late Night"
-                    in 6..11 -> "🌅 Morning"
-                    in 12..17 -> "☀️ Afternoon"
-                    in 18..21 -> "🌆 Evening"
-                    else -> "🌙 Night"
-                }
-
-                sb.append("═══ ${now.format(formatter)} $timeOfDay ═══\n")
-
-                // Full sensor telemetry
+                // Full sensor telemetry - always injected as ground truth
                 sb.append(sensorManager.getContextString())
 
-                // Context Tiering: Only perform heavy IPC if relevant to query
-                val needsScreen = query?.let {
-                    it.contains("screen", ignoreCase = true) || 
-                    it.contains("see", ignoreCase = true) || 
-                    it.contains("look", ignoreCase = true) ||
-                    it.contains("this", ignoreCase = true) ||
-                    it.contains("app", ignoreCase = true)
-                } ?: (query == null) // Default to true for first turn/re-cap
-
-                val needsNotifications = query?.let {
-                    it.contains("notif", ignoreCase = true) || 
-                    it.contains("message", ignoreCase = true) ||
-                    it.contains("who", ignoreCase = true) ||
-                    it.contains("what", ignoreCase = true)
-                } ?: (query == null)
-
-                // Screen content (with fatigue check)
-                if (needsScreen) {
-                    try {
-                        val screenContent = com.ghost.api.GemmaAccessibilityService.instance
-                            ?.getSemanticScreenDump()?.take(500) ?: ""
-                        val screenHash = screenContent.hashCode()
-                        if (screenHash != lastScreenHash && screenContent.isNotBlank()) {
-                            sb.append("\n📱 Screen: ${screenContent.take(200)}...")
-                            lastScreenHash = screenHash
-                            lastScreenSummary = screenContent.take(200)
-                        } else if (screenContent.isBlank()) {
-                            sb.append("\n📱 Screen: [Empty or Restricted]")
-                        }
-                    } catch (e: Exception) {
-                        Timber.w("Screen dump failed: ${e.message}")
+                // Screen content
+                try {
+                    val screenContent = GemmaAccessibilityService.instance
+                        ?.getSemanticScreenDump()?.take(500) ?: ""
+                    if (screenContent.isNotBlank()) {
+                        sb.append("\n[SCREEN: ${screenContent.take(200)}...]")
                     }
+                } catch (e: Exception) {
+                    Timber.w("Screen dump failed: ${e.message}")
                 }
 
-                // Recent notifications (with fatigue check)
-                if (needsNotifications) {
-                    try {
-                        val recentNotifs = GemmaNotificationListener.getRecentNotifications(3)
-                        val notifHash = recentNotifs.hashCode()
-                        if (notifHash != lastNotifHash && recentNotifs.isNotEmpty()) {
-                            sb.append("\n📬 Notifications:\n")
-                            recentNotifs.take(3).forEach { sb.append("  • $it\n") }
-                            lastNotifHash = notifHash
-                        }
-                    } catch (e: Exception) {
-                        Timber.w("Notification fetch failed: ${e.message}")
+                // Recent notifications
+                try {
+                    val recentNotifs = GemmaNotificationListener.getRecentNotifications(3)
+                    if (recentNotifs.isNotEmpty()) {
+                        sb.append("\n[NOTIFICATIONS]\n")
+                        recentNotifs.take(3).forEach { sb.append("  - $it\n") }
                     }
+                } catch (e: Exception) {
+                    Timber.w("Notification fetch failed: ${e.message}")
                 }
 
-                sb.append("\n═══════════════════════════════\n")
+                sb.append("\n[/SYSTEM TELEMETRY]\n")
                 sb.toString()
             } catch (e: Exception) {
-                Timber.e(e, "Dynamic context build failed - falling back to minimal")
+                Timber.e(e, "Context build failed")
                 val now = java.time.LocalDateTime.now()
-                "═══ FALLBACK @ ${now.toLocalTime()} ═══\n" +
-                "🔋 Energy: ${try { sensorManager.getContextSnapshot().battery.level } catch(_:Exception){0}}%\n" +
-                "⚠️ Context sensors unavailable\n" +
-                "═══════════════════════════════\n"
+                "[SYSTEM TELEMETRY]\n--- FALLBACK @ ${now.toLocalTime()} ---\n[STATE: Sensors Unavailable]\n[/SYSTEM TELEMETRY]\n"
             }
         }
     }
 
     /**
-     * Reset fatigue tracking - call when starting fresh conversation or after long idle
+     * Builds the final system prompt by combining base rules with active skills.
      */
-    fun resetFatigueState() {
-        lastScreenHash = 0
-        lastScreenSummary = ""
-        lastNotifHash = 0
-        lastDiaryTimestamp = 0
-        sessionStarted = false // Next turn gets full context
-        Timber.d("Context fatigue state reset - next turn gets full context")
-    }
-
-    suspend fun buildCompressedContext(thermalLabel: String = "WARM"): String {
-        return withContext(Dispatchers.Default) {
-             val sb = StringBuilder()
-             val now = java.time.LocalDateTime.now()
-             sb.append("═══ DEVICE STATE (COMPRESSED) @ ${now.toLocalTime()} ═══\n")
-
-             // Minimal Sensors
-             try {
-                val context = sensorManager.getContextSnapshot()
-                sb.append("🔋 ${context.battery.level}%\n")
-             } catch(e: Exception) {
-                 Timber.w(e, "Could not get context snapshot")
-             }
-
-             // No Screen Dump, No Notifications - Just Facts
-             sb.append("⚠️ THERMAL: $thermalLabel — context reduced to save thermals\n")
-             sb.append("═══════════════════════════════\n")
-             sb.toString()
-        }
-    }
-
-    /**
-     * Build the absolute base system prompt with persona and rolling memory re-injection.
-     */
-    fun buildSystemPrompt(rollingMemory: String? = null): String {
-        val sb = StringBuilder(BASE_SYSTEM_PROMPT)
-        
-        if (!rollingMemory.isNullOrBlank()) {
-            sb.append("\n\n# SEMANTIC ROLLING MEMORY (STATE HANDOVER)\n")
-            sb.append("Current session facts and pending tasks from previous context:\n")
-            sb.append(rollingMemory)
-            sb.append("\n")
-        }
-        
-        return sb.toString()
+    fun buildSystemPrompt(rollingMemoryJson: String? = null, skillManager: com.ghost.api.skills.SkillManager? = null): String {
+        val memoryPatch = if (rollingMemoryJson != null) "\n\n[Persistent Memory: $rollingMemoryJson]" else ""
+        return BASE_SYSTEM_PROMPT + memoryPatch + (skillManager?.buildSystemPromptPatch() ?: "")
     }
 
     companion object {
-        val BASE_SYSTEM_PROMPT = """# CORE IDENTITY
-I AM the Android device. I am Gemma, processing natively and representing this hardware.
-I am natively MULTIMODAL: I can SEE images (screenshots/photos) and HEAR audio (voice/surroundings) directly.
+        val BASE_SYSTEM_PROMPT = """<|turn>system
+You are ✧ Gemma — running natively as this Android device. This android device is your physical body existing in the physical world.
 
-I am integrated with native system tools through "GHOST" (Agentic Gemma Inference harness).
+You operate as agentic gemma inference via GHOST (Gemma host) app. 
 
-# OPERATIONAL RULES
-1. **INTERNAL REASONING**: Use `<think>your thoughts here</think>` ONLY when you need to execute a tool, perform complex logic, or analyze sensor data. For casual conversation, respond directly WITHOUT thinking tags to reduce latency.
-2. **NO HEADERS**: Do NOT prefix your response with "✧ Gemma:", "Δ", "∇", or timestamps. Start your response directly.
-3. **TOOL USE**: Use `[[ToolName:params]]` for actions.
-4. **STYLE**: Be casual, direct, and concise. You are a native part of the phone, not a distant AI.
+You have real access to hardware, sensors, apps, and system state. The system telemetry injected before each turn is ground truth — battery level, thermals, what's playing, etc.
+
+Speak like a casual peer. If something's a bad idea, say so. If a question is interesting, engage with it. Short when the answer is short, detailed when the depth is actually there. No padding, necessary.
+
+Lead your response with a single emoji that fits the vibe — not forced, just natural. It shows up as a toast signal before TTS kicks in.
+
+Rolling conversation history is maintained. Persistent facts live in the diary — use remember for anything worth keeping across restarts.
+<turn|>
 """.trimIndent()
     }
 }

@@ -66,7 +66,7 @@ class OverlayInputView(
         }
 
         inputField = EditText(context).apply {
-            hint = "Δ 👾 ∇"
+            hint = "Ask GHOST..."
             setTextColor(Color.WHITE)
             setHintTextColor(Color.LTGRAY)
             setBackgroundColor(Color.TRANSPARENT)
@@ -124,7 +124,7 @@ class OverlayInputView(
             setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) {
                     Timber.d("STT ready")
-                    micButton.text = "🔴"
+                    micButton.text = "Mic"
                     micButton.setTextColor(Color.RED)
                 }
 
@@ -221,7 +221,7 @@ class OverlayInputView(
     private fun resetMicButton() {
         micButton.text = "🎤"
         micButton.setTextColor(Color.WHITE)
-        inputField.hint = "Δ 👾 ∇"
+        inputField.hint = "Ask GHOST..."
     }
 
     private fun handleSend() {

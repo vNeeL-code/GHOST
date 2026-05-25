@@ -114,7 +114,7 @@ class BubbleActivity : ComponentActivity(), GemmaService.UiCallback {
         // Load recent history so bubble isn't blank
         scope.launch {
             try {
-                val history = gemmaService?.getRecentTurns() ?: return@launch
+                val history = gemmaService?.getRecentTurns(50) ?: return@launch
                 val messages = history.sortedBy { it.timestamp }.flatMap { turn ->
                     val list = mutableListOf<ChatMessage>()
                     if (turn.userMessage.isNotEmpty()) list.add(ChatMessage(turn.userMessage, isFromUser = true, timestamp = turn.timestamp))
@@ -138,10 +138,10 @@ class BubbleActivity : ComponentActivity(), GemmaService.UiCallback {
                 chatAdapter.addMessage(ChatMessage(message, isFromUser = true))
             } else if (isComplete) {
                 val last = chatAdapter.getLastMessage()
-                if (last != null && !last.isFromUser) {
-                    chatAdapter.updateLastMessage(message, true, null)
+                if (last != null && !last.isFromUser && !last.isComplete) {
+                    chatAdapter.updateLastMessage(message, isComplete, null, null, null)
                 } else {
-                    chatAdapter.addMessage(ChatMessage(message, isFromUser = false))
+                    chatAdapter.addMessage(ChatMessage(message, isFromUser = false, isComplete = isComplete))
                 }
             } else {
                 val last = chatAdapter.getLastMessage()

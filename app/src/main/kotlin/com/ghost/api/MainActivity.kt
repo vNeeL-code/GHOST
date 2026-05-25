@@ -1,6 +1,5 @@
 package com.ghost.api
 
-import android.app.Activity
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -28,28 +27,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
 import androidx.activity.ComponentActivity
-import androidx.activity.result.contract.ActivityResultContracts
 import java.io.File
 import com.ghost.api.database.ConversationTurn
 
-/**
- * The Advanced GHOST Gateway
- * Handles Permissions, then spawns the Native Chat Interface seamlessly hooking into GemmaService.
- */
 class MainActivity : ComponentActivity(), GemmaService.UiCallback {
     
-    // UI Elements - Launcher Phase
     private lateinit var statusTextView: TextView
     private lateinit var actionButton: Button
-    private lateinit var bypassButton: Button
     
-    // UI Elements - Chat Phase
     private var chatRecyclerView: RecyclerView? = null
     private var chatInputText: EditText? = null
     private var btnSend: TextView? = null
-    private var btnSparkle: TextView? = null
     private var thinkingProgress: ProgressBar? = null
     private var thinkingText: TextView? = null
     
@@ -57,19 +46,16 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
     private lateinit var ttsManager: TTSManager
     private var voiceController: com.ghost.api.ui.VoiceInputController? = null
     
-    // Service Binding
     private var gemmaService: GemmaService? = null
     private var isBound = false
     private val scope = CoroutineScope(Dispatchers.Main + Job())
-    
     private val handler = Handler(Looper.getMainLooper())
     private var isRitualComplete = false
     private var isShowingDiary = false
-    // Streaming state: tracks whether a streaming assistant bubble is currently in-flight
-    // Prevents double-bubbles when token updates arrive before the initial add completes
-    private var streamingBubbleActive = false
+    
+    // Holds the picked image until the user types a prompt and hits send
+    private var pendingImageBitmap: android.graphics.Bitmap? = null
 
-    // Multimodal
     private val imagePicker = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let { handlePickedImage(it) }
     }
@@ -80,30 +66,22 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
             gemmaService = binder.getService()
             gemmaService?.uiCallback = this@MainActivity
             isBound = true
-            Timber.i("🌀 UI successfully bound to GemmaService")
-            
-            // Switch to Chat UI now that the backend is officially wired up
-            if (!isFinishing) {
-                transitionToChatUi()
+            transitionToChatUi()
+            scope.launch {
+                gemmaService?.isSystemReady?.collect { ready ->
+                    if (ready) loadHistoricalChat()
+                }
             }
         }
-
         override fun onServiceDisconnected(arg0: ComponentName) {
             isBound = false
-            gemmaService?.uiCallback = null
             gemmaService = null
-            Timber.i("🌀 UI unbound from GemmaService")
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        Timber.i("🌀 Entering the System Check...")
-        
-        // Init Voice
         ttsManager = TTSManager(this)
-        
-        // Start in Launcher Phase
         setupLauncherUi()
     }
     
@@ -113,353 +91,141 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
             setPadding(50, 50, 50, 50)
             setBackgroundColor(android.graphics.Color.BLACK)
         }
-        
-        statusTextView = TextView(this).apply {
-            textSize = 18f
-            setPadding(0, 0, 0, 50)
-            text = "Initializing System Check..."
-            setTextColor(android.graphics.Color.WHITE)
-        }
-        
-        actionButton = Button(this).apply {
-            textSize = 18f
-            text = "Check State"
-            visibility = View.GONE
-        }
-        
-        bypassButton = Button(this).apply {
-            textSize = 16f
-            text = "Skip (Lite Mode)"
-            setTextColor(android.graphics.Color.RED)
-            visibility = View.GONE
-        }
-        
+        statusTextView = TextView(this).apply { textSize = 18f; setTextColor(android.graphics.Color.WHITE); text = "Initializing..." }
+        actionButton = Button(this).apply { text = "Check State"; visibility = View.GONE }
         layout.addView(statusTextView)
         layout.addView(actionButton)
-        layout.addView(bypassButton)
         setContentView(layout)
     }
     
     override fun onResume() {
         super.onResume()
-        if (!isRitualComplete) {
-            handler.postDelayed({ checkSystemState() }, 500)
-        }
+        if (!isRitualComplete) handler.postDelayed({ checkSystemState() }, 500)
     }
 
-    // --- PERMISSIONS RITUAL ---
-    
     private fun checkSystemState() {
-        // 1. Notifications (Android 13+ requires POST_NOTIFICATIONS)
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
-            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            showState(
-                "❌ Voice Offline\n\nI need notification permission to talk to you.",
-                "Grant Notifications"
-            ) { requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 100) }
+        val perms = arrayOf(
+            android.Manifest.permission.CAMERA,
+            android.Manifest.permission.RECORD_AUDIO,
+            android.Manifest.permission.WRITE_CALENDAR,
+            android.Manifest.permission.READ_CALENDAR,
+            android.Manifest.permission.ACCESS_FINE_LOCATION,
+            android.Manifest.permission.READ_PHONE_STATE
+        )
+        val missing = perms.filter { checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
+        if (missing.isNotEmpty()) {
+            statusTextView.text = "Missing permissions: ${missing.size}"
+            actionButton.text = "Grant Permissions"
+            actionButton.visibility = View.VISIBLE
+            actionButton.setOnClickListener { requestPermissions(missing.toTypedArray(), 100) }
             return
         }
 
-        // 2. Camera
-        if (checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            showState(
-                "❌ Vision Offline\n\nI need camera access to see.",
-                "Grant Camera"
-            ) { requestPermissions(arrayOf(android.Manifest.permission.CAMERA), 101) }
-            return
-        }
-
-        // 3. Audio
-        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-             showState(
-                "❌ Hearing Offline\n\nI need microphone access to hear.",
-                "Grant Mic"
-            ) { requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 102) }
-            return
-        }
-
-        // 4. Calendar (for diary sync)
-        if (checkSelfPermission(android.Manifest.permission.WRITE_CALENDAR) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            showState(
-                "❌ Memory Offline\n\nI need calendar access to keep my diary.",
-                "Grant Calendar"
-            ) { requestPermissions(arrayOf(
-                android.Manifest.permission.READ_CALENDAR,
-                android.Manifest.permission.WRITE_CALENDAR
-            ), 103) }
-            return
-        }
-
-        // 5. Location (for context awareness)
-        if (checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            showState(
-                "❌ GPS Offline\n\nI need location access to know where we are.",
-                "Grant Location"
-            ) { requestPermissions(arrayOf(
-                android.Manifest.permission.ACCESS_FINE_LOCATION,
-                android.Manifest.permission.ACCESS_COARSE_LOCATION
-            ), 104) }
-            return
-        }
-
-        // 6. Phone state (for context awareness)
-        if (checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            showState(
-                "❌ Phone Offline\n\nI need phone access to know call state.",
-                "Grant Phone"
-            ) { requestPermissions(arrayOf(android.Manifest.permission.READ_PHONE_STATE), 105) }
-            return
-        }
-
-        // 6b. Check for previous crashes and show forensic alert
-        val crashLogDir = File(filesDir, "logs/crashes")
-        if (crashLogDir.exists()) {
-            val latestCrash = crashLogDir.listFiles()?.maxByOrNull { f -> f.lastModified() }
-            if (latestCrash != null) {
-                showState(
-                    "⚠️ Forensic Alert: Previous crash detected.\n\n${latestCrash.name}\n\nReview before launching?",
-                    "View Crash Log"
-                ) {
-                    val text = latestCrash.readText()
-                    statusTextView.text = text.take(1000)
-                    actionButton.text = "Recovery Boot"
-                    actionButton.setOnClickListener {
-                        latestCrash.delete()
-                        // Clear service watchdog too
-                        getSharedPreferences(Constants.PREFS_NAME, MODE_PRIVATE).edit()
-                            .putBoolean("is_initializing", false)
-                            .putInt("init_crash_count", 0)
-                            .apply()
-                        completeRitual()
-                    }
-                }
-                return
-            }
-        }
-
-        // 7. Bluetooth (nearby devices)
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S &&
-            checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            showState(
-                "❌ Bluetooth Offline\n\nI need Bluetooth access for nearby devices.",
-                "Grant Bluetooth"
-            ) { requestPermissions(arrayOf(android.Manifest.permission.BLUETOOTH_CONNECT), 106) }
-            return
-        }
-
-        // 8. Accessibility (non-blocking)
-        if (!isAccessibilityEnabled()) {
-            Timber.i("Accessibility not enabled — click/scroll/type tools will be unavailable")
-        }
-
-        // 9. Overlay
         if (!Settings.canDrawOverlays(this)) {
-            showState(
-                "❌ Presence Inactive\n\nI need 'Draw over other apps' permission.",
-                "Enable Overlay"
-            ) {
-                val intent = Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:$packageName")
-                )
-                startActivity(intent)
-            }
+            statusTextView.text = "Overlay permission required"
+            actionButton.text = "Enable Overlay"
+            actionButton.visibility = View.VISIBLE
+            actionButton.setOnClickListener { startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))) }
             return
         }
 
-        // 9.5 Notification Listener (Required for Media metadata)
-        val expectedListener = android.content.ComponentName(this, GemmaNotificationListener::class.java).flattenToString()
-        val enabledListeners = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
-        if (enabledListeners == null || !enabledListeners.contains(expectedListener)) {
-            showState(
-                "❌ Media Blindspot\n\nI need 'Device & App Notifications' access to read media and notification contents.",
-                "Enable Access"
-            ) {
-                val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-                startActivity(intent)
-            }
-            return
-        }
-        
-        // 10. Complete
-        showState("Δ 👾 ∇\n\nStatus: online", "LAUNCHING...") { }
         completeRitual()
     }
     
-    private fun showState(status: String, buttonText: String, action: () -> Unit) {
-        statusTextView.text = status
-        actionButton.text = buttonText
-        actionButton.visibility = View.VISIBLE
-        actionButton.setOnClickListener { action() }
-    }
-    
-    private fun isAccessibilityEnabled(): Boolean {
-        val expectedServiceName = "$packageName/${GemmaAccessibilityService::class.java.canonicalName}"
-        val enabledServices = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
-        val isInEnabledList = enabledServices?.contains(expectedServiceName) == true
-        val accessibilityEnabled = try { Settings.Secure.getInt(contentResolver, Settings.Secure.ACCESSIBILITY_ENABLED) } catch (e: Exception) { 0 }
-        return isInEnabledList && accessibilityEnabled == 1
-    }
-
     private fun completeRitual() {
-        if (!isFinishing && !isRitualComplete) {
-           isRitualComplete = true
-           actionButton.isEnabled = false
-           try { ttsManager.speak("Online.") } catch (e: Exception) { Timber.e(e) }
-           handler.postDelayed({ launchAndBindService() }, 1000)
-        }
-    }
-
-    private fun launchAndBindService() {
-        try {
+        if (!isRitualComplete) {
+            isRitualComplete = true
+            ttsManager.speak("Online.")
             val intent = Intent(this, GemmaService::class.java)
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                startForegroundService(intent)
-            } else {
-                startService(intent)
-            }
-            // Bind so we can pipe the UI 
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
             bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to start or bind service")
         }
     }
-    
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        checkSystemState()
-    }
-    
-    // --- NATIVE CHAT UI PHASE ---
 
     private fun transitionToChatUi() {
         setContentView(R.layout.activity_main_chat)
-        
         chatRecyclerView = findViewById(R.id.chatRecyclerView)
         chatInputText = findViewById(R.id.chatInputText)
         btnSend = findViewById(R.id.btnSend)
         thinkingProgress = findViewById(R.id.thinkingProgress)
         thinkingText = findViewById(R.id.thinkingText)
-        val btnSettings = findViewById<android.view.View>(R.id.titleText)
-        
-        btnSettings?.setOnClickListener { view ->
-            val popup = android.widget.PopupMenu(this, view)
-            popup.menuInflater.inflate(R.menu.chat_settings_menu, popup.menu)
-            popup.setOnMenuItemClickListener { item ->
-                when (item.itemId) {
-                    R.id.action_transparent_wallpaper -> {
-                        try {
-                            val intent = Intent(android.app.WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).apply {
-                                putExtra(android.app.WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT, 
-                                    ComponentName(this@MainActivity, com.ghost.api.ui.CameraWallpaperService::class.java))
-                            }
-                            startActivity(intent)
-                        } catch (e: Exception) {
-                            Timber.e(e, "Setup Live Wallpaper Intent Failed")
-                        }
-                        true
-                    }
-                    R.id.action_notification_tts -> {
-                        val prefs = getSharedPreferences(Constants.PREFS_NAME, MODE_PRIVATE)
-                        val newState = !prefs.getBoolean(Constants.PREF_PASSIVE_TTS, false)
-                        prefs.edit().putBoolean(Constants.PREF_PASSIVE_TTS, newState).apply()
-                        item.isChecked = newState
-                        Toast.makeText(this@MainActivity, "Passive TTS: ${if (newState) "ON" else "OFF"}", Toast.LENGTH_SHORT).show()
-                        true
-                    }
-                    R.id.action_toggle_diary -> {
-                        isShowingDiary = !isShowingDiary
-                        item.title = if (isShowingDiary) "Show Main Chat" else "Show Gemma's Internal Diary"
-                        findViewById<TextView>(R.id.titleText)?.text = if (isShowingDiary) "Δ \uD83D\uDC7E ∇" else "Δ ✧ ∇"
-                        chatAdapter.isDiaryMode = isShowingDiary
-                        loadHistoricalChat()
-                        true
-                    }
-                    R.id.action_clear_safe_mode -> {
-                        getSharedPreferences(Constants.PREFS_NAME, MODE_PRIVATE).edit()
-                            .putInt("init_crash_count", 0)
-                            .putBoolean("is_initializing", false)
-                            .putBoolean("force_cpu", false)
-                            .putBoolean("gpu_native_crashed", false)
-                            .putBoolean("npu_native_crashed", false)
-                            .putBoolean("gpu_verified", false)
-                            .putBoolean("npu_verified", false)
-                            .putLong("last_native_crash_time", 0)
-                            .apply()
-                        Toast.makeText(this@MainActivity, "Recovery state cleared", Toast.LENGTH_SHORT).show()
-                        true
-                    }
-                    else -> false
-                }
-            }
-            
-            // Set initial state for checkable items
-            val prefs = getSharedPreferences(Constants.PREFS_NAME, MODE_PRIVATE)
-            popup.menu.findItem(R.id.action_notification_tts)?.isChecked = prefs.getBoolean(Constants.PREF_PASSIVE_TTS, false)
-            if (isShowingDiary) {
-                popup.menu.findItem(R.id.action_toggle_diary)?.title = "Show Main Chat"
-            }
-            
-            popup.show()
-        }
         
         chatAdapter = ChatAdapter()
         chatRecyclerView?.apply {
-            layoutManager = LinearLayoutManager(this@MainActivity).apply {
-                stackFromEnd = true // Start from bottom like a real chat app
-            }
+            layoutManager = LinearLayoutManager(this@MainActivity).apply { stackFromEnd = true }
             adapter = chatAdapter
         }
         
         val btnMic = findViewById<TextView>(R.id.btnMic)
-        val btnSend = findViewById<TextView>(R.id.btnSend)
-
-        // Build shared voice controller — same behaviour as overlay bar
         voiceController = com.ghost.api.ui.VoiceInputController(
             context = this,
             micButton = btnMic ?: return,
             inputField = chatInputText ?: return,
-            sparkleOrNull = null, // no sparkle in main chat bar
+            sparkleOrNull = null,
             onAudioReady = { audio ->
                 gemmaService?.let { svc ->
                     scope.launch {
-                        svc.koogAgent.offerAudio(audio)
-                        svc.processQueryFromUi("[User sent voice message — listen and respond to the audio]")
+                        svc.processMultimodalFromUi("[Audio message received]", audio = audio)
                     }
                 }
             },
-            onTextReady = { text ->
-                gemmaService?.processQueryFromUi(text)
-            }
+            onTextReady = { text -> sendStagedMessage(text) }
         )
 
-        // Send button visibility driven by controller's syncButton()
         chatInputText?.addTextChangedListener(object : android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                 val hasText = !s.isNullOrBlank()
-                btnSend?.visibility = if (hasText) android.view.View.VISIBLE else android.view.View.GONE
-                btnMic?.visibility  = if (hasText) android.view.View.GONE  else android.view.View.VISIBLE
+                btnSend?.visibility = if (hasText) View.VISIBLE else View.GONE
+                btnMic?.visibility  = if (hasText) View.GONE  else View.VISIBLE
             }
             override fun afterTextChanged(s: android.text.Editable?) {}
         })
 
         btnSend?.setOnClickListener {
-            voiceController?.handleTap()
+            val text = chatInputText?.text?.toString()?.trim()
+            if (!text.isNullOrEmpty()) {
+                chatInputText?.setText("")
+                sendStagedMessage(text)
+            }
         }
-
-        val btnSparkle = findViewById<TextView>(R.id.btnSparkle)
-        btnSparkle?.setOnClickListener {
-            imagePicker.launch("image/*")
-        }
-
-        btnMic?.setOnClickListener {
-            voiceController?.handleTap()
-        }
-
-        findViewById<View>(R.id.btnMinimize)?.setOnClickListener {
-            gemmaService?.responseNotificationManager?.showResponse("Minimizing to bubble...")
-            moveTaskToBack(true)
+        
+        findViewById<TextView>(R.id.btnSparkle)?.setOnClickListener { imagePicker.launch("image/*") }
+        val btnDropdown = findViewById<TextView>(R.id.btnMinimize)
+        btnDropdown?.setOnClickListener { view ->
+            val popup = android.widget.PopupMenu(this, view)
+            popup.menu.apply {
+                add(0, 1, 0, "Transparent Wallpaper")
+                add(0, 2, 0, "Edge Lights")
+                add(0, 3, 0, "Milkdrop Wallpaper")
+                add(0, 4, 0, "Passive Notification TTS")
+                add(0, 5, 0, "Mute TTS")
+                add(0, 6, 0, "Internal Diary")
+                add(0, 7, 0, "Minimize")
+            }
+            popup.setOnMenuItemClickListener { item ->
+                when (item.itemId) {
+                    1 -> {
+                        // Direct intent to wallpaper service — not a model prompt
+                        sendBroadcast(Intent("com.ghost.api.ACTION_SET_TRANSPARENT_WALLPAPER"))
+                        true
+                    }
+                    2 -> {
+                        sendBroadcast(Intent("com.ghost.api.ACTION_TOGGLE_EDGE_LIGHTS"))
+                        true
+                    }
+                    3 -> {
+                        sendBroadcast(Intent("com.ghost.api.ACTION_SET_MILKDROP_WALLPAPER"))
+                        true
+                    }
+                    4 -> { togglePassiveTts(); true }
+                    5 -> { GemmaService.instance?.ttsManager?.stop(); true }
+                    6 -> { /* TODO: switch to diary view */ true }
+                    7 -> { moveTaskToBack(true); true }
+                    else -> false
+                }
+            }
+            popup.show()
         }
         
         loadHistoricalChat()
@@ -468,84 +234,30 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
     private fun loadHistoricalChat() {
         scope.launch {
             try {
-                if (isShowingDiary) {
-                    val entries = gemmaService?.memoryManager?.getRecentDiaryEntries(50) ?: emptyList()
-                    withContext(Dispatchers.Main) {
-                        val messages = entries.sortedBy { it.timestamp }.map { entry ->
-                            ChatMessage(
-                                content = entry.observation,
-                                isFromUser = false,
-                                timestamp = entry.timestamp,
-                                eventType = entry.eventType
-                            )
-                        }
-                        chatAdapter.setMessages(messages)
-                        chatRecyclerView?.scrollToPosition(chatAdapter.itemCount - 1)
+                val history = gemmaService?.getRecentTurns(50) ?: return@launch
+                withContext(Dispatchers.Main) {
+                    val messages = history.sortedBy { it.timestamp }.flatMap { turn ->
+                        val list = mutableListOf<ChatMessage>()
+                        if (turn.userMessage.isNotEmpty()) list.add(ChatMessage(turn.userMessage, isFromUser = true, timestamp = turn.timestamp))
+                        if (turn.assistantResponse.isNotEmpty()) list.add(ChatMessage(turn.assistantResponse, isFromUser = false, timestamp = turn.timestamp + 1))
+                        list
                     }
-                } else {
-                    val service = gemmaService
-                    if (service == null) {
-                        Timber.w("Cannot load historical chat: service not bound")
-                        return@launch
-                    }
-                    val history: List<ConversationTurn> = service.getRecentTurns()
-                    withContext(Dispatchers.Main) {
-                        val messages = history.sortedBy { it.timestamp }.flatMap { turn: ConversationTurn ->
-                            val list = mutableListOf<ChatMessage>()
-                            if (turn.userMessage.isNotEmpty()) {
-                                list.add(ChatMessage(turn.userMessage, isFromUser = true, timestamp = turn.timestamp))
-                            }
-                            if (turn.assistantResponse.isNotEmpty()) {
-                                list.add(ChatMessage(turn.assistantResponse, isFromUser = false, timestamp = turn.timestamp + 1))
-                            }
-                            list
-                        }
-                        if (messages.isEmpty()) {
-                            // Chat remains clean until initialized
-                        } else {
-                            chatAdapter.setMessages(messages)
-                            chatRecyclerView?.scrollToPosition(chatAdapter.itemCount - 1)
-                        }
-                    }
+                    chatAdapter.setMessages(messages)
+                    chatRecyclerView?.scrollToPosition(chatAdapter.itemCount - 1)
                 }
-            } catch (e: Exception) { Timber.e(e, "Failed to load chat history") }
+            } catch (e: Exception) { Timber.e(e) }
         }
     }
-
-    // --- GEMMA SERVICE CALLBACKS ---
-
-    private var currentThought: String? = null
-
     override fun onMessageAdded(message: String, isUser: Boolean, isComplete: Boolean) {
         runOnUiThread {
             if (isUser) {
                 chatAdapter.addMessage(ChatMessage(message, isFromUser = true))
-                streamingBubbleActive = false
-                currentThought = null
-            } else if (isComplete) {
-                if (streamingBubbleActive) {
-                    chatAdapter.updateLastMessage(message, true, currentThought)
-                } else {
-                    val lastMsg = chatAdapter.getLastMessage()
-                    if (lastMsg != null && !lastMsg.isFromUser && !lastMsg.isComplete) {
-                        chatAdapter.updateLastMessage(message, true, currentThought)
-                    } else {
-                        chatAdapter.addMessage(ChatMessage(message, isFromUser = false, isComplete = true, thought = currentThought))
-                    }
-                }
-                streamingBubbleActive = false
-                currentThought = null // Reset for next turn
             } else {
-                if (streamingBubbleActive) {
-                    chatAdapter.updateLastMessage(message, false, currentThought)
+                val last = chatAdapter.getLastMessage()
+                if (last != null && !last.isFromUser && !last.isComplete) {
+                    chatAdapter.updateLastMessage(message, isComplete, null, null, null)
                 } else {
-                    val lastMsg = chatAdapter.getLastMessage()
-                    if (lastMsg != null && !lastMsg.isFromUser) {
-                        chatAdapter.updateLastMessage(message, false, currentThought)
-                    } else {
-                        chatAdapter.addMessage(ChatMessage(message, isFromUser = false, isComplete = false, thought = currentThought))
-                    }
-                    streamingBubbleActive = true
+                    chatAdapter.addMessage(ChatMessage(message, isFromUser = false, isComplete = isComplete))
                 }
             }
             chatRecyclerView?.scrollToPosition(chatAdapter.itemCount - 1)
@@ -553,25 +265,43 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
     }
 
     override fun onThoughtUpdated(thought: String) {
-        runOnUiThread {
-            currentThought = thought
-            thinkingText?.text = "δ ${thought.take(120).replace('\n', ' ')}..."
-            if (streamingBubbleActive) {
-                chatAdapter.updateLastMessage(chatAdapter.getLastMessage()?.content ?: "", false, thought)
-            }
-            if (isShowingDiary) {
-                // ... diary update logic ...
-            }
-            chatRecyclerView?.scrollToPosition(chatAdapter.itemCount - 1)
-        }
+        runOnUiThread { thinkingText?.text = "Processing: $thought" }
     }
 
     override fun onThinkingStateChanged(isThinking: Boolean) {
         runOnUiThread {
             thinkingProgress?.visibility = if (isThinking) View.VISIBLE else View.GONE
             thinkingText?.visibility = if (isThinking) View.VISIBLE else View.GONE
-            btnSend?.isEnabled = !isThinking
-            chatInputText?.isEnabled = !isThinking
+            if (isThinking) {
+                val ts = java.time.LocalDateTime.now()
+                    .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+                thinkingText?.text = "Thinking... $ts"
+            }
+        }
+    }
+
+    private fun togglePassiveTts() {
+        val prefs = getSharedPreferences(com.ghost.api.Constants.PREFS_NAME, MODE_PRIVATE)
+        val current = prefs.getBoolean(com.ghost.api.Constants.PREF_PASSIVE_TTS, true)
+        prefs.edit().putBoolean(com.ghost.api.Constants.PREF_PASSIVE_TTS, !current).apply()
+        val label = if (!current) "Passive TTS on" else "Passive TTS off"
+        android.widget.Toast.makeText(this, label, android.widget.Toast.LENGTH_SHORT).show()
+    }
+
+    private fun sendStagedMessage(text: String) {
+        val bitmap = pendingImageBitmap
+        if (bitmap != null) {
+            scope.launch {
+                gemmaService?.processMultimodalFromUi(text, listOf(bitmap))
+                withContext(Dispatchers.Main) {
+                    pendingImageBitmap = null
+                    chatInputText?.hint = "Δ \uD83D\uDC7E ∇" // Revert to motif
+                    Toast.makeText(this@MainActivity, "Sent with image", Toast.LENGTH_SHORT).show()
+                }
+            }
+        } else {
+            gemmaService?.processQueryFromUi(text)
+            Toast.makeText(this@MainActivity, "Transmission sent", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -579,39 +309,41 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
         scope.launch {
             try {
                 val bitmap = withContext(Dispatchers.IO) {
-                    contentResolver.openInputStream(uri)?.use { inputStream ->
-                        android.graphics.BitmapFactory.decodeStream(inputStream)
+                    val reqWidth = 1024
+                    val reqHeight = 1024
+                    val options = android.graphics.BitmapFactory.Options().apply {
+                        inJustDecodeBounds = true
+                        contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, this) }
+                        
+                        val height: Int = outHeight
+                        val width: Int = outWidth
+                        var inSampleSize = 1
+                        if (height > reqHeight || width > reqWidth) {
+                            val halfHeight = height / 2
+                            val halfWidth = width / 2
+                            while ((halfHeight / inSampleSize) >= reqHeight && (halfWidth / inSampleSize) >= reqWidth) {
+                                inSampleSize *= 2
+                            }
+                        }
+                        this.inSampleSize = inSampleSize
+                        inJustDecodeBounds = false
                     }
+                    contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, options) }
                 }
-                
                 if (bitmap != null) {
-                    val downsampled = withContext(Dispatchers.Default) {
-                        downsampleBitmap(bitmap, 1024)
+                    withContext(Dispatchers.Main) {
+                        pendingImageBitmap = bitmap
+                        chatInputText?.hint = "[📎 Image attached]"
+                        Toast.makeText(this@MainActivity, "Image staged. Type a prompt and send.", Toast.LENGTH_SHORT).show()
                     }
-                    gemmaService?.processMultimodalFromUi("Please analyze this image.", images = listOf(downsampled))
                 }
-            } catch (e: Exception) {
-                Timber.e(e, "Failed to process picked image")
-            }
+            } catch (e: Exception) { Timber.e(e) }
         }
-    }
-
-    private fun handleMicClick() {
-        voiceController?.handleTap()
-    }
-
-    private fun downsampleBitmap(bitmap: android.graphics.Bitmap, maxDim: Int): android.graphics.Bitmap {
-        if (bitmap.width <= maxDim && bitmap.height <= maxDim) return bitmap
-        val ratio = minOf(maxDim.toFloat() / bitmap.width, maxDim.toFloat() / bitmap.height)
-        return android.graphics.Bitmap.createScaledBitmap(bitmap, (bitmap.width * ratio).toInt(), (bitmap.height * ratio).toInt(), true)
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        if (isBound) {
-            unbindService(serviceConnection)
-            isBound = false
-        }
-        if (::ttsManager.isInitialized) ttsManager.shutdown()
+        if (isBound) unbindService(serviceConnection)
+        ttsManager.shutdown()
     }
 }

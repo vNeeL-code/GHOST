@@ -13,8 +13,8 @@ import timber.log.Timber
 
 /**
  * InputOverlay - Minimal voice/text input overlay for agent queries
- * Just an input bar with the ✦ Gemma sparkle button.
- * Tap ✦ to record audio → sends raw audio directly to Gemma (no STT middleman)
+ * Just an input bar with the ✧ Gemma sparkle button.
+ * Tap ✧ to record audio → sends raw audio directly to Gemma (no STT middleman)
  * Type text → sends text query
  *
  * Audio-first design: Gemma 3n is multimodal, so raw audio is more efficient than STT→text→LLM
@@ -23,7 +23,8 @@ class InputOverlay(
     context: Context,
     private val onTextQuery: (String) -> Unit,
     private val onAudioQuery: (ByteArray) -> Unit,
-    private val onDismiss: () -> Unit
+    private val onDismiss: () -> Unit,
+    private val onFocusRequest: () -> Unit = {}
 ) : FrameLayout(context) {
 
     private val inputField: EditText
@@ -34,11 +35,13 @@ class InputOverlay(
     private var isThinkingState = false
 
     // Colors (still needed for sparkle menu / thinking state)
-    private val colorSurface = Color.parseColor("#1E1E1E")
-    private val colorSurfaceVariant = Color.parseColor("#2D2D2D")
+    // Premium Glassmorphic Palette
+    private val colorSurface = Color.parseColor("#CC121212") // Glassy dark
+    private val colorSurfaceVariant = Color.parseColor("#33FFFFFF") // Subtle border
     private val colorOnSurface = Color.WHITE
-    private val colorAccent = Color.parseColor("#8B5CF6")  // Purple sparkle
-    private val colorRecording = Color.parseColor("#f79503ff")  // Orange when recording
+    private val colorAccent = Color.parseColor("#A78BFA")  // Vibrant Purple
+    private val colorThinking = Color.parseColor("#F59E0B") // Amber
+    private val colorRecording = Color.parseColor("#EF4444")  // Red-Pulse
 
     // Google
     private var isThinking = false
@@ -147,9 +150,9 @@ class InputOverlay(
 
         // Text input
         inputField = EditText(context).apply {
-            hint = "Δ 👾 ∇"
+            hint = "Δ \uD83D\uDC7E ∇"
             setTextColor(colorOnSurface)
-            setHintTextColor(Color.parseColor("#888888"))
+            setHintTextColor(Color.parseColor("#66FFFFFF"))
             setBackgroundColor(Color.TRANSPARENT)
             textSize = 16f
             isSingleLine = true
@@ -157,6 +160,14 @@ class InputOverlay(
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                 marginStart = dpToPx(8)
                 marginEnd = dpToPx(8)
+            }
+
+            setOnClickListener { 
+                onFocusRequest() 
+                requestFocus()
+            }
+            setOnFocusChangeListener { _, hasFocus ->
+                if (hasFocus) onFocusRequest()
             }
 
             setOnEditorActionListener { _, actionId, _ ->
@@ -234,7 +245,7 @@ class InputOverlay(
             textSize = 24f
             setTextColor(color)
             gravity = Gravity.CENTER
-            background = createCircleBackground(Color.parseColor("#1E1E1E"))
+            background = createCircleBackground(colorSurface)
             elevation = dpToPx(6).toFloat()
             translationX = tx
             translationY = ty
@@ -303,6 +314,24 @@ class InputOverlay(
 
     private fun launchBoundApp(label: String, direction: String) {
         val boundPackage = prefs.getString("BIND_${label}_${direction}", null)
+        
+        // Audit 9.0: Agentic Shortcuts
+        // If not bound to an app, or bound to a /command, trigger Gemma directly
+        val command = when {
+            boundPackage?.startsWith("/") == true -> boundPackage
+            boundPackage == null && label.contains("Red") -> "/scan"
+            boundPackage == null && label.contains("Blue") -> "/search"
+            boundPackage == null && label.contains("Green") -> "/diary"
+            boundPackage == null && label.contains("Yellow") -> "/tools"
+            else -> null
+        }
+
+        if (command != null) {
+            hapticPulse()
+            onTextQuery(command)
+            return
+        }
+
         if (boundPackage != null) {
             try {
                 val pm = context.packageManager
@@ -313,7 +342,9 @@ class InputOverlay(
                     context.startActivity(intent)
                     onDismiss()
                 }
-            } catch (e: Exception) { }
+            } catch (e: Exception) { 
+                Timber.e(e, "Failed to launch bound app: $boundPackage")
+            }
         }
     }
 
@@ -528,7 +559,7 @@ class InputOverlay(
             sparkleButton.alpha = 0.5f
         } else {
             inputField.isEnabled = true
-            inputField.hint = "Δ 👾 ∇"
+            inputField.hint = "Ask GHOST..."
             sparkleButton.setTextColor(colorAccent)
             sparkleButton.alpha = 1f
         }
@@ -559,10 +590,11 @@ class InputOverlay(
         }
     }
 
-    private fun createCircleBackground(color: Int): GradientDrawable {
+    private fun createCircleBackground(bgColor: Int): GradientDrawable {
         return GradientDrawable().apply {
             shape = GradientDrawable.OVAL
-            setColor(color)
+            setColor(bgColor)
+            setStroke(dpToPx(1), colorSurfaceVariant)
         }
     }
 

@@ -9,5 +9,7 @@ data class ChatMessage(
     val timestamp: Long = System.currentTimeMillis(),
     val eventType: String? = null,
     val isComplete: Boolean = true,
-    val thought: String? = null
+    val thought: String? = null,
+    val webviewUrl: String? = null,
+    val webviewAspectRatio: Float? = null
 )

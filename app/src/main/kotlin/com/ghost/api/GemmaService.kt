@@ -38,7 +38,6 @@ import com.ghost.api.database.ConversationTurn
 import java.util.concurrent.atomic.AtomicReference
 import com.ghost.api.agent.AgentPlatformCallbacks
 import com.ghost.api.agent.KoogAgent
-import com.ghost.api.mcp.MCPServer
 import com.ghost.api.hardware.SensorFusionManager
 import com.ghost.api.hardware.BatteryState
 import com.ghost.api.hardware.DeviceContext
@@ -110,8 +109,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     internal lateinit var contextManager: com.ghost.api.logic.ContextManager
 
     // NEW: Koog-first architecture
-    internal lateinit var mcpServer: MCPServer
-    internal lateinit var koogAgent: KoogAgent
+        internal lateinit var koogAgent: KoogAgent
     internal lateinit var ttsManager: com.ghost.api.services.TTSManager
     internal lateinit var diaryManager: com.ghost.api.hardware.DiaryManager
     internal lateinit var sensorFusionManager: com.ghost.api.hardware.SensorFusionManager
@@ -211,17 +209,15 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 SharedMediaHolder.clear()
 
                 if (!imagePath.isNullOrEmpty()) {
-                    val bitmap = decodeAndDownsample(imagePath, 1024)
-                    if (bitmap != null && ::koogAgent.isInitialized) {
-                        koogAgent.offerImage(bitmap)
-                        updateNotification("Image ready — ask me about it!")
-                    } else if (bitmap == null) {
-                        Timber.e("Failed to decode shared image: $imagePath")
-                    } else {
-                        Timber.w("Agent not ready — image dropped")
+                    serviceScope.launch {
+                        val bitmap = decodeAndDownsample(imagePath, 1024)
+                        if (bitmap != null && ::koogAgent.isInitialized) {
+                            koogAgent.offerImage(bitmap)
+                            updateNotification("Image ready ✨ ask me about it!")
+                        } else if (bitmap == null) {
+                            Timber.e("Failed to decode image from path: $imagePath")
+                        }
                     }
-                } else {
-                    Timber.w("No image path in intent or SharedMediaHolder")
                 }
             }
 
@@ -380,62 +376,13 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             }
             
             reportStatus("Init: ContextManager...")
-            contextManager = com.ghost.api.logic.ContextManager(sensorFusionManager, memoryManager)
+            contextManager = com.ghost.api.logic.ContextManager(sensorFusionManager)
             
             skillManager = com.ghost.api.skills.SkillManager(this)
             skillManager.loadSkillsFromAssets()
-            skillManager.loadSkillsFromSdCard()
+            skillManager.loadSkillsFromAssets()
 
-            // Initialize MCP Server
-            reportStatus("Init: MCPServer...")
-            mcpServer = com.ghost.api.mcp.MCPServer(
-                context = this,
-                hardwareTools = hardwareToolSet,
-                networkTools = networkToolSet,
-                systemTools = systemToolSet,
-                audioRecorder = audioRecorder,
-                sensorManager = sensorFusionManager,
-                memoryManager = memoryManager,
-                skillManager = skillManager // Unified Skill Manager
-            )
             
-            // Skill Tool Set
-            val skillToolSet = com.ghost.api.skills.SkillToolSet(skillManager)
-
-            mcpServer.setFlushCallback {
-                scope.launch {
-                    Timber.i("MCP: Flush requested - resetting KV cache")
-                    if (::koogAgent.isInitialized) {
-                        koogAgent.softReset()
-                    }
-                }
-            }
-            mcpServer.setCooldownCallback {
-                val now = System.currentTimeMillis()
-                if (now - lastCooldownMs < 30 * 60 * 1000L) {
-                    // Model tried to [[COOLDOWN]] again too soon — suppress the engine reload
-                    Timber.w("[[COOLDOWN]] suppressed — ${(now - lastCooldownMs) / 1000}s since last (min 1800s)")
-                    return@setCooldownCallback
-                }
-                lastCooldownMs = now
-                scope.launch {
-                    Timber.i("MCP: Cooldown requested - entering low-power mode")
-                    unloadEngine()
-                    responseNotificationManager.showResponse("🧊 Cooling down... Model unloaded for 30s")
-                    kotlinx.coroutines.delay(30000)
-                    initialize()
-                    responseNotificationManager.showResponse("✧ Back online after cooldown")
-                }
-            }
-            mcpServer.setAudioRecordedCallback { audioBytes ->
-                Timber.i("MCP: Audio recorded (${audioBytes.size} bytes) - queuing for next inference")
-                if (::koogAgent.isInitialized) {
-                    koogAgent.offerAudio(audioBytes)
-                }
-            }
-
-            Timber.i("MCPServer initialized: ${mcpServer.listTools().size} tools, ${mcpServer.listResources().size} resources")
-
             reportStatus("Init: NotificationChannel...")
             setupNotificationChannel()
             reportStatus("Init: ForegroundService...")
@@ -695,7 +642,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             koogAgent = KoogAgent(
                 context = applicationContext,
                 llmEngine = newEngine,
-                mcpServer = mcpServer,
+                sensorManager = sensorFusionManager,
+                skillManager = skillManager,
                 contextManager = contextManager,
                 checkpointDir = getExternalFilesDir(null) ?: filesDir,
                 callbacks = this@GemmaService
@@ -718,10 +666,11 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 .putInt("init_crash_count", 0)
                 .apply()
 
-            updateNotification("✓ Ready - localhost:${Constants.API_PORT}")
+            updateNotification("✅ Ready - localhost:${Constants.API_PORT}")
 
         } catch (e: Exception) {
             Timber.e(e)
+            prefs.edit().putBoolean("is_initializing", false).apply()
             updateNotification("Crash: ${e.message}")
         }
     }
@@ -779,7 +728,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
                 withContext(Dispatchers.Main) {
                     uiCallback?.onThinkingStateChanged(false)
-                    uiCallback?.onMessageAdded(response ?: "Error: Did not generate response.", isUser = false)
+                    if (response == null || response.contains("Error")) {
+                        uiCallback?.onMessageAdded(response ?: "Error: Did not generate response.", isUser = false)
+                    }
                 }
             } catch (e: Exception) {
                 Timber.e(e, "UI processing failure")
@@ -1256,11 +1207,11 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         responseNotificationManager.cancelThinking()
     }
 
-    override fun showResponse(text: String) {
+    override fun showResponse(text: String, enableBubble: Boolean) {
         responseNotificationManager.showResponse(text)
     }
 
-    override fun onMessageAdded(message: String, isUser: Boolean, isComplete: Boolean) {
+    override fun onMessageAdded(message: String, isUser: Boolean, isComplete: Boolean, webviewUrl: String?, webviewAspectRatio: Float?) {
         uiCallback?.onMessageAdded(message, isUser, isComplete)
     }
 
@@ -1396,5 +1347,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         return memoryManager.getSessionHistory(limit)
     }
 
+    override fun onEmotionSignal(emoji: String) {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            android.widget.Toast.makeText(this, emoji, android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
 }
-

@@ -1,29 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:fitsSystemWindows="true"
-    android:background="@color/background_dark">
+    android:background="#0A0A0A">
 
-    <!-- Top Navigation Bar -->
+    <!-- Top Navigation Bar (Premium Glass) -->
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:padding="16dp"
-        android:background="#000000"
+        android:padding="20dp"
+        android:background="#11FFFFFF"
         app:layout_constraintTop_toTopOf="parent">
 
         <TextView
             android:id="@+id/titleText"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_width="313dp"
+            android:layout_height="50dp"
             android:layout_weight="1"
-            android:text="Δ ✧ ∇"
+            android:letterSpacing="0.2"
+            android:text="Δ 👾 ∇        GHOST"
             android:textColor="@color/accent_purple"
-            android:textSize="20sp"
+            android:textSize="18sp"
             android:textStyle="bold" />
 
         <TextView
@@ -31,8 +33,9 @@
             android:layout_width="44dp"
             android:layout_height="44dp"
             android:text="▼"
-            android:textSize="20sp"
+            android:textSize="18sp"
             android:textColor="@color/text_secondary"
+            android:alpha="0.6"
             android:gravity="center"
             android:background="?android:attr/selectableItemBackgroundBorderless" />
     </LinearLayout>
@@ -41,7 +44,7 @@
         android:id="@+id/divider"
         android:layout_width="match_parent"
         android:layout_height="1dp"
-        android:background="@color/accent_border"
+        android:background="#1AFFFFFF"
         app:layout_constraintTop_toBottomOf="@id/topBar" />
 
     <!-- Chat History List -->
@@ -49,20 +52,22 @@
         android:id="@+id/chatRecyclerView"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:paddingBottom="8dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="12dp"
         android:clipToPadding="false"
         app:layout_constraintTop_toBottomOf="@id/divider"
         app:layout_constraintBottom_toTopOf="@id/inputBar" />
 
-    <!-- Loading Indicator for Gemma Thinking -->
+    <!-- Loading Indicator (Futuristic) -->
     <ProgressBar
         android:id="@+id/thinkingProgress"
         style="?android:attr/progressBarStyleSmall"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
-        android:layout_marginBottom="8dp"
+        android:layout_width="16dp"
+        android:layout_height="16dp"
+        android:layout_marginStart="24dp"
+        android:layout_marginBottom="12dp"
         android:visibility="gone"
+        android:indeterminateTint="@color/accent_purple"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintBottom_toTopOf="@id/inputBar" />
 
@@ -70,29 +75,30 @@
         android:id="@+id/thinkingText"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginStart="8dp"
-        android:text="Δ ✧ ∇ Thinking..."
-        android:textColor="@color/text_secondary"
-        android:textSize="12sp"
+        android:layout_marginStart="10dp"
+        android:text="Thinking..."
+        android:textColor="@color/accent_purple"
+        android:textSize="10sp"
+        android:letterSpacing="0.05"
         android:visibility="gone"
         app:layout_constraintBottom_toBottomOf="@id/thinkingProgress"
         app:layout_constraintStart_toEndOf="@id/thinkingProgress"
         app:layout_constraintTop_toTopOf="@id/thinkingProgress" />
 
-    <!-- Input Bar Area -->
+    <!-- Input Bar Area (Premium Pill) -->
     <LinearLayout
         android:id="@+id/inputBar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:layout_margin="16dp"
-        android:paddingStart="12dp"
-        android:paddingEnd="12dp"
-        android:paddingTop="4dp"
-        android:paddingBottom="4dp"
+        android:layout_margin="20dp"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
         android:background="@drawable/input_pill_bg"
         android:gravity="center_vertical"
-        android:elevation="6dp"
+        android:elevation="8dp"
         app:layout_constraintBottom_toBottomOf="parent">
 
         <TextView
@@ -100,8 +106,8 @@
             android:layout_width="44dp"
             android:layout_height="44dp"
             android:text="✧"
-            android:textSize="28sp"
-            android:textColor="#8B5CF6"
+            android:textSize="26sp"
+            android:textColor="#A78BFA"
             android:gravity="center"
             android:background="?android:attr/selectableItemBackgroundBorderless" />
 
@@ -113,11 +119,11 @@
             android:background="@android:color/transparent"
             android:hint="Δ 👾 ∇"
             android:inputType="textMultiLine|textCapSentences"
-            android:maxLines="4"
-            android:padding="10dp"
+            android:maxLines="5"
+            android:padding="12dp"
             android:textColor="@color/text_primary"
-            android:textColorHint="@color/text_secondary"
-            android:textSize="16sp" />
+            android:textColorHint="#44FFFFFF"
+            android:textSize="15sp" />
 
         <TextView
             android:id="@+id/btnMic"
@@ -126,7 +132,7 @@
             android:background="?android:attr/selectableItemBackgroundBorderless"
             android:gravity="center"
             android:text="🟣"
-            android:textColor="@color/text_secondary"
+            android:alpha="0.8"
             android:textSize="20sp" />
 
         <TextView
@@ -136,8 +142,8 @@
             android:background="?android:attr/selectableItemBackgroundBorderless"
             android:gravity="center"
             android:text="➤"
-            android:textColor="#8B5CF6"
-            android:textSize="24sp"
+            android:textColor="#A78BFA"
+            android:textSize="22sp"
             android:visibility="gone" />
     </LinearLayout>
 

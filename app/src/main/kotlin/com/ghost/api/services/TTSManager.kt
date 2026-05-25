@@ -16,6 +16,7 @@ import android.speech.tts.Voice
 import timber.log.Timber
 import java.util.Locale
 import java.util.concurrent.ConcurrentLinkedQueue
+import kotlinx.coroutines.*
 
 /**
  * State-Aware TTS Manager
@@ -84,10 +85,15 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
     )
 
     init {
-        // Try preferred engines first
-        initWithPreferredEngine()
-        // Start pocket detection sensors
-        initProximitySensor()
+        // Offload heavy discovery to background to prevent service-boot ANR
+        val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        scope.launch {
+            initWithPreferredEngine()
+            // Start pocket detection sensors (sensors are fine on main/io)
+            withContext(Dispatchers.Main) {
+                initProximitySensor()
+            }
+        }
     }
 
     private fun initProximitySensor() {

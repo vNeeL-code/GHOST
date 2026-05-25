@@ -13,64 +13,6 @@ class MemoryManager(context: Context) {
         conversationDao.insertTurn(turn)
     }
 
-    // Buffer the user message so we can write a single paired row when the assistant replies.
-    // Avoids the "split row" bug that produced garbled history in getFormattedHistory().
-    @Volatile private var pendingUserMessage: String? = null
-    @Volatile private var pendingUserTimestamp: Long = 0L
-
-    suspend fun addTurn(role: String, message: String) {
-        when (role) {
-            "user" -> {
-                // Hold in RAM until the assistant responds
-                pendingUserMessage = message
-                pendingUserTimestamp = System.currentTimeMillis()
-            }
-            "assistant" -> {
-                val userMsg = pendingUserMessage ?: ""
-                val ts = if (pendingUserTimestamp > 0L) pendingUserTimestamp else System.currentTimeMillis()
-                pendingUserMessage = null
-                pendingUserTimestamp = 0L
-                conversationDao.insertTurn(
-                    ConversationTurn(
-                        timestamp = ts,
-                        userMessage = userMsg,
-                        assistantResponse = message,
-                        tokensUsed = (userMsg.length + message.length) / 4,
-                        sessionId = "default"
-                    )
-                )
-            }
-            else -> {
-                // system / tool turns stored as assistant-side for diary continuity
-                conversationDao.insertTurn(
-                    ConversationTurn(
-                        timestamp = System.currentTimeMillis(),
-                        userMessage = "",
-                        assistantResponse = "[$role] $message",
-                        tokensUsed = message.length / 4,
-                        sessionId = "default"
-                    )
-                )
-            }
-        }
-    }
-
-    suspend fun getRecentContext(sessionId: String, maxTokens: Int): String {
-        val history = conversationDao.getRecentTurns(sessionId, maxTokens) // Limit is count here, logically acceptable
-        val context = StringBuilder()
-        var totalTokens = 0
-
-        for (turn in history) {
-            val turnText = "User: ${turn.userMessage}\nAssistant: ${turn.assistantResponse}\n"
-            if (totalTokens + turn.tokensUsed > maxTokens) {
-                break
-            }
-            context.insert(0, turnText)
-            totalTokens += turn.tokensUsed
-        }
-
-        return context.toString()
-    }
 
     suspend fun getFormattedHistory(limit: Int = 10): String {
         val turns = conversationDao.getAllRecentTurns(limit)

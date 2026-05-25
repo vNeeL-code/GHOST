@@ -3,8 +3,8 @@ package com.ghost.api.logic
 import timber.log.Timber
 
 /**
- * Stateful parser for the Oracle Protocol stream.
- * Filters tokens into channels (Main Response, Thoughts, State).
+ * Stateful parser for the Gemma 4 Protocol stream.
+ * Filters tokens into channels (Main Response, Thoughts, Tool Calls).
  */
 class StreamProtocolParser(
     private val onResponseToken: (String) -> Unit,
@@ -19,36 +19,36 @@ class StreamProtocolParser(
     }
 
     /**
-     * Ingest a token and route it.
-     * Tokens can contain partial markers like "Δ" or "🔴".
+     * Ingest a token and route it according to Gemma 4 control tokens.
      */
     fun ingest(token: String) {
         buffer += token
 
         // Check for block markers
-        if (buffer.contains(" Δ 🟦") || buffer.contains("<|thought|>")) {
+        if (buffer.contains("<|channel>thought")) {
             currentChannel = Channel.THOUGHT
-            buffer = if (buffer.contains("Δ 🟦")) buffer.substringAfter("Δ 🟦") else buffer.substringAfter("<|thought|>")
-        } else if (buffer.contains("Δ 🔴") || buffer.contains("<|response|>")) {
-            currentChannel = Channel.RESPONSE
-            buffer = if (buffer.contains("Δ 🔴")) buffer.substringAfter("Δ 🔴") else buffer.substringAfter("<|response|>")
-        } else if (buffer.contains("Δ 👾") || buffer.contains("<|state|>")) {
-            currentChannel = Channel.STATE
-            buffer = if (buffer.contains("Δ 👾")) buffer.substringAfter("Δ 👾") else buffer.substringAfter("<|state|>")
-        } else if (buffer.contains("∇") || buffer.contains("<|end|>") || buffer.contains("<tool_call|>")) {
-            // End of current block or start of tool call
-            val endMarker = listOf("∇", "<|end|>", "<tool_call|>").find { buffer.contains(it) }!!
-            val content = buffer.substringBefore(endMarker)
-            route(content)
+            buffer = buffer.substringAfter("<|channel>thought")
+        } else if (buffer.contains("<channel|>")) {
+            // End of thought channel
+            val content = buffer.substringBefore("<channel|>")
+            onThoughtToken(content)
             currentChannel = Channel.NONE
-            buffer = buffer.substringAfter(endMarker)
-            return
+            buffer = buffer.substringAfter("<channel|>")
+        } else if (buffer.contains("<|tool_call>")) {
+            currentChannel = Channel.STATE // Treat tool calls as state/control tokens
+            buffer = buffer.substringAfter("<|tool_call>")
+        } else if (buffer.contains("<tool_call|>")) {
+            val content = buffer.substringBefore("<tool_call|>")
+            onStateToken(content)
+            currentChannel = Channel.NONE
+            buffer = buffer.substringAfter("<tool_call|>")
+        } else if (buffer.contains("<|turn>")) {
+             buffer = buffer.substringAfter("<|turn>")
+        } else if (buffer.contains("<turn|>")) {
+             buffer = buffer.substringAfter("<turn|>")
         }
 
-        // If we are in a channel and haven't seen a new marker yet, route the content
-        // This is tricky because we might have a partial "Δ" or "∇" at the end of the buffer.
-        // We only route content that is definitely NOT part of a marker.
-        
+        // Route stable content that is not part of a pending marker
         val stableContent = getStableContent()
         if (stableContent.isNotEmpty()) {
             route(stableContent)
@@ -57,12 +57,35 @@ class StreamProtocolParser(
     }
 
     private fun getStableContent(): String {
-        // Find the earliest possible start of a marker
-        val markerStart = buffer.indexOfAny(listOf("Δ", "∇"))
-        return if (markerStart == -1) {
+        // Markers: <|channel>, <channel|>, <|tool_call>, <tool_call|>, <|turn>, <turn|>
+        val markers = listOf("<|", "<c", "<t", "<u") // Significant prefixes
+        
+        var earliestMarker = -1
+        for (m in markers) {
+            val idx = buffer.indexOf(m)
+            if (idx != -1) {
+                if (earliestMarker == -1 || idx < earliestMarker) {
+                    earliestMarker = idx
+                }
+            }
+        }
+
+        return if (earliestMarker == -1) {
             buffer
         } else {
-            buffer.substring(0, markerStart)
+            // Only stall if the marker is at the very end (could be incomplete)
+            // or if it's a known valid marker.
+            val possibleMarker = buffer.substring(earliestMarker)
+            val isValidPrefix = listOf("<|channel", "<channel|", "<|tool_call", "<tool_call|", "<|turn", "<turn|").any { 
+                it.startsWith(possibleMarker) || possibleMarker.startsWith(it) 
+            }
+            
+            if (isValidPrefix) {
+                buffer.substring(0, earliestMarker)
+            } else {
+                // Not a valid protocol marker prefix, treat as stable content
+                buffer.substring(0, earliestMarker + 1)
+            }
         }
     }
 
@@ -73,8 +96,7 @@ class StreamProtocolParser(
             Channel.THOUGHT -> onThoughtToken(content)
             Channel.STATE -> onStateToken(content)
             Channel.NONE -> {
-                // If it's not in a block, it might be the start of the response before a marker
-                // or the model is being non-compliant. Default to response.
+                // If not in a specific channel, default to response
                 onResponseToken(content)
             }
         }

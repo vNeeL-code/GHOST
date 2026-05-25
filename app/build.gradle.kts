@@ -8,17 +8,17 @@ plugins {
 
 android {
     namespace = "com.ghost.api"
-    compileSdk = 36
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.ghost.api"
         minSdk = 31
-        targetSdk = 36
+        targetSdk = 35
         versionCode = 5
         versionName = "4.0.0"
 
         ndk {
-            abiFilters.add("arm64-v8a")
+            abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a", "x86_64"))
         }
     }
 
@@ -51,7 +51,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    @Suppress("DEPRECATION")
     kotlinOptions {
         jvmTarget = "17"
     }
@@ -63,7 +62,6 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{INDEX.LIST,*.SF,*.DSA,*.RSA,DEPENDENCIES,LICENSE,LICENSE.txt,license.txt,NOTICE,NOTICE.txt,notice.txt,ASL2.0,AL2.0,LGPL2.1}"
-            excludes += "/META-INF/io.netty.versions.properties"
         }
     }
 }
@@ -73,8 +71,7 @@ ksp {
 }
 
 dependencies {
-    // LiteRT-LM: Gallery reference uses 0.10.0
-    implementation("com.google.ai.edge.litertlm:litertlm-android:0.10.2")
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.12.0")
 
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.activity:activity-ktx:1.10.0")
@@ -86,14 +83,16 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.1")
 
     implementation("io.ktor:ktor-server-core:3.0.3")
-    implementation("io.ktor:ktor-server-netty:3.0.3")
+    implementation("io.ktor:ktor-server-cio:3.0.3")
     implementation("io.ktor:ktor-server-content-negotiation:3.0.3")
     implementation("io.ktor:ktor-serialization-gson:3.0.3")
 
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("com.jakewharton.timber:timber:5.0.1")
 
-    implementation("androidx.room:room-runtime:2.7.0-alpha11")
-    implementation("androidx.room:room-ktx:2.7.0-alpha11")
-    ksp("androidx.room:room-compiler:2.7.0-alpha11")
+    implementation("androidx.room:room-runtime:2.6.1")
+    implementation("androidx.room:room-ktx:2.6.1")
+    ksp("androidx.room:room-compiler:2.6.1")
+    
+    testImplementation("junit:junit:4.13.2")
 }
