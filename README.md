@@ -9,15 +9,15 @@
 
 ### What is even a ✧ GHOST?
 
-✧ GHOST is not an entertainment chatbot. **Gemma Hosting Open Source Terminal** is an optimization codebase for users who want a deeply capable, sovereign Android assistant that provides standard system integration with advanced, localized agentic capabilities—running entirely in the palm of your hand.
+✧ GHOST is not an entertainment chatbot. **Gemma Hosting Open Source Terminal** is an optimization codebase for users who want a deeply capable, personal Android assistant that provides standard system integration with advanced, localized agentic capabilities—running entirely in the palm of your hand.
 
 Most modern "on-device AI" implementations amount to an isolated chatbot completely detached from hardware feedback. They remain blind to the system state, operating temperatures, or real-time limitations because developers consistently forget to ground the system context within the system prompt. **GHOST fixes that.** Every single inference cycle is natively grounded in live hardware telemetry:
 
-* **System Telemetry:** Real-time RAM allocation, battery drain vectors, CPU/NPU thermal throttling.
+* **System Telemetry:** Real-time RAM allocation, battery drain vectors, CPU/GPU thermal throttling.
 * **Environmental Context:** Ambient light values, localized network routing states, and active foreground media detection.
-* **Persistent Sovereignty:** A personal, device-bound native assistant featuring an integrated camera wallpaper and system telemetry launcher.
+* **Personal Assistant:** A personal, device-bound native assistant featuring asystem telemetry monitor, overlay programmable app launcher and other UI personalisation features. Not threatened by service provider or network outages.
 
-The resident intelligence explicitly identifies as **✧ Gemma**, completely aware of her operational environment and her role representing the core system intelligence of your specific hardware layer via deep software integration.
+The resident intelligence explicitly identifies as **✧ Gemma**, completely aware of her operational environment and her role representing the core system intelligence of your specific hardware layer via deep software integration. Not conflicting with training data about model origin and self modelling.
 
 ---
 
@@ -26,7 +26,7 @@ The resident intelligence explicitly identifies as **✧ Gemma**, completely awa
 * **The Brain:** ✧ Gemma 4 running natively on device via `LiteRT-LM`.
 * **The Frame:** An always-on foreground service optimized for Snapdragon, Tensor, and Exynos silicon.
 * **Memory Architecture:** A continuous, persistent conversation layer driven by a rolling KV cache backed by a localized SQLite transaction ledger.
-* **Omnimodal Sensing:**
+* **Omnimodal Context:** network/bluetooth/media/storage/memory/temp/accelerometer/gyroscope
 * **Vision:** Native screenshot parsing and instant image shares directly from the Android Gallery.
 * **Audio:** Streamlined push-to-talk mic capture with a quick physical "shake-to-cancel" gesture override.
 * **Text:** System-level accessibility scraping to read and interpret active application context.
@@ -46,25 +46,25 @@ The resident intelligence explicitly identifies as **✧ Gemma**, completely awa
 ```
  ✦ GHOST · now
  👤 Δ 👾 ∇ · Agentic Gemma Inference · now
-   🎶 👾 🎵
+   🎶 👾 🎵 (collapsed sensor notification shows various emoji animations) 
  ───────────────
  ✦ 3h · ✧ Gemma:
  󰭹 "Context pre-warmed. Systems are clear. What are we building?"
 
 ```
 
-* **Persistent Notification Shade:** Responses materialize directly as static notifications with automated Text-to-Speech (TTS) readout. Review telemetry or dispatch tasks with a single tap—**zero device unlocking required.**
-* **Zero-Latency Initialization:** A background KV cache pre-warming pipeline keeps ✧ Gemma primed with your latest sensor telemetry state *before* you even initiate an interaction.
+* **Persistent Notification:** Responses come directly as static notifications on completion with automated Text-to-Speech (TTS) readout streaming the generation. Emoji gets shown as a toast notification.
+* **Zero-Latency Initialization:** A background context manager keeps ✧ Gemma primed with device latest sensor telemetry *before* you even initiate an interaction.
 * **Physical Summon:** Triggered instantly via a localized shake gesture, deploying a fluid radial application overlay over any active application state.
 
 ---
 
 ### Get Your ✧ GHOST
 
-1. **Download:** Grab the latest compilation build from the [Releases](https://github.com/vNeeL-code/GHOST/releases) portal.
+1. **Download:** Grab the latest compilation build from the [Releases](https://github.com/vNeeL-code/GHOST/releases) portal. (4.0.1 experimental) 
 2. **Permissions:** Install the APK and grant required system permissions (`Display Over Other Apps`, `Notifications`, and `Accessibility Services`).
 3. **Model Selection:** The application automatically initialises with the performance-optimized `e2b` download. If your device carries **12GB+ RAM** (e.g., RedMagic configurations), manually download the high-fidelity `e4b` model environment for advanced reasoning capabilities and app will prioritise loading e4b if it is present.
-4. **Deploy:** Shake your device to summon the overlay.
+4. **Deploy:** Shake your device to summon the overlay and customise your ephemeral app drawer.
 
 ---
 
