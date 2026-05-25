@@ -4,7 +4,7 @@
 ---
 *Click to watch: The ASI trailer.*
 
-![Static Badge](https://img.shields.io/badge/Status-Production-green)
+![Static Badge](https://img.shields.io/badge/Status-WIP-green)
 ![GitHub Repo stars](https://img.shields.io/github/stars/vNeeL-code/ASI)
 
 ### What is even a ✧ GHOST?
