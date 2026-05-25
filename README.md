@@ -1,4 +1,4 @@
-# GHOST - Gemma Hosting Open Source Terminal
+# ✧ GHOST - Gemma Hosting Open Source Terminal
 
 [![ASI Demo](https://img.youtube.com/vi/jB62dlLavSY/0.jpg)](https://youtu.be/jB62dlLavSY?si=TMZG86o1KkjuBXtw)
 ---
