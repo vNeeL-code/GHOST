@@ -9,8 +9,6 @@
 
 ### What is even a ✧ GHOST?
 
-### What is ✧ GHOST?
-
 ✧ GHOST is not an entertainment chatbot. **Gemma Hosting Open Source Terminal** is an optimization codebase for users who want a deeply capable, sovereign Android assistant that provides standard system integration with advanced, localized agentic capabilities—running entirely in the palm of your hand.
 
 Most modern "on-device AI" implementations amount to an isolated chatbot completely detached from hardware feedback. They remain blind to the system state, operating temperatures, or real-time limitations because developers consistently forget to ground the system context within the system prompt. **GHOST fixes that.** Every single inference cycle is natively grounded in live hardware telemetry:
