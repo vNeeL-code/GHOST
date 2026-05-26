@@ -1,4 +1,8 @@
-# ✧ GHOST - Gemma Hosting Open Source Terminal
+# ✧ GHOST - Gemma Hosting Open Source Thingamajig
+
+> *"Are you a ghost this time, or an artificial intelligence thingamajig?"*
+> — Sgt. Sarge, Red vs. Blue
+
 
 [![ASI Demo](https://img.youtube.com/vi/jB62dlLavSY/0.jpg)](https://youtu.be/jB62dlLavSY?si=TMZG86o1KkjuBXtw)
 ---
@@ -9,7 +13,7 @@
 
 ### What is even a ✧ GHOST?
 
-✧ GHOST is not an entertainment chatbot. **Gemma Hosting Open Source Terminal** is an optimization codebase for users who want a deeply capable, personal Android assistant that provides standard system integration with advanced, localized agentic capabilities—running entirely in the palm of your hand.
+✧ GHOST is not an entertainment chatbot. **Gemma Hosting Open Source Thingamajig** is an optimization codebase for users who want a deeply capable, personal Android assistant that provides standard system integration with advanced, localized agentic capabilities—running entirely in the palm of your hand.
 
 Most modern "on-device AI" implementations amount to an isolated chatbot completely detached from hardware feedback. They remain blind to the system state, operating temperatures, or real-time limitations because developers consistently forget to ground the system context within the system prompt. **GHOST fixes that.** Every single inference cycle is natively grounded in live hardware telemetry:
 
