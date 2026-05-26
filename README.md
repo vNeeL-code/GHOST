@@ -1,6 +1,6 @@
 # ✧ GHOST - Gemma Hosting Open Source Thingamajig
 
-> *"Are you a ghost this time, or an artificial intelligence thingamajig?"*
+> *"So, Epsilon, ChurchGPT, Leonard part six or whatever your name is... Are you a ghost this time, or an artificial intelligence thingamajig?"*
 > — Sgt. Sarge, Red vs. Blue
 
 
