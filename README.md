@@ -102,12 +102,12 @@ Intelligence emerges from integration, not automation. But integration can be au
 
 ### Roadmap
 
-* [ ] **Diary Mode:** Autonomous logging cycles powered by structured Google Calendar cron routines.
+* [x] **Diary Mode:** Autonomous logging cycles powered by structured Google Calendar cron routines.
 * [ ] **Edge Lighting UI:** Dynamic physical display edge illumination during live inference tracking.
 * [ ] **Visual Engine:** Native Milkdrop3 visualization rendering engine mapped to live audio pipelines.
 * [ ] **Wake Word Execution:** Local, low-power hotword monitoring for "Hey Ghost".
-* [ ] **Termux Core Pipe:** Full command-line terminal piping (GHOST in the Shell).
-* [ ] **Intent Vector Mapping:** Direct Android intent routing wired straight to the localized `@tool` orchestration matrix.
+* [x] **Termux Core Pipe:** Full command-line terminal piping (GHOST in the Shell).
+* [x] **Intent Vector Mapping:** Direct Android intent routing wired straight to the localized `@tool` orchestration matrix.
 
 ---
 
