@@ -59,8 +59,8 @@ object EngineHolder {
 
         Timber.i("getOrCreate: creating new engine for $modelPath with $requestedBackendLabel")
         return try {
-            // Disabled MTP speculative decoding - causes massive TTFT/OOM on mobile GPUs
-            ExperimentalFlags.enableSpeculativeDecoding = false
+            // Enabled MTP speculative decoding as per user request to increase speed
+            ExperimentalFlags.enableSpeculativeDecoding = true
             
             val engineConfig = EngineConfig(
                 modelPath = modelPath,

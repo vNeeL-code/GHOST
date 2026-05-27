@@ -145,6 +145,31 @@ class SystemToolSet(private val context: Context) : ToolSet {
         return if (success) mapOf("result" to "success") else mapOf("result" to "error")
     }
 
+    @Tool(description = "Read current screen text semantics")
+    fun read_screen(): Map<String, String> {
+        val content = com.ghost.api.GemmaAccessibilityService.getSemantics() ?: "[[SCREEN NOT ACCESSIBLE]]"
+        return mapOf("result" to "success", "content" to content)
+    }
+
+    @Tool(description = "Type text into focused element")
+    fun type(text: String): Map<String, String> {
+        val success = com.ghost.api.GemmaAccessibilityService.instance?.performType(text) ?: false
+        return if (success) mapOf("result" to "success") else mapOf("result" to "error")
+    }
+
+    @Tool(description = "Open email app to compose an email")
+    fun open_email(email: String, subject: String = "", body: String = ""): Map<String, String> {
+        val intent = Intent(Intent.ACTION_SENDTO).apply {
+            data = android.net.Uri.parse("mailto:")
+            putExtra(Intent.EXTRA_EMAIL, arrayOf(email))
+            putExtra(Intent.EXTRA_SUBJECT, subject)
+            putExtra(Intent.EXTRA_TEXT, body)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+        return mapOf("result" to "success", "message" to "Email app opened")
+    }
+
     @Tool(description = "Bash command")
     fun bash(command: String): Map<String, String> {
         return try {

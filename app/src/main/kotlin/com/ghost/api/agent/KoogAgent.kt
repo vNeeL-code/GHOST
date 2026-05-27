@@ -711,10 +711,12 @@ class KoogAgent(
 
             // 9. Checkpoint
             Timber.d("💾 Checkpointing state...")
-            try {
-                withContext(Dispatchers.IO) { checkpoint() }
-            } catch (e: Exception) {
-                Timber.e(e, "Checkpoint failed")
+            agentScope.launch(Dispatchers.IO) {
+                try {
+                    checkpoint()
+                } catch (e: Exception) {
+                    Timber.e(e, "Checkpoint failed")
+                }
             }
 
             // 10. Platform callbacks: UI, TTS, persistence

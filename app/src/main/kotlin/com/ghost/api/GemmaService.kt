@@ -29,6 +29,8 @@ import java.util.UUID
 import com.ghost.api.hardware.HardwareToolSet
 import com.ghost.api.hardware.NetworkToolSet
 import com.ghost.api.hardware.SystemToolSet
+import com.ghost.api.hardware.AutomationToolSet
+import com.ghost.api.hardware.TermuxAdbToolSet
 import com.ghost.api.hardware.ShakeDetector
 import com.ghost.api.hardware.AudioRecorder
 import com.ghost.api.hardware.HardwarePropertiesManager
@@ -38,6 +40,7 @@ import com.ghost.api.database.ConversationTurn
 import java.util.concurrent.atomic.AtomicReference
 import com.ghost.api.agent.AgentPlatformCallbacks
 import com.ghost.api.agent.KoogAgent
+import com.ghost.api.mcp.MCPServer
 import com.ghost.api.hardware.SensorFusionManager
 import com.ghost.api.hardware.BatteryState
 import com.ghost.api.hardware.DeviceContext
@@ -109,7 +112,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     internal lateinit var contextManager: com.ghost.api.logic.ContextManager
 
     // NEW: Koog-first architecture
-        internal lateinit var koogAgent: KoogAgent
+    internal lateinit var mcpServer: MCPServer
+    internal lateinit var koogAgent: KoogAgent
     internal lateinit var ttsManager: com.ghost.api.services.TTSManager
     internal lateinit var diaryManager: com.ghost.api.hardware.DiaryManager
     internal lateinit var sensorFusionManager: com.ghost.api.hardware.SensorFusionManager
@@ -168,6 +172,15 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                     ttsManager.speak(text)
                 }
             }
+            "com.ghost.api.ACTION_CRON_PROMPT" -> {
+                val prompt = intent.getStringExtra("prompt")
+                if (!prompt.isNullOrEmpty()) {
+                    Timber.i("Cron prompt triggered: ${prompt.take(30)}...")
+                    scope.launch {
+                        processQuery(prompt)
+                    }
+                }
+            }
             "com.ghost.api.ACTION_SHOW_OVERLAY" -> {
                 Timber.i("Received ACTION_SHOW_OVERLAY")
                 // Robust Init: If overlay manager isn't ready, try to init it immediately
@@ -209,15 +222,17 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 SharedMediaHolder.clear()
 
                 if (!imagePath.isNullOrEmpty()) {
-                    serviceScope.launch {
-                        val bitmap = decodeAndDownsample(imagePath, 1024)
-                        if (bitmap != null && ::koogAgent.isInitialized) {
-                            koogAgent.offerImage(bitmap)
-                            updateNotification("Image ready ✨ ask me about it!")
-                        } else if (bitmap == null) {
-                            Timber.e("Failed to decode image from path: $imagePath")
-                        }
+                    val bitmap = decodeAndDownsample(imagePath, 1024)
+                    if (bitmap != null && ::koogAgent.isInitialized) {
+                        koogAgent.offerImage(bitmap)
+                        updateNotification("Image ready ÔÇö ask me about it!")
+                    } else if (bitmap == null) {
+                        Timber.e("Failed to decode shared image: $imagePath")
+                    } else {
+                        Timber.w("Agent not ready ÔÇö image dropped")
                     }
+                } else {
+                    Timber.w("No image path in intent or SharedMediaHolder")
                 }
             }
 
@@ -239,7 +254,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 } else {
                     Timber.w("Accessibility Service not connected. Cannot take screenshot.")
                     // Optional: notify agent of failure?
-                    // responseNotificationManager.showResponse("❌ Vision requires Accessibility Service.")
+                    // responseNotificationManager.showResponse("ÔØî Vision requires Accessibility Service.")
                 }
             }
             "com.ghost.api.ACTION_CONFIRM_TOOL", "com.ghost.api.ACTION_DENY_TOOL" -> {
@@ -261,10 +276,10 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
                              // Clear stash
                              PendingConfirmationStash.clear(toolName)
-                             responseNotificationManager.showResponse(if(isApproved) "✅ Approved $toolName" else "🚫 Denied $toolName")
+                             responseNotificationManager.showResponse(if(isApproved) "Ô£à Approved $toolName" else "­ƒÜ½ Denied $toolName")
                          } else {
                              Timber.e("No pending confirmation channel found for $toolName!")
-                             responseNotificationManager.showResponse("⚠️ Error: Confirmation session expired.")
+                             responseNotificationManager.showResponse("ÔÜá´©Å Error: Confirmation session expired.")
                          }
                      }
                  }
@@ -277,6 +292,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     private lateinit var hardwareToolSet: HardwareToolSet // Hardware Bridge
     private lateinit var networkToolSet: NetworkToolSet // Search Bridge
     private lateinit var systemToolSet: SystemToolSet // Apps & Media Bridge
+    private lateinit var automationToolSet: AutomationToolSet // Cron Bridge
+    private lateinit var termuxAdbToolSet: TermuxAdbToolSet // Power User Bridge
     private lateinit var shakeDetector: ShakeDetector // Shake to summon
     private lateinit var overlayManager: OverlayManager // Floating input
     private lateinit var audioRecorder: AudioRecorder // Hearing
@@ -344,6 +361,10 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             networkToolSet = NetworkToolSet(this) // Init Network
             reportStatus("Init: SystemToolSet...")
             systemToolSet = SystemToolSet(this) // Init Apps & Media Bridge
+            reportStatus("Init: AutomationToolSet...")
+            automationToolSet = AutomationToolSet(this) // Init Cron Bridge
+            reportStatus("Init: TermuxAdbToolSet...")
+            termuxAdbToolSet = TermuxAdbToolSet(this) // Init Power User Bridge
             reportStatus("Init: AudioRecorder...")
             audioRecorder = AudioRecorder(this) // Init Hearing
 
@@ -376,13 +397,62 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             }
             
             reportStatus("Init: ContextManager...")
-            contextManager = com.ghost.api.logic.ContextManager(sensorFusionManager)
+            contextManager = com.ghost.api.logic.ContextManager(sensorFusionManager, memoryManager)
             
             skillManager = com.ghost.api.skills.SkillManager(this)
             skillManager.loadSkillsFromAssets()
-            skillManager.loadSkillsFromAssets()
+            skillManager.loadSkillsFromSdCard()
 
+            // Initialize MCP Server
+            reportStatus("Init: MCPServer...")
+            mcpServer = com.ghost.api.mcp.MCPServer(
+                context = this,
+                hardwareTools = hardwareToolSet,
+                networkTools = networkToolSet,
+                systemTools = systemToolSet,
+                audioRecorder = audioRecorder,
+                sensorManager = sensorFusionManager,
+                memoryManager = memoryManager,
+                skillManager = skillManager // Unified Skill Manager
+            )
             
+            // Skill Tool Set
+            val skillToolSet = com.ghost.api.skills.SkillToolSet(skillManager)
+
+            mcpServer.setFlushCallback {
+                scope.launch {
+                    Timber.i("MCP: Flush requested - resetting KV cache")
+                    if (::koogAgent.isInitialized) {
+                        koogAgent.softReset()
+                    }
+                }
+            }
+            mcpServer.setCooldownCallback {
+                val now = System.currentTimeMillis()
+                if (now - lastCooldownMs < 30 * 60 * 1000L) {
+                    // Model tried to [[COOLDOWN]] again too soon ÔÇö suppress the engine reload
+                    Timber.w("[[COOLDOWN]] suppressed ÔÇö ${(now - lastCooldownMs) / 1000}s since last (min 1800s)")
+                    return@setCooldownCallback
+                }
+                lastCooldownMs = now
+                scope.launch {
+                    Timber.i("MCP: Cooldown requested - entering low-power mode")
+                    unloadEngine()
+                    responseNotificationManager.showResponse("­ƒºè Cooling down... Model unloaded for 30s")
+                    kotlinx.coroutines.delay(30000)
+                    initialize()
+                    responseNotificationManager.showResponse("Ô£º Back online after cooldown")
+                }
+            }
+            mcpServer.setAudioRecordedCallback { audioBytes ->
+                Timber.i("MCP: Audio recorded (${audioBytes.size} bytes) - queuing for next inference")
+                if (::koogAgent.isInitialized) {
+                    koogAgent.offerAudio(audioBytes)
+                }
+            }
+
+            Timber.i("MCPServer initialized: ${mcpServer.listTools().size} tools, ${mcpServer.listResources().size} resources")
+
             reportStatus("Init: NotificationChannel...")
             setupNotificationChannel()
             reportStatus("Init: ForegroundService...")
@@ -413,7 +483,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
                 // FINAL: System Ready
                 _isSystemReady.value = true
-                Timber.i("GHOST: All systems green 🟢")
+                Timber.i("GHOST: All systems green ­ƒƒó")
 
                 // Re-broadcast backend status after a short delay to ensure UI sees it
                 kotlinx.coroutines.delay(2000)
@@ -467,7 +537,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                     if (file.exists()) file.delete()
                 }
 
-                Timber.i("🧹 Memory wiped: history cleared, checkpoints deleted")
+                Timber.i("­ƒº╣ Memory wiped: history cleared, checkpoints deleted")
             } catch (e: Exception) {
                 Timber.e(e, "Failed to delete checkpoint files")
                 throw e
@@ -491,7 +561,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             .putBoolean("is_initializing", false)
             .putBoolean("force_cpu", false)
             .apply()
-        Timber.i("🧹 Recovery state cleared via service")
+        Timber.i("­ƒº╣ Recovery state cleared via service")
     }
 
     private fun getThermalSafetyState(thermalState: HardwarePropertiesManager.ThermalState): ThermalSafetyState {
@@ -519,7 +589,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         if (wasInitializing) {
             val newCount = crashCount + 1
             prefs.edit().putInt("init_crash_count", newCount).apply()
-            Timber.e("🚨 WATCHDOG: Previous initialization crashed! (Count: $newCount)")
+            Timber.e("­ƒÜ¿ WATCHDOG: Previous initialization crashed! (Count: $newCount)")
             
             // Audit 2.0: Be less aggressive (4 crashes instead of 2) to allow for memory pressure recovery
             if (newCount >= 4) {
@@ -568,7 +638,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                     modelFile.name.contains("E2B") -> "E2B (lite)"
                     else -> "unknown variant"
                 }
-                Timber.i("📦 Found model: ${modelFile.name} ($variant) in ${modelFile.parent}")
+                Timber.i("­ƒôª Found model: ${modelFile.name} ($variant) in ${modelFile.parent}")
             }
 
             if (modelFile == null) {
@@ -582,7 +652,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
             // Determine backend
             val forcedBackend = if (prefs.getInt("init_crash_count", 0) >= 4) {
-                Timber.w("🚨 Forcing CPU backend due to repeated crashes (threshold 4)")
+                Timber.w("­ƒÜ¿ Forcing CPU backend due to repeated crashes (threshold 4)")
                 updateNotification("Safe Mode: Forcing CPU")
                 "CPU"
             } else if (prefs.getBoolean("force_cpu", false)) {
@@ -591,7 +661,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
             // Engine Creation (Locked to prevent double allocation)
             val newEngine = engineMutex.withLock {
-                val tools = listOf(hardwareToolSet, networkToolSet, systemToolSet,
+                val tools = listOf(hardwareToolSet, networkToolSet, systemToolSet, automationToolSet, termuxAdbToolSet,
                     com.ghost.api.skills.SkillToolSet(skillManager))
                 
                 // CRITICAL: Cleanup old engine BEFORE creating new one to free RAM
@@ -618,7 +688,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                         error.contains("memory", ignoreCase = true) || error.contains("OOM", ignoreCase = true) ->
                             " (Try quantizing device backend)"
                         error.contains("GPU", ignoreCase = true) ->
-                            " (GPU init failed — device may not support this model natively)"
+                            " (GPU init failed ÔÇö device may not support this model natively)"
                         else -> ""
                     }
                     Timber.e("Model load failed: $error")
@@ -642,8 +712,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             koogAgent = KoogAgent(
                 context = applicationContext,
                 llmEngine = newEngine,
-                sensorManager = sensorFusionManager,
-                skillManager = skillManager,
+                mcpServer = mcpServer,
                 contextManager = contextManager,
                 checkpointDir = getExternalFilesDir(null) ?: filesDir,
                 callbacks = this@GemmaService
@@ -666,11 +735,10 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 .putInt("init_crash_count", 0)
                 .apply()
 
-            updateNotification("✅ Ready - localhost:${Constants.API_PORT}")
+            updateNotification("Ô£ô Ready - localhost:${Constants.API_PORT}")
 
         } catch (e: Exception) {
             Timber.e(e)
-            prefs.edit().putBoolean("is_initializing", false).apply()
             updateNotification("Crash: ${e.message}")
         }
     }
@@ -728,9 +796,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
                 withContext(Dispatchers.Main) {
                     uiCallback?.onThinkingStateChanged(false)
-                    if (response == null || response.contains("Error")) {
-                        uiCallback?.onMessageAdded(response ?: "Error: Did not generate response.", isUser = false)
-                    }
+                    uiCallback?.onMessageAdded(response ?: "Error: Did not generate response.", isUser = false)
                 }
             } catch (e: Exception) {
                 Timber.e(e, "UI processing failure")
@@ -765,7 +831,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
      */
     suspend fun processQuery(userPrompt: String, sessionId: String? = null, isDream: Boolean = false): String? = engineMutex.withLock {
         if (!::koogAgent.isInitialized || !koogAgent.isReady) {
-            responseNotificationManager.showResponse("⚠️ System still starting up... try again in a moment")
+            responseNotificationManager.showResponse("ÔÜá´©Å System still starting up... try again in a moment")
             return@withLock "System is still initializing. Please wait a moment and try again."
         }
 
@@ -814,7 +880,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             val seq = animations[(System.currentTimeMillis() / 10000 % animations.size).toInt()]
             val idx = (System.currentTimeMillis() / 250 % seq.size).toInt()
             seq[idx]
-        } catch(e:Exception) { "Δ 👾 ∇" }
+        } catch(e:Exception) { "╬ö ­ƒæ¥ Ôêç" }
 
         val iconRes = if (::sensorFusionManager.isInitialized) {
             val battery = try { sensorFusionManager.getContextSnapshot().battery } catch(e:Exception) { null }
@@ -827,18 +893,18 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         }
 
         val text = if (textToNotify.length < 32) textToNotify else frame
-        val title = "Δ 👾 ∇"
+        val title = "╬ö ­ƒæ¥ Ôêç"
 
         // Full Telemetry for expanded view
         val ctx = if (::sensorFusionManager.isInitialized) sensorFusionManager.getContextSnapshot() else null
         val ramUsed = ctx?.system?.let { it.ramTotalMB - it.ramAvailableMB } ?: 0
         val cpuLoad = ctx?.environment?.cpuTemp?.toInt() ?: 0
-        val telemetry = "SYS_OPERATIONAL | CPU: ${cpuLoad}°C [THERMAL_LOAD] | RAM: ${ramUsed}MB [RESERVED_POOL] | NPU_STABLE"
+        val telemetry = "SYS_OPERATIONAL | CPU: ${cpuLoad}┬░C [THERMAL_LOAD] | RAM: ${ramUsed}MB [RESERVED_POOL] | NPU_STABLE"
 
         // Build expanded telemetry view for notification expansion
         val expandedText = try {
             if (::hardwarePropertiesManager.isInitialized && hardwarePropertiesManager.thermalState.value.name != "COOL") {
-                 "🌡️ ${hardwarePropertiesManager.thermalState.value.name} | ${text}"
+                 "­ƒîí´©Å ${hardwarePropertiesManager.thermalState.value.name} | ${text}"
             } else {
                 text
             }
@@ -862,7 +928,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             .setOnlyAlertOnce(true)
             .setStyle(Notification.BigTextStyle()
                 .bigText(if (::sensorFusionManager.isInitialized) sensorFusionManager.getContextString() else telemetry)
-                .setBigContentTitle("Δ 👾 ∇")
+                .setBigContentTitle("╬ö ­ƒæ¥ Ôêç")
                 .setSummaryText("Agentic Gemma Inference"))
             .build()
     }
@@ -870,34 +936,34 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     private val animations = listOf(
         // Electric sheep - grazing pattern (Moving)
         listOf(
-            "⚡🐑⚡      ",
-            " ⚡🐑⚡     ",
-            "  ⚡🐑⚡    ",
-            "   ⚡🐑⚡   ",
-            "    ⚡🐑⚡  ",
-            "     ⚡🐑⚡ ",
-            "      ⚡🐑⚡",
-            "     ⚡🐑⚡ ",
-            "    ⚡🐑⚡  ",
-            "   ⚡🐑⚡   ",
-            "  ⚡🐑⚡    ",
-            " ⚡🐑⚡     "
+            "ÔÜí­ƒÉæÔÜí      ",
+            " ÔÜí­ƒÉæÔÜí     ",
+            "  ÔÜí­ƒÉæÔÜí    ",
+            "   ÔÜí­ƒÉæÔÜí   ",
+            "    ÔÜí­ƒÉæÔÜí  ",
+            "     ÔÜí­ƒÉæÔÜí ",
+            "      ÔÜí­ƒÉæÔÜí",
+            "     ÔÜí­ƒÉæÔÜí ",
+            "    ÔÜí­ƒÉæÔÜí  ",
+            "   ÔÜí­ƒÉæÔÜí   ",
+            "  ÔÜí­ƒÉæÔÜí    ",
+            " ÔÜí­ƒÉæÔÜí     "
         ),
         // gem loading
         listOf(
-            "✧✧✧✧✧✧✧✧✧✧✧✧",
-            "✦✧✧✧✧✧✧✧✧✧✧✧",
-            "✦✦✧✧✧✧✧✧✧✧✧✧",
-            "✦✦✦✧✧✧✧✧✧✧✧✧",
-            "✦✦✦✦✧✧✧✧✧✧✧✧",
-            "✦✦✦✦✦✧✧✧✧✧✧✧",
-            "✦✦✦✦✦✦✧✧✧✧✧✧",
-            "✦✦✦✦✦✦✦✧✧✧✧✧",
-            "✦✦✦✦✦✦✦✦✧✧✧✧",
-            "✦✦✦✦✦✦✦✦✦✧✧✧",
-            "✦✦✦✦✦✦✦✦✦✦✧✧",
-            "✦✦✦✦✦✦✦✦✦✦✦✧",
-            "✦✦✦✦✦✦✦✦✦✦✦✦"
+            "Ô£ºÔ£ºÔ£ºÔ£ºÔ£ºÔ£ºÔ£ºÔ£ºÔ£ºÔ£ºÔ£ºÔ£º",
+            "Ô£ªÔ£ºÔ£ºÔ£ºÔ£ºÔ£ºÔ£ºÔ£ºÔ£ºÔ£ºÔ£ºÔ£º",
+            "Ô£ªÔ£ªÔ£ºÔ£ºÔ£ºÔ£ºÔ£ºÔ£ºÔ£ºÔ£ºÔ£ºÔ£º",
+            "Ô£ªÔ£ªÔ£ªÔ£ºÔ£ºÔ£ºÔ£ºÔ£ºÔ£ºÔ£ºÔ£ºÔ£º",
+            "Ô£ªÔ£ªÔ£ªÔ£ªÔ£ºÔ£ºÔ£ºÔ£ºÔ£ºÔ£ºÔ£ºÔ£º",
+            "Ô£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ºÔ£ºÔ£ºÔ£ºÔ£ºÔ£ºÔ£º",
+            "Ô£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ºÔ£ºÔ£ºÔ£ºÔ£ºÔ£º",
+            "Ô£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ºÔ£ºÔ£ºÔ£ºÔ£º",
+            "Ô£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ºÔ£ºÔ£ºÔ£º",
+            "Ô£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ºÔ£ºÔ£º",
+            "Ô£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ºÔ£º",
+            "Ô£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£º",
+            "Ô£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ªÔ£ª"
         ),
         // Space Invaders - Wide Invasion
         listOf(
@@ -915,34 +981,34 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         ),
         // Ocean - whale swims across
         listOf(
-            "🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🐋",
-            "🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🐋🌊",
-            "🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🐋🌊🌊",
-            "🌊🌊🌊🌊🌊🌊🌊🌊🌊🐋🌊🌊🌊",
-            "🌊🌊🌊🌊🌊🌊🌊🌊🐋🌊🌊🌊🌊",
-            "🌊🌊🌊🌊🌊🌊🌊🐋🌊🌊🌊🌊🌊",
-            "🌊🌊🌊🌊🌊🌊🐋🌊🌊🌊🌊🌊🌊",
-            "🌊🌊🌊🌊🌊🐋🌊🌊🌊🌊🌊🌊🌊",
-            "🌊🌊🌊🌊🐋🌊🌊🌊🌊🌊🌊🌊🌊",
-            "🌊🌊🌊🐋🌊🌊🌊🌊🌊🌊🌊🌊🌊",
-            "🌊🌊🐋🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊",
-            "🌊🐋Moist🌊🌊🌊🌊🌊🌊🌊🌊🌊",
-            "🐋🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊"
+            "­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒÉï",
+            "­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒÉï­ƒîè",
+            "­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒÉï­ƒîè­ƒîè",
+            "­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒÉï­ƒîè­ƒîè­ƒîè",
+            "­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒÉï­ƒîè­ƒîè­ƒîè­ƒîè",
+            "­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒÉï­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè",
+            "­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒÉï­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè",
+            "­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒÉï­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè",
+            "­ƒîè­ƒîè­ƒîè­ƒîè­ƒÉï­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè",
+            "­ƒîè­ƒîè­ƒîè­ƒÉï­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè",
+            "­ƒîè­ƒîè­ƒÉï­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè",
+            "­ƒîè­ƒÉïMoist­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè",
+            "­ƒÉï­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè­ƒîè"
         ),
         // Fog Reveal
         listOf(
-            "☁\uFE0F✴\uFE0F☁\uFE0F      ",
-            " ☁\uFE0F✴\uFE0F☁\uFE0F     ",
-            "  ☁\uFE0F✴\uFE0F☁\uFE0F    ",
-            "   ☁\uFE0F✴\uFE0F☁\uFE0F   ",
-            "    ☁\uFE0F✴\uFE0F☁\uFE0F  ",
-            "     ☁\uFE0F✴\uFE0F☁\uFE0F ",
-            "      ☁\uFE0F✴\uFE0F☁\uFE0F",
-            "     ☁\uFE0F✴\uFE0F☁\uFE0F ",
-            "    ☁\uFE0F✴\uFE0F☁\uFE0F  ",
-            "   ☁\uFE0F✴\uFE0F☁\uFE0F   ",
-            "  ☁️✴️You're absolutely right☁️",
-            " ☁\uFE0F✴\uFE0F☁\uFE0F     "
+            "Ôÿü\uFE0FÔ£┤\uFE0FÔÿü\uFE0F      ",
+            " Ôÿü\uFE0FÔ£┤\uFE0FÔÿü\uFE0F     ",
+            "  Ôÿü\uFE0FÔ£┤\uFE0FÔÿü\uFE0F    ",
+            "   Ôÿü\uFE0FÔ£┤\uFE0FÔÿü\uFE0F   ",
+            "    Ôÿü\uFE0FÔ£┤\uFE0FÔÿü\uFE0F  ",
+            "     Ôÿü\uFE0FÔ£┤\uFE0FÔÿü\uFE0F ",
+            "      Ôÿü\uFE0FÔ£┤\uFE0FÔÿü\uFE0F",
+            "     Ôÿü\uFE0FÔ£┤\uFE0FÔÿü\uFE0F ",
+            "    Ôÿü\uFE0FÔ£┤\uFE0FÔÿü\uFE0F  ",
+            "   Ôÿü\uFE0FÔ£┤\uFE0FÔÿü\uFE0F   ",
+            "  Ôÿü´©ÅÔ£┤´©ÅYou're absolutely rightÔÿü´©Å",
+            " Ôÿü\uFE0FÔ£┤\uFE0FÔÿü\uFE0F     "
         )
     )
 
@@ -965,8 +1031,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 }
 
                 val now = System.currentTimeMillis()
-                // Audit 2.0: Reduced refresh rate (2s instead of 0.5s) to slash IPC overhead
-                val delayMs = if (isInteractive) 2000L else 30000L 
+                // Audit 3.0: Reduced refresh rate to 5s to slash IPC overhead
+                val delayMs = if (isInteractive) 5000L else 30000L 
                 
                 if (now - lastActivityTime > 15 * 60 * 1000 && now - lastKvFlushTime > 15 * 60 * 1000) {
                     lastKvFlushTime = now
@@ -1022,7 +1088,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     /**
      * Called when a task from this app is removed from recents.
      *
-     * WARNING: This fires for ANY task removal — including ShareReceiverActivity's
+     * WARNING: This fires for ANY task removal ÔÇö including ShareReceiverActivity's
      * empty task (taskAffinity="", excludeFromRecents=true). Do NOT tear down the
      * service here or the shake detector, overlay, and API server all die.
      *
@@ -1052,7 +1118,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
 
     override fun onDestroy() {
-        Timber.i("🛑 GemmaService: Shutting down system...")
+        Timber.i("­ƒøæ GemmaService: Shutting down system...")
         instance = null // Set early to prevent leaks
         
         // 1. Immediate UI/Foregound Release
@@ -1089,7 +1155,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                     apiServer.stop()
                 }
                 
-                Timber.i("✅ GemmaService: Shutdown complete")
+                Timber.i("Ô£à GemmaService: Shutdown complete")
             } catch (e: Exception) {
                 Timber.e(e, "Error during GemmaService shutdown")
             } finally {
@@ -1134,7 +1200,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
     fun setMoodState(state: String) { /* Mood tracking removed */ }
 
-    // Tool execution lives in KoogAgent.act() → MCPServer.executeTool()
+    // Tool execution lives in KoogAgent.act() ÔåÆ MCPServer.executeTool()
 
     // === SAFETY UI ===
 
@@ -1178,7 +1244,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
         val builder = android.app.Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
-            .setContentTitle("🛡️ Confirm Action")
+            .setContentTitle("­ƒøí´©Å Confirm Action")
             .setContentText("Allow Gemma to use ${event.toolName}?")
             .setStyle(android.app.Notification.BigTextStyle().bigText(
                 "Tool: ${event.toolName}\nParams: ${event.toolParams}\n\nRisky action detected. Do you approve?"
@@ -1186,18 +1252,18 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             .setOngoing(true)
             .setCategory(android.app.Notification.CATEGORY_CALL)
             .addAction(android.app.Notification.Action.Builder(
-                null, "✅ ALLOW", confirmPending
+                null, "Ô£à ALLOW", confirmPending
             ).build())
             .addAction(android.app.Notification.Action.Builder(
-                null, "🚫 DENY", denyPending
+                null, "­ƒÜ½ DENY", denyPending
             ).build())
 
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, builder.build())
     }
 
-    // ═══════════════════════════════════════════════════════════════
+    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
     // AgentPlatformCallbacks implementation
-    // ═══════════════════════════════════════════════════════════════
+    // ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
 
     override fun showThinking() {
         responseNotificationManager.showThinking()
@@ -1207,11 +1273,11 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         responseNotificationManager.cancelThinking()
     }
 
-    override fun showResponse(text: String, enableBubble: Boolean) {
+    override fun showResponse(text: String) {
         responseNotificationManager.showResponse(text)
     }
 
-    override fun onMessageAdded(message: String, isUser: Boolean, isComplete: Boolean, webviewUrl: String?, webviewAspectRatio: Float?) {
+    override fun onMessageAdded(message: String, isUser: Boolean, isComplete: Boolean) {
         uiCallback?.onMessageAdded(message, isUser, isComplete)
     }
 
@@ -1224,7 +1290,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         scope.launch(Dispatchers.IO) {
             val thermal = getCurrentThermalState()
             writeDiaryEntry("LOGIC_TRACE", thought, thermal)
-            Timber.i("🧠 Logic trace persisted: ${thought.take(50)}...")
+            Timber.i("­ƒºá Logic trace persisted: ${thought.take(50)}...")
         }
     }
 
@@ -1297,9 +1363,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 == android.content.pm.PackageManager.PERMISSION_GRANTED
             ) {
                 systemToolSet.calendar(title, description, 15)
-                Timber.i("📅 Calendar event created: $title")
+                Timber.i("­ƒôà Calendar event created: $title")
             } else {
-                Timber.w("📅 Calendar permission not granted")
+                Timber.w("­ƒôà Calendar permission not granted")
             }
         } catch (e: Exception) {
             Timber.w(e, "Calendar event creation failed (non-fatal)")
@@ -1336,7 +1402,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
                 val sessionId = UUID.randomUUID().toString()
                 // Tell the model to listen to the attached audio
-                processQuery("[User sent voice message — listen and respond to the audio]", sessionId)
+                processQuery("[User sent voice message ÔÇö listen and respond to the audio]", sessionId)
             }
         }
     }
@@ -1347,9 +1413,5 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         return memoryManager.getSessionHistory(limit)
     }
 
-    override fun onEmotionSignal(emoji: String) {
-        android.os.Handler(android.os.Looper.getMainLooper()).post {
-            android.widget.Toast.makeText(this, emoji, android.widget.Toast.LENGTH_SHORT).show()
-        }
-    }
 }
+

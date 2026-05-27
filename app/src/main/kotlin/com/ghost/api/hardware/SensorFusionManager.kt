@@ -191,11 +191,22 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
     private var slowIntervalMs = 600000L // 10m default
 
     private val stateReceiver = object : android.content.BroadcastReceiver() {
+        private var lastBatteryUpdate = 0L
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
                 Intent.ACTION_SCREEN_ON -> {}
                 Intent.ACTION_SCREEN_OFF -> {}
-                Intent.ACTION_BATTERY_CHANGED -> { getContextSnapshot() }
+                Intent.ACTION_BATTERY_CHANGED -> { 
+                    // Audit Fix: Debounce battery intent to max once per 30 seconds
+                    // to prevent thermal broadcast storms and high IPC usage during charging.
+                    val now = System.currentTimeMillis()
+                    if (now - lastBatteryUpdate > 30000L) {
+                        lastBatteryUpdate = now
+                        scope.launch {
+                            getContextSnapshot()
+                        }
+                    }
+                }
             }
         }
     }
