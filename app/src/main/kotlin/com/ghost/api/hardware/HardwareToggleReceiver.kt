@@ -22,13 +22,24 @@ class HardwareToggleReceiver : BroadcastReceiver() {
             }
             "com.ghost.api.ACTION_TOGGLE_EDGE_LIGHTS" -> {
                 Timber.i("Hardware Toggle: Edge Lights requested")
-                Toast.makeText(context, "Toggling Edge Lights...", Toast.LENGTH_SHORT).show()
-                // TODO: Interface with edge lighting overlay
+                com.ghost.api.ui.EdgeLightsManager.toggle(context)
+                val status = if (com.ghost.api.ui.EdgeLightsManager.isShowing) "ON" else "OFF"
+                Toast.makeText(context, "Edge Lights $status", Toast.LENGTH_SHORT).show()
             }
             "com.ghost.api.ACTION_SET_MILKDROP_WALLPAPER" -> {
                 Timber.i("Hardware Toggle: Milkdrop Wallpaper requested")
-                Toast.makeText(context, "Setting Milkdrop Wallpaper...", Toast.LENGTH_SHORT).show()
-                // TODO: Interface with Milkdrop engine
+                Toast.makeText(context, "Launching Wallpaper Chooser...", Toast.LENGTH_SHORT).show()
+                val wpIntent = Intent(android.app.WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).apply {
+                    putExtra(android.app.WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT, 
+                        android.content.ComponentName(context, com.ghost.api.ui.MilkdropWallpaperService::class.java))
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                try {
+                    context.startActivity(wpIntent)
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to launch wallpaper chooser")
+                    Toast.makeText(context, "Error launching wallpaper chooser", Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }

@@ -41,6 +41,7 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
     private var btnSend: TextView? = null
     private var thinkingProgress: ProgressBar? = null
     private var thinkingText: TextView? = null
+    private var visualizer: com.ghost.api.ui.AudioVisualizerView? = null
     
     private lateinit var chatAdapter: ChatAdapter
     private lateinit var ttsManager: TTSManager
@@ -79,9 +80,32 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
         }
     }
 
+    private val ttsStateReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                "com.ghost.api.ACTION_TTS_START" -> {
+                    visualizer?.visibility = View.VISIBLE
+                    visualizer?.startAnimating()
+                }
+                "com.ghost.api.ACTION_TTS_STOP" -> {
+                    visualizer?.stopAnimating()
+                    visualizer?.visibility = View.GONE
+                }
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ttsManager = TTSManager(this)
+        
+        val filter = android.content.IntentFilter().apply {
+            addAction("com.ghost.api.ACTION_TTS_START")
+            addAction("com.ghost.api.ACTION_TTS_STOP")
+        }
+        val flags = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) Context.RECEIVER_NOT_EXPORTED else 0
+        registerReceiver(ttsStateReceiver, filter, flags)
+        
         setupLauncherUi()
     }
     
@@ -104,7 +128,7 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
     }
 
     private fun checkSystemState() {
-        val perms = arrayOf(
+        val perms = mutableListOf(
             android.Manifest.permission.CAMERA,
             android.Manifest.permission.RECORD_AUDIO,
             android.Manifest.permission.WRITE_CALENDAR,
@@ -112,12 +136,30 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
             android.Manifest.permission.ACCESS_FINE_LOCATION,
             android.Manifest.permission.READ_PHONE_STATE
         )
+        
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            perms.add(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            perms.add(android.Manifest.permission.BLUETOOTH_CONNECT)
+        }
+
         val missing = perms.filter { checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
         if (missing.isNotEmpty()) {
             statusTextView.text = "Missing permissions: ${missing.size}"
             actionButton.text = "Grant Permissions"
             actionButton.visibility = View.VISIBLE
             actionButton.setOnClickListener { requestPermissions(missing.toTypedArray(), 100) }
+            return
+        }
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R && !android.os.Environment.isExternalStorageManager()) {
+            statusTextView.text = "Storage access required to read model"
+            actionButton.text = "Allow Storage"
+            actionButton.visibility = View.VISIBLE
+            actionButton.setOnClickListener { 
+                startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName"))) 
+            }
             return
         }
 
@@ -149,6 +191,7 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
         btnSend = findViewById(R.id.btnSend)
         thinkingProgress = findViewById(R.id.thinkingProgress)
         thinkingText = findViewById(R.id.thinkingText)
+        visualizer = findViewById(R.id.visualizer)
         
         chatAdapter = ChatAdapter()
         chatRecyclerView?.apply {
@@ -207,15 +250,15 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
                 when (item.itemId) {
                     1 -> {
                         // Direct intent to wallpaper service — not a model prompt
-                        sendBroadcast(Intent("com.ghost.api.ACTION_SET_TRANSPARENT_WALLPAPER"))
+                        sendBroadcast(Intent(this@MainActivity, com.ghost.api.hardware.HardwareToggleReceiver::class.java).apply { action = "com.ghost.api.ACTION_SET_TRANSPARENT_WALLPAPER" })
                         true
                     }
                     2 -> {
-                        sendBroadcast(Intent("com.ghost.api.ACTION_TOGGLE_EDGE_LIGHTS"))
+                        sendBroadcast(Intent(this@MainActivity, com.ghost.api.hardware.HardwareToggleReceiver::class.java).apply { action = "com.ghost.api.ACTION_TOGGLE_EDGE_LIGHTS" })
                         true
                     }
                     3 -> {
-                        sendBroadcast(Intent("com.ghost.api.ACTION_SET_MILKDROP_WALLPAPER"))
+                        sendBroadcast(Intent(this@MainActivity, com.ghost.api.hardware.HardwareToggleReceiver::class.java).apply { action = "com.ghost.api.ACTION_SET_MILKDROP_WALLPAPER" })
                         true
                     }
                     4 -> { togglePassiveTts(); true }
@@ -345,5 +388,6 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
         super.onDestroy()
         if (isBound) unbindService(serviceConnection)
         ttsManager.shutdown()
+        unregisterReceiver(ttsStateReceiver)
     }
 }

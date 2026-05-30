@@ -69,7 +69,7 @@ class MCPServer(
         // Shell
         "bash"            to ToolDefinition("bash", "Run a shell command (Termux pipe)", mapOf("command" to ParameterSpec("string", "Shell command"))),
         // Network
-        "search"          to ToolDefinition("search", "Web search", mapOf("query" to ParameterSpec("string", "Search query"))),
+        "web_search"      to ToolDefinition("web_search", "Web search", mapOf("query" to ParameterSpec("string", "Search query"))),
         // Skills
         "loadSkill"       to ToolDefinition("loadSkill", "Load skill instructions by name", mapOf("name" to ParameterSpec("string", "Skill name")))
     )
@@ -158,9 +158,9 @@ class MCPServer(
                     ToolResult(res["result"] == "success", res["output"] ?: res["message"] ?: "")
                 }
                 // Network
-                "search" -> {
+                "web_search" -> {
                     val query = params["query"]?.toString() ?: ""
-                    val res = networkTools.search(query, 3)
+                    val res = networkTools.web_search(query, 3)
                     ToolResult(res["result"] == "success", res["content"] ?: "")
                 }
                 // Skills

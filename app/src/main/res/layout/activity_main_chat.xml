@@ -69,7 +69,7 @@
         android:visibility="gone"
         android:indeterminateTint="@color/accent_purple"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintBottom_toTopOf="@id/inputBar" />
+        app:layout_constraintBottom_toTopOf="@id/visualizer" />
 
     <TextView
         android:id="@+id/thinkingText"
@@ -84,6 +84,17 @@
         app:layout_constraintBottom_toBottomOf="@id/thinkingProgress"
         app:layout_constraintStart_toEndOf="@id/thinkingProgress"
         app:layout_constraintTop_toTopOf="@id/thinkingProgress" />
+
+    <!-- Audio Visualizer -->
+    <com.ghost.api.ui.AudioVisualizerView
+        android:id="@+id/visualizer"
+        android:layout_width="100dp"
+        android:layout_height="30dp"
+        android:layout_marginBottom="8dp"
+        android:visibility="gone"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/inputBar" />
 
     <!-- Input Bar Area (Premium Pill) -->
     <LinearLayout

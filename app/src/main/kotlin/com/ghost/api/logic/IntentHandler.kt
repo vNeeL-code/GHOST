@@ -180,9 +180,9 @@ object IntentHandler {
                     com.ghost.api.hardware.SystemToolSet(context).bash(command)
                     true
                 }
-                "search" -> {
+                "web_search" -> {
                     val query = json.optString("query", "")
-                    com.ghost.api.hardware.NetworkToolSet(context).search(query, 3)
+                    com.ghost.api.hardware.NetworkToolSet(context).web_search(query, 3)
                     true
                 }
                 else -> false

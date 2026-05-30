@@ -172,6 +172,18 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
             // Try to find a high-quality voice
             selectBestVoice()
 
+            tts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {
+                    context.sendBroadcast(android.content.Intent("com.ghost.api.ACTION_TTS_START"))
+                }
+                override fun onDone(utteranceId: String?) {
+                    context.sendBroadcast(android.content.Intent("com.ghost.api.ACTION_TTS_STOP"))
+                }
+                override fun onError(utteranceId: String?) {
+                    context.sendBroadcast(android.content.Intent("com.ghost.api.ACTION_TTS_STOP"))
+                }
+            })
+
             isReady = true
             Timber.i("TTS initialized successfully")
         } else {

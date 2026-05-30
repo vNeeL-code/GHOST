@@ -14,6 +14,7 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     
     <!-- ASSISTANT ROLE (Android 15+) -->
     <uses-permission android:name="android.permission.BIND_ASSISTANT_SERVICE" />
@@ -153,6 +154,19 @@
                 android:resource="@xml/transparent_wallpaper" />
         </service>
         
+        <!-- MILKDROP WALLPAPER -->
+        <service
+            android:name=".ui.MilkdropWallpaperService"
+            android:permission="android.permission.BIND_WALLPAPER"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.wallpaper.WallpaperService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.wallpaper"
+                android:resource="@xml/milkdrop_wallpaper" />
+        </service>
+        
         <!-- Native Bubble Activity -->
         <activity
             android:name=".BubbleActivity"
@@ -243,6 +257,9 @@
                 <action android:name="com.ghost.api.ACTION_SET_MILKDROP_WALLPAPER" />
             </intent-filter>
         </receiver>
+
+        <!-- Internal Alarm Receiver -->
+        <receiver android:name=".hardware.GhostAlarmReceiver" android:exported="false" />
         
     </application>
 </manifest>
