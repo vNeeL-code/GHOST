@@ -50,6 +50,7 @@ class MilkdropWallpaperService : WallpaperService() {
         private var baselineRoll = 0f
         private var pitchOffset = 0f
         private var rollOffset = 0f
+        private var isBaselineSet = false
         private var sensorManager: SensorManager? = null
         private var rotationSensor: Sensor? = null
         
@@ -72,10 +73,10 @@ class MilkdropWallpaperService : WallpaperService() {
             rotationSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
             
             logoPaint.color = Color.WHITE
-            logoPaint.textSize = 140f
+            logoPaint.textSize = 320f
             logoPaint.textAlign = Paint.Align.CENTER
             logoPaint.typeface = Typeface.DEFAULT_BOLD
-            logoPaint.setShadowLayer(30f, 0f, 0f, defaultColors[0])
+            logoPaint.setShadowLayer(80f, 0f, 0f, defaultColors[0])
         }
 
         override fun onCreate(surfaceHolder: SurfaceHolder?) {
@@ -114,11 +115,8 @@ class MilkdropWallpaperService : WallpaperService() {
 
         private fun interpolateColors() {
             for (i in currentColors.indices) {
-                // Smoothly blend from current to target
                 currentColors[i] = ColorUtils.blendARGB(currentColors[i], targetColors[i], 0.05f)
             }
-            // Update logo glow color
-            logoPaint.setShadowLayer(30f, 0f, 0f, currentColors[0])
         }
 
         private fun drawFrame() {
@@ -130,10 +128,13 @@ class MilkdropWallpaperService : WallpaperService() {
                     val width = canvas.width.toFloat()
                     val height = canvas.height.toFloat()
                     
-                    val dynamicBaseRadius = min(width, height) * 0.35f
+                    // Small base so rings start tight to center and explode outward on beats
+                    val dynamicBaseRadius = min(width, height) * 0.08f
                     
-                    val cx = width / 2f + rollOffset * 150f
-                    val cy = height / 2f + pitchOffset * 150f
+                    // Nudged slightly left to perfectly center mathematically on screen
+                    val cx = width / 2f - 12f + rollOffset * 150f
+                    // Nudged slightly up to align with the widget/input bar center
+                    val cy = height / 2f - 75f + pitchOffset * 150f
                     
                     canvas.drawColor(Color.parseColor("#0A0A0A"))
                     
@@ -142,7 +143,8 @@ class MilkdropWallpaperService : WallpaperService() {
                     val isNoisy = smoothedBass > 100f || smoothedIntensity > 80f
                     
                     canvas.save()
-                    canvas.translate(cx, cy)
+                    // Nudge rings slightly right and down to optically align with the ✧ glyph
+                    canvas.translate(cx + 12f, cy + 40f)
                     canvas.rotate(rotationAngle)
                     
                     if (isNoisy) {
@@ -153,6 +155,34 @@ class MilkdropWallpaperService : WallpaperService() {
                     
                     canvas.restore()
                     
+                    // Multi-pass bloom glow — setShadowLayer is unreliable on hardware canvas.
+                    // Draw the star in album color at 4 increasing sizes with low alpha,
+                    // then white core on top. Bass makes the halo breathe.
+                    val glowColor = currentColors[0]
+                    val bassBoost = smoothedBass * 1.5f
+                    // Massive scale to peek out behind the widget
+                    val baseStarSize = 1200f 
+                    val bloomSizes   = floatArrayOf(
+                        baseStarSize + 500f + bassBoost, 
+                        baseStarSize + 300f + bassBoost, 
+                        baseStarSize + 150f + bassBoost, 
+                        baseStarSize + 50f + bassBoost
+                    )
+                    val bloomAlphas  = intArrayOf(18, 32, 52, 80)
+                    
+                    logoPaint.color = glowColor
+                    logoPaint.clearShadowLayer()
+                    for (i in bloomSizes.indices) {
+                        logoPaint.textSize = bloomSizes[i]
+                        logoPaint.alpha    = bloomAlphas[i]
+                        val off = (logoPaint.descent() + logoPaint.ascent()) / 2f
+                        canvas.drawText("✧", cx, cy - off, logoPaint)
+                    }
+                    
+                    // White core star
+                    logoPaint.color    = Color.WHITE
+                    logoPaint.alpha    = 255
+                    logoPaint.textSize = baseStarSize
                     val textOffset = (logoPaint.descent() + logoPaint.ascent()) / 2f
                     canvas.drawText("✧", cx, cy - textOffset, logoPaint)
                 }
@@ -165,16 +195,16 @@ class MilkdropWallpaperService : WallpaperService() {
 
         private fun drawOscilloscopeFlower(canvas: Canvas, baseRadius: Float) {
             val numPoints = 120
-            val currentRadius = baseRadius + (smoothedBass * 1.5f)
+            val currentRadius = baseRadius + (smoothedBass * 2.5f)
             
             paint.style = Paint.Style.STROKE
-            paint.strokeWidth = 6f
+            paint.strokeWidth = 8f
             
             for (c in currentColors.indices) {
                 val color = currentColors[c]
                 paint.color = color
-                paint.alpha = 200 - (c * 20)
-                paint.setShadowLayer(30f + (smoothedBass/5f), 0f, 0f, color)
+                paint.alpha = 220 - (c * 15)
+                paint.setShadowLayer(55f + (smoothedBass / 3f), 0f, 0f, color)
                 
                 val path = Path()
                 for (i in 0..numPoints) {
@@ -187,7 +217,7 @@ class MilkdropWallpaperService : WallpaperService() {
                         Math.hypot(r.toDouble(), i_comp.toDouble()).toFloat()
                     } else 0f
                     
-                    val rOffset = mag * 3f + (c * 15f)
+                    val rOffset = mag * 5f + (c * 45f)
                     val r = currentRadius + rOffset
                     
                     val x = cos(angle) * r
@@ -197,24 +227,25 @@ class MilkdropWallpaperService : WallpaperService() {
                     else path.lineTo(x, y)
                 }
                 path.close()
-                paint.strokeWidth = 6f
-                paint.alpha = max(0, 200 - (c * 20))
+                paint.strokeWidth = 8f
+                paint.alpha = max(0, 220 - (c * 15))
                 canvas.drawPath(path, paint)
             }
         }
 
         private fun drawIris(canvas: Canvas, baseRadius: Float) {
-            val startRadius = baseRadius * 0.8f + smoothedBass
+            // Start tight to center so rings explode outward on bass hits
+            val startRadius = baseRadius * 0.2f + smoothedBass * 1.5f
             
             paint.style = Paint.Style.STROKE
             
-            for (i in 0 until 5) {
+            for (i in 0 until 7) {
                 val color = currentColors[i % currentColors.size]
                 paint.color = color
-                paint.strokeWidth = 15f + (smoothedIntensity / 15f)
-                paint.setShadowLayer(50f + (smoothedBass/2f), 0f, 0f, color)
+                paint.strokeWidth = 20f + (smoothedIntensity / 8f) - (i * 1.5f)
+                paint.setShadowLayer(70f + (smoothedBass / 1.5f), 0f, 0f, color)
                 
-                val radius = startRadius + (i * 70f) + (smoothedBass * (i * 0.4f))
+                val radius = startRadius + (i * 140f) + (smoothedBass * (i * 0.9f))
                 
                 if (i == 0) {
                     drawOscilloscopeFlower(canvas, startRadius)
@@ -228,23 +259,31 @@ class MilkdropWallpaperService : WallpaperService() {
             if (event?.sensor?.type == Sensor.TYPE_ROTATION_VECTOR) {
                 val rotationMatrix = FloatArray(9)
                 SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
-                val orientation = FloatArray(3)
-                SensorManager.getOrientation(rotationMatrix, orientation)
-                
-                val currentPitch = orientation[1]
-                val currentRoll = orientation[2]
 
-                // Leaky integrator to anchor the baseline to the current orientation
-                if (baselinePitch == 0f && baselineRoll == 0f) {
-                    baselinePitch = currentPitch
-                    baselineRoll = currentRoll
-                } else {
-                    baselinePitch = baselinePitch * 0.98f + currentPitch * 0.02f
-                    baselineRoll = baselineRoll * 0.98f + currentRoll * 0.02f
+                // Read tilt directly from the rotation matrix instead of getOrientation().
+                // R[7] = -sin(pitch_euler), R[6] = -sin(roll)*cos(pitch)
+                // Both are naturally bounded to [-1, 1] with zero discontinuities or
+                // gimbal lock, so no Euler angle wrap-around can fling the canvas off-screen.
+                val tiltX = -rotationMatrix[6]  // left-right tilt
+                val tiltY = -rotationMatrix[7]  // forward-back tilt
+
+                if (!isBaselineSet) {
+                    baselinePitch = tiltY
+                    baselineRoll  = tiltX
+                    isBaselineSet = true
+                    return
                 }
-                
-                pitchOffset = currentPitch - baselinePitch
-                rollOffset = currentRoll - baselineRoll
+
+                // Slow leaky integrator: anchors baseline to how the phone is usually held
+                baselinePitch = baselinePitch * 0.99f + tiltY * 0.01f
+                baselineRoll  = baselineRoll  * 0.99f + tiltX * 0.01f
+
+                // Clamp raw delta so a sudden orientation change can't spike the canvas,
+                // then smooth the final offset to kill any remaining jitter
+                val rawPitch = (tiltY - baselinePitch).coerceIn(-0.25f, 0.25f)
+                val rawRoll  = (tiltX - baselineRoll ).coerceIn(-0.25f, 0.25f)
+                pitchOffset = pitchOffset * 0.8f + rawPitch * 0.2f
+                rollOffset  = rollOffset  * 0.8f + rawRoll  * 0.2f
             }
         }
 

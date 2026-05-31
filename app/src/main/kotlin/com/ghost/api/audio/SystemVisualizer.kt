@@ -27,6 +27,13 @@ object SystemVisualizer {
     var currentAlbumColors: IntArray? = null
         private set
 
+    private var overrideEmotionColors: IntArray? = null
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val clearEmotionRunnable = Runnable {
+        overrideEmotionColors = null
+        listeners.forEach { it.onColorsChanged(currentAlbumColors) }
+    }
+
     interface AudioListener {
         fun onAudioData(waveform: ByteArray, fft: ByteArray, intensity: Float, bass: Float)
         fun onColorsChanged(colors: IntArray?) {}
@@ -132,9 +139,42 @@ object SystemVisualizer {
                     if (lightVibrant != 0) lightVibrant else if (dominant != 0) dominant else colorFallback(4)
                 )
                 currentAlbumColors = extracted
-                listeners.forEach { it.onColorsChanged(extracted) }
+                if (overrideEmotionColors == null) {
+                    listeners.forEach { it.onColorsChanged(extracted) }
+                }
             }
         }
+    }
+
+    fun pushEmotionColor(emoji: String) {
+        val baseColor = when (emoji) {
+            "😡", "😠", "🤬", "🛑", "❗" -> android.graphics.Color.parseColor("#FF1744") // Red
+            "💙", "🧊", "❄️", "💧", "🔵" -> android.graphics.Color.parseColor("#00E5FF") // Cyan/Blue
+            "💚", "🌿", "🔋", "🤢", "🟢" -> android.graphics.Color.parseColor("#00E676") // Green
+            "💛", "☀️", "🌟", "⚡", "🟡" -> android.graphics.Color.parseColor("#FFEA00") // Yellow
+            "💜", "🔮", "😈", "☂️", "🟣" -> android.graphics.Color.parseColor("#D500F9") // Purple
+            "🩷", "🌸", "💕", "🧠" -> android.graphics.Color.parseColor("#F50057") // Pink
+            "🧡", "🔥", "🦊", "🎃", "🟠" -> android.graphics.Color.parseColor("#FF9100") // Orange
+            "🤍", "☁️", "👻", "💀", "⚪" -> android.graphics.Color.parseColor("#FFFFFF") // White
+            else -> android.graphics.Color.parseColor("#A78BFA") // Default Purple
+        }
+        
+        // Build a palette from the base color
+        val hsv = FloatArray(3)
+        android.graphics.Color.colorToHSV(baseColor, hsv)
+        
+        val c1 = baseColor
+        hsv[2] = (hsv[2] * 0.8f).coerceIn(0f, 1f); val c2 = android.graphics.Color.HSVToColor(hsv)
+        hsv[2] = (hsv[2] * 0.6f).coerceIn(0f, 1f); val c3 = android.graphics.Color.HSVToColor(hsv)
+        hsv[2] = (hsv[2] * 0.4f).coerceIn(0f, 1f); val c4 = android.graphics.Color.HSVToColor(hsv)
+        hsv[1] = (hsv[1] * 0.5f).coerceIn(0f, 1f); val c5 = android.graphics.Color.HSVToColor(hsv)
+
+        overrideEmotionColors = intArrayOf(c1, c2, c3, c4, c5)
+        listeners.forEach { it.onColorsChanged(overrideEmotionColors) }
+        
+        // Revert to album art after 4 seconds
+        handler.removeCallbacks(clearEmotionRunnable)
+        handler.postDelayed(clearEmotionRunnable, 4000)
     }
 
     private fun colorFallback(index: Int): Int {
@@ -170,7 +210,7 @@ object SystemVisualizer {
         if (!listeners.contains(listener)) {
             listeners.add(listener)
             // Immediately dispatch current colors
-            listener.onColorsChanged(currentAlbumColors)
+            listener.onColorsChanged(overrideEmotionColors ?: currentAlbumColors)
         }
         if (listeners.isNotEmpty()) start()
     }

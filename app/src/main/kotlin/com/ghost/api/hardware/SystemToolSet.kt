@@ -81,23 +81,15 @@ class SystemToolSet(private val context: Context) : ToolSet {
         @ToolParam(description = "Optional label") label: String = ""
     ): Map<String, String> {
         return try {
-            val calendar = java.util.Calendar.getInstance().apply {
-                set(java.util.Calendar.HOUR_OF_DAY, hour)
-                set(java.util.Calendar.MINUTE, minutes)
-                set(java.util.Calendar.SECOND, 0)
-                if (timeInMillis <= System.currentTimeMillis()) {
-                    add(java.util.Calendar.DAY_OF_YEAR, 1)
-                }
+            val intent = Intent(android.provider.AlarmClock.ACTION_SET_ALARM).apply {
+                putExtra(android.provider.AlarmClock.EXTRA_HOUR, hour)
+                putExtra(android.provider.AlarmClock.EXTRA_MINUTES, minutes)
+                putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, label)
+                putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, true)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            val intent = Intent(context, GhostAlarmReceiver::class.java).apply {
-                putExtra("LABEL", label)
-            }
-            val flags = android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
-            val pendingIntent = android.app.PendingIntent.getBroadcast(context, hour * 60 + minutes, intent, flags)
-            
-            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
-            alarmManager.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, calendar.timeInMillis, pendingIntent)
-            mapOf("result" to "success", "message" to "Background alarm scheduled for $hour:$minutes")
+            context.startActivity(intent)
+            mapOf("result" to "success", "message" to "Alarm scheduled for $hour:$minutes in system Clock app")
         } catch (e: Exception) {
             mapOf("result" to "error", "message" to "Failed to set alarm: ${e.message}")
         }
@@ -109,16 +101,14 @@ class SystemToolSet(private val context: Context) : ToolSet {
         @ToolParam(description = "Optional label") label: String = ""
     ): Map<String, String> {
         return try {
-            val targetTime = System.currentTimeMillis() + (seconds * 1000L)
-            val intent = Intent(context, GhostAlarmReceiver::class.java).apply {
-                putExtra("LABEL", label.ifEmpty { "Timer" })
+            val intent = Intent(android.provider.AlarmClock.ACTION_SET_TIMER).apply {
+                putExtra(android.provider.AlarmClock.EXTRA_LENGTH, seconds)
+                putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, label)
+                putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, true)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            val flags = android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
-            val pendingIntent = android.app.PendingIntent.getBroadcast(context, seconds, intent, flags)
-            
-            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
-            alarmManager.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, targetTime, pendingIntent)
-            mapOf("result" to "success", "message" to "Background timer scheduled for $seconds seconds")
+            context.startActivity(intent)
+            mapOf("result" to "success", "message" to "Timer scheduled for $seconds seconds in system Clock app")
         } catch (e: Exception) {
             mapOf("result" to "error", "message" to "Failed to set timer: ${e.message}")
         }

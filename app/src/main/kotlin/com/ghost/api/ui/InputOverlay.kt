@@ -594,7 +594,7 @@ class InputOverlay(
         return GradientDrawable().apply {
             shape = GradientDrawable.OVAL
             setColor(bgColor)
-            setStroke(dpToPx(1), colorSurfaceVariant)
+            // Removed setStroke to eliminate the white ring outlines on transparent buttons
         }
     }
 
