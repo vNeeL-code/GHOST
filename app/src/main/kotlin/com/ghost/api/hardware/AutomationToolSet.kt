@@ -31,7 +31,7 @@ class AutomationToolSet(private val context: Context) : ToolSet {
                 setPackage(context.packageName)
             }
             
-            val requestCode = System.currentTimeMillis().toInt()
+            val requestCode = (prompt.hashCode() xor System.nanoTime().toInt()).and(0x7FFFFFFF)
             val pendingIntent = PendingIntent.getBroadcast(
                 context,
                 requestCode,

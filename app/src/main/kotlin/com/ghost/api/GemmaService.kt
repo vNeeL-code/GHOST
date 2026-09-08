@@ -78,7 +78,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     
     internal var uiCallback: UiCallback? = null
 
-    internal val serviceScope = CoroutineScope(Dispatchers.Default + Job())
+    internal val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     val modelDownloader: ModelDownloader by lazy { ModelDownloader(applicationContext, serviceScope) }
 
     // Mandatory Service implementation
@@ -1254,8 +1254,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         // 2. Critical Native Cleanup (Must be synchronous/prioritized to release GPU)
         try {
             kotlinx.coroutines.runBlocking {
-                // Short timeout to ensure we don't block the OS too long
-                kotlinx.coroutines.withTimeout(1000) {
+                // Allow up to 5s to ensure GPU allocations and native engines are completely released
+                kotlinx.coroutines.withTimeout(5000) {
                     performCriticalCleanup()
                 }
             }

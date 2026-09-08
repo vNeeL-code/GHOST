@@ -26,6 +26,7 @@ class SystemToolSet(private val context: Context) : ToolSet {
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val packageManager: PackageManager = context.packageManager
     private var appListCache: List<AppInfo>? = null
+    private var appListCacheTime: Long = 0L
 
     data class AppInfo(val label: String, val packageName: String)
 
@@ -70,11 +71,13 @@ class SystemToolSet(private val context: Context) : ToolSet {
     }
 
     private fun getInstalledApps(): List<AppInfo> {
-        if (appListCache == null) {
+        val now = System.currentTimeMillis()
+        if (appListCache == null || (now - appListCacheTime) > 60_000L) {
             val intent = Intent(Intent.ACTION_MAIN, null).apply { addCategory(Intent.CATEGORY_LAUNCHER) }
             appListCache = packageManager.queryIntentActivities(intent, 0).map {
                 AppInfo(it.loadLabel(packageManager).toString(), it.activityInfo.packageName)
             }
+            appListCacheTime = now
         }
         return appListCache ?: emptyList()
     }

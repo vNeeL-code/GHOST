@@ -355,13 +355,17 @@ class GemmaEngine(private val context: Context) : LlmBackend {
     }
 
     override suspend fun cleanup() {
-        // Try to acquire lock, but don't block forever if inference is stuck
-        val acquired = kotlinx.coroutines.withTimeoutOrNull(2000) {
+        // Mark busy upfront to prevent new inferences from queueing during teardown
+        isBusy.set(true)
+        val acquired = kotlinx.coroutines.withTimeoutOrNull(5000) {
             sessionMutex.lock()
             true
         } ?: false
 
         try {
+            if (!acquired) {
+                Timber.w("sessionMutex lock timed out during cleanup, proceeding with safe close")
+            }
             conversation?.close()
             engine?.close()
         } catch (e: Exception) {
@@ -370,6 +374,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
             conversation = null
             engine = null
             if (acquired) sessionMutex.unlock()
+            isBusy.set(false)
         }
     }
 

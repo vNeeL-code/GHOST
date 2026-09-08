@@ -15,14 +15,16 @@ class TermuxAdbToolSet(private val context: Context) : ToolSet {
 
     private fun runAdb(cmd: String): Map<String, String> {
         return try {
-            // We assume the user has a local adb binary in PATH or Termux environment
-            // or that standard 'adb' works via standard shell if rooted/termux-configured.
-            // A more robust implementation would connect directly via TCP to 5555, but 
-            // for OpenClaw-style pipes, calling the shell command is the standard.
             val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", "adb -s 127.0.0.1:5555 shell $cmd"))
+            val outputFuture = java.util.concurrent.CompletableFuture.supplyAsync {
+                process.inputStream.bufferedReader().use { it.readText() }
+            }
+            val errorFuture = java.util.concurrent.CompletableFuture.supplyAsync {
+                process.errorStream.bufferedReader().use { it.readText() }
+            }
             process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)
-            val output = process.inputStream.bufferedReader().use { it.readText() }
-            val error = process.errorStream.bufferedReader().use { it.readText() }
+            val output = try { outputFuture.get(2, java.util.concurrent.TimeUnit.SECONDS) } catch (e: Exception) { "" }
+            val error = try { errorFuture.get(2, java.util.concurrent.TimeUnit.SECONDS) } catch (e: Exception) { "" }
             
             if (process.exitValue() == 0) {
                 mapOf("result" to "success", "output" to output.take(2000))
@@ -87,8 +89,11 @@ class TermuxAdbToolSet(private val context: Context) : ToolSet {
         com.ghost.api.GemmaService.instance?.showPipContent("Terminal", "Executing: ${command.take(20)}...")
         return try {
             val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
+            val outputFuture = java.util.concurrent.CompletableFuture.supplyAsync {
+                process.inputStream.bufferedReader().use { it.readText() }
+            }
             process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)
-            val output = process.inputStream.bufferedReader().use { it.readText() }
+            val output = try { outputFuture.get(2, java.util.concurrent.TimeUnit.SECONDS) } catch (e: Exception) { "" }
             mapOf("result" to "success", "output" to output.take(2000))
         } catch (e: Exception) { mapOf("result" to "error", "message" to e.message.toString()) }
     }

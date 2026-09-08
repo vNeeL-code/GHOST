@@ -182,6 +182,9 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
     @Volatile private var cachedAccelZ: Float? = null
     @Volatile private var lastSignificantMotion: Long = 0
 
+    @Volatile private var cachedBtConnected: Boolean = false
+    @Volatile private var cachedBtDeviceName: String? = null
+
     // Store listener reference for cleanup
     private var sensorListener: SensorEventListener? = null
     @Volatile private var isClosed = false
@@ -208,6 +211,27 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
                         }
                     }
                 }
+                android.bluetooth.BluetoothDevice.ACTION_ACL_CONNECTED -> {
+                    val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        intent.getParcelableExtra(android.bluetooth.BluetoothDevice.EXTRA_DEVICE, android.bluetooth.BluetoothDevice::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        intent.getParcelableExtra(android.bluetooth.BluetoothDevice.EXTRA_DEVICE)
+                    }
+                    cachedBtConnected = true
+                    cachedBtDeviceName = try { device?.name ?: "Connected Device" } catch (e: SecurityException) { "Connected Device" }
+                }
+                android.bluetooth.BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+                    cachedBtConnected = false
+                    cachedBtDeviceName = null
+                }
+                android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED -> {
+                    val state = intent.getIntExtra(android.bluetooth.BluetoothAdapter.EXTRA_STATE, android.bluetooth.BluetoothAdapter.ERROR)
+                    if (state == android.bluetooth.BluetoothAdapter.STATE_OFF || state == android.bluetooth.BluetoothAdapter.STATE_TURNING_OFF) {
+                        cachedBtConnected = false
+                        cachedBtDeviceName = null
+                    }
+                }
             }
         }
     }
@@ -230,6 +254,9 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
             addAction(Intent.ACTION_BATTERY_CHANGED)
             addAction(Intent.ACTION_POWER_CONNECTED)
             addAction(Intent.ACTION_POWER_DISCONNECTED)
+            addAction(android.bluetooth.BluetoothDevice.ACTION_ACL_CONNECTED)
+            addAction(android.bluetooth.BluetoothDevice.ACTION_ACL_DISCONNECTED)
+            addAction(android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             context.registerReceiver(stateReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
@@ -690,31 +717,23 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
                 bluetoothManager?.adapter?.let { adapter ->
                     btEnabled = adapter.isEnabled
                     if (btEnabled) {
-                        // Check for connected devices (requires high-level profile check)
-                        val proxyListener = object : android.bluetooth.BluetoothProfile.ServiceListener {
-                            override fun onServiceConnected(profile: Int, proxy: android.bluetooth.BluetoothProfile) {
-                                val devices = proxy.connectedDevices
-                                if (devices.isNotEmpty()) {
+                        if (cachedBtConnected) {
+                            btConnected = true
+                            btDeviceName = cachedBtDeviceName
+                        } else {
+                            try {
+                                val gattDevices = bluetoothManager.getConnectedDevices(android.bluetooth.BluetoothProfile.GATT)
+                                if (gattDevices.isNotEmpty()) {
                                     btConnected = true
-                                    btDeviceName = devices[0].name
+                                    btDeviceName = try { gattDevices[0].name } catch (e: SecurityException) { "Connected Device" }
                                 }
-                                adapter.closeProfileProxy(profile, proxy)
-                            }
-                            override fun onServiceDisconnected(profile: Int) {}
-                        }
-
-                        // We do a quick check of common profiles
-                        adapter.getProfileProxy(context, proxyListener, android.bluetooth.BluetoothProfile.A2DP)
-                        adapter.getProfileProxy(context, proxyListener, android.bluetooth.BluetoothProfile.HEADSET)
-
-                        // Bonded devices check as fallback for "is something paired and active"
-                        if (!btConnected) {
-                            val bonded = adapter.bondedDevices
-                            if (bonded?.isNotEmpty() == true) {
-                                // This is loose, but better than nothing
-                                // btConnected = true // Only set true if really active
+                            } catch (e: SecurityException) {
+                                // Missing BLUETOOTH_CONNECT runtime permission on Android 12+
                             }
                         }
+                    } else {
+                        cachedBtConnected = false
+                        cachedBtDeviceName = null
                     }
                 }
             } catch (t: Throwable) {
