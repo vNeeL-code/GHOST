@@ -25,6 +25,8 @@ class SystemToolSet(private val context: Context) : ToolSet {
 
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val packageManager: PackageManager = context.packageManager
+    private val memoryManager by lazy { com.ghost.api.database.MemoryManager(context) }
+    private val diaryManager by lazy { DiaryManager(context) }
     private var appListCache: List<AppInfo>? = null
     private var appListCacheTime: Long = 0L
 
@@ -208,9 +210,9 @@ class SystemToolSet(private val context: Context) : ToolSet {
         return try {
             val now = System.currentTimeMillis()
             val past = now - (days * 24 * 60 * 60 * 1000L)
-            val memories = DiaryManager(context).searchMemories("DREAM")
+            val memories = diaryManager.searchMemories("DREAM")
             val dbEntries = kotlinx.coroutines.runBlocking {
-                com.ghost.api.database.MemoryManager(context).getRecentDiaryEntries(20)
+                memoryManager.getRecentDiaryEntries(20)
             }.filter { it.eventType == "DREAM" && it.timestamp >= past }
 
             val entries = mutableListOf<String>()
@@ -243,7 +245,7 @@ class SystemToolSet(private val context: Context) : ToolSet {
         @ToolParam(description = "Memory content/fact") content: String
     ): Map<String, String> {
         kotlinx.coroutines.runBlocking {
-            com.ghost.api.database.MemoryManager(context).storeSemanticFact(title, content)
+            memoryManager.storeSemanticFact(title, content)
         }
         return mapOf("result" to "success", "message" to "Factored into Semantic Memory: $title")
     }
@@ -253,11 +255,11 @@ class SystemToolSet(private val context: Context) : ToolSet {
         @ToolParam(description = "Search query keyword") query: String
     ): Map<String, String> {
         // 1. Query Episodic Memory (Calendar)
-        val episodicMemories = DiaryManager(context).searchMemories(query)
+        val episodicMemories = diaryManager.searchMemories(query)
         
         // 2. Query Semantic Memory (FTS4 DB)
         val semanticMemories = kotlinx.coroutines.runBlocking {
-            com.ghost.api.database.MemoryManager(context).searchSemanticFacts(query)
+            memoryManager.searchSemanticFacts(query)
         }
         
         val merged = buildString {
@@ -373,9 +375,16 @@ class SystemToolSet(private val context: Context) : ToolSet {
         }
 
         return try {
-            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
             val ext = file.extension.lowercase(Locale.ROOT)
             val mimeType = when (ext) {
+                "mp3" -> "audio/mpeg"
+                "wav" -> "audio/wav"
+                "ogg", "oga" -> "audio/ogg"
+                "m4a", "aac" -> "audio/mp4"
+                "flac" -> "audio/flac"
+                "mp4" -> "video/mp4"
+                "mkv" -> "video/x-matroska"
+                "webm" -> "video/webm"
                 "md", "markdown" -> "text/markdown"
                 "json" -> "application/json"
                 "pdf" -> "application/pdf"
@@ -384,8 +393,32 @@ class SystemToolSet(private val context: Context) : ToolSet {
                 else -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
             }
 
+            val isMedia = mimeType.startsWith("audio/") || mimeType.startsWith("video/") || mimeType.startsWith("image/")
+
+            // For media files, scan into MediaStore to get a stable canonical content://media/ URI
+            // to avoid anonymous Linux file descriptors (fd://) dropping in players like VLC on orientation/fullscreen.
+            var targetUri: android.net.Uri? = null
+            if (isMedia) {
+                try {
+                    val latch = java.util.concurrent.CountDownLatch(1)
+                    android.media.MediaScannerConnection.scanFile(
+                        context,
+                        arrayOf(file.absolutePath),
+                        arrayOf(mimeType)
+                    ) { _, uri ->
+                        if (uri != null) targetUri = uri
+                        latch.countDown()
+                    }
+                    latch.await(800, java.util.concurrent.TimeUnit.MILLISECONDS)
+                } catch (e: Exception) {
+                    Timber.w(e, "MediaScannerConnection scan failed, falling back to FileProvider")
+                }
+            }
+
+            val finalUri = targetUri ?: FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+
             val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, mimeType)
+                setDataAndType(finalUri, mimeType)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }

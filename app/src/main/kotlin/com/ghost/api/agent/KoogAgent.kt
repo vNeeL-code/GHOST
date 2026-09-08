@@ -43,6 +43,7 @@ class KoogAgent(
     private val callbacks: AgentPlatformCallbacks? = null
 ) {
     private var currentTools = coreTools
+    private val memoryManager by lazy { com.ghost.api.database.MemoryManager(context) }
     // Agent's own coroutine scope for fire-and-forget operations (KV flush, etc.)
     private val agentScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
@@ -632,19 +633,24 @@ class KoogAgent(
                 callbacks?.updateNotification("(╭r_•́)")
             }
 
-            // --- Tiered Tool Loading (Lazy inject heavy UI or Termux macros if requested) ---
+            // --- Tiered Tool Loading (Lazy inject heavy UI or Termux macros if explicitly requested) ---
             if (!event.isDream) {
-                val wantsUi = listOf("tap", "click", "scroll", "type", "navigate", "screen").any { event.message.contains(it, ignoreCase = true) }
-                val wantsTermux = listOf("termux", "adb", "bash", "shell", "script", "cron", "automate", "terminal").any { event.message.contains(it, ignoreCase = true) }
+                val wantsUi = Regex("""\b(tap|click\s+on|scroll\s+(up|down)|swipe|press\s+button)\b""", RegexOption.IGNORE_CASE).containsMatchIn(event.message)
+                val wantsTermux = Regex("""\b(termux|adb|bash|shell\s+command|run\s+script)\b""", RegexOption.IGNORE_CASE).containsMatchIn(event.message)
                 
-                var newTools = coreTools
-                if (wantsUi && uiTools.isNotEmpty()) newTools = newTools + uiTools
-                if (wantsTermux && termuxTools.isNotEmpty()) newTools = newTools + termuxTools
+                var targetTools = currentTools
+                if (wantsUi && uiTools.isNotEmpty() && !currentTools.containsAll(uiTools)) {
+                    targetTools = targetTools + uiTools
+                }
+                if (wantsTermux && termuxTools.isNotEmpty() && !currentTools.containsAll(termuxTools)) {
+                    targetTools = targetTools + termuxTools
+                }
 
-                if (newTools != currentTools) {
-                    currentTools = newTools
+                // Only softReset when expanding tool capabilities for the active session, never thrash back and forth
+                if (targetTools.size > currentTools.size) {
+                    currentTools = targetTools
                     llmEngine.softReset(buildSystemPrompt() + getRollingMemoryString(), currentTools)
-                    Timber.i("lazy_tools: Swapped tools (UI: $wantsUi, Termux: $wantsTermux)")
+                    Timber.i("lazy_tools: Expanded tools for active session (UI: $wantsUi, Termux: $wantsTermux)")
                 }
             }
             // -----------------------------------------------------------------------
@@ -1180,12 +1186,11 @@ class KoogAgent(
         }
     }
     
-    fun getSystemPrompt(): String = buildSystemPrompt()
+    suspend fun getSystemPrompt(): String = buildSystemPrompt()
 
-    private fun buildSystemPrompt(): String {
+    private suspend fun buildSystemPrompt(): String {
         val basePrompt = contextManager.buildSystemPrompt(this@KoogAgent.context, rollingMemoryJson, skillManager)
-        val memoryManager = com.ghost.api.database.MemoryManager(this@KoogAgent.context)
-        val oldMemory = kotlinx.coroutines.runBlocking { memoryManager.getCompactedSessionMemory() }
+        val oldMemory = memoryManager.getCompactedSessionMemory()
         val longTermMemoryPatch = if (oldMemory.isNotBlank()) "\n\n[LONG TERM SESSION MEMORY]\n$oldMemory\n[/LONG TERM SESSION MEMORY]\n" else ""
         return longTermMemoryPatch + basePrompt
     }

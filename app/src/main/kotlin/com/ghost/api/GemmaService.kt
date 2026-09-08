@@ -718,9 +718,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             } else null
 
             // Determine Tools
-            val coreTools = listOf(hardwareToolSet, networkToolSet, systemToolSet, com.ghost.api.skills.SkillToolSet(skillManager))
+            val coreTools = listOf(hardwareToolSet, networkToolSet, systemToolSet, automationToolSet, com.ghost.api.skills.SkillToolSet(skillManager))
             val uiTools = listOf(uiMacroToolSet)
-            val termuxTools = listOf(termuxAdbToolSet, automationToolSet)
+            val termuxTools = listOf(termuxAdbToolSet)
 
             // Engine Creation (Locked to prevent double allocation)
             val newEngine = engineMutex.withLock {
