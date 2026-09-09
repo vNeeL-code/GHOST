@@ -327,7 +327,7 @@ fun SettingsDialog(
                                         ),
                                         listOf(
                                             "OPTION_C" to "Option C (Prisms)",
-                                            "OPTION_D" to "Option D (Highway)"
+                                            "OPTION_D" to "Option D (Sunset)"
                                         )
                                     )
                                     for (presetRow in rows) {
