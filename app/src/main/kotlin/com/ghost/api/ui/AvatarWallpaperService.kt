@@ -68,6 +68,7 @@ class AvatarWallpaperService : WallpaperService() {
         private var tunnelPhase = 0f
         private var trackZScroll = 0f
         private var strobeFlash = 0f // Audio threshold strobe trigger (0f = silent, 1f = blinding beat strobe)
+        private val nodeMagnitudes = FloatArray(30) // Per-hexagon smoothed FFT activation energies
         private var bugLane = 0 // -1: Left, 0: Center, 1: Right
         private var bugTargetLane = 0
         private var bugHopProgress = 1f
@@ -101,13 +102,18 @@ class AvatarWallpaperService : WallpaperService() {
                     // Exponential strobe decay (sharp beat onset, smooth falloff)
                     strobeFlash = (strobeFlash * 0.84f).coerceAtLeast(0f)
 
+                    // Hexagon node FFT energy decay: quick snap on onset, smooth release so nodes don't get stuck blown up
+                    for (i in nodeMagnitudes.indices) {
+                        nodeMagnitudes[i] = (nodeMagnitudes[i] * 0.82f).coerceAtLeast(0f)
+                    }
+
                     // Space Bug lane hopping physics (Option D)
                     if (bugHopProgress < 1f) {
-                        bugHopProgress = (bugHopProgress + 0.08f).coerceAtMost(1f)
+                        bugHopProgress = (bugHopProgress + 0.06f).coerceAtMost(1f)
                         if (bugHopProgress >= 1f) {
                             bugLane = bugTargetLane
                         }
-                    } else if (smoothedBass > 70f && System.currentTimeMillis() - lastBeatHopTime > 400L) {
+                    } else if (smoothedBass > 75f && System.currentTimeMillis() - lastBeatHopTime > 450L) {
                         lastBeatHopTime = System.currentTimeMillis()
                         val nextLane = when (bugLane) {
                             0 -> if (Math.random() > 0.5) 1 else -1
@@ -187,6 +193,21 @@ class AvatarWallpaperService : WallpaperService() {
             rollingBassEnergy = rollingBassEnergy * 0.92f + bass * 0.08f
             smoothedIntensity = smoothedIntensity * 0.7f + intensity * 0.3f
             smoothedBass = smoothedBass * 0.7f + bass * 0.3f
+
+            // Sample FFT frequency bins for the 30 spiral hexagon nodes
+            if (fft.isNotEmpty() && fft.size >= 4) {
+                val maxBin = (fft.size / 2) - 1
+                for (n in nodeMagnitudes.indices) {
+                    val binIndex = ((n * 3) + 1).coerceIn(0, maxBin)
+                    val real = fft[binIndex * 2].toDouble()
+                    val imag = fft[binIndex * 2 + 1].toDouble()
+                    val rawMag = Math.hypot(real, imag).toFloat().coerceIn(0f, 90f)
+                    // Fast attack if new magnitude is higher, otherwise let frame loop smoothly decay
+                    if (rawMag > nodeMagnitudes[n]) {
+                        nodeMagnitudes[n] = rawMag
+                    }
+                }
+            }
         }
 
         override fun onColorsChanged(colors: IntArray?) {
@@ -542,28 +563,21 @@ class AvatarWallpaperService : WallpaperService() {
                 for (step in 1..hexesPerArm) {
                     val progress = step.toFloat() / hexesPerArm.toFloat()
 
-                    // Map this node to a unique FFT frequency bin across the audio spectrum
-                    val nodeIndex = arm * hexesPerArm + (step - 1)
-                    val binIndex = ((nodeIndex * 3) + 1).coerceIn(0, maxBin)
-                    val nodeMag = if (fftAvailable) {
-                        val real = currentFft[binIndex * 2].toDouble()
-                        val imag = currentFft[binIndex * 2 + 1].toDouble()
-                        Math.hypot(real, imag).toFloat().coerceIn(0f, 90f)
-                    } else {
-                        0f
-                    }
+                    // Sample from smoothly decaying per-node FFT magnitude
+                    val nodeIndex = (arm * hexesPerArm + (step - 1)).coerceIn(0, nodeMagnitudes.size - 1)
+                    val nodeMag = nodeMagnitudes[nodeIndex]
 
-                    // Individual node activation pop & impulse
-                    val activationPop = nodeMag * 0.45f
-                    val distance = coreRadius * 1.35f + (step * (42f + bassKick * 0.35f)) + (activationPop * 0.4f)
+                    // Subtle, crisp activation pop (capped at max 9px so it never blows up out of proportion)
+                    val activationPop = (nodeMag * 0.12f).coerceIn(0f, 9f)
+                    val distance = coreRadius * 1.35f + (step * (42f + bassKick * 0.35f)) + (activationPop * 0.3f)
                     val angle = baseAngle + (step * spiralTwist) + (smoothedIntensity * 0.003f)
 
                     val hx = (cos(angle) * distance).toFloat()
                     val hy = (sin(angle) * distance).toFloat()
 
-                    // Individual size scaling on frequency activation
-                    val baseHexSize = coreRadius * 0.30f * (1.1f - progress * 0.55f)
-                    val hexSize = (baseHexSize + (smoothedIntensity * 0.05f) + activationPop).coerceAtLeast(7f)
+                    // Controlled size scaling: stays small and proportional to the constellation
+                    val baseHexSize = coreRadius * 0.28f * (1.0f - progress * 0.50f)
+                    val hexSize = (baseHexSize + activationPop).coerceIn(6f, coreRadius * 0.42f)
 
                     val colorIdx = (arm + step) % currentColors.size
                     val baseArmColor = if (isCustomPaletteActive) currentColors[colorIdx] else {
@@ -577,15 +591,15 @@ class AvatarWallpaperService : WallpaperService() {
                     }
 
                     // Active nodes flash brighter/whiter when their frequency slice hits
-                    val armColor = if (nodeMag > 25f) {
-                        val blendRatio = (nodeMag / 90f).coerceIn(0f, 0.75f)
+                    val armColor = if (nodeMag > 22f) {
+                        val blendRatio = (nodeMag / 80f).coerceIn(0f, 0.70f)
                         ColorUtils.blendARGB(baseArmColor, Color.WHITE, blendRatio)
                     } else {
                         baseArmColor
                     }
 
                     val baseAlpha = ((1f - progress * 0.35f) * 210).toInt()
-                    val nodeAlpha = (baseAlpha + (nodeMag * 1.5f).toInt()).coerceIn(40, 255)
+                    val nodeAlpha = (baseAlpha + (nodeMag * 1.2f).toInt()).coerceIn(40, 255)
 
                     paint.style = Paint.Style.FILL
                     paint.color = armColor
@@ -593,9 +607,9 @@ class AvatarWallpaperService : WallpaperService() {
                     drawHexagon(canvas, hx, hy, hexSize, paint)
 
                     paint.style = Paint.Style.STROKE
-                    paint.strokeWidth = 2.0f + (nodeMag * 0.04f)
-                    paint.color = if (nodeMag > 35f) Color.WHITE else baseArmColor
-                    paint.alpha = ((1f - progress * 0.5f) * 180 + (nodeMag * 1.2f)).toInt().coerceIn(30, 255)
+                    paint.strokeWidth = 2.0f + (nodeMag * 0.02f)
+                    paint.color = if (nodeMag > 30f) Color.WHITE else baseArmColor
+                    paint.alpha = ((1f - progress * 0.5f) * 180 + (nodeMag * 1.0f)).toInt().coerceIn(30, 255)
                     drawHexagon(canvas, hx, hy, hexSize, paint)
                 }
             }
@@ -791,7 +805,10 @@ class AvatarWallpaperService : WallpaperService() {
          */
         private fun drawOptionDNeonSunset(canvas: Canvas, cx: Float, cy: Float, width: Float, height: Float) {
             val horizonY = height * 0.50f
-            val vpX = width * 0.5f + (rollOffset * 240f) + (launcherSwipeOffset * 200f)
+            // Road and horizon remain completely solid and stable at screen center
+            val roadCenterX = width * 0.5f
+            // Upper sky elements (sun & sky) retain gentle look-around parallax
+            val skyCenterX = width * 0.5f + (rollOffset * 100f) + (launcherSwipeOffset * 90f)
             val bassKick = (smoothedBass * 1.5f).coerceAtLeast(0f)
 
             // 1. Deep Space Night Sky & Twinkling Stars
@@ -850,8 +867,7 @@ class AvatarWallpaperService : WallpaperService() {
             // 3. The Black Hole Sun with Hot Neon Concentric Solar Flares
             // Obsidian dark singularity center surrounded by explosive coronal flare rings
             val sunRadius = (min(width, height) * 0.28f + bassKick * 0.25f).coerceIn(80f, 300f)
-            val sunCenterX = width * 0.5f + (rollOffset * 100f) + (launcherSwipeOffset * 90f)
-            // Sunk slightly lower to align with the circular music / app overlay center
+            val sunCenterX = skyCenterX
             val sunCenterY = horizonY - (sunRadius * 0.18f)
 
             // Coronal solar flare rings expanding dramatically with bass beats
@@ -895,6 +911,7 @@ class AvatarWallpaperService : WallpaperService() {
             canvas.drawLine(0f, horizonY, width, horizonY, paint)
 
             // 5. Full-Screen 3D Perspective Terrain Mesh with Equalizer Mountain Ridges
+            // Solid, grounded road grid with stationary Y rows and stable road center
             val numRows = 22
             val numCols = 16 // -8 to +8 columns
             val gridGroundBottom = height * 1.05f
@@ -906,9 +923,8 @@ class AvatarWallpaperService : WallpaperService() {
             val meshY = Array(numRows + 1) { FloatArray(numCols + 1) }
 
             for (r in 0..numRows) {
-                val p = ((r.toFloat() + (trackZScroll % 1f)) / numRows.toFloat()).coerceIn(0f, 1f)
-                val depthZ = p * p // Quadratic perspective depth
-
+                // Fixed row perspective depth: Y is completely static and NEVER hops or bobs
+                val depthZ = (r.toFloat() / numRows.toFloat()).let { it * it }
                 val baseRowY = horizonY + (gridGroundBottom - horizonY) * depthZ
                 val rowHalfWidth = (width * 0.65f) * (depthZ + 0.05f) * 2.6f
 
@@ -917,18 +933,16 @@ class AvatarWallpaperService : WallpaperService() {
                     val colIndexFromCenter = (c - numCols / 2) // negative is left, positive is right
                     val absCol = abs(colIndexFromCenter)
 
-                    val rawX = vpX + (colNorm * rowHalfWidth)
+                    val rawX = roadCenterX + (colNorm * rowHalfWidth)
 
-                    // Equalizer Mountain Elevation:
-                    // Flanks (|absCol| >= 3) rise into jagged wireframe peaks.
-                    // Scale elevation by depthZ so peaks cleanly vanish at the horizon line (r=0) rather than poking into the sun!
+                    // Equalizer Mountain Elevation on outer flanks (|absCol| >= 3)
                     var elevation = 0f
                     if (absCol >= 3 && depthZ > 0.01f) {
                         val flankFactor = (absCol - 2).toFloat()
                         val peakBase = flankFactor * (12f + (22f * depthZ))
                         val tooth = if (c % 2 == 0) 1.3f else 0.8f
                         val audioDeform = if (colIndexFromCenter < 0) {
-                            bassFFT * (flankFactor * 0.18f) // Symmetrical, controlled bass bounce
+                            bassFFT * (flankFactor * 0.18f)
                         } else {
                             midFFT * (flankFactor * 0.18f)
                         }
@@ -936,14 +950,14 @@ class AvatarWallpaperService : WallpaperService() {
                     }
 
                     meshX[r][c] = rawX
-                    meshY[r][c] = (baseRowY - elevation).coerceAtLeast(horizonY)
+                    // Road center (highway lanes) stays 100% planar at baseRowY
+                    meshY[r][c] = if (absCol <= 2) baseRowY else (baseRowY - elevation).coerceAtLeast(horizonY)
                 }
             }
 
             // A) 100% Solid Opaque Ground Floor (Completely occludes the sun and sky below the horizon line)
             paint.style = Paint.Style.FILL
             paint.shader = null
-            // Solid dark cyber base color that warms up subtly during bass pulses
             val baseGroundColor = if (strobeFlash > 0.05f) Color.parseColor("#150B24") else Color.parseColor("#080512")
             paint.color = baseGroundColor
             paint.alpha = 255
@@ -974,18 +988,19 @@ class AvatarWallpaperService : WallpaperService() {
 
             paint.style = Paint.Style.STROKE
 
-            // C) Horizontal Rung Lines (across columns for each depth row)
+            // C) Scrolling Horizontal Rung Lines (traveling down the road towards the screen)
+            val scrollFrac = trackZScroll % 1f
             for (r in 0..numRows) {
-                val p = r.toFloat() / numRows.toFloat()
+                val p = ((r.toFloat() + scrollFrac) / numRows.toFloat()).coerceIn(0f, 1f)
                 val depthZ = p * p
+                val rungY = horizonY + (gridGroundBottom - horizonY) * depthZ
+                val rungHalfWidth = (width * 0.65f) * (depthZ + 0.05f) * 2.6f
                 paint.strokeWidth = (1.2f + (depthZ * 2.8f)).coerceIn(1f, 4.5f)
                 val alphaBase = (depthZ * 170f + (strobeFlash * 80f)).toInt().coerceIn(20, 255)
                 paint.color = terrainColor
                 paint.alpha = alphaBase
 
-                for (c in 0 until numCols) {
-                    canvas.drawLine(meshX[r][c], meshY[r][c], meshX[r][c + 1], meshY[r][c + 1], paint)
-                }
+                canvas.drawLine(roadCenterX - rungHalfWidth, rungY, roadCenterX + rungHalfWidth, rungY, paint)
             }
 
             // D) Longitudinal Lines (connecting depth rows from horizon to foreground)
@@ -1024,41 +1039,31 @@ class AvatarWallpaperService : WallpaperService() {
                 }
             }
 
-            // 6. Gemma Jet Craft with Weight-Shifting Steering & Multi-Bubble Plasma Propulsion
-            // Craft stays horizontally locked to the road surface, steering across lanes with dynamic chassis banking roll
+            // 6. Gemma Jet Craft with Direct Horizontal Tilt Steering
+            // Craft height (Y) is 100% constant on the screen.
+            // When phone tilts, the craft slides left and right across the road lanes, banking its chassis!
             val craftRow = (numRows * 0.82f).toInt().coerceIn(0, numRows)
             val centerCol = numCols / 2
 
-            // Smooth cubic ease-in-out interpolation across road lanes
-            val hopT = bugHopProgress.coerceIn(0f, 1f)
-            val smoothHopProgress = hopT * hopT * (3f - 2f * hopT)
-            val lanePos = bugLane.toFloat() + (bugTargetLane - bugLane).toFloat() * smoothHopProgress
+            val leftRoadEdgeX = meshX[craftRow][centerCol - 2]
+            val centerRoadX = meshX[craftRow][centerCol]
+            val rightRoadEdgeX = meshX[craftRow][centerCol + 2]
+            val roadHalfSpan = (rightRoadEdgeX - centerRoadX) * 0.85f
 
-            // Lane coordinates along the 3 central highway lanes: -1 (left), 0 (center), +1 (right)
-            val leftLaneX = meshX[craftRow][centerCol - 1]
-            val centerLaneX = meshX[craftRow][centerCol]
-            val rightLaneX = meshX[craftRow][centerCol + 1]
+            // Phone tilt directly steers the craft left/right across the road span
+            // Normal held orientation tilt range: rollOffset clamped within road width
+            val tiltSteerFactor = (rollOffset * 2.5f).coerceIn(-1.0f, 1.0f)
+            val craftX = centerRoadX + (tiltSteerFactor * roadHalfSpan)
 
-            // Craft glides horizontally across road surface without ungrounded hopping
-            val craftX = when {
-                lanePos < 0f -> centerLaneX + (leftLaneX - centerLaneX) * (-lanePos)
-                else -> centerLaneX + (rightLaneX - centerLaneX) * lanePos
-            }
+            // Craft height is strictly static — absolutely zero vertical hopping or jumping
             val craftY = meshY[craftRow][centerCol]
 
-            // Weight shifting & vehicle chassis banking roll into the turn
-            // Velocity derivative (sin of transition) produces natural lean into the steering direction
-            val laneDelta = (bugTargetLane - bugLane).toFloat()
-            val steeringBankAngle = if (bugHopProgress < 1f) {
-                sin(bugHopProgress * Math.PI.toFloat()) * laneDelta * -26f // Negative leans in direction of steering
-            } else {
-                0f
-            }
-            val totalCraftRotation = (rollOffset * 22f) + steeringBankAngle
+            // Dynamic banking lean: vehicle rolls into the tilt steering angle
+            val chassisBankAngle = tiltSteerFactor * 32f
 
             canvas.save()
             canvas.translate(craftX, craftY)
-            canvas.rotate(totalCraftRotation)
+            canvas.rotate(chassisBankAngle)
 
             val craftSize = (width * 0.062f).coerceIn(26f, 75f)
 
