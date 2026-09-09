@@ -357,26 +357,6 @@ class AvatarWallpaperService : WallpaperService() {
             val bassBoost = smoothedBass * 3.2f // Booming expansion on audio beats!
             val idleBreath = sin(rotationAngle * 0.4f) * 25f
 
-            // Ambient Environment Grounding Pool (At the bottom App Dock area)
-            // Sized down by half, positioned cleanly above the bottom audio visualizer dock
-            val dockPoolY = height * 0.88f
-            val dockPoolRadiusX = (dynamicBaseRadius * 1.25f + (bassBoost * 0.12f)).coerceIn(20f, 120f)
-            val dockPoolRadiusY = (dynamicBaseRadius * 0.35f + (bassBoost * 0.05f)).coerceIn(8f, 40f)
-            val dockPoolAlpha = (20 + (smoothedBass * 0.3f).toInt() + (strobeFlash * 30f).toInt()).coerceIn(12, 70)
-            val dockPoolColor = if (isCustomPaletteActive) currentColors[0] else colorCobaltGlow
-
-            paint.style = Paint.Style.FILL
-            paint.shader = null
-            paint.color = dockPoolColor
-            paint.alpha = dockPoolAlpha
-            val poolRect = RectF(cx - dockPoolRadiusX, dockPoolY - dockPoolRadiusY, cx + dockPoolRadiusX, dockPoolY + dockPoolRadiusY)
-            canvas.drawOval(poolRect, paint)
-
-            // Outer subtle accent ring
-            val poolRectOuter = RectF(cx - dockPoolRadiusX * 1.35f, dockPoolY - dockPoolRadiusY * 1.35f, cx + dockPoolRadiusX * 1.35f, dockPoolY + dockPoolRadiusY * 1.35f)
-            paint.alpha = (dockPoolAlpha * 0.35f).toInt().coerceIn(4, 25)
-            canvas.drawOval(poolRectOuter, paint)
-
             canvas.save()
             // Nudge rings slightly right and down to optically align with the ✧ glyph
             canvas.translate(cx + 12f, cy + 40f)
@@ -495,19 +475,19 @@ class AvatarWallpaperService : WallpaperService() {
                     paint.alpha = (hallwayFlashAlpha * 0.22f * facetFactor).toInt().coerceIn(0, 75)
                     canvas.drawPath(wallPath, paint)
 
-                    // Crisp architectural perspective corner guide lines in stolen palette accent
+                    // Crisp architectural perspective corner guide lines in stolen palette accent (solid lines grabbing stolen color)
                     paint.style = Paint.Style.STROKE
-                    paint.strokeWidth = 2.0f + (strobeFlash * 2.0f)
-                    paint.color = if (strobeFlash > 0.4f) Color.WHITE else wallColor
-                    paint.alpha = (hallwayFlashAlpha * 0.75f).toInt().coerceIn(0, 200)
+                    paint.strokeWidth = 2.5f + (strobeFlash * 2.5f)
+                    paint.color = wallColor
+                    paint.alpha = (hallwayFlashAlpha * 0.90f).toInt().coerceIn(0, 240)
                     canvas.drawLine(n1x, n1y, f1x, f1y, paint)
                 }
 
                 // Distant static outer corridor boundary ring
                 paint.style = Paint.Style.STROKE
                 paint.strokeWidth = 3f
-                paint.color = if (strobeFlash > 0.4f) Color.WHITE else wallColor
-                paint.alpha = (hallwayFlashAlpha * 0.5f).toInt().coerceIn(0, 140)
+                paint.color = wallColor
+                paint.alpha = (hallwayFlashAlpha * 0.65f).toInt().coerceIn(0, 180)
                 drawHexagon(canvas, 0f, 0f, farR * 0.75f, paint)
 
                 canvas.restore()
@@ -516,7 +496,7 @@ class AvatarWallpaperService : WallpaperService() {
             canvas.save()
             canvas.translate(cx, cy)
             
-            // Subtle slow rotational drift for the floating avatar & spirals
+            // Subtle slow rotational drift for the floating outer spirals and halos
             canvas.rotate(rotationAngle * 0.35f)
 
             paint.clearShadowLayer()
@@ -542,7 +522,7 @@ class AvatarWallpaperService : WallpaperService() {
             // High-energy strobe halo on prominent outer hex during beat flash
             if (strobeFlash > 0.10f) {
                 paint.strokeWidth = 5f
-                paint.color = Color.WHITE
+                paint.color = wallColor
                 paint.alpha = (strobeFlash * 255f).toInt().coerceIn(0, 255)
                 drawHexagon(canvas, 0f, 0f, coreRadius * 2.8f + bassKick * 1.5f, paint)
             }
@@ -588,6 +568,29 @@ class AvatarWallpaperService : WallpaperService() {
                 }
             }
 
+            // Stepped Concentric Blooming Hexagons behind the Mother Hexagon (Layered Fake Bloom)
+            // Mirrors the rich glow layers of Option A, grabbing the stolen wallpaper palette colors
+            val hexBloomRadii = floatArrayOf(
+                coreRadius * 1.55f + (bassKick * 0.65f),
+                coreRadius * 1.32f + (bassKick * 0.45f),
+                coreRadius * 1.15f + (bassKick * 0.25f)
+            )
+            val hexBloomAlphas = intArrayOf(35, 65, 110)
+            val hexBloomWidths = floatArrayOf(4.5f, 3.5f, 2.8f)
+
+            for (hb in hexBloomRadii.indices) {
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = hexBloomWidths[hb]
+                val hexGlowColor = if (isCustomPaletteActive) {
+                    currentColors[hb % currentColors.size]
+                } else {
+                    colorCobaltGlow
+                }
+                paint.color = hexGlowColor
+                paint.alpha = hexBloomAlphas[hb]
+                drawHexagon(canvas, 0f, 0f, hexBloomRadii[hb], paint)
+            }
+
             // 4. Mother Hexagon (Hollow Obsidian Cyber Chamber)
             paint.style = Paint.Style.FILL
             paint.color = Color.parseColor("#060A10")
@@ -605,33 +608,18 @@ class AvatarWallpaperService : WallpaperService() {
             paint.alpha = 200
             drawHexagon(canvas, 0f, 0f, coreRadius * 0.82f, paint)
 
-            // 5. Model Unicode Glyph (✧) Centered with Layered Multi-Pass Bloom
-            val glyphBaseSize = coreRadius * 1.35f
-            val glyphBloomSizes = floatArrayOf(
-                glyphBaseSize * 1.9f + (bassKick * 0.8f),
-                glyphBaseSize * 1.55f + (bassKick * 0.5f),
-                glyphBaseSize * 1.25f,
-                glyphBaseSize
-            )
-            val glyphBloomAlphas = intArrayOf(40, 75, 120, 255)
+            canvas.restore() // Restore unrotated frame for the central star glyph
 
+            // 5. Model Unicode Glyph (✧) Centered, Crisp White & Unrotated
+            // Isolated from avatar spin and without blurry star bloom text
+            canvas.save()
+            canvas.translate(cx, cy)
             logoPaint.clearShadowLayer()
-            for (i in glyphBloomSizes.indices) {
-                val color = if (i == 3) {
-                    Color.parseColor("#F8FAFC")
-                } else if (isCustomPaletteActive) {
-                    ensureVisibleBloomColor(currentColors[i % currentColors.size], colorCobaltGlow)
-                } else {
-                    colorCobaltGlow
-                }
-
-                logoPaint.color = color
-                logoPaint.textSize = glyphBloomSizes[i]
-                logoPaint.alpha = glyphBloomAlphas[i]
-                val off = (logoPaint.descent() + logoPaint.ascent()) / 2f
-                canvas.drawText("✧", 0f, -off, logoPaint)
-            }
-
+            logoPaint.color = Color.WHITE
+            logoPaint.alpha = 255
+            logoPaint.textSize = coreRadius * 1.35f
+            val off = (logoPaint.descent() + logoPaint.ascent()) / 2f
+            canvas.drawText("✧", 0f, -off, logoPaint)
             canvas.restore()
         }
 
@@ -740,7 +728,8 @@ class AvatarWallpaperService : WallpaperService() {
                 logoPaint.textSize = glyphBloomSizes[g]
                 logoPaint.alpha = glyphBloomAlphas[g]
                 val off = (logoPaint.descent() + logoPaint.ascent()) / 2f
-                canvas.drawText("✧", 0f, -off + (focalRadius * 0.12f), logoPaint)
+                // Center slightly higher to optically sit in the centroid of the equilateral triangle
+                canvas.drawText("✧", 0f, -off - (focalRadius * 0.08f), logoPaint)
             }
 
             canvas.restore()
@@ -817,7 +806,8 @@ class AvatarWallpaperService : WallpaperService() {
             // Obsidian dark singularity center surrounded by explosive coronal flare rings
             val sunRadius = (min(width, height) * 0.28f + bassKick * 0.25f).coerceIn(80f, 300f)
             val sunCenterX = width * 0.5f + (rollOffset * 100f) + (launcherSwipeOffset * 90f)
-            val sunCenterY = horizonY - (sunRadius * 0.45f)
+            // Sunk slightly lower to align with the circular music / app overlay center
+            val sunCenterY = horizonY - (sunRadius * 0.18f)
 
             // Coronal solar flare rings expanding dramatically with bass beats
             val flareBoom = (bassKick * 0.75f) + (strobeFlash * 90f)
@@ -905,21 +895,14 @@ class AvatarWallpaperService : WallpaperService() {
                 }
             }
 
-            // A) Solid Illuminated Ground Floor (Covering from horizon down to bottom of screen)
-            val groundFloorPath = Path().apply {
-                moveTo(0f, horizonY)
-                lineTo(width, horizonY)
-                lineTo(width, height)
-                lineTo(0f, height)
-                close()
-            }
+            // A) 100% Solid Opaque Ground Floor (Completely occludes the sun and sky below the horizon line)
             paint.style = Paint.Style.FILL
             paint.shader = null
-            // Solid dark cyber base color that warms up during bass pulses
-            val baseGroundColor = if (strobeFlash > 0.05f) Color.parseColor("#150B24") else Color.parseColor("#090514")
+            // Solid dark cyber base color that warms up subtly during bass pulses
+            val baseGroundColor = if (strobeFlash > 0.05f) Color.parseColor("#150B24") else Color.parseColor("#080512")
             paint.color = baseGroundColor
-            paint.alpha = 245
-            canvas.drawPath(groundFloorPath, paint)
+            paint.alpha = 255
+            canvas.drawRect(0f, horizonY, width, height, paint)
 
             // B) Center Illuminated Highway Bed
             val highwayBedPath = Path()
@@ -1013,9 +996,18 @@ class AvatarWallpaperService : WallpaperService() {
             val hopArcY = sin(bugHopProgress * Math.PI.toFloat()) * 20f
             val craftY = meshY[craftRow][centerCol] - hopArcY
 
+            // Dynamic steering banking tilt when switching lanes
+            val laneDelta = (bugTargetLane - bugLane)
+            val hopBankAngle = if (bugHopProgress < 1f) {
+                sin(bugHopProgress * Math.PI.toFloat()) * laneDelta * 22f
+            } else {
+                0f
+            }
+            val totalCraftRotation = (rollOffset * 30f) + hopBankAngle
+
             canvas.save()
             canvas.translate(craftX, craftY)
-            canvas.rotate(rollOffset * 30f + (bugTargetLane - bugLane) * 10f * (1f - bugHopProgress))
+            canvas.rotate(totalCraftRotation)
 
             val craftSize = (width * 0.062f).coerceIn(26f, 75f)
 
