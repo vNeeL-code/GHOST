@@ -429,6 +429,50 @@ class AvatarWallpaperService : WallpaperService() {
                 drawHexagon(canvas, 0f, 0f, glowRadius + (g * 35f), paint)
             }
 
+            // 4. Ambient Hexagonal Circuit Paths & Pulses (Fading into the screen depth)
+            val ambientRays = 12
+            val maxReach = (canvas.width + canvas.height) * 0.75f
+            val pulseOffset = (rotationAngle * 12f) % 180f
+
+            for (r in 0 until ambientRays) {
+                val rayAngle = (r * Math.PI * 2.0 / ambientRays).toFloat() + (rotationAngle * 0.05f)
+                val startDist = glowRadius + 20f
+                val endDist = maxReach
+
+                // Background radial circuit bus lines
+                val p1x = (cos(rayAngle) * startDist).toFloat()
+                val p1y = (sin(rayAngle) * startDist).toFloat()
+                val p2x = (cos(rayAngle) * endDist).toFloat()
+                val p2y = (sin(rayAngle) * endDist).toFloat()
+
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = 1.5f
+                paint.color = if (isCustomPaletteActive) currentColors[r % currentColors.size] else Color.parseColor("#38BDF8")
+                paint.alpha = 25 // Very subtle, cinematic background depth
+                canvas.drawLine(p1x, p1y, p2x, p2y, paint)
+
+                // Periodic energy packets / data pulses travelling along circuit traces
+                val packetDist = startDist + ((pulseOffset + (r * 70f)) % (endDist - startDist))
+                val packetX = (cos(rayAngle) * packetDist).toFloat()
+                val packetY = (sin(rayAngle) * packetDist).toFloat()
+                val fade = (1f - (packetDist / endDist)).coerceIn(0.1f, 1f)
+
+                paint.style = Paint.Style.FILL
+                paint.color = if (isCustomPaletteActive) currentColors[(r + 1) % currentColors.size] else Color.parseColor("#93C5FD")
+                paint.alpha = (fade * (40f + smoothedBass * 0.5f)).toInt().coerceIn(10, 140)
+                drawHexagon(canvas, packetX, packetY, 8f + (smoothedBass * 0.05f), paint)
+            }
+
+            // 5. Outer Faint Resonant Hex Rings (Fading into the void)
+            paint.style = Paint.Style.STROKE
+            for (ring in 1..4) {
+                val ringDist = glowRadius + (ring * 160f) + (bassKick * 0.8f)
+                paint.strokeWidth = 1.2f
+                paint.color = if (isCustomPaletteActive) currentColors[ring % currentColors.size] else Color.parseColor("#38BDF8")
+                paint.alpha = (35 / ring).coerceIn(8, 40)
+                drawHexagon(canvas, 0f, 0f, ringDist, paint)
+            }
+
             canvas.restore()
         }
 
