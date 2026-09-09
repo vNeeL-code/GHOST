@@ -50,7 +50,14 @@ fun SettingsDialog(
     var diaryCadence by remember { mutableStateOf(prefs.getString(Constants.PREF_DIARY_CADENCE, "12") ?: "12") }
     var ttsEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_TTS_ENABLED, true)) }
     var backend by remember { mutableStateOf(prefs.getString(Constants.PREF_USER_BACKEND, "AUTO") ?: "AUTO") }
-    var visualizerPreset by remember { mutableStateOf(prefs.getString(Constants.PREF_VISUALIZER_PRESET, "GHOST") ?: "GHOST") }
+    val rawPreset = prefs.getString(Constants.PREF_VISUALIZER_PRESET, "OPTION_A") ?: "OPTION_A"
+    val initialPreset = when (rawPreset) {
+        "GHOST" -> "OPTION_A"
+        "SUDA" -> "OPTION_B"
+        "AUDIOSURF" -> "OPTION_D"
+        else -> rawPreset
+    }
+    var visualizerPreset by remember { mutableStateOf(initialPreset) }
 
     val accentColor = Color(0xFF8BB4F6)
     val cardBg = Color(0xFF141418)
@@ -312,35 +319,48 @@ fun SettingsDialog(
                                     color = textDim,
                                     modifier = Modifier.padding(bottom = 8.dp)
                                 )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    val presets = listOf(
-                                        "GHOST" to "Classic Ghost",
-                                        "SUDA" to "Cephalon Suda"
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    val rows = listOf(
+                                        listOf(
+                                            "OPTION_A" to "Option A (Orbital)",
+                                            "OPTION_B" to "Option B (Hexagons)"
+                                        ),
+                                        listOf(
+                                            "OPTION_C" to "Option C (Prisms)",
+                                            "OPTION_D" to "Option D (Highway)"
+                                        )
                                     )
-                                    for ((key, label) in presets) {
-                                        val isSelected = visualizerPreset == key
-                                        Box(
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(if (isSelected) accentColor else cardBg)
-                                                .clickable {
-                                                    visualizerPreset = key
-                                                    prefs.edit().putString(Constants.PREF_VISUALIZER_PRESET, key).apply()
-                                                    Toast.makeText(context, "Visualizer geometry set to $label", Toast.LENGTH_SHORT).show()
-                                                }
-                                                .padding(vertical = 10.dp),
-                                            contentAlignment = Alignment.Center
+                                    for (presetRow in rows) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
-                                            Text(
-                                                text = label,
-                                                fontSize = 12.sp,
-                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                color = if (isSelected) Color.Black else Color.White
-                                            )
+                                            for ((key, label) in presetRow) {
+                                                val isSelected = visualizerPreset == key ||
+                                                    (key == "OPTION_A" && visualizerPreset == "GHOST") ||
+                                                    (key == "OPTION_B" && visualizerPreset == "SUDA") ||
+                                                    (key == "OPTION_D" && visualizerPreset == "AUDIOSURF")
+                                                Box(
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .background(if (isSelected) accentColor else cardBg)
+                                                        .clickable {
+                                                            visualizerPreset = key
+                                                            prefs.edit().putString(Constants.PREF_VISUALIZER_PRESET, key).apply()
+                                                            Toast.makeText(context, "Visualizer geometry set to $label", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                        .padding(vertical = 10.dp),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Text(
+                                                        text = label,
+                                                        fontSize = 12.sp,
+                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                        color = if (isSelected) Color.Black else Color.White
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }
