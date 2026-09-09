@@ -527,25 +527,46 @@ class AvatarWallpaperService : WallpaperService() {
                 drawHexagon(canvas, 0f, 0f, coreRadius * 2.8f + bassKick * 1.5f, paint)
             }
 
-            // 3. Six Logarithmic Spiral Hex Arms
+            // 3. Six Logarithmic Spiral Hex Arms (Mixture of Experts / Neural Parameter Activation)
+            // Each individual hexagon is wired to a distinct audio FFT frequency bin,
+            // so individual weights/nodes "pop" and flash independently on harmonics, snares, and basslines!
             val numArms = 6
             val hexesPerArm = 5
             val spiralTwist = 0.22f
+            val fftAvailable = currentFft.isNotEmpty() && currentFft.size >= 4
+            val maxBin = if (fftAvailable) (currentFft.size / 2) - 1 else 1
 
             for (arm in 0 until numArms) {
                 val baseAngle = (arm * Math.PI * 2.0 / numArms).toFloat()
 
                 for (step in 1..hexesPerArm) {
                     val progress = step.toFloat() / hexesPerArm.toFloat()
-                    val distance = coreRadius * 1.35f + (step * (42f + bassKick * 0.45f))
+
+                    // Map this node to a unique FFT frequency bin across the audio spectrum
+                    val nodeIndex = arm * hexesPerArm + (step - 1)
+                    val binIndex = ((nodeIndex * 3) + 1).coerceIn(0, maxBin)
+                    val nodeMag = if (fftAvailable) {
+                        val real = currentFft[binIndex * 2].toDouble()
+                        val imag = currentFft[binIndex * 2 + 1].toDouble()
+                        Math.hypot(real, imag).toFloat().coerceIn(0f, 90f)
+                    } else {
+                        0f
+                    }
+
+                    // Individual node activation pop & impulse
+                    val activationPop = nodeMag * 0.45f
+                    val distance = coreRadius * 1.35f + (step * (42f + bassKick * 0.35f)) + (activationPop * 0.4f)
                     val angle = baseAngle + (step * spiralTwist) + (smoothedIntensity * 0.003f)
 
                     val hx = (cos(angle) * distance).toFloat()
                     val hy = (sin(angle) * distance).toFloat()
-                    val hexSize = (coreRadius * 0.30f * (1.1f - progress * 0.55f) + (smoothedIntensity * 0.1f)).coerceAtLeast(8f)
+
+                    // Individual size scaling on frequency activation
+                    val baseHexSize = coreRadius * 0.30f * (1.1f - progress * 0.55f)
+                    val hexSize = (baseHexSize + (smoothedIntensity * 0.05f) + activationPop).coerceAtLeast(7f)
 
                     val colorIdx = (arm + step) % currentColors.size
-                    val armColor = if (isCustomPaletteActive) currentColors[colorIdx] else {
+                    val baseArmColor = if (isCustomPaletteActive) currentColors[colorIdx] else {
                         when (step) {
                             1 -> Color.parseColor("#F1F5F9")
                             2 -> Color.parseColor("#93C5FD")
@@ -555,15 +576,26 @@ class AvatarWallpaperService : WallpaperService() {
                         }
                     }
 
+                    // Active nodes flash brighter/whiter when their frequency slice hits
+                    val armColor = if (nodeMag > 25f) {
+                        val blendRatio = (nodeMag / 90f).coerceIn(0f, 0.75f)
+                        ColorUtils.blendARGB(baseArmColor, Color.WHITE, blendRatio)
+                    } else {
+                        baseArmColor
+                    }
+
+                    val baseAlpha = ((1f - progress * 0.35f) * 210).toInt()
+                    val nodeAlpha = (baseAlpha + (nodeMag * 1.5f).toInt()).coerceIn(40, 255)
+
                     paint.style = Paint.Style.FILL
                     paint.color = armColor
-                    paint.alpha = ((1f - progress * 0.35f) * 230).toInt().coerceIn(40, 255)
+                    paint.alpha = nodeAlpha
                     drawHexagon(canvas, hx, hy, hexSize, paint)
 
                     paint.style = Paint.Style.STROKE
-                    paint.strokeWidth = 2.5f
-                    paint.color = Color.WHITE
-                    paint.alpha = ((1f - progress * 0.5f) * 180).toInt().coerceIn(20, 200)
+                    paint.strokeWidth = 2.0f + (nodeMag * 0.04f)
+                    paint.color = if (nodeMag > 35f) Color.WHITE else baseArmColor
+                    paint.alpha = ((1f - progress * 0.5f) * 180 + (nodeMag * 1.2f)).toInt().coerceIn(30, 255)
                     drawHexagon(canvas, hx, hy, hexSize, paint)
                 }
             }
