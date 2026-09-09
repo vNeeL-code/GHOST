@@ -22,6 +22,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
 import com.ghost.api.hardware.HardwareToggleReceiver
 import com.ghost.api.services.TTSManager
@@ -140,6 +143,8 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
                 val isTtsActive by chatViewModel.isTtsActive.collectAsState()
                 val downloadProgress by chatViewModel.downloadProgress.collectAsState()
 
+                var showSettings by remember { mutableStateOf(false) }
+
                 ChatScreen(
                     messages = messages,
                     isThinking = isThinking,
@@ -163,7 +168,7 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
                         // Future reasoning toggle expansion
                     },
                     onOpenSettings = {
-                        showSettingsDialog()
+                        showSettings = true
                     },
                     visualizerViewFactory = { context ->
                         AudioVisualizerView(context).apply {
@@ -172,6 +177,26 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
                         }
                     }
                 )
+
+                if (showSettings) {
+                    com.ghost.api.ui.screens.SettingsDialog(
+                        onDismiss = { showSettings = false },
+                        onShowTutorial = {
+                            showSettings = false
+                            showTutorialDialog()
+                        },
+                        onShowDiaryHistory = {
+                            showSettings = false
+                            scope.launch {
+                                val entries = gemmaService?.memoryManager?.getRecentDiaryEntries(25) ?: emptyList()
+                                withContext(Dispatchers.Main) {
+                                    showDiaryHistoryDialog(entries)
+                                }
+                            }
+                        },
+                        gemmaService = gemmaService ?: GemmaService.instance
+                    )
+                }
             }
         }
 
@@ -309,304 +334,6 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
                 }
             } catch (e: Exception) { Timber.e(e) }
         }
-    }
-
-    private fun showSettingsDialog() {
-        val prefs = getSharedPreferences(Constants.PREFS_NAME, MODE_PRIVATE)
-        
-        // Root container
-        val root = ScrollView(this).apply {
-            setBackgroundColor(Color.parseColor("#0A0A0A"))
-            setPadding(0, 0, 0, 0)
-        }
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(48, 32, 48, 32)
-        }
-        root.addView(container)
-
-        val accentColor = Color.parseColor("#8BB4F6")
-        val dimTextColor = Color.parseColor("#99FFFFFF")
-        val dividerColor = Color.parseColor("#1AFFFFFF")
-
-        // === SECTION: Title ===
-        container.addView(TextView(this).apply {
-            text = "✧ Settings"
-            textSize = 16f
-            setTextColor(accentColor)
-            letterSpacing = 0.1f
-            setPadding(0, 0, 0, 24)
-        })
-
-        // === SECTION: Toggle Switches ===
-        fun addToggleRow(label: String, isOn: Boolean, onToggle: (Boolean) -> Unit) {
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, 16, 0, 16)
-            }
-            row.addView(TextView(this).apply {
-                text = label
-                textSize = 14f
-                setTextColor(Color.WHITE)
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            })
-            val switch = Switch(this).apply {
-                isChecked = isOn
-                thumbTintList = ColorStateList.valueOf(if (isOn) accentColor else Color.parseColor("#555555"))
-                trackTintList = ColorStateList.valueOf(if (isOn) Color.parseColor("#4DA78BFA") else Color.parseColor("#333333"))
-            }
-            switch.setOnCheckedChangeListener { _, checked ->
-                onToggle(checked)
-                switch.thumbTintList = ColorStateList.valueOf(if (checked) accentColor else Color.parseColor("#555555"))
-                switch.trackTintList = ColorStateList.valueOf(if (checked) Color.parseColor("#4DA78BFA") else Color.parseColor("#333333"))
-            }
-            row.addView(switch)
-            container.addView(row)
-        }
-
-        // Edge Lights toggle
-        addToggleRow("Edge Lights", EdgeLightsManager.isShowing) { checked ->
-            if (checked != EdgeLightsManager.isShowing) {
-                sendBroadcast(Intent(this, HardwareToggleReceiver::class.java).apply { action = "com.ghost.api.ACTION_TOGGLE_EDGE_LIGHTS" })
-            }
-        }
-
-        // Passive TTS toggle
-        addToggleRow("Passive Notification TTS", prefs.getBoolean(Constants.PREF_PASSIVE_TTS, true)) { checked ->
-            prefs.edit().putBoolean(Constants.PREF_PASSIVE_TTS, checked).apply()
-            Toast.makeText(this, if (checked) "Passive TTS on" else "Passive TTS off", Toast.LENGTH_SHORT).show()
-        }
-
-        // PiP Tool Visibility toggle
-        addToggleRow("PiP Tool Visibility", prefs.getBoolean(Constants.PREF_PIP_VISIBILITY, true)) { checked ->
-            prefs.edit().putBoolean(Constants.PREF_PIP_VISIBILITY, checked).apply()
-            Toast.makeText(this, if (checked) "PiP overlays on" else "PiP overlays off", Toast.LENGTH_SHORT).show()
-        }
-
-        // === Divider ===
-        container.addView(View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 1
-            ).apply { topMargin = 16; bottomMargin = 16 }
-            setBackgroundColor(dividerColor)
-        })
-
-        // === SECTION: Autonomous Diary ===
-        val diaryActive = prefs.getBoolean(Constants.PREF_AUTONOMOUS_DIARY, true)
-        val currentCadence = prefs.getString(Constants.PREF_DIARY_CADENCE, "12") ?: "12"
-
-        val cadenceContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            alpha = if (diaryActive) 1f else 0.35f
-        }
-
-        addToggleRow("Autonomous Diary", diaryActive) { checked ->
-            prefs.edit().putBoolean(Constants.PREF_AUTONOMOUS_DIARY, checked).apply()
-            cadenceContainer.alpha = if (checked) 1f else 0.35f
-            for (i in 0 until cadenceContainer.childCount) {
-                val child = cadenceContainer.getChildAt(i)
-                child.isEnabled = checked
-                if (child is RadioGroup) {
-                    for (j in 0 until child.childCount) {
-                        child.getChildAt(j).isEnabled = checked
-                    }
-                }
-            }
-            if (checked) {
-                com.ghost.api.workers.DiaryWorker.schedule(this)
-                Toast.makeText(this, "Autonomous diary enabled", Toast.LENGTH_SHORT).show()
-            } else {
-                com.ghost.api.workers.DiaryWorker.cancel(this)
-                Toast.makeText(this, "Autonomous diary paused", Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        cadenceContainer.addView(TextView(this).apply {
-            text = "Reflection Cadence"
-            textSize = 12f
-            setTextColor(dimTextColor)
-            letterSpacing = 0.08f
-            setPadding(0, 8, 0, 8)
-        })
-
-        val diaryRadioGroup = RadioGroup(this).apply {
-            orientation = RadioGroup.HORIZONTAL
-        }
-        val cadences = listOf("1H" to "1", "3H" to "3", "6H" to "6", "12H" to "12", "24H" to "24")
-        for ((label, value) in cadences) {
-            diaryRadioGroup.addView(RadioButton(this).apply {
-                text = label
-                textSize = 12f
-                setTextColor(Color.WHITE)
-                buttonTintList = ColorStateList.valueOf(accentColor)
-                isChecked = (value == currentCadence)
-                isEnabled = diaryActive
-                id = View.generateViewId()
-                setPadding(0, 0, 16, 0)
-            })
-        }
-        diaryRadioGroup.setOnCheckedChangeListener { group, checkedId ->
-            val checkedRb = group.findViewById<RadioButton>(checkedId)
-            val selectedLabel = checkedRb?.text?.toString() ?: "12H"
-            val selectedValue = cadences.firstOrNull { it.first == selectedLabel }?.second ?: "12"
-            
-            prefs.edit()
-                .putString(Constants.PREF_DIARY_CADENCE, selectedValue)
-                .apply()
-            
-            if (prefs.getBoolean(Constants.PREF_AUTONOMOUS_DIARY, true)) {
-                com.ghost.api.workers.DiaryWorker.schedule(this)
-            }
-            Toast.makeText(this, "Diary cadence set to $selectedLabel", Toast.LENGTH_SHORT).show()
-        }
-        cadenceContainer.addView(diaryRadioGroup)
-        container.addView(cadenceContainer)
-
-        // Voice Output (TTS) persistent toggle
-        val ttsActive = prefs.getBoolean(Constants.PREF_TTS_ENABLED, true)
-        addToggleRow("Voice Output (TTS)", ttsActive) { checked ->
-            prefs.edit().putBoolean(Constants.PREF_TTS_ENABLED, checked).apply()
-            GemmaService.instance?.ttsManager?.isTtsEnabled = checked
-            if (!checked) {
-                GemmaService.instance?.ttsManager?.stop()
-            }
-            Toast.makeText(this, if (checked) "Voice output enabled" else "Voice output muted (media won't pause)", Toast.LENGTH_SHORT).show()
-        }
-
-        // === Divider ===
-        container.addView(View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 1
-            ).apply { topMargin = 16; bottomMargin = 16 }
-            setBackgroundColor(dividerColor)
-        })
-
-        // === SECTION: Wallpapers (action buttons) ===
-        fun addActionRow(label: String, onClick: () -> Unit) {
-            container.addView(TextView(this).apply {
-                text = label
-                textSize = 14f
-                setTextColor(Color.WHITE)
-                setPadding(0, 24, 0, 24)
-                setOnClickListener { onClick() }
-                setCompoundDrawablesRelativeWithIntrinsicBounds(0, 0, android.R.drawable.ic_media_play, 0)
-                compoundDrawableTintList = ColorStateList.valueOf(dimTextColor)
-                compoundDrawablePadding = 16
-            })
-        }
-
-        addActionRow("Camera Wallpaper") {
-            sendBroadcast(Intent(this, HardwareToggleReceiver::class.java).apply { action = "com.ghost.api.ACTION_SET_CAMERA_WALLPAPER" })
-        }
-        addActionRow("Avatar Wallpaper") {
-            sendBroadcast(Intent(this, HardwareToggleReceiver::class.java).apply { action = "com.ghost.api.ACTION_SET_AVATAR_WALLPAPER" })
-        }
-
-        // === Divider ===
-        container.addView(View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 1
-            ).apply { topMargin = 16; bottomMargin = 16 }
-            setBackgroundColor(dividerColor)
-        })
-
-        // === SECTION: Backend Selector ===
-        container.addView(TextView(this).apply {
-            text = "Inference Backend"
-            textSize = 12f
-            setTextColor(dimTextColor)
-            letterSpacing = 0.08f
-            setPadding(0, 0, 0, 12)
-        })
-
-        val currentBackend = prefs.getString(Constants.PREF_USER_BACKEND, "AUTO") ?: "AUTO"
-        val radioGroup = RadioGroup(this).apply {
-            orientation = RadioGroup.HORIZONTAL
-        }
-        val backends = listOf("AUTO", "CPU", "GPU", "OFF")
-        for (backend in backends) {
-            radioGroup.addView(RadioButton(this).apply {
-                text = backend
-                textSize = 12f
-                setTextColor(Color.WHITE)
-                buttonTintList = ColorStateList.valueOf(accentColor)
-                isChecked = (backend == currentBackend)
-                id = View.generateViewId()
-                setPadding(0, 0, 20, 0)
-            })
-        }
-        radioGroup.setOnCheckedChangeListener { group, checkedId ->
-            val selected = group.findViewById<RadioButton>(checkedId)?.text?.toString() ?: "AUTO"
-            prefs.edit().putString(Constants.PREF_USER_BACKEND, selected).apply()
-            val service = gemmaService ?: GemmaService.instance
-            if (service != null) {
-                service.reloadWithBackend(selected)
-            } else {
-                Toast.makeText(this, "Backend set to $selected (takes effect on startup)", Toast.LENGTH_SHORT).show()
-            }
-        }
-        container.addView(radioGroup)
-
-        // === Divider ===
-        container.addView(View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 1
-            ).apply { topMargin = 16; bottomMargin = 16 }
-            setBackgroundColor(dividerColor)
-        })
-
-        // === SECTION: Utility Actions ===
-        addActionRow("Tutorial Programme") {
-            showTutorialDialog()
-        }
-        addActionRow("Compress Session / Flush Memory") {
-            val service = gemmaService ?: GemmaService.instance
-            service?.flushSessionMemory()
-        }
-        addActionRow("Clear Safe Mode") {
-            GemmaService.instance?.resetRecoveryState()
-            Toast.makeText(this, "Safe mode cleared — GPU performance restored", Toast.LENGTH_SHORT).show()
-        }
-        addActionRow("Trigger Diary Log Now") {
-            GemmaService.instance?.startDiaryCycle()
-            Toast.makeText(this, "Generating diary entry...", Toast.LENGTH_SHORT).show()
-        }
-        addActionRow("View Diary History") {
-            scope.launch {
-                val entries = gemmaService?.memoryManager?.getRecentDiaryEntries(25) ?: emptyList()
-                withContext(Dispatchers.Main) {
-                    showDiaryHistoryDialog(entries)
-                }
-            }
-        }
-
-        // === SECTION: Permissions & Access ===
-        val cn = ComponentName(this, GemmaNotificationListener::class.java)
-        val flat = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
-        val isNotifEnabled = flat != null && flat.contains(cn.flattenToString())
-        val isOverlayEnabled = Settings.canDrawOverlays(this)
-
-        if (!isNotifEnabled) {
-            addActionRow("Grant Notification Listener Access") {
-                val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivity(intent)
-            }
-        }
-
-        if (!isOverlayEnabled) {
-            addActionRow("Grant System Overlay Access") {
-                startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
-            }
-        }
-
-        // Build and show dialog
-        val dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_NoActionBar)
-            .setView(root)
-            .create()
-        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
-        dialog.show()
     }
 
     private fun showTutorialDialog() {

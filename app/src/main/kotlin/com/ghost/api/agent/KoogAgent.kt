@@ -353,7 +353,6 @@ class KoogAgent(
     suspend fun flushAndCompactSession() {
         Timber.i("🌀 Explicit Session Compaction & KV Cache Flush requested")
         try {
-            val memoryManager = com.ghost.api.database.MemoryManager(this.context)
             val oldMemory = memoryManager.getCompactedSessionMemory()
 
             val messagesToCompact = synchronized(_conversationHistory) {
@@ -372,7 +371,11 @@ class KoogAgent(
 
             if (messagesToCompact.isNotEmpty()) {
                 val newMemory = SessionMemoryCompactor.compactOldMessages(messagesToCompact, oldMemory, llmEngine)
-                memoryManager.updateCompactedSessionMemory(newMemory)
+                if (!newMemory.startsWith("Error:") && newMemory.isNotBlank()) {
+                    memoryManager.updateCompactedSessionMemory(newMemory)
+                } else {
+                    Timber.w("Compaction returned error or blank, preserving existing memory: $newMemory")
+                }
             }
 
             val initialMessages = synchronized(_conversationHistory) {
