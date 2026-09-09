@@ -569,23 +569,35 @@ class AvatarWallpaperService : WallpaperService() {
             }
 
             // Stepped Concentric Blooming Hexagons behind the Mother Hexagon (Layered Fake Bloom)
-            // Mirrors the rich glow layers of Option A, grabbing the stolen wallpaper palette colors
+            // Mirrors the rich, vibrant layered fake bloom of Option A, grabbing the stolen wallpaper palette colors
             val hexBloomRadii = floatArrayOf(
-                coreRadius * 1.55f + (bassKick * 0.65f),
-                coreRadius * 1.32f + (bassKick * 0.45f),
-                coreRadius * 1.15f + (bassKick * 0.25f)
+                coreRadius * 2.05f + (bassKick * 0.95f),
+                coreRadius * 1.68f + (bassKick * 0.65f),
+                coreRadius * 1.35f + (bassKick * 0.40f),
+                coreRadius * 1.12f + (bassKick * 0.18f)
             )
-            val hexBloomAlphas = intArrayOf(35, 65, 110)
-            val hexBloomWidths = floatArrayOf(4.5f, 3.5f, 2.8f)
+            val hexBloomAlphas = intArrayOf(28, 55, 95, 145)
+            val hexBloomBorderWidths = floatArrayOf(5.5f, 4.2f, 3.2f, 2.5f)
 
             for (hb in hexBloomRadii.indices) {
-                paint.style = Paint.Style.STROKE
-                paint.strokeWidth = hexBloomWidths[hb]
-                val hexGlowColor = if (isCustomPaletteActive) {
-                    currentColors[hb % currentColors.size]
-                } else {
-                    colorCobaltGlow
+                val swatchIndex = when (hb) {
+                    3 -> 1 % currentColors.size // Vibrant / Inner
+                    2 -> 0 % currentColors.size // Dominant
+                    1 -> 2 % currentColors.size // Muted
+                    else -> 3 % currentColors.size // Outer
                 }
+                val rawColor = if (isCustomPaletteActive) currentColors[swatchIndex] else colorCobaltGlow
+                val hexGlowColor = ensureVisibleBloomColor(rawColor, colorCobaltGlow)
+
+                // Translucent solid planar aura fill for radiant bloom volume
+                paint.style = Paint.Style.FILL
+                paint.color = hexGlowColor
+                paint.alpha = (hexBloomAlphas[hb] * 0.42f).toInt().coerceIn(10, 80)
+                drawHexagon(canvas, 0f, 0f, hexBloomRadii[hb], paint)
+
+                // Rich neon boundary contour
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = hexBloomBorderWidths[hb]
                 paint.color = hexGlowColor
                 paint.alpha = hexBloomAlphas[hb]
                 drawHexagon(canvas, 0f, 0f, hexBloomRadii[hb], paint)
@@ -639,14 +651,15 @@ class AvatarWallpaperService : WallpaperService() {
 
             // 1. Audio-Triggered Central Corner Laser Guide Rails
             // 3 Clean perspective lasers shooting through the vertices of the triangle tunnel into deep space
+            // Strictly grabbing rich stolen palette colors instead of harsh cutting white
             if (strobeFlash > 0.04f) {
                 val reach = (canvas.width + canvas.height) * 0.9f
                 val strobeAlpha = (strobeFlash * 255f).toInt().coerceIn(0, 255)
                 val railColor = if (isCustomPaletteActive) currentColors[0] else Color.parseColor("#38BDF8")
 
                 paint.style = Paint.Style.STROKE
-                paint.strokeWidth = 2.5f + (strobeFlash * 2.5f)
-                paint.color = if (strobeFlash > 0.4f) Color.WHITE else railColor
+                paint.strokeWidth = 3.0f + (strobeFlash * 2.5f)
+                paint.color = railColor
                 paint.alpha = strobeAlpha
                 for (v in 0..2) {
                     val railAngle = (v * Math.PI * 2.0 / 3.0 - Math.PI / 2.0).toFloat()
@@ -979,31 +992,37 @@ class AvatarWallpaperService : WallpaperService() {
                 }
             }
 
-            // 6. Centered Outrun Gemma Jet / Hovercraft (Hopping cleanly on the road)
+            // 6. Gemma Jet Craft with Weight-Shifting Steering & Multi-Bubble Plasma Propulsion
+            // Craft stays horizontally locked to the road surface, steering across lanes with dynamic chassis banking roll
             val craftRow = (numRows * 0.82f).toInt().coerceIn(0, numRows)
-            
-            val currentLanePos = bugLane + (bugTargetLane - bugLane) * bugHopProgress
             val centerCol = numCols / 2
+
+            // Smooth cubic ease-in-out interpolation across road lanes
+            val hopT = bugHopProgress.coerceIn(0f, 1f)
+            val smoothHopProgress = hopT * hopT * (3f - 2f * hopT)
+            val lanePos = bugLane.toFloat() + (bugTargetLane - bugLane).toFloat() * smoothHopProgress
+
+            // Lane coordinates along the 3 central highway lanes: -1 (left), 0 (center), +1 (right)
             val leftLaneX = meshX[craftRow][centerCol - 1]
             val centerLaneX = meshX[craftRow][centerCol]
             val rightLaneX = meshX[craftRow][centerCol + 1]
 
+            // Craft glides horizontally across road surface without ungrounded hopping
             val craftX = when {
-                currentLanePos < 0f -> centerLaneX + (leftLaneX - centerLaneX) * (-currentLanePos)
-                else -> centerLaneX + (rightLaneX - centerLaneX) * currentLanePos
+                lanePos < 0f -> centerLaneX + (leftLaneX - centerLaneX) * (-lanePos)
+                else -> centerLaneX + (rightLaneX - centerLaneX) * lanePos
             }
-            // Controlled gentle vertical hop during lane transitions
-            val hopArcY = sin(bugHopProgress * Math.PI.toFloat()) * 20f
-            val craftY = meshY[craftRow][centerCol] - hopArcY
+            val craftY = meshY[craftRow][centerCol]
 
-            // Dynamic steering banking tilt when switching lanes
-            val laneDelta = (bugTargetLane - bugLane)
-            val hopBankAngle = if (bugHopProgress < 1f) {
-                sin(bugHopProgress * Math.PI.toFloat()) * laneDelta * 22f
+            // Weight shifting & vehicle chassis banking roll into the turn
+            // Velocity derivative (sin of transition) produces natural lean into the steering direction
+            val laneDelta = (bugTargetLane - bugLane).toFloat()
+            val steeringBankAngle = if (bugHopProgress < 1f) {
+                sin(bugHopProgress * Math.PI.toFloat()) * laneDelta * -26f // Negative leans in direction of steering
             } else {
                 0f
             }
-            val totalCraftRotation = (rollOffset * 30f) + hopBankAngle
+            val totalCraftRotation = (rollOffset * 22f) + steeringBankAngle
 
             canvas.save()
             canvas.translate(craftX, craftY)
@@ -1011,12 +1030,29 @@ class AvatarWallpaperService : WallpaperService() {
 
             val craftSize = (width * 0.062f).coerceIn(26f, 75f)
 
-            // Consistent Cyan Neon Thruster Flame (Size scales gently with speed, no giant erratic boom or color swapping)
+            // Trailing Jet Thruster Plasma Bubbles (Stream of glowing propulsion bubbles trailing behind the engines)
+            val bubbleColor = if (isCustomPaletteActive) currentColors[0] else Color.parseColor("#38BDF8")
+            val numBubbles = 4
             paint.style = Paint.Style.FILL
-            val flameSize = craftSize * 0.28f + (bassKick * 0.04f)
-            paint.color = Color.parseColor("#38BDF8") // Clean cyan thruster exhaust
-            paint.alpha = (170 + (smoothedBass * 0.4f).toInt()).coerceIn(120, 240)
-            canvas.drawCircle(0f, craftSize * 0.62f, flameSize, paint)
+            for (b in 1..numBubbles) {
+                val bProgress = b.toFloat() / numBubbles.toFloat()
+                val bubbleY = craftSize * (0.55f + bProgress * 0.95f)
+                val bubbleRadius = craftSize * (0.24f * (1.15f - bProgress * 0.55f)) + (bassKick * 0.02f)
+                // Slight dynamic wake turbulence wobble
+                val bubbleX = sin(animTime * 12f + b * 1.8f) * (bProgress * 4.5f)
+                val bubbleAlpha = ((1f - bProgress * 0.70f) * (180f + bassKick * 15f)).toInt().coerceIn(20, 240)
+
+                paint.color = bubbleColor
+                paint.alpha = bubbleAlpha
+                canvas.drawCircle(bubbleX, bubbleY, bubbleRadius, paint)
+
+                // White energetic core inside the nearest primary bubble
+                if (b == 1) {
+                    paint.color = Color.WHITE
+                    paint.alpha = 220
+                    canvas.drawCircle(0f, bubbleY * 0.92f, bubbleRadius * 0.45f, paint)
+                }
+            }
 
             // Sleek vector jet craft body (Solid dark obsidian fuselage)
             paint.color = Color.parseColor("#090D16")
