@@ -92,11 +92,11 @@ class AvatarWallpaperService : WallpaperService() {
                         }
                     }
 
-                    // Kinetic clocks
+                    // Kinetic clocks: very gentle idle speed, accelerating on live audio beats
                     animTime += 0.016f
                     val bassImpulse = (smoothedBass / 100f).coerceIn(0f, 1f)
-                    tunnelPhase = (tunnelPhase + 0.007f + (bassImpulse * 0.012f)) % 1.0f
-                    trackZScroll = (trackZScroll + 0.018f + (bassImpulse * 0.025f)) % 1.0f
+                    tunnelPhase = (tunnelPhase + 0.0022f + (bassImpulse * 0.018f)) % 1.0f
+                    trackZScroll = (trackZScroll + 0.008f + (bassImpulse * 0.028f)) % 1.0f
 
                     // Exponential strobe decay (sharp beat onset, smooth falloff)
                     strobeFlash = (strobeFlash * 0.84f).coerceAtLeast(0f)
@@ -242,8 +242,8 @@ class AvatarWallpaperService : WallpaperService() {
                     // Small base so rings start tight to center and explode outward on beats
                     val dynamicBaseRadius = min(width, height) * 0.08f
                     
-                    // Nudged slightly left to perfectly center mathematically on screen
-                    val cx = width / 2f - 12f + rollOffset * 150f
+                    // Nudged slightly left to perfectly center mathematically on screen (-15f)
+                    val cx = width / 2f - 15f + rollOffset * 150f
                     // Nudged slightly up to align with the widget/input bar center
                     val cy = height / 2f - 75f + pitchOffset * 150f
                     
@@ -358,11 +358,11 @@ class AvatarWallpaperService : WallpaperService() {
             val idleBreath = sin(rotationAngle * 0.4f) * 25f
 
             // Ambient Environment Grounding Pool (At the bottom App Dock area)
-            // Positioned right above the bottom audio visualizer dock (~88% of screen height)
+            // Sized down by half, positioned cleanly above the bottom audio visualizer dock
             val dockPoolY = height * 0.88f
-            val dockPoolRadiusX = dynamicBaseRadius * 2.5f + (bassBoost * 0.25f)
-            val dockPoolRadiusY = dynamicBaseRadius * 0.7f + (bassBoost * 0.10f)
-            val dockPoolAlpha = (25 + (smoothedBass * 0.35f).toInt() + (strobeFlash * 35f).toInt()).coerceIn(15, 80)
+            val dockPoolRadiusX = (dynamicBaseRadius * 1.25f + (bassBoost * 0.12f)).coerceIn(20f, 120f)
+            val dockPoolRadiusY = (dynamicBaseRadius * 0.35f + (bassBoost * 0.05f)).coerceIn(8f, 40f)
+            val dockPoolAlpha = (20 + (smoothedBass * 0.3f).toInt() + (strobeFlash * 30f).toInt()).coerceIn(12, 70)
             val dockPoolColor = if (isCustomPaletteActive) currentColors[0] else colorCobaltGlow
 
             paint.style = Paint.Style.FILL
@@ -372,9 +372,9 @@ class AvatarWallpaperService : WallpaperService() {
             val poolRect = RectF(cx - dockPoolRadiusX, dockPoolY - dockPoolRadiusY, cx + dockPoolRadiusX, dockPoolY + dockPoolRadiusY)
             canvas.drawOval(poolRect, paint)
 
-            // Outer soft accent glow
-            val poolRectOuter = RectF(cx - dockPoolRadiusX * 1.5f, dockPoolY - dockPoolRadiusY * 1.5f, cx + dockPoolRadiusX * 1.5f, dockPoolY + dockPoolRadiusY * 1.5f)
-            paint.alpha = (dockPoolAlpha * 0.4f).toInt().coerceIn(6, 35)
+            // Outer subtle accent ring
+            val poolRectOuter = RectF(cx - dockPoolRadiusX * 1.35f, dockPoolY - dockPoolRadiusY * 1.35f, cx + dockPoolRadiusX * 1.35f, dockPoolY + dockPoolRadiusY * 1.35f)
+            paint.alpha = (dockPoolAlpha * 0.35f).toInt().coerceIn(4, 25)
             canvas.drawOval(poolRectOuter, paint)
 
             canvas.save()
@@ -448,29 +448,23 @@ class AvatarWallpaperService : WallpaperService() {
             val bassKick = (smoothedBass * 1.5f).coerceAtLeast(0f)
             val coreRadius = (baseRadius * 0.95f + bassKick * 0.6f).coerceIn(45f, 240f)
 
-            // 1. Perspective Hexagonal Cyber Hallway / Corridor Behind Avatar
-            // Connects the 6 vertices of the Mother Hex to a distant vanishing hex behind it,
-            // forming 6 perspective wall trapezoids that illuminate the room like a futuristic tunnel.
+            // 1. Perspective Hexagonal Cyber Hallway / Corridor in the Environment (Behind Avatar)
+            // Static to the environment/screen (not coupled to avatar's spin), using stolen wallpaper color palette
             val hallwayFlashAlpha = if (strobeFlash > 0.04f) {
                 (strobeFlash * 255f).toInt().coerceIn(0, 255)
             } else {
                 0
             }
 
-            canvas.save()
-            canvas.translate(cx, cy)
-            
-            // Subtle slow rotational drift
-            canvas.rotate(rotationAngle * 0.35f)
-
-            // Draw 3D Hexagonal Corridor Walls (Behind the chamber)
-            // Near hex is coreRadius * 1.05f; far hex extends outwards/backwards to screen bounds
             val nearR = coreRadius * 1.05f
             val farR = maxOf(width, height) * 0.85f
-            val wallColor = if (strobeFlash > 0.35f) Color.WHITE else (if (isCustomPaletteActive) currentColors[0] else Color.parseColor("#38BDF8"))
+            val wallColor = if (isCustomPaletteActive) currentColors[0] else Color.parseColor("#38BDF8")
 
             if (hallwayFlashAlpha > 0) {
+                canvas.save()
+                canvas.translate(cx, cy)
                 paint.clearShadowLayer()
+
                 for (v in 0 until 6) {
                     val a1 = (v * Math.PI / 3.0).toFloat()
                     val a2 = ((v + 1) * Math.PI / 3.0).toFloat()
@@ -494,28 +488,36 @@ class AvatarWallpaperService : WallpaperService() {
                         close()
                     }
 
-                    // Alternating subtle wall facet shading for 3D room depth
+                    // Alternating subtle wall facet shading using stolen palette color
                     val facetFactor = if (v % 2 == 0) 1.0f else 0.65f
                     paint.style = Paint.Style.FILL
                     paint.color = wallColor
-                    paint.alpha = (hallwayFlashAlpha * 0.18f * facetFactor).toInt().coerceIn(0, 60)
+                    paint.alpha = (hallwayFlashAlpha * 0.22f * facetFactor).toInt().coerceIn(0, 75)
                     canvas.drawPath(wallPath, paint)
 
-                    // Crisp architectural perspective corner guide lines
+                    // Crisp architectural perspective corner guide lines in stolen palette accent
                     paint.style = Paint.Style.STROKE
                     paint.strokeWidth = 2.0f + (strobeFlash * 2.0f)
-                    paint.color = if (strobeFlash > 0.4f) Color.WHITE else Color.parseColor("#E0F2FE")
-                    paint.alpha = (hallwayFlashAlpha * 0.70f).toInt().coerceIn(0, 180)
+                    paint.color = if (strobeFlash > 0.4f) Color.WHITE else wallColor
+                    paint.alpha = (hallwayFlashAlpha * 0.75f).toInt().coerceIn(0, 200)
                     canvas.drawLine(n1x, n1y, f1x, f1y, paint)
                 }
 
-                // Distant outer corridor boundary ring
+                // Distant static outer corridor boundary ring
                 paint.style = Paint.Style.STROKE
                 paint.strokeWidth = 3f
-                paint.color = Color.WHITE
+                paint.color = if (strobeFlash > 0.4f) Color.WHITE else wallColor
                 paint.alpha = (hallwayFlashAlpha * 0.5f).toInt().coerceIn(0, 140)
                 drawHexagon(canvas, 0f, 0f, farR * 0.75f, paint)
+
+                canvas.restore()
             }
+
+            canvas.save()
+            canvas.translate(cx, cy)
+            
+            // Subtle slow rotational drift for the floating avatar & spirals
+            canvas.rotate(rotationAngle * 0.35f)
 
             paint.clearShadowLayer()
 
@@ -647,51 +649,16 @@ class AvatarWallpaperService : WallpaperService() {
             val numTriangles = 8
             val baseSize = (baseRadius * 0.7f + bassKick * 0.3f).coerceIn(30f, 180f)
 
-            // 1. Audio-Triggered Beat Saber Laser Strobe in Top Corners
+            // 1. Audio-Triggered Central Corner Laser Guide Rails
+            // 3 Clean perspective lasers shooting through the vertices of the triangle tunnel into deep space
             if (strobeFlash > 0.04f) {
                 val reach = (canvas.width + canvas.height) * 0.9f
                 val strobeAlpha = (strobeFlash * 255f).toInt().coerceIn(0, 255)
-
-                // Left Corner Laser Fan Triangle
-                val leftFan = Path()
-                leftFan.moveTo(0f, 0f)
-                leftFan.lineTo(-reach * 0.75f, -reach * 0.90f)
-                leftFan.lineTo(-reach * 0.40f, -reach * 0.90f)
-                leftFan.close()
-
-                paint.style = Paint.Style.FILL
-                paint.color = if (isCustomPaletteActive) currentColors[0] else Color.parseColor("#38BDF8")
-                paint.alpha = (strobeAlpha * 0.45f).toInt().coerceIn(0, 110)
-                canvas.drawPath(leftFan, paint)
+                val railColor = if (isCustomPaletteActive) currentColors[0] else Color.parseColor("#38BDF8")
 
                 paint.style = Paint.Style.STROKE
-                paint.strokeWidth = 2.5f + (strobeFlash * 3f)
-                paint.color = Color.WHITE
-                paint.alpha = strobeAlpha
-                canvas.drawLine(0f, 0f, -reach * 0.75f, -reach * 0.90f, paint)
-                canvas.drawLine(0f, 0f, -reach * 0.40f, -reach * 0.90f, paint)
-
-                // Right Corner Laser Fan Triangle
-                val rightFan = Path()
-                rightFan.moveTo(0f, 0f)
-                rightFan.lineTo(reach * 0.40f, -reach * 0.90f)
-                rightFan.lineTo(reach * 0.75f, -reach * 0.90f)
-                rightFan.close()
-
-                paint.style = Paint.Style.FILL
-                paint.alpha = (strobeAlpha * 0.45f).toInt().coerceIn(0, 110)
-                canvas.drawPath(rightFan, paint)
-
-                paint.style = Paint.Style.STROKE
-                paint.strokeWidth = 2.5f + (strobeFlash * 3f)
-                paint.color = Color.WHITE
-                paint.alpha = strobeAlpha
-                canvas.drawLine(0f, 0f, reach * 0.40f, -reach * 0.90f, paint)
-                canvas.drawLine(0f, 0f, reach * 0.75f, -reach * 0.90f, paint)
-
-                // Corner Laser Guide Rails
-                paint.strokeWidth = 2.5f
-                paint.color = Color.WHITE
+                paint.strokeWidth = 2.5f + (strobeFlash * 2.5f)
+                paint.color = if (strobeFlash > 0.4f) Color.WHITE else railColor
                 paint.alpha = strobeAlpha
                 for (v in 0..2) {
                     val railAngle = (v * Math.PI * 2.0 / 3.0 - Math.PI / 2.0).toFloat()
@@ -702,9 +669,15 @@ class AvatarWallpaperService : WallpaperService() {
             }
 
             // 2. Infinite Nested Equilateral Triangles Zooming Outward (Seven Nation Army Tunnel)
+            // Enhanced with 3D tunnel parallax layering (outer triangles shift more with device tilt than inner core)
             for (i in 0 until numTriangles) {
                 val p = ((tunnelPhase + (i.toFloat() / numTriangles)) % 1.0f)
                 val scale = (baseSize * exp(p * 3.4f)).toFloat()
+
+                // Layered tunnel parallax: outer foreground rings drift further than deep core
+                val parallaxZ = p * p * 60f
+                val triCenterX = rollOffset * parallaxZ
+                val triCenterY = pitchOffset * parallaxZ
 
                 val fadeIn = (p * 5f).coerceIn(0f, 1f)
                 val fadeOut = ((1f - p) * 3f).coerceIn(0f, 1f)
@@ -722,7 +695,7 @@ class AvatarWallpaperService : WallpaperService() {
                 paint.strokeWidth = (3.5f * (1f - p * 0.4f)).coerceIn(1.5f, 5.5f)
                 paint.color = baseColor
                 paint.alpha = totalAlpha
-                drawEquilateralTriangle(canvas, 0f, 0f, scale, rotation, paint)
+                drawEquilateralTriangle(canvas, triCenterX, triCenterY, scale, rotation, paint)
             }
 
             // 3. Vanishing Point Focal Core (Center Triangle with Model Glyph ✧)
@@ -912,30 +885,32 @@ class AvatarWallpaperService : WallpaperService() {
                     val rawX = vpX + (colNorm * rowHalfWidth)
 
                     // Equalizer Mountain Elevation:
+                    // Flanks (|absCol| >= 3) rise into jagged wireframe peaks.
+                    // Scale elevation by depthZ so peaks cleanly vanish at the horizon line (r=0) rather than poking into the sun!
                     var elevation = 0f
-                    if (absCol >= 3) {
+                    if (absCol >= 3 && depthZ > 0.01f) {
                         val flankFactor = (absCol - 2).toFloat()
-                        val peakBase = flankFactor * (18f + (25f * depthZ))
-                        val tooth = if (c % 2 == 0) 1.4f else 0.75f
+                        val peakBase = flankFactor * (12f + (22f * depthZ))
+                        val tooth = if (c % 2 == 0) 1.3f else 0.8f
                         val audioDeform = if (colIndexFromCenter < 0) {
-                            bassFFT * (flankFactor * 0.35f) // Left mountain bounces on bass
+                            bassFFT * (flankFactor * 0.18f) // Symmetrical, controlled bass bounce
                         } else {
-                            midFFT * (flankFactor * 0.35f)  // Right mountain bounces on mids/treble
+                            midFFT * (flankFactor * 0.18f)
                         }
-                        elevation = (peakBase * tooth) + audioDeform
+                        elevation = ((peakBase * tooth) + audioDeform) * depthZ.coerceIn(0f, 1f)
                     }
 
                     meshX[r][c] = rawX
-                    meshY[r][c] = baseRowY - elevation
+                    meshY[r][c] = (baseRowY - elevation).coerceAtLeast(horizonY)
                 }
             }
 
-            // A) Solid Illuminated Ground Floor (Not transparent! Deep indigo cyber terrain)
+            // A) Solid Illuminated Ground Floor (Covering from horizon down to bottom of screen)
             val groundFloorPath = Path().apply {
-                moveTo(meshX[0][0], meshY[0][0])
-                lineTo(meshX[0][numCols], meshY[0][numCols])
-                lineTo(meshX[numRows][numCols], meshY[numRows][numCols])
-                lineTo(meshX[numRows][0], meshY[numRows][0])
+                moveTo(0f, horizonY)
+                lineTo(width, horizonY)
+                lineTo(width, height)
+                lineTo(0f, height)
                 close()
             }
             paint.style = Paint.Style.FILL
@@ -943,7 +918,7 @@ class AvatarWallpaperService : WallpaperService() {
             // Solid dark cyber base color that warms up during bass pulses
             val baseGroundColor = if (strobeFlash > 0.05f) Color.parseColor("#150B24") else Color.parseColor("#090514")
             paint.color = baseGroundColor
-            paint.alpha = 240
+            paint.alpha = 245
             canvas.drawPath(groundFloorPath, paint)
 
             // B) Center Illuminated Highway Bed
