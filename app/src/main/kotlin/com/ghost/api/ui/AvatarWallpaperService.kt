@@ -168,13 +168,23 @@ class AvatarWallpaperService : WallpaperService() {
             } catch (e: Exception) {}
         }
 
+        // Beat detection: rolling energy tracking + temporal refractory debounce
+        private var rollingBassEnergy = 30f
+        private var lastBeatTimestamp = 0L
+
         override fun onAudioData(waveform: ByteArray, fft: ByteArray, intensity: Float, bass: Float) {
             currentFft = fft
-            val bassDelta = bass - smoothedBass
-            // Audio beat threshold: sudden bass kick above threshold triggers strobe flash
-            if (bassDelta > 26f && bass > 50f) {
+            val now = System.currentTimeMillis()
+            
+            // Dynamic threshold: 1.32x rolling average bass with minimum floor of 45
+            val beatThreshold = (rollingBassEnergy * 1.32f).coerceAtLeast(45f)
+            if (bass > beatThreshold && (now - lastBeatTimestamp > 220L)) {
                 strobeFlash = 1f
+                lastBeatTimestamp = now
             }
+            
+            // Update rolling bass average with asymmetric tracking (slow rise, gentle fall)
+            rollingBassEnergy = rollingBassEnergy * 0.92f + bass * 0.08f
             smoothedIntensity = smoothedIntensity * 0.7f + intensity * 0.3f
             smoothedBass = smoothedBass * 0.7f + bass * 0.3f
         }
@@ -247,7 +257,7 @@ class AvatarWallpaperService : WallpaperService() {
                     
                     when (preset) {
                         "OPTION_B", "SUDA" -> {
-                            drawOptionBHexLattice(canvas, cx + 12f, cy + 40f, dynamicBaseRadius)
+                            drawOptionBHexLattice(canvas, cx + 12f, cy + 40f, dynamicBaseRadius, width, height)
                         }
                         "OPTION_C" -> {
                             drawOptionCDeltaTunnel(canvas, cx + 12f, cy + 40f, dynamicBaseRadius)
@@ -340,9 +350,33 @@ class AvatarWallpaperService : WallpaperService() {
 
         /**
          * Option A: Orbital Star / Iris (Classic Baseline)
-         * Enhanced with dynamic booming bass expansion and subtle idle harmonic breathing.
+         * Enhanced with dynamic booming bass expansion, ambient grounding pool behind/below the star,
+         * and subtle idle harmonic breathing.
          */
         private fun drawOptionAOrbitalStar(canvas: Canvas, cx: Float, cy: Float, dynamicBaseRadius: Float, isNoisy: Boolean) {
+            val bassBoost = smoothedBass * 3.2f // Booming expansion on audio beats!
+            val idleBreath = sin(rotationAngle * 0.4f) * 25f
+
+            // Ambient Environment Grounding Pool (Theatrical Stage Spot behind & beneath the avatar)
+            // Creates depth and grounds the space where the widget / 3 dots sit
+            val poolY = cy + 180f
+            val poolRadiusX = dynamicBaseRadius * 4.2f + (bassBoost * 0.5f)
+            val poolRadiusY = dynamicBaseRadius * 1.6f + (bassBoost * 0.2f)
+            val poolAlpha = (22 + (smoothedBass * 0.4f).toInt() + (strobeFlash * 45f).toInt()).coerceIn(15, 95)
+            val poolColor = if (isCustomPaletteActive) currentColors[0] else colorCobaltGlow
+
+            paint.style = Paint.Style.FILL
+            paint.shader = null
+            paint.color = poolColor
+            paint.alpha = poolAlpha
+            val poolRect = RectF(cx - poolRadiusX, poolY - poolRadiusY, cx + poolRadiusX, poolY + poolRadiusY)
+            canvas.drawOval(poolRect, paint)
+
+            // Outer softer ambient halo
+            val poolRectOuter = RectF(cx - poolRadiusX * 1.45f, poolY - poolRadiusY * 1.45f, cx + poolRadiusX * 1.45f, poolY + poolRadiusY * 1.45f)
+            paint.alpha = (poolAlpha * 0.45f).toInt().coerceIn(6, 45)
+            canvas.drawOval(poolRectOuter, paint)
+
             canvas.save()
             // Nudge rings slightly right and down to optically align with the ✧ glyph
             canvas.translate(cx + 12f, cy + 40f)
@@ -365,8 +399,6 @@ class AvatarWallpaperService : WallpaperService() {
             
             // Multi-pass bloom glow:
             // Idle harmonic breathing + explosive booming on audio kicks
-            val idleBreath = sin(rotationAngle * 0.4f) * 25f
-            val bassBoost = smoothedBass * 3.2f // Booming expansion on audio beats!
             val baseStarSize = 1200f 
             val bloomSizes = floatArrayOf(
                 baseStarSize + 550f + bassBoost + idleBreath,         // 0: Outermost Corona
@@ -407,23 +439,87 @@ class AvatarWallpaperService : WallpaperService() {
         }
 
         /**
-         * Option B: Hex Lattice & Lasers (Sacred Geometry / Suda)
+         * Option B: Hex Lattice & Stage Lighting (Sacred Geometry / Suda)
          * Hollow cyber-hex chamber with centered model unicode glyph (✧),
-         * vertex-aligned concentric hex halos, Beat Saber laser fan trapezoids, and spiral arms.
+         * vertex-aligned concentric hex halos, Beat Saber theatrical stage spotlight trapezoids
+         * (flash photography effect illuminating the space), and spiral arms.
          */
-        private fun drawOptionBHexLattice(canvas: Canvas, cx: Float, cy: Float, baseRadius: Float) {
+        private fun drawOptionBHexLattice(canvas: Canvas, cx: Float, cy: Float, baseRadius: Float, width: Float, height: Float) {
+            val bassKick = (smoothedBass * 1.5f).coerceAtLeast(0f)
+            val coreRadius = (baseRadius * 0.95f + bassKick * 0.6f).coerceIn(45f, 240f)
+
+            // 1. Beat Saber Stage Spotlights & Flash Photography (Paper Mache Depth)
+            // 4 Wide Volumetric Spotlight Cones / Trapezoids (Top-Left, Top-Right, Bottom-Left, Bottom-Right)
+            // In quiet passages: 0% opacity. On beat kicks: flashes blindingly bright (80-100% white/cyan),
+            // dramatically illuminating the surrounding room/space like a live concert lighting rig.
+            val stageFlashAlpha = if (strobeFlash > 0.04f) {
+                (strobeFlash * 255f).toInt().coerceIn(0, 255)
+            } else {
+                0
+            }
+
+            if (stageFlashAlpha > 0) {
+                val spotColor = if (strobeFlash > 0.35f) Color.WHITE else (if (isCustomPaletteActive) currentColors[0] else Color.parseColor("#38BDF8"))
+                
+                // Stage Spotlight Beam 1: Top-Left Rig aiming towards center chamber
+                val spotTL = Path().apply {
+                    moveTo(0f, 0f)
+                    lineTo(width * 0.32f, 0f)
+                    lineTo(cx + coreRadius * 0.7f, cy + coreRadius * 0.5f)
+                    lineTo(cx - coreRadius * 0.9f, cy - coreRadius * 0.4f)
+                    close()
+                }
+                // Stage Spotlight Beam 2: Top-Right Rig aiming towards center chamber
+                val spotTR = Path().apply {
+                    moveTo(width * 0.68f, 0f)
+                    lineTo(width, 0f)
+                    lineTo(cx + coreRadius * 0.9f, cy - coreRadius * 0.4f)
+                    lineTo(cx - coreRadius * 0.7f, cy + coreRadius * 0.5f)
+                    close()
+                }
+                // Stage Spotlight Beam 3: Bottom Truss Left aiming up
+                val spotBL = Path().apply {
+                    moveTo(0f, height * 0.88f)
+                    lineTo(0f, height)
+                    lineTo(cx + coreRadius * 0.8f, cy - coreRadius * 0.3f)
+                    lineTo(cx - coreRadius * 0.6f, cy + coreRadius * 0.8f)
+                    close()
+                }
+                // Stage Spotlight Beam 4: Bottom Truss Right aiming up
+                val spotBR = Path().apply {
+                    moveTo(width, height * 0.88f)
+                    lineTo(width, height)
+                    lineTo(cx + coreRadius * 0.6f, cy + coreRadius * 0.8f)
+                    lineTo(cx - coreRadius * 0.8f, cy - coreRadius * 0.3f)
+                    close()
+                }
+
+                val stageSpotlights = arrayOf(spotTL, spotTR, spotBL, spotBR)
+                for (spotPath in stageSpotlights) {
+                    // Translucent volumetric light interior
+                    paint.style = Paint.Style.FILL
+                    paint.color = spotColor
+                    paint.alpha = (stageFlashAlpha * 0.28f).toInt().coerceIn(0, 75)
+                    canvas.drawPath(spotPath, paint)
+
+                    // Crisp razor outer laser edge line
+                    paint.style = Paint.Style.STROKE
+                    paint.strokeWidth = 2.0f + (strobeFlash * 2.0f)
+                    paint.color = if (strobeFlash > 0.4f) Color.WHITE else Color.parseColor("#E0F2FE")
+                    paint.alpha = (stageFlashAlpha * 0.75f).toInt().coerceIn(0, 190)
+                    canvas.drawPath(spotPath, paint)
+                }
+            }
+
             canvas.save()
             canvas.translate(cx, cy)
             
             // Subtle slow rotational drift
             canvas.rotate(rotationAngle * 0.35f)
 
-            val bassKick = (smoothedBass * 1.5f).coerceAtLeast(0f)
-            val coreRadius = (baseRadius * 0.95f + bassKick * 0.6f).coerceIn(45f, 240f)
-
             paint.clearShadowLayer()
 
-            // 1. Concentric Vertex-Aligned Hexagonal Halos (Multi-Pass Bloom for Geometry)
+            // 2. Concentric Vertex-Aligned Hexagonal Halos (Multi-Pass Bloom for Geometry)
             paint.style = Paint.Style.STROKE
             val haloRadii = floatArrayOf(
                 coreRadius * 1.8f + bassKick * 0.8f,
@@ -441,59 +537,12 @@ class AvatarWallpaperService : WallpaperService() {
                 drawHexagon(canvas, 0f, 0f, haloRadii[h], paint)
             }
 
-            // 2. Beat Saber Laser Trapezoids & Vertex Beams (Strobelight Trigger on Beat Threshold)
-            val maxReach = (canvas.width + canvas.height) * 0.75f
-            val laserStrobeAlpha = if (strobeFlash > 0.04f) {
-                (strobeFlash * 255f).toInt().coerceIn(0, 255)
-            } else {
-                0 // 100% OFF during silence / non-beat!
-            }
-
-            if (laserStrobeAlpha > 0) {
-                for (arm in 0 until 6) {
-                    val vertexAngle = (arm * Math.PI / 3.0).toFloat()
-                    val cosA = cos(vertexAngle).toFloat()
-                    val sinA = sin(vertexAngle).toFloat()
-                    val normX = -sinA
-                    val normY = cosA
-
-                    val startDist = coreRadius * 1.05f
-                    val endDist = maxReach
-
-                    val wStart = 6f
-                    val wEnd = 60f + (smoothedBass * 0.3f)
-
-                    val p1x = (cosA * startDist) - (normX * wStart * 0.5f)
-                    val p1y = (sinA * startDist) - (normY * wStart * 0.5f)
-                    val p2x = (cosA * startDist) + (normX * wStart * 0.5f)
-                    val p2y = (sinA * startDist) + (normY * wStart * 0.5f)
-
-                    val p3x = (cosA * endDist) + (normX * wEnd * 0.5f)
-                    val p3y = (sinA * endDist) + (normY * wEnd * 0.5f)
-                    val p4x = (cosA * endDist) - (normX * wEnd * 0.5f)
-                    val p4y = (sinA * endDist) - (normY * wEnd * 0.5f)
-
-                    // Translucent laser beam interior fill
-                    val laserPath = Path()
-                    laserPath.moveTo(p1x, p1y)
-                    laserPath.lineTo(p2x, p2y)
-                    laserPath.lineTo(p3x, p3y)
-                    laserPath.lineTo(p4x, p4y)
-                    laserPath.close()
-
-                    paint.style = Paint.Style.FILL
-                    paint.color = if (isCustomPaletteActive) currentColors[arm % currentColors.size] else Color.parseColor("#38BDF8")
-                    paint.alpha = (laserStrobeAlpha * 0.45f).toInt().coerceIn(0, 110)
-                    canvas.drawPath(laserPath, paint)
-
-                    // Two razor-sharp solid outer laser edges (Beat Saber look)
-                    paint.style = Paint.Style.STROKE
-                    paint.strokeWidth = 2.2f + (strobeFlash * 2.5f)
-                    paint.color = if (strobeFlash > 0.4f) Color.WHITE else Color.parseColor("#E0F2FE")
-                    paint.alpha = laserStrobeAlpha
-                    canvas.drawLine(p1x, p1y, p4x, p4y, paint)
-                    canvas.drawLine(p2x, p2y, p3x, p3y, paint)
-                }
+            // High-energy strobe halo on prominent outer hex during beat flash
+            if (strobeFlash > 0.10f) {
+                paint.strokeWidth = 5f
+                paint.color = Color.WHITE
+                paint.alpha = (strobeFlash * 255f).toInt().coerceIn(0, 255)
+                drawHexagon(canvas, 0f, 0f, coreRadius * 2.8f + bassKick * 1.5f, paint)
             }
 
             // 3. Six Logarithmic Spiral Hex Arms
@@ -778,28 +827,75 @@ class AvatarWallpaperService : WallpaperService() {
                 canvas.drawPoint(starX, starY, paint)
             }
 
-            // 2. The Giant Striped Synthwave Sun (Horizon)
+            // 2. Volumetric Sky Stage Spotlights / Laser Rays (Beat Saber / Lightshow in the Sky)
+            val skyFlashAlpha = if (strobeFlash > 0.04f) {
+                (strobeFlash * 255f).toInt().coerceIn(0, 255)
+            } else {
+                0
+            }
+
+            if (skyFlashAlpha > 0) {
+                val skySpotColor = if (strobeFlash > 0.35f) Color.WHITE else Color.parseColor("#38BDF8")
+                // Left sky searchlight pointing down toward horizon sun
+                val skyBeamLeft = Path().apply {
+                    moveTo(0f, 0f)
+                    lineTo(width * 0.28f, 0f)
+                    lineTo(width * 0.45f, horizonY)
+                    lineTo(width * 0.38f, horizonY)
+                    close()
+                }
+                // Right sky searchlight pointing down toward horizon sun
+                val skyBeamRight = Path().apply {
+                    moveTo(width * 0.72f, 0f)
+                    lineTo(width, 0f)
+                    lineTo(width * 0.62f, horizonY)
+                    lineTo(width * 0.55f, horizonY)
+                    close()
+                }
+
+                val beams = arrayOf(skyBeamLeft, skyBeamRight)
+                for (b in beams) {
+                    paint.style = Paint.Style.FILL
+                    paint.color = skySpotColor
+                    paint.alpha = (skyFlashAlpha * 0.26f).toInt().coerceIn(0, 70)
+                    canvas.drawPath(b, paint)
+
+                    paint.style = Paint.Style.STROKE
+                    paint.strokeWidth = 2f + (strobeFlash * 2f)
+                    paint.color = Color.WHITE
+                    paint.alpha = (skyFlashAlpha * 0.65f).toInt().coerceIn(0, 175)
+                    canvas.drawPath(b, paint)
+                }
+            }
+
+            // 3. The Giant Synthwave Sun with Layered Concentric Alpha Bloom Discs
+            // Centered slightly higher on horizon for dramatic perspective
             val sunRadius = (min(width, height) * 0.30f + bassKick * 0.25f).coerceIn(85f, 320f)
             val sunCenterX = width * 0.5f + (rollOffset * 100f) + (launcherSwipeOffset * 90f)
-            val sunCenterY = horizonY - (sunRadius * 0.40f)
+            val sunCenterY = horizonY - (sunRadius * 0.50f)
 
-            // Sun Ambient Corona / Radiant Bloom behind sun
-            val coronaExtra = (bassKick * 0.6f) + (strobeFlash * 90f)
+            // Multi-pass stepped concentric bloom discs (popup book / paper mache depth)
+            // Solar flares expand outward dramatically on audio kicks and beat flash
+            val flareBoom = (bassKick * 0.7f) + (strobeFlash * 95f)
+            val sunBloomMultipliers = floatArrayOf(2.2f, 1.75f, 1.4f, 1.15f)
+            val sunBloomAlphas = intArrayOf(25, 48, 85, 140)
+            val sunBloomColors = intArrayOf(
+                Color.parseColor("#E11D48"), // 0: Deep hot magenta outer flare
+                Color.parseColor("#F43F5E"), // 1: Neon pink mid-outer corona
+                Color.parseColor("#FB923C"), // 2: Solar amber mid-inner aura
+                Color.parseColor("#FBBF24")  // 3: Electric gold inner corona
+            )
+
             paint.style = Paint.Style.FILL
-            val coronaColors = intArrayOf(
-                Color.parseColor("#F43F5E"), // Hot pink
-                Color.parseColor("#FB923C"), // Solar amber
-                Color.TRANSPARENT
-            )
-            paint.shader = RadialGradient(
-                sunCenterX, sunCenterY, sunRadius + 60f + coronaExtra,
-                coronaColors, floatArrayOf(0.4f, 0.75f, 1f), Shader.TileMode.CLAMP
-            )
-            paint.alpha = (100 + (smoothedBass * 0.4f).toInt() + (strobeFlash * 140f).toInt()).coerceIn(60, 255)
-            canvas.drawCircle(sunCenterX, sunCenterY, sunRadius + 60f + coronaExtra, paint)
             paint.shader = null
+            for (sb in sunBloomMultipliers.indices) {
+                val r = (sunRadius * sunBloomMultipliers[sb]) + flareBoom
+                paint.color = if (isCustomPaletteActive) currentColors[sb % currentColors.size] else sunBloomColors[sb]
+                paint.alpha = ((sunBloomAlphas[sb] + (strobeFlash * 90f).toInt())).coerceIn(15, 255)
+                canvas.drawCircle(sunCenterX, sunCenterY, r, paint)
+            }
 
-            // Sun Body with Vertical Gradient: Yellow -> Orange -> Neon Magenta
+            // Sun Core Body with Vertical Gradient: Yellow -> Orange -> Neon Magenta
             val sunShader = LinearGradient(
                 sunCenterX, sunCenterY - sunRadius,
                 sunCenterX, sunCenterY + sunRadius,
@@ -835,14 +931,14 @@ class AvatarWallpaperService : WallpaperService() {
                 )
             }
 
-            // 3. Horizon Neon Glow Line (The divide between sky and wireframe floor)
+            // 4. Horizon Neon Glow Line (The divide between sky and wireframe floor)
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 3f + (strobeFlash * 4f)
             paint.color = if (strobeFlash > 0.05f) Color.WHITE else Color.parseColor("#38BDF8")
             paint.alpha = (160 + (strobeFlash * 95f).toInt()).coerceIn(120, 255)
             canvas.drawLine(0f, horizonY, width, horizonY, paint)
 
-            // 4. Full-Screen 3D Perspective Terrain Mesh with Equalizer Mountain Ridges
+            // 5. Full-Screen 3D Perspective Terrain Mesh with Equalizer Mountain Ridges
             val numRows = 22
             val numCols = 16 // -8 to +8 columns
             val gridGroundBottom = height * 1.05f
@@ -888,6 +984,23 @@ class AvatarWallpaperService : WallpaperService() {
                 }
             }
 
+            // A) Illuminated Highway Bed Fill (Rich Environment beneath wireframe rungs)
+            // Fills the center 3 highway lanes (|col| <= 1) with a deep neon cyan glow
+            val highwayBedPath = Path()
+            val centerColL = numCols / 2 - 1
+            val centerColR = numCols / 2 + 1
+            highwayBedPath.moveTo(meshX[0][centerColL], meshY[0][centerColL])
+            highwayBedPath.lineTo(meshX[0][centerColR], meshY[0][centerColR])
+            highwayBedPath.lineTo(meshX[numRows][centerColR], meshY[numRows][centerColR])
+            highwayBedPath.lineTo(meshX[numRows][centerColL], meshY[numRows][centerColL])
+            highwayBedPath.close()
+
+            paint.style = Paint.Style.FILL
+            paint.shader = null
+            paint.color = if (strobeFlash > 0.05f) Color.parseColor("#0E2A47") else Color.parseColor("#071526")
+            paint.alpha = (70 + (smoothedBass * 0.5f).toInt() + (strobeFlash * 60f).toInt()).coerceIn(40, 180)
+            canvas.drawPath(highwayBedPath, paint)
+
             // Draw Wireframe Terrain Mesh:
             val terrainColor = if (strobeFlash > 0.05f) {
                 ColorUtils.blendARGB(Color.parseColor("#E11D48"), Color.WHITE, strobeFlash)
@@ -899,7 +1012,7 @@ class AvatarWallpaperService : WallpaperService() {
 
             paint.style = Paint.Style.STROKE
 
-            // A) Horizontal Rung Lines (across columns for each depth row)
+            // B) Horizontal Rung Lines (across columns for each depth row)
             for (r in 0..numRows) {
                 val p = r.toFloat() / numRows.toFloat()
                 val depthZ = p * p
@@ -913,13 +1026,16 @@ class AvatarWallpaperService : WallpaperService() {
                 }
             }
 
-            // B) Longitudinal Lines (connecting depth rows from horizon to foreground)
+            // C) Longitudinal Lines (connecting depth rows from horizon to foreground)
             for (c in 0..numCols) {
                 val colIndexFromCenter = (c - numCols / 2)
                 val absCol = abs(colIndexFromCenter)
                 val isHighway = absCol <= 2
-                val colColor = if (isHighway) {
-                    if (strobeFlash > 0.05f) Color.WHITE else Color.parseColor("#38BDF8")
+                val isHighwayEdge = absCol == 2
+                val colColor = if (isHighwayEdge) {
+                    if (strobeFlash > 0.05f) Color.WHITE else Color.parseColor("#38BDF8") // Glowing cyan boundary rails
+                } else if (isHighway) {
+                    Color.parseColor("#67E8F9") // Light sky cyan road rungs
                 } else {
                     terrainColor
                 }
@@ -946,32 +1062,51 @@ class AvatarWallpaperService : WallpaperService() {
                 }
             }
 
-            // 5. Center Outrun Hovercraft / Avatar
+            // 6. Centered Outrun Gemma Jet / Hovercraft (Hopping smoothly between lanes)
             val craftRow = (numRows * 0.82f).toInt().coerceIn(0, numRows)
-            val craftX = (meshX[craftRow][numCols / 2] + meshX[craftRow][numCols / 2 + 1]) * 0.5f
-            val craftY = (meshY[craftRow][numCols / 2] + meshY[craftRow][numCols / 2 + 1]) * 0.5f
+            
+            // Lane interpolation: lane 0 = center, -1 = left lane, +1 = right lane
+            val currentLanePos = bugLane + (bugTargetLane - bugLane) * bugHopProgress
+            val centerCol = numCols / 2
+            val leftLaneX = meshX[craftRow][centerCol - 1]
+            val centerLaneX = meshX[craftRow][centerCol]
+            val rightLaneX = meshX[craftRow][centerCol + 1]
+
+            val craftX = when {
+                currentLanePos < 0f -> centerLaneX + (leftLaneX - centerLaneX) * (-currentLanePos)
+                else -> centerLaneX + (rightLaneX - centerLaneX) * currentLanePos
+            }
+            // Vertical arc hop during lane transition
+            val hopArcY = sin(bugHopProgress * Math.PI.toFloat()) * 26f
+            val craftY = meshY[craftRow][centerCol] - hopArcY
 
             canvas.save()
             canvas.translate(craftX, craftY)
-            canvas.rotate(rollOffset * 40f)
+            canvas.rotate(rollOffset * 35f + (bugTargetLane - bugLane) * 12f * (1f - bugHopProgress))
 
-            val craftSize = (width * 0.06f + (bassKick * 0.08f)).coerceIn(24f, 75f)
+            val craftSize = (width * 0.062f + (bassKick * 0.08f)).coerceIn(26f, 78f)
 
-            // Neon thruster flame
+            // Neon thruster flame (swapping colors with the jet body on beat kicks)
             paint.style = Paint.Style.FILL
-            paint.color = if (strobeFlash > 0.05f) Color.WHITE else Color.parseColor("#38BDF8")
-            paint.alpha = (160 + (smoothedBass * 0.8f).toInt() + (strobeFlash * 90f).toInt()).coerceIn(100, 255)
-            canvas.drawCircle(0f, craftSize * 0.7f, craftSize * 0.32f + (strobeFlash * 8f), paint)
+            val thrusterColor = if (strobeFlash > 0.05f) {
+                Color.parseColor("#F43F5E") // Hot neon flame on beat
+            } else {
+                Color.parseColor("#38BDF8") // Electric cyan cruise flame
+            }
+            paint.color = thrusterColor
+            paint.alpha = (180 + (smoothedBass * 0.7f).toInt() + (strobeFlash * 75f).toInt()).coerceIn(120, 255)
+            canvas.drawCircle(0f, craftSize * 0.72f, craftSize * 0.35f + (strobeFlash * 10f), paint)
 
-            // Sleek vector craft body
+            // Sleek vector jet craft body
             paint.color = Color.parseColor("#090D16")
             paint.alpha = 245
-            val craftPath = Path()
-            craftPath.moveTo(0f, -craftSize)
-            craftPath.lineTo(craftSize * 0.75f, craftSize * 0.65f)
-            craftPath.lineTo(0f, craftSize * 0.40f)
-            craftPath.lineTo(-craftSize * 0.75f, craftSize * 0.65f)
-            craftPath.close()
+            val craftPath = Path().apply {
+                moveTo(0f, -craftSize)
+                lineTo(craftSize * 0.75f, craftSize * 0.65f)
+                lineTo(0f, craftSize * 0.40f)
+                lineTo(-craftSize * 0.75f, craftSize * 0.65f)
+                close()
+            }
             canvas.drawPath(craftPath, paint)
 
             paint.style = Paint.Style.STROKE
@@ -980,8 +1115,8 @@ class AvatarWallpaperService : WallpaperService() {
             paint.alpha = 255
             canvas.drawPath(craftPath, paint)
 
-            // Center Model Glyph (✧)
-            logoPaint.color = if (strobeFlash > 0.05f) Color.parseColor("#38BDF8") else Color.WHITE
+            // Center Model Glyph (✧) with glowing bloom
+            logoPaint.color = if (strobeFlash > 0.05f) Color.WHITE else Color.parseColor("#38BDF8")
             logoPaint.alpha = 255
             logoPaint.textSize = craftSize * 0.95f
             val cOff = (logoPaint.descent() + logoPaint.ascent()) / 2f
