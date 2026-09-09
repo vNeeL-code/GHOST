@@ -191,62 +191,70 @@ class AvatarWallpaperService : WallpaperService() {
                     
                     val isNoisy = smoothedBass > 100f || smoothedIntensity > 80f
                     
-                    canvas.save()
-                    // Nudge rings slightly right and down to optically align with the ✧ glyph
-                    canvas.translate(cx + 12f, cy + 40f)
-                    canvas.rotate(rotationAngle)
+                    val preset = prefs.getString(Constants.PREF_VISUALIZER_PRESET, "GHOST") ?: "GHOST"
                     
-                    if (isNoisy) {
-                        drawIris(canvas, dynamicBaseRadius)
+                    if (preset == "SUDA") {
+                        // === PRESET 1: CEPHALON SUDA (Warframe Hexagonal Lattice & Sacred Geometry) ===
+                        drawCephalonSuda(canvas, cx + 12f, cy + 40f, dynamicBaseRadius)
                     } else {
-                        drawOscilloscopeFlower(canvas, dynamicBaseRadius)
-                    }
-                    
-                    canvas.restore()
-                    
-                    // Multi-pass bloom glow:
-                    // 1. When IDLE: Pure, deterministic single-tone Ethereal Cobalt (#8BB4F6) across all passes
-                    // 2. When PLAYING MUSIC: Dynamic multi-layer album art swatch extraction (Vibrant, Dominant, Muted, DarkVibrant)
-                    val bassBoost = smoothedBass * 1.5f
-                    val baseStarSize = 1200f 
-                    val bloomSizes   = floatArrayOf(
-                        baseStarSize + 500f + bassBoost, // 0: Outermost Corona
-                        baseStarSize + 300f + bassBoost, // 1: Mid-Outer Halo
-                        baseStarSize + 150f + bassBoost, // 2: Mid-Inner Aura
-                        baseStarSize + 50f + bassBoost   // 3: Inner (Closest to Star)
-                    )
-                    val bloomAlphas  = intArrayOf(35, 60, 95, 140)
-                    
-                    logoPaint.clearShadowLayer()
-                    for (i in bloomSizes.indices) {
-                        val layerColor = if (isCustomPaletteActive) {
-                            // Extract multi-swatch palette from album art
-                            val swatchIndex = when (i) {
-                                3 -> 1 % currentColors.size // Vibrant
-                                2 -> 0 % currentColors.size // Dominant
-                                1 -> 2 % currentColors.size // Muted
-                                else -> 3 % currentColors.size // Dark Vibrant
-                            }
-                            val rawColor = currentColors[swatchIndex]
-                            ensureVisibleBloomColor(rawColor, colorCobaltGlow)
+                        // === PRESET 0: CLASSIC GHOST (Default Baseline — 100% untouched) ===
+                        canvas.save()
+                        // Nudge rings slightly right and down to optically align with the ✧ glyph
+                        canvas.translate(cx + 12f, cy + 40f)
+                        canvas.rotate(rotationAngle)
+                        
+                        if (isNoisy) {
+                            drawIris(canvas, dynamicBaseRadius)
                         } else {
-                            // Default idle state: Pure deterministic Ethereal Cobalt (#8BB4F6)
-                            colorCobaltGlow
+                            drawOscilloscopeFlower(canvas, dynamicBaseRadius)
                         }
+                        
+                        canvas.restore()
+                        
+                        // Multi-pass bloom glow:
+                        // 1. When IDLE: Pure, deterministic single-tone Ethereal Cobalt (#8BB4F6) across all passes
+                        // 2. When PLAYING MUSIC: Dynamic multi-layer album art swatch extraction (Vibrant, Dominant, Muted, DarkVibrant)
+                        val bassBoost = smoothedBass * 1.5f
+                        val baseStarSize = 1200f 
+                        val bloomSizes   = floatArrayOf(
+                            baseStarSize + 500f + bassBoost, // 0: Outermost Corona
+                            baseStarSize + 300f + bassBoost, // 1: Mid-Outer Halo
+                            baseStarSize + 150f + bassBoost, // 2: Mid-Inner Aura
+                            baseStarSize + 50f + bassBoost   // 3: Inner (Closest to Star)
+                        )
+                        val bloomAlphas  = intArrayOf(35, 60, 95, 140)
+                        
+                        logoPaint.clearShadowLayer()
+                        for (i in bloomSizes.indices) {
+                            val layerColor = if (isCustomPaletteActive) {
+                                // Extract multi-swatch palette from album art
+                                val swatchIndex = when (i) {
+                                    3 -> 1 % currentColors.size // Vibrant
+                                    2 -> 0 % currentColors.size // Dominant
+                                    1 -> 2 % currentColors.size // Muted
+                                    else -> 3 % currentColors.size // Dark Vibrant
+                                }
+                                val rawColor = currentColors[swatchIndex]
+                                ensureVisibleBloomColor(rawColor, colorCobaltGlow)
+                            } else {
+                                // Default idle state: Pure deterministic Ethereal Cobalt (#8BB4F6)
+                                colorCobaltGlow
+                            }
 
-                        logoPaint.color = layerColor
-                        logoPaint.textSize = bloomSizes[i]
-                        logoPaint.alpha    = bloomAlphas[i]
-                        val off = (logoPaint.descent() + logoPaint.ascent()) / 2f
-                        canvas.drawText("✧", cx, cy - off, logoPaint)
+                            logoPaint.color = layerColor
+                            logoPaint.textSize = bloomSizes[i]
+                            logoPaint.alpha    = bloomAlphas[i]
+                            val off = (logoPaint.descent() + logoPaint.ascent()) / 2f
+                            canvas.drawText("✧", cx, cy - off, logoPaint)
+                        }
+                        
+                        // Crisp Core star
+                        logoPaint.color    = Color.parseColor("#F8FAFC")
+                        logoPaint.alpha    = 255
+                        logoPaint.textSize = baseStarSize
+                        val textOffset = (logoPaint.descent() + logoPaint.ascent()) / 2f
+                        canvas.drawText("✧", cx, cy - textOffset, logoPaint)
                     }
-                    
-                    // Crisp Core star
-                    logoPaint.color    = Color.parseColor("#F8FAFC")
-                    logoPaint.alpha    = 255
-                    logoPaint.textSize = baseStarSize
-                    val textOffset = (logoPaint.descent() + logoPaint.ascent()) / 2f
-                    canvas.drawText("✧", cx, cy - textOffset, logoPaint)
                 }
             } finally {
                 if (canvas != null) {
@@ -324,6 +332,119 @@ class AvatarWallpaperService : WallpaperService() {
                     canvas.drawCircle(0f, 0f, radius, paint)
                 }
             }
+        }
+
+        /**
+         * Preset 1: Cephalon Suda (Warframe)
+         * 6-fold radial symmetry with procedural spiral arms of audio-reactive hexagons.
+         * Math: Pure polar trigonometry on a 6-phase axis, modulated by FFT bass & treble.
+         */
+        private fun drawCephalonSuda(canvas: Canvas, cx: Float, cy: Float, baseRadius: Float) {
+            canvas.save()
+            canvas.translate(cx, cy)
+            
+            // Subtle slow rotational drift
+            canvas.rotate(rotationAngle * 0.4f)
+
+            val bassKick = (smoothedBass * 1.2f).coerceAtLeast(0f)
+            val coreRadius = (baseRadius * 0.85f + bassKick * 0.5f).coerceIn(40f, 220f)
+
+            paint.style = Paint.Style.FILL
+            paint.clearShadowLayer()
+
+            // 1. Mother Hexagon (Center Core of Suda)
+            paint.color = Color.parseColor("#F8FAFC")
+            paint.alpha = 240
+            drawHexagon(canvas, 0f, 0f, coreRadius, paint)
+
+            // Inner core shadow / accent ring
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 6f
+            paint.color = if (isCustomPaletteActive) currentColors[0] else Color.parseColor("#38BDF8")
+            paint.alpha = 220
+            drawHexagon(canvas, 0f, 0f, coreRadius * 0.72f, paint)
+
+            // 2. Six Spiral Hex Arms of Suda
+            val numArms = 6
+            val hexesPerArm = 5
+            val spiralTwist = 0.22f // Farbrausch domain warp curvature
+
+            for (arm in 0 until numArms) {
+                val baseAngle = (arm * Math.PI * 2.0 / numArms).toFloat()
+
+                for (step in 1..hexesPerArm) {
+                    val progress = step.toFloat() / hexesPerArm.toFloat()
+                    
+                    // Curved logarithmic spiral distance
+                    val distance = coreRadius * 1.45f + (step * (42f + bassKick * 0.45f))
+                    val angle = baseAngle + (step * spiralTwist) + (smoothedIntensity * 0.003f)
+
+                    val hx = (cos(angle) * distance).toFloat()
+                    val hy = (sin(angle) * distance).toFloat()
+
+                    // Hex sizes shrink outward toward arm tips
+                    val hexSize = (coreRadius * 0.32f * (1.1f - progress * 0.55f) + (smoothedIntensity * 0.1f)).coerceAtLeast(10f)
+
+                    // FFT frequency mapping: inner hexes react to bass, outer hexes to treble
+                    val fftIdx = (step * 2).coerceIn(0, if (currentFft.isEmpty()) 0 else currentFft.size / 2 - 1)
+                    val fftMag = if (currentFft.isNotEmpty()) {
+                        val r = currentFft[fftIdx * 2].toInt()
+                        val ic = currentFft[fftIdx * 2 + 1].toInt()
+                        kotlin.math.hypot(r.toDouble(), ic.toDouble()).toFloat()
+                    } else 10f
+
+                    val colorIdx = (arm + step) % currentColors.size
+                    val armColor = if (isCustomPaletteActive) currentColors[colorIdx] else {
+                        when (step) {
+                            1 -> Color.parseColor("#F1F5F9") // Pure white near center
+                            2 -> Color.parseColor("#93C5FD") // Pale Cobalt
+                            3 -> Color.parseColor("#38BDF8") // Vivid Cyan
+                            4 -> Color.parseColor("#818CF8") // Indigo
+                            else -> Color.parseColor("#A78BFA") // Electric Purple tip
+                        }
+                    }
+
+                    // Filled hex with subtle alpha decay
+                    paint.style = Paint.Style.FILL
+                    paint.color = armColor
+                    paint.alpha = ((1f - progress * 0.35f) * 230).toInt().coerceIn(40, 255)
+                    drawHexagon(canvas, hx, hy, hexSize + (fftMag * 0.08f), paint)
+
+                    // Crisp geometric stroke outline
+                    paint.style = Paint.Style.STROKE
+                    paint.strokeWidth = 3f
+                    paint.color = Color.WHITE
+                    paint.alpha = ((1f - progress * 0.5f) * 180).toInt().coerceIn(20, 200)
+                    drawHexagon(canvas, hx, hy, hexSize + (fftMag * 0.08f), paint)
+                }
+            }
+
+            // 3. Ethereal Suda Hexagonal Corona Glow (Multi-pass)
+            paint.style = Paint.Style.STROKE
+            val glowRadius = coreRadius * 2.8f + bassKick * 1.5f
+            for (g in 1..3) {
+                paint.strokeWidth = 4f * g
+                paint.color = if (isCustomPaletteActive) currentColors[g % currentColors.size] else Color.parseColor("#38BDF8")
+                paint.alpha = (90 / g).coerceIn(10, 100)
+                drawHexagon(canvas, 0f, 0f, glowRadius + (g * 35f), paint)
+            }
+
+            canvas.restore()
+        }
+
+        /**
+         * Regular 6-vertex regular polygon generator
+         */
+        private fun drawHexagon(canvas: Canvas, x: Float, y: Float, radius: Float, paint: Paint) {
+            val path = Path()
+            for (i in 0 until 6) {
+                val angle = (i * Math.PI / 3.0).toFloat()
+                val px = x + (radius * cos(angle))
+                val py = y + (radius * sin(angle))
+                if (i == 0) path.moveTo(px, py) else path.lineTo(px, py)
+            }
+            path.close()
+            canvas.drawPath(path, paint)
         }
 
         override fun onSensorChanged(event: SensorEvent?) {
