@@ -70,7 +70,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     
     // UI streaming interface for the native chat activity
     interface UiCallback {
-        fun onMessageAdded(message: String, isUser: Boolean, isComplete: Boolean = true)
+        fun onMessageAdded(message: String, isUser: Boolean, isComplete: Boolean = true, image: android.graphics.Bitmap? = null)
         fun onThinkingStateChanged(isThinking: Boolean)
         fun onThoughtUpdated(thought: String)
         fun onDownloadProgress(progressText: String?) {}
@@ -908,7 +908,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
         val userBackend = prefs.getString(Constants.PREF_USER_BACKEND, "AUTO")
         if (userBackend == "OFF") {
-            uiCallback?.onMessageAdded(query, isUser = true)
+            uiCallback?.onMessageAdded(query, isUser = true, image = images?.firstOrNull())
             uiCallback?.onMessageAdded("Inference Engine is set to OFF in Settings. Select AUTO, CPU, or GPU to enable on-device chat.", isUser = false)
             return
         }
@@ -918,7 +918,28 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         }
         images?.forEach { koogAgent.offerImage(it) }
         audio?.let { koogAgent.offerAudio(it) }
-        processQueryFromUi(query)
+
+        // Emit user message with attached image preview
+        uiCallback?.onMessageAdded(query, isUser = true, image = images?.firstOrNull())
+        uiCallback?.onThinkingStateChanged(true)
+
+        serviceScope.launch {
+            try {
+                val response = processQuery(query, null, false)
+                withContext(Dispatchers.Main) {
+                    uiCallback?.onThinkingStateChanged(false)
+                    if (response == null) {
+                        uiCallback?.onMessageAdded("Error: Request timed out or returned null.", isUser = false)
+                    }
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "UI multimodal processing failure")
+                withContext(Dispatchers.Main) {
+                    uiCallback?.onThinkingStateChanged(false)
+                    uiCallback?.onMessageAdded("Error: ${e.message}", isUser = false)
+                }
+            }
+        }
     }
 
     suspend fun recordAudio(durationSeconds: Int): ByteArray? {

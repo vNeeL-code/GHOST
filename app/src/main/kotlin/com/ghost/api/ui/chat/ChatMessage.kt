@@ -11,5 +11,6 @@ data class ChatMessage(
     val isComplete: Boolean = true,
     val thought: String? = null,
     val webviewUrl: String? = null,
-    val webviewAspectRatio: Float? = null
+    val webviewAspectRatio: Float? = null,
+    val image: android.graphics.Bitmap? = null
 )

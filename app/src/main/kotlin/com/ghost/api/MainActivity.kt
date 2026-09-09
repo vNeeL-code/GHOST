@@ -170,6 +170,9 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
                     onOpenSettings = {
                         showSettings = true
                     },
+                    onPlayMessage = { text ->
+                        ttsManager.forceSpeak(text)
+                    },
                     visualizerViewFactory = { context ->
                         AudioVisualizerView(context).apply {
                             audioVisualizerView = this
@@ -246,10 +249,10 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
         }
     }
 
-    override fun onMessageAdded(message: String, isUser: Boolean, isComplete: Boolean) {
+    override fun onMessageAdded(message: String, isUser: Boolean, isComplete: Boolean, image: android.graphics.Bitmap?) {
         lifecycleScope.launch(Dispatchers.Main) {
             if (isUser) {
-                chatViewModel.addMessage(ChatMessage(message, isFromUser = true))
+                chatViewModel.addMessage(ChatMessage(message, isFromUser = true, image = image))
             } else {
                 val current = chatViewModel.messages.value
                 val last = current.lastOrNull()
@@ -278,11 +281,11 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
 
     private fun sendStagedMessage(text: String) {
         val bitmap = chatViewModel.attachedImage.value
+        chatViewModel.setAttachedImage(null)
         if (bitmap != null) {
             scope.launch {
                 gemmaService?.processMultimodalFromUi(text, listOf(bitmap))
                 withContext(Dispatchers.Main) {
-                    chatViewModel.setAttachedImage(null)
                     Toast.makeText(this@MainActivity, "Sent with image", Toast.LENGTH_SHORT).show()
                 }
             }

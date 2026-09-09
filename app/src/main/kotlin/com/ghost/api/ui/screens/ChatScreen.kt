@@ -27,7 +27,12 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -57,6 +62,7 @@ fun ChatScreen(
     onClearImage: () -> Unit,
     onToggleThinking: (ChatMessage) -> Unit,
     onOpenSettings: () -> Unit,
+    onPlayMessage: (String) -> Unit = {},
     visualizerViewFactory: ((Context) -> android.view.View)? = null
 ) {
     val listState = rememberLazyListState()
@@ -175,7 +181,8 @@ fun ChatScreen(
             items(messages) { message ->
                 ChatMessageRow(
                     message = message,
-                    onToggleThinking = { onToggleThinking(message) }
+                    onToggleThinking = { onToggleThinking(message) },
+                    onPlayMessage = onPlayMessage
                 )
             }
         }
@@ -226,7 +233,11 @@ fun ChatScreen(
 }
 
 @Composable
-fun ChatMessageRow(message: ChatMessage, onToggleThinking: () -> Unit) {
+fun ChatMessageRow(
+    message: ChatMessage,
+    onToggleThinking: () -> Unit,
+    onPlayMessage: (String) -> Unit = {}
+) {
     val isUser = message.isFromUser
     
     // Process display content (strip thought, tool calls, and control protocol markup)
@@ -287,6 +298,10 @@ fun ChatMessageRow(message: ChatMessage, onToggleThinking: () -> Unit) {
 
     var showThinking by remember { mutableStateOf(false) }
 
+    val annotatedText = remember(finalDisplayContent, textColor) {
+        buildMarkdownAnnotatedString(finalDisplayContent, textColor)
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -295,12 +310,12 @@ fun ChatMessageRow(message: ChatMessage, onToggleThinking: () -> Unit) {
     ) {
         Column(
             modifier = Modifier
-                .widthIn(max = 320.dp)
+                .widthIn(max = 380.dp)
                 .background(bubbleColor, shape)
                 .border(1.dp, AccentBorder, shape)
                 .padding(16.dp)
         ) {
-            // Header with 1-tap Copy Button (UCF format)
+            // Header with 1-tap Copy Button (UCF format) and Play (TTS) Button
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -316,17 +331,31 @@ fun ChatMessageRow(message: ChatMessage, onToggleThinking: () -> Unit) {
                     letterSpacing = 0.1.sp
                 )
 
-                Text(
-                    text = "📋",
-                    fontSize = 13.sp,
-                    modifier = Modifier
-                        .clickable {
-                            clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(ucfFormattedContent))
-                            Toast.makeText(context, "Copied UCF to clipboard", Toast.LENGTH_SHORT).show()
-                        }
-                        .alpha(0.6f)
-                        .padding(start = 8.dp)
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (displayContent.isNotEmpty()) {
+                        Text(
+                            text = "🔊",
+                            fontSize = 13.sp,
+                            modifier = Modifier
+                                .clickable {
+                                    onPlayMessage(displayContent)
+                                }
+                                .alpha(0.7f)
+                                .padding(end = 8.dp)
+                        )
+                    }
+
+                    Text(
+                        text = "📋",
+                        fontSize = 13.sp,
+                        modifier = Modifier
+                            .clickable {
+                                clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(ucfFormattedContent))
+                                Toast.makeText(context, "Copied UCF to clipboard", Toast.LENGTH_SHORT).show()
+                            }
+                            .alpha(0.6f)
+                    )
+                }
             }
             
             // Thinking block
@@ -359,16 +388,114 @@ fun ChatMessageRow(message: ChatMessage, onToggleThinking: () -> Unit) {
                     }
                 }
             }
+
+            // Attached / Sent Image Thumbnail
+            if (message.image != null) {
+                Image(
+                    bitmap = message.image.asImageBitmap(),
+                    contentDescription = "Message Image Attachment",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 240.dp)
+                        .padding(bottom = 8.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .border(1.dp, Color(0x338BB4F6), RoundedCornerShape(12.dp)),
+                    contentScale = ContentScale.Crop
+                )
+            }
             
             // Message Content
             SelectionContainer {
                 Text(
-                    text = finalDisplayContent,
-                    color = textColor,
+                    text = annotatedText,
                     fontSize = 15.sp,
-                    lineHeight = 19.sp
+                    lineHeight = 20.sp
                 )
             }
+        }
+    }
+}
+
+/**
+ * Lightweight, zero-dependency Markdown parser for Jetpack Compose.
+ * Formats:
+ * - ```code blocks``` -> Monospace with subtle tinted pill background
+ * - `inline code` -> Monospace with subtle tinted pill background
+ * - **bold** or __bold__ -> Bold font weight
+ * - *italic* or _italic_ -> Italic font style
+ */
+private fun buildMarkdownAnnotatedString(
+    text: String,
+    defaultColor: Color
+): androidx.compose.ui.text.AnnotatedString {
+    return buildAnnotatedString {
+        var cursor = 0
+        val len = text.length
+
+        // Tokenize into code blocks, inline code, bold, italic, or plain text
+        val pattern = Regex("```([\\s\\S]*?)```|`([^`]+)`|\\*\\*([^*]+)\\*\\*|__([^_]+)__|\\*([^*]+)\\*|_([^_]+)_")
+        val matches = pattern.findAll(text)
+
+        for (match in matches) {
+            val range = match.range
+            if (range.first > cursor) {
+                // Append text before match
+                pushStyle(SpanStyle(color = defaultColor))
+                append(text.substring(cursor, range.first))
+                pop()
+            }
+
+            when {
+                // Code block: ```content```
+                match.value.startsWith("```") -> {
+                    val code = match.groupValues[1].removePrefix("\n").removeSuffix("\n")
+                    pushStyle(
+                        SpanStyle(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 13.sp,
+                            background = Color(0x22FFFFFF),
+                            color = Color(0xFFF1F5F9)
+                        )
+                    )
+                    append("\n$code\n")
+                    pop()
+                }
+                // Inline code: `content`
+                match.value.startsWith("`") -> {
+                    val code = match.groupValues[2]
+                    pushStyle(
+                        SpanStyle(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 13.sp,
+                            background = Color(0x228BB4F6),
+                            color = Color(0xFF93C5FD)
+                        )
+                    )
+                    append(" $code ")
+                    pop()
+                }
+                // Bold: **content** or __content__
+                match.value.startsWith("**") || match.value.startsWith("__") -> {
+                    val content = if (match.value.startsWith("**")) match.groupValues[3] else match.groupValues[4]
+                    pushStyle(SpanStyle(fontWeight = FontWeight.Bold, color = defaultColor))
+                    append(content)
+                    pop()
+                }
+                // Italic: *content* or _content_
+                match.value.startsWith("*") || match.value.startsWith("_") -> {
+                    val content = if (match.value.startsWith("*")) match.groupValues[5] else match.groupValues[6]
+                    pushStyle(SpanStyle(fontStyle = FontStyle.Italic, color = defaultColor))
+                    append(content)
+                    pop()
+                }
+            }
+            cursor = range.last + 1
+        }
+
+        if (cursor < len) {
+            pushStyle(SpanStyle(color = defaultColor))
+            append(text.substring(cursor, len))
+            pop()
         }
     }
 }
