@@ -239,15 +239,21 @@ fun ChatMessageRow(
     onPlayMessage: (String) -> Unit = {}
 ) {
     val isUser = message.isFromUser
+
+    // Extract tool calls & responses before stripping markup
+    val rawContent = message.content
+    val extractedTools = remember(rawContent) {
+        extractToolInvocations(rawContent)
+    }
     
     // Process display content (strip thought, tool calls, and control protocol markup)
-    val displayContent = message.content
+    val displayContent = rawContent
         .replace(Regex("<think>.*?</think>", RegexOption.DOT_MATCHES_ALL), "")
         .replace(Regex("<\\|channel>thought.*?<channel\\|>", RegexOption.DOT_MATCHES_ALL), "")
         .replace(Regex("<\\|?channel>?|<channel\\|?>"), "")
         .replace(Regex("<\\|tool_call>.*?<tool_call\\|>", RegexOption.DOT_MATCHES_ALL), "")
         .replace(Regex("<\\|tool_call>|<tool_call\\|>"), "")
-        .replace(Regex("<\\|tool_response>|<tool_response\\|>"), "")
+        .replace(Regex("<\\|tool_response>.*?<tool_response\\|>"), "")
         .replace(Regex("\\[\\[([A-Z_a-z0-9]+)(?::([^\\]]+))?\\]\\]"), "")
         .trim()
     
@@ -260,10 +266,23 @@ fun ChatMessageRow(
     val cleanDeviceName = remember(context) { com.ghost.api.logic.ContextManager.resolveDeviceCallSign(context) }
     val aiHeaderTag = remember(cleanDeviceName) { "✧ $cleanDeviceName" }
 
+    // Pulsing terminal cursor for streaming assistant tokens
+    val infiniteTransition = rememberInfiniteTransition(label = "cursor")
+    val cursorAlpha by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(500, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "cursorAlpha"
+    )
+
     val finalDisplayContent = if (isUser) {
         "$displayContent\n\n[$timeStr]"
     } else {
-        "$aiHeaderTag:\n$displayContent\n\n[$timeStr]"
+        val cursorSuffix = if (!message.isComplete) " ▋" else ""
+        "$aiHeaderTag:\n$displayContent$cursorSuffix\n\n[$timeStr]"
     }
     
     val alignment = if (isUser) Alignment.End else Alignment.Start
@@ -389,6 +408,19 @@ fun ChatMessageRow(
                 }
             }
 
+            // Operit-Style Collapsible Interactive Tool Invocations
+            if (extractedTools.isNotEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp)
+                ) {
+                    extractedTools.forEach { tool ->
+                        CompactToolCard(tool = tool)
+                    }
+                }
+            }
+
             // Attached / Sent Image Thumbnail
             if (message.image != null) {
                 Image(
@@ -410,6 +442,152 @@ fun ChatMessageRow(
                     text = annotatedText,
                     fontSize = 15.sp,
                     lineHeight = 20.sp
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Operit & A2UI inspired Tool Invocation Data Model
+ */
+data class ToolInvocation(
+    val name: String,
+    val params: String,
+    val response: String? = null
+)
+
+/**
+ * Parse native Gemma tool calls <|tool_call>call:func{...}<tool_call|>
+ * or legacy bracket calls [[TOOL:args]] into structured cards
+ */
+private fun extractToolInvocations(content: String): List<ToolInvocation> {
+    val list = mutableListOf<ToolInvocation>()
+    
+    // Pattern 1: Native Gemma 4 <|tool_call>...<tool_call|>
+    val nativePattern = Regex("<\\|tool_call>([\\s\\S]*?)<tool_call\\|>")
+    nativePattern.findAll(content).forEach { match ->
+        val raw = match.groupValues[1].trim()
+        val colonIdx = raw.indexOf(':')
+        val toolName = if (colonIdx != -1) raw.substringBefore(':').removePrefix("call_").removePrefix("call") else raw.take(24)
+        val params = if (colonIdx != -1) raw.substringAfter(':').trim() else ""
+        list.add(ToolInvocation(name = toolName.ifEmpty { "tool_call" }, params = params))
+    }
+
+    // Pattern 2: Legacy [[TOOL:args]]
+    val legacyPattern = Regex("\\[\\[([A-Z_a-z0-9]+)(?::([^\\]]+))?\\]\\]")
+    legacyPattern.findAll(content).forEach { match ->
+        val toolName = match.groupValues[1]
+        val params = match.groupValues.getOrNull(2) ?: ""
+        list.add(ToolInvocation(name = toolName, params = params))
+    }
+
+    return list
+}
+
+/**
+ * Sleek, Operit-inspired collapsible Tool Card
+ */
+@Composable
+fun CompactToolCard(tool: ToolInvocation) {
+    var expanded by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+
+    val toolIcon = when {
+        tool.name.contains("search", ignoreCase = true) -> "🔍"
+        tool.name.contains("file", ignoreCase = true) || tool.name.contains("storage", ignoreCase = true) -> "📁"
+        tool.name.contains("shell", ignoreCase = true) || tool.name.contains("bash", ignoreCase = true) || tool.name.contains("adb", ignoreCase = true) -> "⚡"
+        tool.name.contains("sensor", ignoreCase = true) || tool.name.contains("telemetry", ignoreCase = true) -> "📊"
+        tool.name.contains("memory", ignoreCase = true) || tool.name.contains("recall", ignoreCase = true) -> "🧠"
+        else -> "🛠️"
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp)
+            .background(Color(0x1A8BB4F6), RoundedCornerShape(8.dp))
+            .border(1.dp, Color(0x338BB4F6), RoundedCornerShape(8.dp))
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(text = toolIcon, fontSize = 12.sp)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = tool.name,
+                    color = Color(0xFF93C5FD),
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold
+                )
+                if (tool.params.isNotBlank() && !expanded) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = tool.params.replace("\n", " ").take(30) + if (tool.params.length > 30) "..." else "",
+                        color = Color(0x99FFFFFF),
+                        fontSize = 11.sp,
+                        maxLines = 1
+                    )
+                }
+            }
+
+            Text(
+                text = if (expanded) "▾" else "▸",
+                color = Color(0x88FFFFFF),
+                fontSize = 12.sp,
+                modifier = Modifier.padding(start = 6.dp)
+            )
+        }
+
+        if (expanded) {
+            Spacer(modifier = Modifier.height(6.dp))
+            HorizontalDivider(color = Color(0x22FFFFFF), thickness = 0.5.dp)
+            Spacer(modifier = Modifier.height(6.dp))
+
+            if (tool.params.isNotBlank()) {
+                SelectionContainer {
+                    Text(
+                        text = tool.params,
+                        color = Color(0xFFE2E8F0),
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        lineHeight = 15.sp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0x22000000), RoundedCornerShape(4.dp))
+                            .padding(6.dp)
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.End
+            ) {
+                Text(
+                    text = "Copy Payload",
+                    color = Color(0xFF38BDF8),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .clickable {
+                            clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(tool.params))
+                            Toast.makeText(context, "Copied payload", Toast.LENGTH_SHORT).show()
+                        }
+                        .padding(4.dp)
                 )
             }
         }
