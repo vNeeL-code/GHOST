@@ -1,6 +1,7 @@
 package com.ghost.api.ui
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.graphics.*
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -19,6 +20,62 @@ import kotlin.math.*
 
 class AvatarWallpaperService : WallpaperService() {
 
+    companion object {
+        // Pre-computed static colors to eliminate runtime String parsing in 60fps render loop
+        private val COLOR_BACKGROUND = Color.parseColor("#0A0A0A")
+        private val COLOR_VOID = Color.parseColor("#060A10")
+        private val COLOR_SINGULARITY = Color.parseColor("#05050A")
+        private val COLOR_STAR_CORE = Color.parseColor("#F8FAFC")
+        private val COLOR_CYAN_ACCENT = Color.parseColor("#38BDF8")
+        private val COLOR_PALE_SLATE = Color.parseColor("#F1F5F9")
+        private val COLOR_SOFT_BLUE = Color.parseColor("#93C5FD")
+        private val COLOR_INDIGO = Color.parseColor("#818CF8")
+        private val COLOR_ORBIT_HALO = Color.parseColor("#E0F2FE")
+        private val COLOR_GOLD_RIM = Color.parseColor("#FBBF24")
+        private val COLOR_ELECTRIC_PURPLE = Color.parseColor("#A78BFA")
+        private val COLOR_COBALT_GLOW = Color.parseColor("#8BB4F6")
+
+        private val SUN_BLOOM_COLORS = intArrayOf(
+            Color.parseColor("#991B1B"), // 0: Deep crimson outer storm
+            Color.parseColor("#DC2626"), // 1: Neon red flare
+            Color.parseColor("#EA580C"), // 2: Blazing solar orange
+            Color.parseColor("#FBBF24")  // 3: Electric gold inner rim
+        )
+        private val SUN_BLOOM_MULTIPLIERS = floatArrayOf(2.2f, 1.75f, 1.4f, 1.15f)
+        private val SUN_BLOOM_ALPHAS = intArrayOf(25, 45, 80, 140)
+
+        private val SATELLITE_COLORS = intArrayOf(
+            Color.parseColor("#F97316"), // 0: Orange Apex
+            Color.parseColor("#4285F4"), // 1: Google Blue
+            Color.parseColor("#FBBC05"), // 2: Google Yellow
+            Color.parseColor("#00F0FF"), // 3: Cyan Apex
+            Color.parseColor("#34A853"), // 4: Google Green
+            Color.parseColor("#EA4335")  // 5: Google Red
+        )
+
+        private val BLOOM_ALPHAS_OPTION_A = intArrayOf(38, 65, 105, 150)
+
+        private val HEX_HALO_RADII_MULTS = floatArrayOf(1.8f, 2.8f, 4.2f, 6.0f)
+        private val HEX_HALO_BASS_MULTS = floatArrayOf(0.8f, 1.5f, 2.4f, 3.5f)
+        private val HEX_HALO_ALPHAS = intArrayOf(75, 45, 25, 12)
+        private val HEX_HALO_WIDTHS = floatArrayOf(3.5f, 2.5f, 1.8f, 1.2f)
+
+        private val HEX_BLOOM_CORE_MULTS = floatArrayOf(2.50f, 1.95f, 1.50f, 1.20f)
+        private val HEX_BLOOM_BASS_MULTS = floatArrayOf(1.50f, 1.10f, 0.70f, 0.35f)
+        private val HEX_BLOOM_ALPHAS = intArrayOf(35, 65, 110, 160)
+        private val HEX_BLOOM_WIDTHS = floatArrayOf(5.5f, 4.2f, 3.2f, 2.5f)
+
+        private val TRI_BLOOM_FOCAL_MULTS = floatArrayOf(2.40f, 1.85f, 1.45f, 1.18f)
+        private val TRI_BLOOM_MELODY_MULTS = floatArrayOf(1.20f, 0.85f, 0.50f, 0.25f)
+        private val TRI_BLOOM_ALPHAS = intArrayOf(35, 65, 110, 160)
+        private val TRI_BLOOM_WIDTHS = floatArrayOf(5.5f, 4.2f, 3.2f, 2.2f)
+
+        private val CUBE_BLOOM_CORE_MULTS = floatArrayOf(2.40f, 1.85f, 1.45f, 1.18f)
+        private val CUBE_BLOOM_BASS_MULTS = floatArrayOf(1.30f, 0.90f, 0.55f, 0.25f)
+        private val CUBE_BLOOM_ALPHAS = intArrayOf(35, 70, 115, 160)
+        private val CUBE_BLOOM_WIDTHS = floatArrayOf(5.5f, 4.2f, 3.2f, 2.2f)
+    }
+
     override fun onCreateEngine(): Engine {
         return AvatarEngine()
     }
@@ -30,6 +87,33 @@ class AvatarWallpaperService : WallpaperService() {
             strokeCap = Paint.Cap.ROUND
         }
         private val logoPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+        // Zero-GC cached Path objects for 60fps geometry rendering
+        private val cachedDiamondPath = Path()
+        private val cachedTrianglePath = Path()
+        private val cachedHexPath = Path()
+        private val cachedWallPath = Path()
+        private val cachedFlowerPath = Path()
+
+        // Cached Preferences - avoid framework disk/mutex hits inside Choreographer loop
+        private var cachedBackend = "AUTO"
+        private var cachedPreset = "OPTION_A"
+        private var cachedSafeMode = false
+
+        private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
+            when (key) {
+                Constants.PREF_USER_BACKEND -> cachedBackend = prefs.getString(Constants.PREF_USER_BACKEND, "AUTO") ?: "AUTO"
+                Constants.PREF_VISUALIZER_PRESET -> cachedPreset = prefs.getString(Constants.PREF_VISUALIZER_PRESET, "OPTION_A") ?: "OPTION_A"
+                "safe_mode" -> cachedSafeMode = prefs.getBoolean("safe_mode", false)
+            }
+        }
+
+        private fun updateCachedPreferences() {
+            val prefs = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+            cachedBackend = prefs.getString(Constants.PREF_USER_BACKEND, "AUTO") ?: "AUTO"
+            cachedPreset = prefs.getString(Constants.PREF_VISUALIZER_PRESET, "OPTION_A") ?: "OPTION_A"
+            cachedSafeMode = prefs.getBoolean("safe_mode", false)
+        }
         
         private var currentFft = ByteArray(0)
         private var smoothedIntensity = 0f
@@ -38,15 +122,15 @@ class AvatarWallpaperService : WallpaperService() {
         
         // Default Google Colors + Accent Purple
         private val defaultColors = intArrayOf(
-            Color.parseColor("#A78BFA"), // 0: Electric Purple (Subconscious Turing Core)
-            Color.parseColor("#4285F4"), // 1: Google Blue
-            Color.parseColor("#EA4335"), // 2: Google Red
-            Color.parseColor("#FBBC05"), // 3: Google Yellow
-            Color.parseColor("#34A853")  // 4: Google Green
+            COLOR_ELECTRIC_PURPLE,       // 0: Electric Purple (Subconscious Turing Core)
+            SATELLITE_COLORS[1],         // 1: Google Blue
+            SATELLITE_COLORS[5],         // 2: Google Red
+            SATELLITE_COLORS[2],         // 3: Google Yellow
+            SATELLITE_COLORS[4]          // 4: Google Green
         )
 
         // Default neutral star glow matches Ethereal Off-White Cobalt (#8BB4F6) from the App Icon & HUD Sparkle
-        private val colorCobaltGlow = Color.parseColor("#8BB4F6")
+        private val colorCobaltGlow = COLOR_COBALT_GLOW
         private var isCustomPaletteActive = false
         
         // Target and Current colors for smooth transitions
@@ -79,8 +163,7 @@ class AvatarWallpaperService : WallpaperService() {
         private val frameCallback = object : android.view.Choreographer.FrameCallback {
             override fun doFrame(frameTimeNanos: Long) {
                 if (isVisible) {
-                    val prefs = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                    val backend = prefs.getString(Constants.PREF_USER_BACKEND, "AUTO") ?: "AUTO"
+                    val backend = cachedBackend
                     val isInferencing = GemmaService.isInferencing
 
                     // Dynamic Substrate Throttling: If CPU inference is active on weak devices, cap wallpaper to 30fps
@@ -148,11 +231,15 @@ class AvatarWallpaperService : WallpaperService() {
         override fun onCreate(surfaceHolder: SurfaceHolder?) {
             super.onCreate(surfaceHolder)
             SystemVisualizer.init(applicationContext)
+            val prefs = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.registerOnSharedPreferenceChangeListener(prefsListener)
+            updateCachedPreferences()
         }
 
         override fun onVisibilityChanged(visible: Boolean) {
             this.isVisible = visible
             if (visible) {
+                updateCachedPreferences()
                 SystemVisualizer.addListener(this)
                 sensorManager?.registerListener(this, rotationSensor, SensorManager.SENSOR_DELAY_GAME)
                 try {
@@ -285,9 +372,8 @@ class AvatarWallpaperService : WallpaperService() {
             val holder = surfaceHolder
             var canvas: Canvas? = null
             try {
-                val prefs = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                val backend = prefs.getString(Constants.PREF_USER_BACKEND, "AUTO") ?: "AUTO"
-                val isSafeMode = prefs.getBoolean("safe_mode", false)
+                val backend = cachedBackend
+                val isSafeMode = cachedSafeMode
 
                 // Substrate Guardrail Inversion:
                 // 1. GPU/NPU/AUTO backend -> software CPU canvas (lockCanvas) to preserve 100% GPU VRAM & ALUs for LiteRT-LM.
@@ -315,13 +401,13 @@ class AvatarWallpaperService : WallpaperService() {
                     // Nudged slightly up to align with the widget/input bar center
                     val cy = height / 2f - 75f + pitchOffset * 150f
                     
-                    canvas.drawColor(Color.parseColor("#0A0A0A"))
+                    canvas.drawColor(COLOR_BACKGROUND)
                     
                     rotationAngle += 0.2f + (smoothedBass / 100f)
                     
                     val isNoisy = smoothedBass > 100f || smoothedIntensity > 80f
                     
-                    val preset = prefs.getString(Constants.PREF_VISUALIZER_PRESET, "OPTION_A") ?: "OPTION_A"
+                    val preset = cachedPreset
                     
                     when (preset) {
                         "OPTION_B", "SUDA" -> {
@@ -370,15 +456,15 @@ class AvatarWallpaperService : WallpaperService() {
                 paint.color = color
                 paint.alpha = max(0, 220 - (c * 15))
                 
-                val path = Path()
+                cachedFlowerPath.reset()
                 for (i in 0..numPoints) {
                     val angle = (i * Math.PI * 2 / numPoints).toFloat()
                     
                     val binIndex = (i * 2) % (if (currentFft.isEmpty()) 1 else currentFft.size / 2)
-                    val mag = if (currentFft.isNotEmpty()) {
-                        val r = currentFft[binIndex]
-                        val i_comp = currentFft[binIndex + 1]
-                        Math.hypot(r.toDouble(), i_comp.toDouble()).toFloat()
+                    val mag = if (currentFft.isNotEmpty() && (binIndex * 2 + 1) < currentFft.size) {
+                        val r = Math.abs(currentFft[binIndex * 2].toInt()).toDouble()
+                        val i_comp = Math.abs(currentFft[binIndex * 2 + 1].toInt()).toDouble()
+                        Math.hypot(r, i_comp).toFloat()
                     } else 0f
                     
                     val rOffset = mag * 5f + (c * 45f)
@@ -387,11 +473,11 @@ class AvatarWallpaperService : WallpaperService() {
                     val x = cos(angle) * r
                     val y = sin(angle) * r
                     
-                    if (i == 0) path.moveTo(x, y)
-                    else path.lineTo(x, y)
+                    if (i == 0) cachedFlowerPath.moveTo(x, y)
+                    else cachedFlowerPath.lineTo(x, y)
                 }
-                path.close()
-                canvas.drawPath(path, paint)
+                cachedFlowerPath.close()
+                canvas.drawPath(cachedFlowerPath, paint)
             }
         }
 
@@ -433,7 +519,7 @@ class AvatarWallpaperService : WallpaperService() {
             // Faint idle celestial resonance ring (gives ambient life even in silence)
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 1.2f
-            paint.color = if (isCustomPaletteActive) currentColors[1 % currentColors.size] else Color.parseColor("#38BDF8")
+            paint.color = if (isCustomPaletteActive) currentColors[1 % currentColors.size] else COLOR_CYAN_ACCENT
             paint.alpha = 25
             canvas.drawCircle(0f, 0f, dynamicBaseRadius * 2.8f + (sin(rotationAngle * 0.3f) * 12f), paint)
 
@@ -448,16 +534,14 @@ class AvatarWallpaperService : WallpaperService() {
             // Multi-pass bloom glow:
             // Idle harmonic breathing + explosive booming on audio kicks
             val baseStarSize = 1200f 
-            val bloomSizes = floatArrayOf(
-                baseStarSize + 550f + bassBoost + idleBreath,         // 0: Outermost Corona
-                baseStarSize + 340f + bassBoost + (idleBreath * 0.6f), // 1: Mid-Outer Halo
-                baseStarSize + 170f + (bassBoost * 0.7f),              // 2: Mid-Inner Aura
-                baseStarSize + 50f + (bassBoost * 0.3f)                // 3: Inner (Closest to Star)
-            )
-            val bloomAlphas = intArrayOf(38, 65, 105, 150)
-            
             logoPaint.clearShadowLayer()
-            for (i in bloomSizes.indices) {
+            for (i in 0 until 4) {
+                val bloomSize = when (i) {
+                    0 -> baseStarSize + 550f + bassBoost + idleBreath         // 0: Outermost Corona
+                    1 -> baseStarSize + 340f + bassBoost + (idleBreath * 0.6f) // 1: Mid-Outer Halo
+                    2 -> baseStarSize + 170f + (bassBoost * 0.7f)              // 2: Mid-Inner Aura
+                    else -> baseStarSize + 50f + (bassBoost * 0.3f)            // 3: Inner (Closest to Star)
+                }
                 val layerColor = if (isCustomPaletteActive) {
                     val swatchIndex = when (i) {
                         3 -> 1 % currentColors.size // Vibrant
@@ -466,20 +550,20 @@ class AvatarWallpaperService : WallpaperService() {
                         else -> 3 % currentColors.size // Dark Vibrant
                     }
                     val rawColor = currentColors[swatchIndex]
-                    ensureVisibleBloomColor(rawColor, colorCobaltGlow)
+                    ensureVisibleBloomColor(rawColor, COLOR_COBALT_GLOW)
                 } else {
-                    colorCobaltGlow
+                    COLOR_COBALT_GLOW
                 }
 
                 logoPaint.color = layerColor
-                logoPaint.textSize = bloomSizes[i]
-                logoPaint.alpha = bloomAlphas[i]
+                logoPaint.textSize = bloomSize
+                logoPaint.alpha = BLOOM_ALPHAS_OPTION_A[i]
                 val off = (logoPaint.descent() + logoPaint.ascent()) / 2f
                 canvas.drawText("✧", cx, cy - off, logoPaint)
             }
             
             // Crisp Core star
-            logoPaint.color = Color.parseColor("#F8FAFC")
+            logoPaint.color = COLOR_STAR_CORE
             logoPaint.alpha = 255
             logoPaint.textSize = baseStarSize
             val textOffset = (logoPaint.descent() + logoPaint.ascent()) / 2f
@@ -506,7 +590,7 @@ class AvatarWallpaperService : WallpaperService() {
 
             val nearR = coreRadius * 1.05f
             val farR = maxOf(width, height) * 0.85f
-            val wallColor = if (isCustomPaletteActive) currentColors[0] else Color.parseColor("#38BDF8")
+            val wallColor = if (isCustomPaletteActive) currentColors[0] else COLOR_CYAN_ACCENT
 
             if (hallwayFlashAlpha > 0) {
                 canvas.save()
@@ -527,21 +611,20 @@ class AvatarWallpaperService : WallpaperService() {
                     val f2x = farR * cos(a2)
                     val f2y = farR * sin(a2)
 
-                    // Perspective wall quad/trapezoid
-                    val wallPath = Path().apply {
-                        moveTo(n1x, n1y)
-                        lineTo(f1x, f1y)
-                        lineTo(f2x, f2y)
-                        lineTo(n2x, n2y)
-                        close()
-                    }
+                    // Perspective wall quad/trapezoid - Zero-GC
+                    cachedWallPath.reset()
+                    cachedWallPath.moveTo(n1x, n1y)
+                    cachedWallPath.lineTo(f1x, f1y)
+                    cachedWallPath.lineTo(f2x, f2y)
+                    cachedWallPath.lineTo(n2x, n2y)
+                    cachedWallPath.close()
 
                     // Alternating subtle wall facet shading using stolen palette color
                     val facetFactor = if (v % 2 == 0) 1.0f else 0.65f
                     paint.style = Paint.Style.FILL
                     paint.color = wallColor
                     paint.alpha = (hallwayFlashAlpha * 0.22f * facetFactor).toInt().coerceIn(0, 75)
-                    canvas.drawPath(wallPath, paint)
+                    canvas.drawPath(cachedWallPath, paint)
 
                     // Crisp architectural perspective corner guide lines in stolen palette accent (solid lines grabbing stolen color)
                     paint.style = Paint.Style.STROKE
@@ -571,20 +654,12 @@ class AvatarWallpaperService : WallpaperService() {
 
             // 2. Concentric Vertex-Aligned Hexagonal Halos (Multi-Pass Bloom for Geometry)
             paint.style = Paint.Style.STROKE
-            val haloRadii = floatArrayOf(
-                coreRadius * 1.8f + bassKick * 0.8f,
-                coreRadius * 2.8f + bassKick * 1.5f,
-                coreRadius * 4.2f + bassKick * 2.4f,
-                coreRadius * 6.0f + bassKick * 3.5f
-            )
-            val haloAlphas = intArrayOf(75, 45, 25, 12)
-            val haloWidths = floatArrayOf(3.5f, 2.5f, 1.8f, 1.2f)
-
-            for (h in haloRadii.indices) {
-                paint.strokeWidth = haloWidths[h]
-                paint.color = if (isCustomPaletteActive) currentColors[h % currentColors.size] else Color.parseColor("#38BDF8")
-                paint.alpha = haloAlphas[h]
-                drawHexagon(canvas, 0f, 0f, haloRadii[h], paint)
+            for (h in 0 until 4) {
+                val radius = coreRadius * HEX_HALO_RADII_MULTS[h] + bassKick * HEX_HALO_BASS_MULTS[h]
+                paint.strokeWidth = HEX_HALO_WIDTHS[h]
+                paint.color = if (isCustomPaletteActive) currentColors[h % currentColors.size] else COLOR_CYAN_ACCENT
+                paint.alpha = HEX_HALO_ALPHAS[h]
+                drawHexagon(canvas, 0f, 0f, radius, paint)
             }
 
             // High-energy strobe halo on prominent outer hex during beat flash
@@ -598,37 +673,29 @@ class AvatarWallpaperService : WallpaperService() {
             // 3. Stepped Concentric Blooming Hexagons behind Mother Hexagon (Layered Fake Bloom)
             // Mirrors the rich, vibrant layered fake bloom of Option A, grabbing the stolen wallpaper palette colors
             // Booms outward dramatically on bass hits so the center is the primary reactor!
-            val hexBloomRadii = floatArrayOf(
-                coreRadius * 2.50f + (bassKick * 1.50f),
-                coreRadius * 1.95f + (bassKick * 1.10f),
-                coreRadius * 1.50f + (bassKick * 0.70f),
-                coreRadius * 1.20f + (bassKick * 0.35f)
-            )
-            val hexBloomAlphas = intArrayOf(35, 65, 110, 160)
-            val hexBloomBorderWidths = floatArrayOf(5.5f, 4.2f, 3.2f, 2.5f)
-
-            for (hb in hexBloomRadii.indices) {
+            for (hb in 0 until 4) {
+                val radius = coreRadius * HEX_BLOOM_CORE_MULTS[hb] + (bassKick * HEX_BLOOM_BASS_MULTS[hb])
                 val swatchIndex = when (hb) {
                     3 -> 1 % currentColors.size // Vibrant / Inner
                     2 -> 0 % currentColors.size // Dominant
                     1 -> 2 % currentColors.size // Muted
                     else -> 3 % currentColors.size // Outer
                 }
-                val rawColor = if (isCustomPaletteActive) currentColors[swatchIndex] else colorCobaltGlow
-                val hexGlowColor = ensureVisibleBloomColor(rawColor, colorCobaltGlow)
+                val rawColor = if (isCustomPaletteActive) currentColors[swatchIndex] else COLOR_COBALT_GLOW
+                val hexGlowColor = ensureVisibleBloomColor(rawColor, COLOR_COBALT_GLOW)
 
                 // Translucent solid planar aura fill for radiant bloom volume
                 paint.style = Paint.Style.FILL
                 paint.color = hexGlowColor
-                paint.alpha = (hexBloomAlphas[hb] * 0.45f).toInt().coerceIn(15, 90)
-                drawHexagon(canvas, 0f, 0f, hexBloomRadii[hb], paint)
+                paint.alpha = (HEX_BLOOM_ALPHAS[hb] * 0.45f).toInt().coerceIn(15, 90)
+                drawHexagon(canvas, 0f, 0f, radius, paint)
 
                 // Rich neon boundary contour
                 paint.style = Paint.Style.STROKE
-                paint.strokeWidth = hexBloomBorderWidths[hb]
+                paint.strokeWidth = HEX_BLOOM_WIDTHS[hb]
                 paint.color = hexGlowColor
-                paint.alpha = hexBloomAlphas[hb]
-                drawHexagon(canvas, 0f, 0f, hexBloomRadii[hb], paint)
+                paint.alpha = HEX_BLOOM_ALPHAS[hb]
+                drawHexagon(canvas, 0f, 0f, radius, paint)
             }
 
             // 4. Six Logarithmic Spiral Hex Arms (Mixture of Experts / Neural Parameter Activation)
@@ -667,11 +734,11 @@ class AvatarWallpaperService : WallpaperService() {
                     val colorIdx = (arm + step) % currentColors.size
                     val baseArmColor = if (isCustomPaletteActive) currentColors[colorIdx] else {
                         when (step) {
-                            1 -> Color.parseColor("#F1F5F9")
-                            2 -> Color.parseColor("#93C5FD")
-                            3 -> Color.parseColor("#38BDF8")
-                            4 -> Color.parseColor("#818CF8")
-                            else -> Color.parseColor("#A78BFA")
+                            1 -> COLOR_PALE_SLATE
+                            2 -> COLOR_SOFT_BLUE
+                            3 -> COLOR_CYAN_ACCENT
+                            4 -> COLOR_INDIGO
+                            else -> COLOR_ELECTRIC_PURPLE
                         }
                     }
 
@@ -701,18 +768,18 @@ class AvatarWallpaperService : WallpaperService() {
 
             // 5. Mother Hexagon (Hollow Obsidian Cyber Chamber)
             paint.style = Paint.Style.FILL
-            paint.color = Color.parseColor("#060A10")
+            paint.color = COLOR_VOID
             paint.alpha = 240
             drawHexagon(canvas, 0f, 0f, coreRadius, paint)
 
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 4f
-            paint.color = Color.parseColor("#F8FAFC")
+            paint.color = COLOR_STAR_CORE
             paint.alpha = 255
             drawHexagon(canvas, 0f, 0f, coreRadius, paint)
 
             paint.strokeWidth = 2.5f
-            paint.color = if (isCustomPaletteActive) currentColors[0] else Color.parseColor("#38BDF8")
+            paint.color = if (isCustomPaletteActive) currentColors[0] else COLOR_CYAN_ACCENT
             paint.alpha = 200
             drawHexagon(canvas, 0f, 0f, coreRadius * 0.82f, paint)
 
@@ -755,7 +822,7 @@ class AvatarWallpaperService : WallpaperService() {
             if (strobeFlash > 0.03f) {
                 val reach = (canvas.width + canvas.height) * 0.95f
                 val wallFlashAlpha = (strobeFlash * 255f).toInt().coerceIn(0, 255)
-                val primaryColor = if (isCustomPaletteActive) currentColors[0] else Color.parseColor("#38BDF8")
+                val primaryColor = if (isCustomPaletteActive) currentColors[0] else COLOR_CYAN_ACCENT
 
                 paint.style = Paint.Style.STROKE
                 paint.strokeWidth = 3.2f + (strobeFlash * 3.0f)
@@ -795,7 +862,7 @@ class AvatarWallpaperService : WallpaperService() {
                 // Seamless color cycling: uses raw continuous index so color smoothly flows with depth
                 val cycleIdx = ((rawP * numTriangles).toInt() % currentColors.size + currentColors.size) % currentColors.size
                 val baseColor = if (isCustomPaletteActive) currentColors[cycleIdx] else {
-                    if (i % 2 == 0) Color.parseColor("#38BDF8") else Color.parseColor("#F1F5F9")
+                    if (i % 2 == 0) COLOR_CYAN_ACCENT else COLOR_PALE_SLATE
                 }
 
                 // Seamless corkscrew:
@@ -831,48 +898,39 @@ class AvatarWallpaperService : WallpaperService() {
 
             // Permanent living concentric fake bloom layers attached to the Triangle Housing:
             // Swells and shrinks continuously with melodic energy (not flashing on/off with kicks!)
-            val triBloomRadii = floatArrayOf(
-                focalRadius * 2.40f + (melodyExpansion * 1.20f),
-                focalRadius * 1.85f + (melodyExpansion * 0.85f),
-                focalRadius * 1.45f + (melodyExpansion * 0.50f),
-                focalRadius * 1.18f + (melodyExpansion * 0.25f)
-            )
-            // Solid, permanent ambient presence that breathes with melody
-            val triBloomAlphas = intArrayOf(35, 65, 110, 160)
-            val triBloomWidths = floatArrayOf(5.5f, 4.2f, 3.2f, 2.2f)
-
-            for (tb in triBloomRadii.indices) {
+            for (tb in 0 until 4) {
+                val radius = focalRadius * TRI_BLOOM_FOCAL_MULTS[tb] + (melodyExpansion * TRI_BLOOM_MELODY_MULTS[tb])
                 val swatchIndex = when (tb) {
                     3 -> 1 % currentColors.size // Vibrant / Inner
                     2 -> 0 % currentColors.size // Dominant
                     1 -> 2 % currentColors.size // Muted
                     else -> 3 % currentColors.size // Outer
                 }
-                val rawColor = if (isCustomPaletteActive) currentColors[swatchIndex] else colorCobaltGlow
-                val bloomColor = ensureVisibleBloomColor(rawColor, colorCobaltGlow)
+                val rawColor = if (isCustomPaletteActive) currentColors[swatchIndex] else COLOR_COBALT_GLOW
+                val bloomColor = ensureVisibleBloomColor(rawColor, COLOR_COBALT_GLOW)
 
                 // Translucent planar fill for permanent glowing triangle volume
                 paint.style = Paint.Style.FILL
                 paint.color = bloomColor
-                paint.alpha = (triBloomAlphas[tb] * 0.45f).toInt().coerceIn(15, 95)
-                drawEquilateralTriangle(canvas, 0f, 0f, triBloomRadii[tb], 0f, paint)
+                paint.alpha = (TRI_BLOOM_ALPHAS[tb] * 0.45f).toInt().coerceIn(15, 95)
+                drawEquilateralTriangle(canvas, 0f, 0f, radius, 0f, paint)
 
                 // Crisp bloom contour line
                 paint.style = Paint.Style.STROKE
-                paint.strokeWidth = triBloomWidths[tb]
+                paint.strokeWidth = TRI_BLOOM_WIDTHS[tb]
                 paint.color = bloomColor
-                paint.alpha = triBloomAlphas[tb]
-                drawEquilateralTriangle(canvas, 0f, 0f, triBloomRadii[tb], 0f, paint)
+                paint.alpha = TRI_BLOOM_ALPHAS[tb]
+                drawEquilateralTriangle(canvas, 0f, 0f, radius, 0f, paint)
             }
 
             // Solid Obsidian Cyber Chamber for Central Triangle
             paint.style = Paint.Style.FILL
-            paint.color = Color.parseColor("#060A10")
+            paint.color = COLOR_VOID
             paint.alpha = 240
             drawEquilateralTriangle(canvas, 0f, 0f, focalRadius, 0f, paint)
 
             // Inner triangle ambient glow (swells with melody and gets a subtle punch on kicks)
-            val innerColor = if (isCustomPaletteActive) currentColors[0] else Color.parseColor("#38BDF8")
+            val innerColor = if (isCustomPaletteActive) currentColors[0] else COLOR_CYAN_ACCENT
             val baseInnerAlpha = (25 + (melodyExpansion * 1.8f).toInt()).coerceIn(20, 90)
             val kickInnerAlpha = if (strobeFlash > 0.04f) (strobeFlash * 70f).toInt() else 0
             paint.style = Paint.Style.FILL
@@ -883,7 +941,7 @@ class AvatarWallpaperService : WallpaperService() {
             // Crisp White Triangle Housing Contour
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 3.8f + (strobeFlash * 2.5f)
-            paint.color = if (strobeFlash > 0.05f) Color.WHITE else Color.parseColor("#F8FAFC")
+            paint.color = if (strobeFlash > 0.05f) Color.WHITE else COLOR_STAR_CORE
             paint.alpha = 255
             drawEquilateralTriangle(canvas, 0f, 0f, focalRadius, 0f, paint)
 
@@ -896,12 +954,12 @@ class AvatarWallpaperService : WallpaperService() {
             // 4. Center Model Unicode Glyph (✧): Clean, Crisp, Centered White Core
             val glyphSize = focalRadius * 1.15f
             logoPaint.clearShadowLayer()
-            logoPaint.color = Color.parseColor("#F8FAFC")
+            logoPaint.color = COLOR_STAR_CORE
             logoPaint.textSize = glyphSize
             logoPaint.alpha = 255
             val off = (logoPaint.descent() + logoPaint.ascent()) / 2f
             // Center slightly higher to optically sit in the centroid of the equilateral triangle
-            canvas.drawText("✧", 0f, -off - (focalRadius * 0.08f), logoPaint)
+            canvas.drawText("✧", 0f, -off - (focalRadius * 0.12f), logoPaint)
 
             canvas.restore()
         }
@@ -924,35 +982,26 @@ class AvatarWallpaperService : WallpaperService() {
             val flareBoom = (bassKick * 0.75f) + (strobeFlash * 80f)
 
             // Deep Space Black Sun with Hot Concentric Solar Flares (Salvation of the Sun)
-            val sunBloomMultipliers = floatArrayOf(2.2f, 1.75f, 1.4f, 1.15f)
-            val sunBloomAlphas = intArrayOf(25, 45, 80, 140)
-            val sunBloomColors = intArrayOf(
-                Color.parseColor("#991B1B"), // 0: Deep crimson outer storm
-                Color.parseColor("#DC2626"), // 1: Neon red flare
-                Color.parseColor("#EA580C"), // 2: Blazing solar orange
-                Color.parseColor("#FBBF24")  // 3: Electric gold inner rim
-            )
-
             paint.style = Paint.Style.FILL
             paint.shader = null
-            for (sb in sunBloomMultipliers.indices) {
-                val r = (sunRadius * sunBloomMultipliers[sb]) + flareBoom
-                val flareColor = if (isCustomPaletteActive) currentColors[sb % currentColors.size] else sunBloomColors[sb]
-                paint.color = ensureVisibleBloomColor(flareColor, colorCobaltGlow)
-                paint.alpha = ((sunBloomAlphas[sb] + (strobeFlash * 75f).toInt())).coerceIn(15, 240)
+            for (sb in 0 until 4) {
+                val r = (sunRadius * SUN_BLOOM_MULTIPLIERS[sb]) + flareBoom
+                val flareColor = if (isCustomPaletteActive) currentColors[sb % currentColors.size] else SUN_BLOOM_COLORS[sb]
+                paint.color = ensureVisibleBloomColor(flareColor, COLOR_COBALT_GLOW)
+                paint.alpha = ((SUN_BLOOM_ALPHAS[sb] + (strobeFlash * 75f).toInt())).coerceIn(15, 240)
                 canvas.drawCircle(cx, cy, r, paint)
             }
 
             // Black Hole Singularity Core (Deep obsidian dark void)
             paint.style = Paint.Style.FILL
-            paint.color = Color.parseColor("#05050A")
+            paint.color = COLOR_SINGULARITY
             paint.alpha = 255
             canvas.drawCircle(cx, cy, sunRadius, paint)
 
             // Fiery Accretion Rim
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 3f + (strobeFlash * 3f)
-            paint.color = if (strobeFlash > 0.05f) Color.WHITE else Color.parseColor("#FBBF24")
+            paint.color = if (strobeFlash > 0.05f) Color.WHITE else COLOR_GOLD_RIM
             paint.alpha = 240
             canvas.drawCircle(cx, cy, sunRadius, paint)
 
@@ -960,7 +1009,7 @@ class AvatarWallpaperService : WallpaperService() {
             val orbitCircleRadius = sunRadius * 1.08f
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 2.5f + (strobeFlash * 2.0f)
-            paint.color = if (isCustomPaletteActive) currentColors[1 % currentColors.size] else Color.parseColor("#E0F2FE")
+            paint.color = if (isCustomPaletteActive) currentColors[1 % currentColors.size] else COLOR_ORBIT_HALO
             paint.alpha = (140 + (strobeFlash * 100f).toInt()).coerceIn(100, 255)
             canvas.drawCircle(cx, cy, orbitCircleRadius, paint)
 
@@ -971,53 +1020,45 @@ class AvatarWallpaperService : WallpaperService() {
             // 4-Layer Stepped Concentric Fake Bloom behind Central Cube
             // Booms massively on bass kicks and extends far beyond the central pill,
             // matching the radiant bloom presence of Option A
-            val cubeBloomRadii = floatArrayOf(
-                coreCubeRadius * 2.40f + (bassKick * 1.30f),
-                coreCubeRadius * 1.85f + (bassKick * 0.90f),
-                coreCubeRadius * 1.45f + (bassKick * 0.55f),
-                coreCubeRadius * 1.18f + (bassKick * 0.25f)
-            )
-            val cubeBloomAlphas = intArrayOf(35, 70, 115, 160)
-            val cubeBloomWidths = floatArrayOf(5.5f, 4.2f, 3.2f, 2.2f)
-
-            for (cb in cubeBloomRadii.indices) {
+            for (cb in 0 until 4) {
+                val radius = coreCubeRadius * CUBE_BLOOM_CORE_MULTS[cb] + (bassKick * CUBE_BLOOM_BASS_MULTS[cb])
                 val swatchIndex = when (cb) {
                     3 -> 1 % currentColors.size // Vibrant / Inner
                     2 -> 0 % currentColors.size // Dominant
                     1 -> 2 % currentColors.size // Muted
                     else -> 3 % currentColors.size // Outer
                 }
-                val rawColor = if (isCustomPaletteActive) currentColors[swatchIndex] else colorCobaltGlow
-                val bloomColor = ensureVisibleBloomColor(rawColor, colorCobaltGlow)
+                val rawColor = if (isCustomPaletteActive) currentColors[swatchIndex] else COLOR_COBALT_GLOW
+                val bloomColor = ensureVisibleBloomColor(rawColor, COLOR_COBALT_GLOW)
 
                 // Translucent fill for planar glow volume
                 paint.style = Paint.Style.FILL
                 paint.color = bloomColor
-                paint.alpha = (cubeBloomAlphas[cb] * 0.45f).toInt().coerceIn(15, 95)
-                drawDiamond(canvas, 0f, 0f, cubeBloomRadii[cb], paint)
+                paint.alpha = (CUBE_BLOOM_ALPHAS[cb] * 0.45f).toInt().coerceIn(15, 95)
+                drawDiamond(canvas, 0f, 0f, radius, paint)
 
                 // Crisp border contour
                 paint.style = Paint.Style.STROKE
-                paint.strokeWidth = cubeBloomWidths[cb]
+                paint.strokeWidth = CUBE_BLOOM_WIDTHS[cb]
                 paint.color = bloomColor
-                paint.alpha = cubeBloomAlphas[cb]
-                drawDiamond(canvas, 0f, 0f, cubeBloomRadii[cb], paint)
+                paint.alpha = CUBE_BLOOM_ALPHAS[cb]
+                drawDiamond(canvas, 0f, 0f, radius, paint)
             }
 
             // Solid Obsidian Cyber Chamber for Central Cube
             paint.style = Paint.Style.FILL
-            paint.color = Color.parseColor("#060A10")
+            paint.color = COLOR_VOID
             paint.alpha = 240
             drawDiamond(canvas, 0f, 0f, coreCubeRadius, paint)
 
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 4f + (strobeFlash * 2.5f)
-            paint.color = if (strobeFlash > 0.05f) Color.WHITE else Color.parseColor("#F8FAFC")
+            paint.color = if (strobeFlash > 0.05f) Color.WHITE else COLOR_STAR_CORE
             paint.alpha = 255
             drawDiamond(canvas, 0f, 0f, coreCubeRadius, paint)
 
             paint.strokeWidth = 2.5f
-            paint.color = if (isCustomPaletteActive) currentColors[0] else Color.parseColor("#38BDF8")
+            paint.color = if (isCustomPaletteActive) currentColors[0] else COLOR_CYAN_ACCENT
             paint.alpha = 200
             drawDiamond(canvas, 0f, 0f, coreCubeRadius * 0.82f, paint)
 
@@ -1048,19 +1089,21 @@ class AvatarWallpaperService : WallpaperService() {
             val nodeDy = (if (isLandscape) 56f else 105f) * density
             val nodeApex = (if (isLandscape) 102f else 182f) * density
 
-            val satelliteOffsets = arrayOf(
-                Pair(0f, -nodeApex),           // 0: Top Apex
-                Pair(nodeDx, -nodeDy),         // 1: Top-Right
-                Pair(nodeDx, nodeDy),          // 2: Bottom-Right
-                Pair(0f, nodeApex),            // 3: Bottom Apex
-                Pair(-nodeDx, nodeDy),         // 4: Bottom-Left
-                Pair(-nodeDx, -nodeDy)         // 5: Top-Left
-            )
-
             val satelliteBaseSize = 24f * density // matches 48dp button radius
 
             for (s in 0 until numSatellites) {
-                val (offsetX, offsetY) = satelliteOffsets[s]
+                // Zero-allocation coordinate computation
+                val offsetX = when (s) {
+                    1, 2 -> nodeDx
+                    4, 5 -> -nodeDx
+                    else -> 0f
+                }
+                val offsetY = when (s) {
+                    0 -> -nodeApex
+                    3 -> nodeApex
+                    1, 5 -> -nodeDy
+                    else -> nodeDy
+                }
                 val satX = cx + offsetX
                 val satY = cy + offsetY
 
@@ -1083,17 +1126,8 @@ class AvatarWallpaperService : WallpaperService() {
 
                 // Distinct stolen palette color per satellite
                 val colorIdx = s % currentColors.size
-                val rawSatColor = if (isCustomPaletteActive) currentColors[colorIdx] else {
-                    when (s) {
-                        0 -> Color.parseColor("#F97316") // Orange Apex
-                        1 -> Color.parseColor("#4285F4") // Google Blue
-                        2 -> Color.parseColor("#FBBC05") // Google Yellow
-                        3 -> Color.parseColor("#00F0FF") // Cyan Apex
-                        4 -> Color.parseColor("#34A853") // Google Green
-                        else -> Color.parseColor("#EA4335") // Google Red
-                    }
-                }
-                val baseSatColor = ensureVisibleBloomColor(rawSatColor, colorCobaltGlow)
+                val rawSatColor = if (isCustomPaletteActive) currentColors[colorIdx] else SATELLITE_COLORS[s]
+                val baseSatColor = ensureVisibleBloomColor(rawSatColor, COLOR_COBALT_GLOW)
 
                 // Layered Colorful Glass Fill:
                 // On hit, the translucent glass interior flashes intensely in stolen color / tinted white,
@@ -1128,47 +1162,46 @@ class AvatarWallpaperService : WallpaperService() {
         }
 
         /**
-         * Regular 4-vertex diamond generator (rotated 45° square)
+         * Regular 4-vertex diamond generator (rotated 45° square) - Zero-GC
          */
         private fun drawDiamond(canvas: Canvas, x: Float, y: Float, radius: Float, paint: Paint) {
-            val path = Path().apply {
-                moveTo(x, y - radius)      // Top
-                lineTo(x + radius, y)      // Right
-                lineTo(x, y + radius)      // Bottom
-                lineTo(x - radius, y)      // Left
-                close()
-            }
-            canvas.drawPath(path, paint)
+            cachedDiamondPath.reset()
+            cachedDiamondPath.moveTo(x, y - radius)      // Top
+            cachedDiamondPath.lineTo(x + radius, y)      // Right
+            cachedDiamondPath.lineTo(x, y + radius)      // Bottom
+            cachedDiamondPath.lineTo(x - radius, y)      // Left
+            cachedDiamondPath.close()
+            canvas.drawPath(cachedDiamondPath, paint)
         }
 
         /**
-         * Regular 3-vertex equilateral triangle generator (Seven Nation Army / Delta)
+         * Regular 3-vertex equilateral triangle generator (Seven Nation Army / Delta) - Zero-GC
          */
         private fun drawEquilateralTriangle(canvas: Canvas, x: Float, y: Float, radius: Float, rotation: Float, paint: Paint) {
-            val path = Path()
+            cachedTrianglePath.reset()
             for (i in 0 until 3) {
                 val angle = (i * Math.PI * 2.0 / 3.0 - Math.PI / 2.0).toFloat() + rotation
                 val px = x + (radius * cos(angle))
                 val py = y + (radius * sin(angle))
-                if (i == 0) path.moveTo(px, py) else path.lineTo(px, py)
+                if (i == 0) cachedTrianglePath.moveTo(px, py) else cachedTrianglePath.lineTo(px, py)
             }
-            path.close()
-            canvas.drawPath(path, paint)
+            cachedTrianglePath.close()
+            canvas.drawPath(cachedTrianglePath, paint)
         }
 
         /**
-         * Regular 6-vertex regular polygon generator
+         * Regular 6-vertex regular polygon generator - Zero-GC
          */
         private fun drawHexagon(canvas: Canvas, x: Float, y: Float, radius: Float, paint: Paint) {
-            val path = Path()
+            cachedHexPath.reset()
             for (i in 0 until 6) {
                 val angle = (i * Math.PI / 3.0).toFloat()
                 val px = x + (radius * cos(angle))
                 val py = y + (radius * sin(angle))
-                if (i == 0) path.moveTo(px, py) else path.lineTo(px, py)
+                if (i == 0) cachedHexPath.moveTo(px, py) else cachedHexPath.lineTo(px, py)
             }
-            path.close()
-            canvas.drawPath(path, paint)
+            cachedHexPath.close()
+            canvas.drawPath(cachedHexPath, paint)
         }
 
         override fun onSensorChanged(event: SensorEvent?) {
@@ -1207,6 +1240,8 @@ class AvatarWallpaperService : WallpaperService() {
         
         override fun onDestroy() {
             super.onDestroy()
+            val prefs = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.unregisterOnSharedPreferenceChangeListener(prefsListener)
             SystemVisualizer.removeListener(this)
             sensorManager?.unregisterListener(this)
             try {
