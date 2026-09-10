@@ -734,47 +734,29 @@ class AvatarWallpaperService : WallpaperService() {
         /**
          * Option C: Delta Tunnel & Prisms (Seven Nation Army / Cephalon Cy & Suda tier)
          * Audio architecture:
-         * 1. Speed: Continuous tunnel zoom speed is driven directly by non-stop sub-bass/kicks.
+         * 1. Speed: Continuous tunnel zoom and corkscrewing rotation driven non-stop by sub-bass/kicks.
          * 2. Central Expansion & Bloom: Driven by melody and harmonics (vocals, synths, chords).
-         *    Concentric bloom layers live on the triangle housing, with inner color glow flashing.
-         * 3. Kick / Snare: Fires corner perspective lasers AND summons expanding translucent
-         *    "color wall" triangles that retain rich stolen palette color as they zoom outward.
+         *    The glow is a permanent, living, breathing part of the triangle housing that swells and contracts with melody.
+         * 3. Kick / Snare: Fires corner perspective lasers and lights up the translucent colored tunnel facets
+         *    as triangles corkscrew past, producing an immersive "color wall" corridor in motion.
          * 4. Central Glyph (✧): Clean, centered, crisp white core.
          */
         private fun drawOptionCDeltaTunnel(canvas: Canvas, cx: Float, cy: Float, baseRadius: Float) {
             canvas.save()
             canvas.translate(cx, cy)
 
-            val bassKick = (smoothedBass * 1.6f).coerceAtLeast(0f)
-            val melodyExpansion = (smoothedMelody * 1.2f).coerceAtLeast(0f)
+            val bassKick = (smoothedBass * 1.5f).coerceAtLeast(0f)
+            val melodyExpansion = (smoothedMelody * 1.3f).coerceAtLeast(0f)
             val numTriangles = 9
             val baseSize = (baseRadius * 0.75f + melodyExpansion * 0.35f).coerceIn(30f, 180f)
 
-            // 1. Kick / Snare Translucent "Color Wall" Shockwave Triangles
-            // When a beat hits, this projects an expanding translucent color plane outward,
-            // producing an immersive "color wall" effect through the corridor
+            // 1. Perspective Corner Laser Guide Rails (Shooting through the 3 vertices into deep space)
+            // They corkscrew in sync with the tunnel vanishing point!
             if (strobeFlash > 0.03f) {
+                val reach = (canvas.width + canvas.height) * 0.95f
                 val wallFlashAlpha = (strobeFlash * 255f).toInt().coerceIn(0, 255)
                 val primaryColor = if (isCustomPaletteActive) currentColors[0] else Color.parseColor("#38BDF8")
-                val secondaryColor = if (isCustomPaletteActive) currentColors[1 % currentColors.size] else Color.parseColor("#818CF8")
 
-                // Expanding translucent colored polygon shockwave
-                for (w in 1..3) {
-                    val shockRadius = baseSize * (1.8f + (w * 1.6f) + (strobeFlash * 3.5f))
-                    paint.style = Paint.Style.FILL
-                    paint.color = if (w % 2 == 0) secondaryColor else primaryColor
-                    paint.alpha = (wallFlashAlpha * (0.28f / w)).toInt().coerceIn(5, 80)
-                    drawEquilateralTriangle(canvas, 0f, 0f, shockRadius, 0f, paint)
-
-                    paint.style = Paint.Style.STROKE
-                    paint.strokeWidth = 3f + (strobeFlash * 3f)
-                    paint.color = if (w % 2 == 0) secondaryColor else primaryColor
-                    paint.alpha = (wallFlashAlpha * (0.75f / w)).toInt().coerceIn(10, 200)
-                    drawEquilateralTriangle(canvas, 0f, 0f, shockRadius, 0f, paint)
-                }
-
-                // Perspective Corner Laser Guide Rails shooting through vertices
-                val reach = (canvas.width + canvas.height) * 0.95f
                 paint.style = Paint.Style.STROKE
                 paint.strokeWidth = 3.2f + (strobeFlash * 3.0f)
                 paint.color = primaryColor
@@ -787,55 +769,65 @@ class AvatarWallpaperService : WallpaperService() {
                 }
             }
 
-            // 2. Infinite Nested Equilateral Triangles Zooming Outward (Tunnel Driven by Bass Speed)
-            // Enhanced with 3D tunnel parallax layering (outer triangles shift more with device tilt than inner core)
+            // 2. Continuous Corkscrewing Infinite Triangular Tunnel (Seven Nation Army Corridor)
+            // Triangles continuously zoom outward and smoothly corkscrew around the Z-axis,
+            // creating the real geometric corridor illusion!
             for (i in 0 until numTriangles) {
                 val p = ((tunnelPhase + (i.toFloat() / numTriangles)) % 1.0f)
-                val scale = (baseSize * exp(p * 3.5f)).toFloat()
+                val scale = (baseSize * exp(p * 3.4f)).toFloat()
 
                 // Layered tunnel parallax: outer foreground rings drift further than deep core
-                val parallaxZ = p * p * 60f
+                val parallaxZ = p * p * 55f
                 val triCenterX = rollOffset * parallaxZ
                 val triCenterY = pitchOffset * parallaxZ
 
                 val fadeIn = (p * 5f).coerceIn(0f, 1f)
-                val fadeOut = ((1f - p) * 3.2f).coerceIn(0f, 1f)
-                val totalAlpha = (fadeIn * fadeOut * 240f).toInt().coerceIn(0, 255)
+                val fadeOut = ((1f - p) * 3.0f).coerceIn(0f, 1f)
+                val totalAlpha = (fadeIn * fadeOut * 245f).toInt().coerceIn(0, 255)
 
                 val colorIdx = i % currentColors.size
                 val baseColor = if (isCustomPaletteActive) currentColors[colorIdx] else {
                     if (i % 2 == 0) Color.parseColor("#38BDF8") else Color.parseColor("#F1F5F9")
                 }
 
-                val rotation = (sin(p * Math.PI.toFloat()) * 0.15f) + (if (i % 2 == 1) Math.PI.toFloat() else 0f)
+                // True corkscrew twist: continuous rotation that rolls through depth (z-twist)
+                val corkscrewAngle = (p * 1.8f) + (animTime * 0.4f) + (tunnelPhase * 2.5f)
 
-                // Translucent tinted glass facet for tunnel depth
-                if (strobeFlash > 0.05f) {
+                // Translucent "Color Wall" facet fill:
+                // Retains translucent color and flashes vibrantly during kicks/snares,
+                // so the corkscrewing tunnel walls become a dynamic kaleidoscope of colored light!
+                val baseFacetAlpha = (12f * fadeIn * fadeOut).toInt()
+                val flashFacetAlpha = if (strobeFlash > 0.04f) ((strobeFlash * 90f) * fadeIn * fadeOut).toInt() else 0
+                val facetAlpha = (baseFacetAlpha + flashFacetAlpha).coerceIn(0, 110)
+
+                if (facetAlpha > 0) {
                     paint.style = Paint.Style.FILL
                     paint.color = baseColor
-                    paint.alpha = ((strobeFlash * 45f) * fadeIn * fadeOut).toInt().coerceIn(0, 40)
-                    drawEquilateralTriangle(canvas, triCenterX, triCenterY, scale, rotation, paint)
+                    paint.alpha = facetAlpha
+                    drawEquilateralTriangle(canvas, triCenterX, triCenterY, scale, corkscrewAngle, paint)
                 }
 
-                // Crisp solid laser edges (clean infinite zoom without violent full-screen flash)
+                // Crisp solid laser edges zooming past the camera
                 paint.style = Paint.Style.STROKE
                 paint.strokeWidth = (3.5f * (1f - p * 0.4f) + (strobeFlash * 1.5f)).coerceIn(1.5f, 6.0f)
                 paint.color = baseColor
                 paint.alpha = totalAlpha
-                drawEquilateralTriangle(canvas, triCenterX, triCenterY, scale, rotation, paint)
+                drawEquilateralTriangle(canvas, triCenterX, triCenterY, scale, corkscrewAngle, paint)
             }
 
             // 3. Vanishing Point Focal Core & Central Triangle Housing
-            // The central triangle expansion and concentric bloom layers are driven by melody!
+            // The central triangle expansion and concentric bloom layers are permanently driven by melody!
             val focalRadius = (baseSize * 1.25f + melodyExpansion * 0.65f).coerceIn(40f, 180f)
 
-            // Stepped Concentric Fake Bloom Layers attached to the Triangle Housing
+            // Permanent living concentric fake bloom layers attached to the Triangle Housing:
+            // Swells and shrinks continuously with melodic energy (not flashing on/off with kicks!)
             val triBloomRadii = floatArrayOf(
                 focalRadius * 2.40f + (melodyExpansion * 1.20f),
                 focalRadius * 1.85f + (melodyExpansion * 0.85f),
                 focalRadius * 1.45f + (melodyExpansion * 0.50f),
                 focalRadius * 1.18f + (melodyExpansion * 0.25f)
             )
+            // Solid, permanent ambient presence that breathes with melody
             val triBloomAlphas = intArrayOf(35, 65, 110, 160)
             val triBloomWidths = floatArrayOf(5.5f, 4.2f, 3.2f, 2.2f)
 
@@ -849,7 +841,7 @@ class AvatarWallpaperService : WallpaperService() {
                 val rawColor = if (isCustomPaletteActive) currentColors[swatchIndex] else colorCobaltGlow
                 val bloomColor = ensureVisibleBloomColor(rawColor, colorCobaltGlow)
 
-                // Translucent planar fill for glowing triangle volume
+                // Translucent planar fill for permanent glowing triangle volume
                 paint.style = Paint.Style.FILL
                 paint.color = bloomColor
                 paint.alpha = (triBloomAlphas[tb] * 0.45f).toInt().coerceIn(15, 95)
@@ -869,15 +861,14 @@ class AvatarWallpaperService : WallpaperService() {
             paint.alpha = 240
             drawEquilateralTriangle(canvas, 0f, 0f, focalRadius, 0f, paint)
 
-            // Inside of triangle flashing the stolen color on hits/kicks!
-            if (strobeFlash > 0.04f || smoothedBass > 40f) {
-                val innerFlashAlpha = ((strobeFlash * 140f) + (bassKick * 0.5f)).toInt().coerceIn(0, 160)
-                val innerColor = if (isCustomPaletteActive) currentColors[0] else Color.parseColor("#38BDF8")
-                paint.style = Paint.Style.FILL
-                paint.color = innerColor
-                paint.alpha = innerFlashAlpha
-                drawEquilateralTriangle(canvas, 0f, 0f, focalRadius * 0.85f, 0f, paint)
-            }
+            // Inner triangle ambient glow (swells with melody and gets a subtle punch on kicks)
+            val innerColor = if (isCustomPaletteActive) currentColors[0] else Color.parseColor("#38BDF8")
+            val baseInnerAlpha = (25 + (melodyExpansion * 1.8f).toInt()).coerceIn(20, 90)
+            val kickInnerAlpha = if (strobeFlash > 0.04f) (strobeFlash * 70f).toInt() else 0
+            paint.style = Paint.Style.FILL
+            paint.color = innerColor
+            paint.alpha = (baseInnerAlpha + kickInnerAlpha).coerceIn(20, 160)
+            drawEquilateralTriangle(canvas, 0f, 0f, focalRadius * 0.85f, 0f, paint)
 
             // Crisp White Triangle Housing Contour
             paint.style = Paint.Style.STROKE
@@ -888,7 +879,7 @@ class AvatarWallpaperService : WallpaperService() {
 
             // Secondary inner accent contour
             paint.strokeWidth = 2.2f
-            paint.color = if (isCustomPaletteActive) currentColors[0] else Color.parseColor("#38BDF8")
+            paint.color = innerColor
             paint.alpha = 200
             drawEquilateralTriangle(canvas, 0f, 0f, focalRadius * 0.80f, 0f, paint)
 
