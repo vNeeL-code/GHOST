@@ -14,7 +14,7 @@ interface AgentPlatformCallbacks {
     fun updateNotification(text: String)
     fun showConfirmation(toolName: String, params: Map<String, Any?>, description: String)
     fun speak(text: String)
-    fun storeConversationTurn(userMessage: String, response: String, sessionId: String)
+    fun storeConversationTurn(userMessage: String, response: String, sessionId: String, imageUri: String? = null)
     fun writeDiaryEntry(eventType: String, content: String, thermalState: String)
     suspend fun unloadEngine()
     suspend fun reloadEngine()

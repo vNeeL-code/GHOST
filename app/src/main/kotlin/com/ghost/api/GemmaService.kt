@@ -70,7 +70,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     
     // UI streaming interface for the native chat activity
     interface UiCallback {
-        fun onMessageAdded(message: String, isUser: Boolean, isComplete: Boolean = true, image: android.graphics.Bitmap? = null)
+        fun onMessageAdded(message: String, isUser: Boolean, isComplete: Boolean = true, image: android.graphics.Bitmap? = null, imageUri: String? = null)
         fun onThinkingStateChanged(isThinking: Boolean)
         fun onThoughtUpdated(thought: String)
         fun onDownloadProgress(progressText: String?) {}
@@ -223,13 +223,23 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             "com.ghost.api.ACTION_SHARE_MEDIA" -> {
                 val imagePath = intent.getStringExtra("image_path")
                     ?: SharedMediaHolder.pendingImagePath
+                val sharedQuery = intent.getStringExtra("query")
+                    ?: SharedMediaHolder.pendingQuery
                 SharedMediaHolder.clear()
 
                 if (!imagePath.isNullOrEmpty()) {
                     val bitmap = decodeAndDownsample(imagePath, 1024)
                     if (bitmap != null && ::koogAgent.isInitialized) {
-                        koogAgent.offerImage(bitmap)
+                        koogAgent.offerImage(bitmap, imagePath)
                         updateNotification("Image ready ✨ ask me about it!")
+
+                        if (!sharedQuery.isNullOrEmpty()) {
+                            scope.launch {
+                                processQuery(sharedQuery, null, false)
+                            }
+                        } else {
+                            uiCallback?.onMessageAdded("[Shared Image]", isUser = true, image = bitmap, imageUri = imagePath)
+                        }
                     } else if (bitmap == null) {
                         Timber.e("Failed to decode shared image: $imagePath")
                     } else {
@@ -248,8 +258,18 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                     // Note: captureScreen accepts a callback (Bitmap?) -> Unit
                     accessService.captureScreen { bitmap ->
                         if (bitmap != null && ::koogAgent.isInitialized) {
-                            koogAgent.offerImage(bitmap)
-                            Timber.i("Agent screenshot captured and queued")
+                            val persistentPath = try {
+                                val dir = java.io.File(filesDir, "chat_images").apply { mkdirs() }
+                                val file = java.io.File(dir, "screen_${System.currentTimeMillis()}.jpg")
+                                java.io.FileOutputStream(file).use { out ->
+                                    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, out)
+                                }
+                                file.absolutePath
+                            } catch (e: Exception) {
+                                null
+                            }
+                            koogAgent.offerImage(bitmap, persistentPath)
+                            Timber.i("Agent screenshot captured and queued (path=$persistentPath)")
                         } else {
                             Timber.e("Agent screenshot failed (null bitmap)")
                         }
@@ -886,7 +906,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         serviceScope.launch {
             try {
                 // Pass it through the core pipeline without triggering TTS audio unless explicitly asked
-                val response = processQuery(query, null, false)
+                val response = processQuery(query, null, false, fromUi = true)
 
                 withContext(Dispatchers.Main) {
                     uiCallback?.onThinkingStateChanged(false)
@@ -904,11 +924,16 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         }
     }
 
-    fun processMultimodalFromUi(query: String, images: List<android.graphics.Bitmap>? = null, audio: ByteArray? = null) {
+    fun processMultimodalFromUi(
+        query: String,
+        images: List<android.graphics.Bitmap>? = null,
+        audio: ByteArray? = null,
+        imageUris: List<String>? = null
+    ) {
         val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
         val userBackend = prefs.getString(Constants.PREF_USER_BACKEND, "AUTO")
         if (userBackend == "OFF") {
-            uiCallback?.onMessageAdded(query, isUser = true, image = images?.firstOrNull())
+            uiCallback?.onMessageAdded(query, isUser = true, image = images?.firstOrNull(), imageUri = imageUris?.firstOrNull())
             uiCallback?.onMessageAdded("Inference Engine is set to OFF in Settings. Select AUTO, CPU, or GPU to enable on-device chat.", isUser = false)
             return
         }
@@ -916,16 +941,33 @@ class GemmaService : Service(), AgentPlatformCallbacks {
              uiCallback?.onMessageAdded("System is still initializing. Please wait.", isUser = false)
              return
         }
-        images?.forEach { koogAgent.offerImage(it) }
+
+        val persistentUris = images?.mapIndexed { idx, bmp ->
+            imageUris?.getOrNull(idx) ?: try {
+                val dir = java.io.File(filesDir, "chat_images").apply { mkdirs() }
+                val file = java.io.File(dir, "ui_${System.currentTimeMillis()}_$idx.jpg")
+                java.io.FileOutputStream(file).use { out ->
+                    bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, out)
+                }
+                file.absolutePath
+            } catch (e: Exception) {
+                null
+            }
+        }
+
+        images?.forEachIndexed { idx, bmp ->
+            koogAgent.offerImage(bmp, persistentUris?.getOrNull(idx))
+        }
         audio?.let { koogAgent.offerAudio(it) }
 
         // Emit user message with attached image preview
-        uiCallback?.onMessageAdded(query, isUser = true, image = images?.firstOrNull())
+        val primaryUri = persistentUris?.firstOrNull()
+        uiCallback?.onMessageAdded(query, isUser = true, image = images?.firstOrNull(), imageUri = primaryUri)
         uiCallback?.onThinkingStateChanged(true)
 
         serviceScope.launch {
             try {
-                val response = processQuery(query, null, false)
+                val response = processQuery(query, null, false, fromUi = true)
                 withContext(Dispatchers.Main) {
                     uiCallback?.onThinkingStateChanged(false)
                     if (response == null) {
@@ -950,22 +992,30 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         }
     }
 
+    var currentInFlightQuery: String? = null
+        private set
+
     /**
      * Core orchestrator: Context gathering + LLM reasoning + Tool execution
      */
-    suspend fun processQuery(userPrompt: String, sessionId: String? = null, isDream: Boolean = false): String? = engineMutex.withLock {
+    suspend fun processQuery(
+        userPrompt: String,
+        sessionId: String? = null,
+        isDream: Boolean = false,
+        fromUi: Boolean = false
+    ): String? = engineMutex.withLock {
         val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
         val userBackend = prefs.getString(Constants.PREF_USER_BACKEND, "AUTO")
         if (userBackend == "OFF") {
             val msg = "Inference Engine is set to OFF in Settings. Select AUTO, CPU, or GPU to enable on-device chat."
             if (!isDream) {
-                responseNotificationManager.showResponse("⚠\uFE0F $msg")
+                responseNotificationManager.showResponse("⚠️ $msg")
             }
             return@withLock msg
         }
 
         if (!::koogAgent.isInitialized || !koogAgent.isReady) {
-            responseNotificationManager.showResponse("⚠\uFE0F System still starting up... try again in a moment")
+            responseNotificationManager.showResponse("⚠️ System still starting up... try again in a moment")
             return@withLock "System is still initializing. Please wait a moment and try again."
         }
 
@@ -973,6 +1023,13 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             markActivity()
             if (::ttsManager.isInitialized) {
                 ttsManager.stop()
+            }
+            currentInFlightQuery = userPrompt
+            if (!fromUi) {
+                withContext(Dispatchers.Main) {
+                    uiCallback?.onMessageAdded(userPrompt, isUser = true)
+                    uiCallback?.onThinkingStateChanged(true)
+                }
             }
         }
 
@@ -995,6 +1052,12 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             }
         } finally {
             isInferencing = false
+            currentInFlightQuery = null
+            if (!fromUi && !isDream) {
+                withContext(Dispatchers.Main) {
+                    uiCallback?.onThinkingStateChanged(false)
+                }
+            }
         }
     }
 
@@ -1443,14 +1506,15 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         if (::ttsManager.isInitialized) ttsManager.speak(text)
     }
 
-    override fun storeConversationTurn(userMessage: String, response: String, sessionId: String) {
+    override fun storeConversationTurn(userMessage: String, response: String, sessionId: String, imageUri: String?) {
         scope.launch(Dispatchers.IO) {
             memoryManager.storeTurn(com.ghost.api.database.ConversationTurn(
                 timestamp = System.currentTimeMillis(),
                 userMessage = userMessage,
                 assistantResponse = response,
                 tokensUsed = 0,
-                sessionId = sessionId
+                sessionId = sessionId,
+                imageUri = imageUri
             ))
         }
     }

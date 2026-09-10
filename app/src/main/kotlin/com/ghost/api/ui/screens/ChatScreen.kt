@@ -422,9 +422,17 @@ fun ChatMessageRow(
             }
 
             // Attached / Sent Image Thumbnail
-            if (message.image != null) {
+            val safeImageBitmap = remember(message.image) {
+                try {
+                    val bmp = message.image
+                    if (bmp != null && !bmp.isRecycled) bmp.asImageBitmap() else null
+                } catch (e: Exception) {
+                    null
+                }
+            }
+            if (safeImageBitmap != null) {
                 Image(
-                    bitmap = message.image.asImageBitmap(),
+                    bitmap = safeImageBitmap,
                     contentDescription = "Message Image Attachment",
                     modifier = Modifier
                         .fillMaxWidth()

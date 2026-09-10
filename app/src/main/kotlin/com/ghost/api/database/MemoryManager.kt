@@ -7,7 +7,7 @@ import kotlinx.coroutines.withContext
 
 class MemoryManager(private val context: Context) {
 
-    private val db = OracleDatabase.getDatabase(context)
+    private val db = MemoryDatabase.getDatabase(context)
     private val conversationDao = db.conversationDao()
     private val diaryDao = db.diaryDao()
     private val semanticFactDao = db.semanticFactDao()

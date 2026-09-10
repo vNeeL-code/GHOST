@@ -127,13 +127,14 @@ class KoogAgent(
     // MEDIA QUEUES (owned by KoogAgent, fed by GemmaService)
     // ═══════════════════════════════════════════════════════════════
 
-    private val pendingImages = ConcurrentLinkedQueue<Bitmap>()
+    data class QueuedImage(val bitmap: Bitmap, val uri: String? = null)
+    private val pendingImages = ConcurrentLinkedQueue<QueuedImage>()
     private val pendingAudio = AtomicReference<ByteArray?>(null)
 
     /** Queue an image for the next inference turn */
-    fun offerImage(bitmap: Bitmap) {
-        pendingImages.offer(bitmap)
-        Timber.i("📷 Image queued (${bitmap.width}x${bitmap.height}), queue size: ${pendingImages.size}")
+    fun offerImage(bitmap: Bitmap, uri: String? = null) {
+        pendingImages.offer(QueuedImage(bitmap, uri))
+        Timber.i("📷 Image queued (${bitmap.width}x${bitmap.height}, uri=$uri), queue size: ${pendingImages.size}")
     }
 
     /** Queue audio for the next inference turn */
@@ -143,8 +144,8 @@ class KoogAgent(
     }
 
     /** Drain media queues atomically for one inference call */
-    private fun drainMedia(): Pair<List<Bitmap>, ByteArray?> {
-        val images = mutableListOf<Bitmap>()
+    private fun drainMedia(): Pair<List<QueuedImage>, ByteArray?> {
+        val images = mutableListOf<QueuedImage>()
         while (true) {
             val img = pendingImages.poll() ?: break
             images.add(img)
@@ -512,7 +513,8 @@ class KoogAgent(
         onToken: (String) -> Unit
     ) {
         val context = contextManager.buildContext()
-        val (images, audio) = drainMedia()
+        val (queuedImages, audio) = drainMedia()
+        val images = queuedImages.map { it.bitmap }
 
         try {
             // Build the full prompt the same way handleUserMessage does
@@ -592,7 +594,7 @@ class KoogAgent(
             }
         )
         } finally {
-            images.forEach { try { it.recycle() } catch (e: Exception) {} }
+            // Modern ART GC manages bitmap memory safely; no explicit recycle to prevent Canvas crash
         }
     }
 
@@ -617,8 +619,6 @@ class KoogAgent(
     private suspend fun handleUserMessage(event: AgentEvent.UserMessage) {
         _turnCount.incrementAndGet()
         Timber.i("🧠 KoogAgent: Turn $turnCount - Starting...")
-
-        var imagesToRecycle: List<Bitmap>? = null
 
         try {
             // 0. Thermal throttling — delay if device is warm/hot (never block)
@@ -664,8 +664,9 @@ class KoogAgent(
             Timber.d("Context gathered: ${context.length} chars")
 
             // 2. Drain media queues
-            val (images, audio) = drainMedia()
-            imagesToRecycle = images
+            val (queuedImages, audio) = drainMedia()
+            val images = queuedImages.map { it.bitmap }
+            val turnImageUri = queuedImages.firstOrNull()?.uri
 
             // 3. Add user message to history
             val currentDate = java.time.LocalDate.now().toString()
@@ -844,7 +845,7 @@ class KoogAgent(
                         sentenceBuffer.setLength(0)
                     }
                     
-                    cb.storeConversationTurn(event.message, finalResponse, event.sessionId)
+                    cb.storeConversationTurn(event.message, finalResponse, event.sessionId, turnImageUri)
                 } else {
                     // Diary: use clean response directly without redundant book prefix
                     try {
@@ -870,7 +871,7 @@ class KoogAgent(
             callbacks?.showResponse(errorMsg)
             event.responseChannel.complete(errorMsg)
         } finally {
-            imagesToRecycle?.forEach { try { it.recycle() } catch (e: Exception) {} }
+            // Modern ART GC automatically reclaims bitmap memory safely without Canvas crashes
         }
     }
 

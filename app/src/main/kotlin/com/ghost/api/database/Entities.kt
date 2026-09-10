@@ -15,7 +15,8 @@ data class ConversationTurn(
     val assistantResponse: String,
     val tokensUsed: Int,
     val sessionId: String,  // For grouping related conversations
-    val tokenHash: String = "" // Detect content changes without re-tokenizing
+    val tokenHash: String = "", // Detect content changes without re-tokenizing
+    val imageUri: String? = null
 )
 
 @androidx.room.Fts4(contentEntity = ConversationTurn::class)

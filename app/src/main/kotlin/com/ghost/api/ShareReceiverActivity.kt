@@ -73,28 +73,33 @@ class ShareReceiverActivity : Activity() {
                     return@thread
                 }
 
-                val cacheFile = File(cacheDir, "shared_image_${System.currentTimeMillis()}.jpg")
-                cacheFile.deleteOnExit() // Audit Fix: Prevent disk bloat
+                val imagesDir = File(filesDir, "chat_images").apply { mkdirs() }
+                val persistentFile = File(imagesDir, "shared_${System.currentTimeMillis()}.jpg")
 
                 inputStream.use { input ->
-                    java.io.FileOutputStream(cacheFile).use { output ->
+                    java.io.FileOutputStream(persistentFile).use { output ->
                         input.copyTo(output)
                     }
                 }
 
-                Timber.i("Image streamed to disk: ${cacheFile.length()} bytes")
+                Timber.i("Image streamed to disk: ${persistentFile.length()} bytes at ${persistentFile.absolutePath}")
+
+                val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
 
                 // Store global state
-                SharedMediaHolder.pendingImagePath = cacheFile.absolutePath
+                SharedMediaHolder.pendingImagePath = persistentFile.absolutePath
                 SharedMediaHolder.pendingType = "image"
-
+                SharedMediaHolder.pendingQuery = sharedText
 
                 // Start service — use startService() to avoid foreground type re-validation on Android 14+
                 // The service is already running as foreground from its own onCreate.
                 val serviceIntent = Intent(this, GemmaService::class.java).apply {
                     action = "com.ghost.api.ACTION_SHARE_MEDIA"
                     putExtra("media_type", "image")
-                    putExtra("image_path", cacheFile.absolutePath)
+                    putExtra("image_path", persistentFile.absolutePath)
+                    if (!sharedText.isNullOrEmpty()) {
+                        putExtra("query", sharedText)
+                    }
                 }
                 try {
                     startService(serviceIntent)
@@ -104,7 +109,7 @@ class ShareReceiverActivity : Activity() {
                 }
 
                 runOnUiThread {
-                    Toast.makeText(this, "Image shared with Gemma", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, if (!sharedText.isNullOrEmpty()) "Analyzing shared image..." else "Image shared with Gemma ✨", Toast.LENGTH_SHORT).show()
                     finish()
                 }
             } catch (e: Exception) {
@@ -172,10 +177,12 @@ class ShareReceiverActivity : Activity() {
 object SharedMediaHolder {
     var pendingImagePath: String? = null // Path based sharing
     var pendingType: String? = null
+    var pendingQuery: String? = null
 
     fun clear() {
         // No bitmap to recycle
         pendingImagePath = null
         pendingType = null
+        pendingQuery = null
     }
 }

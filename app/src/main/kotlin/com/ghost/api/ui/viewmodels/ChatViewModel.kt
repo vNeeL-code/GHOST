@@ -21,6 +21,9 @@ class ChatViewModel : ViewModel() {
     private val _attachedImage = MutableStateFlow<android.graphics.Bitmap?>(null)
     val attachedImage: StateFlow<android.graphics.Bitmap?> = _attachedImage.asStateFlow()
 
+    private val _attachedImagePath = MutableStateFlow<String?>(null)
+    val attachedImagePath: StateFlow<String?> = _attachedImagePath.asStateFlow()
+
     private val _isTtsActive = MutableStateFlow(false)
     val isTtsActive: StateFlow<Boolean> = _isTtsActive.asStateFlow()
 
@@ -35,8 +38,9 @@ class ChatViewModel : ViewModel() {
         _isTtsActive.value = active
     }
 
-    fun setAttachedImage(bitmap: android.graphics.Bitmap?) {
+    fun setAttachedImage(bitmap: android.graphics.Bitmap?, imagePath: String? = null) {
         _attachedImage.value = bitmap
+        _attachedImagePath.value = imagePath
     }
 
     fun setMessages(newMessages: List<ChatMessage>) {
@@ -47,12 +51,12 @@ class ChatViewModel : ViewModel() {
         _messages.value = _messages.value + message
     }
 
-    fun updateLastMessage(content: String, thought: String? = null) {
+    fun updateLastMessage(content: String, thought: String? = null, isComplete: Boolean = true) {
         val current = _messages.value
         if (current.isNotEmpty() && !current.last().isFromUser) {
             val last = current.last()
             val updated = current.toMutableList().apply {
-                this[size - 1] = last.copy(content = content, thought = thought)
+                this[size - 1] = last.copy(content = content, thought = thought, isComplete = isComplete)
             }
             _messages.value = updated
         }

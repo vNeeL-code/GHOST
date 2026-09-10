@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.res.ColorStateList
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
@@ -214,6 +215,9 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
     override fun onResume() {
         super.onResume()
         completeRitual()
+        if (isBound && gemmaService?.isSystemReady?.value == true) {
+            loadHistoricalChat()
+        }
     }
 
     override fun onDownloadProgress(progressText: String?) {
@@ -233,31 +237,67 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
     }
     
     private fun loadHistoricalChat() {
-        scope.launch {
+        scope.launch(Dispatchers.IO) {
             try {
+                if (chatViewModel.isThinking.value) return@launch
                 val history = gemmaService?.getRecentTurns(50) ?: return@launch
-                withContext(Dispatchers.Main) {
-                    val messages = history.sortedBy { it.timestamp }.flatMap { turn ->
-                        val list = mutableListOf<ChatMessage>()
-                        if (turn.userMessage.isNotEmpty()) list.add(ChatMessage(turn.userMessage, isFromUser = true, timestamp = turn.timestamp))
-                        if (turn.assistantResponse.isNotEmpty()) list.add(ChatMessage(turn.assistantResponse, isFromUser = false, timestamp = turn.timestamp + 1))
-                        list
+                val messages = history.sortedBy { it.timestamp }.flatMap { turn ->
+                    val list = mutableListOf<ChatMessage>()
+                    val imageBitmap = if (!turn.imageUri.isNullOrEmpty() && java.io.File(turn.imageUri).exists()) {
+                        decodeSampledBitmap(turn.imageUri, 1024)
+                    } else null
+                    if (turn.userMessage.isNotEmpty() || imageBitmap != null) {
+                        list.add(ChatMessage(
+                            content = turn.userMessage,
+                            isFromUser = true,
+                            timestamp = turn.timestamp,
+                            image = imageBitmap,
+                            imageUri = turn.imageUri
+                        ))
                     }
-                    chatViewModel.setMessages(messages)
+                    if (turn.assistantResponse.isNotEmpty()) {
+                        list.add(ChatMessage(
+                            content = turn.assistantResponse,
+                            isFromUser = false,
+                            timestamp = turn.timestamp + 1
+                        ))
+                    }
+                    list
+                }
+                withContext(Dispatchers.Main) {
+                    if (!chatViewModel.isThinking.value) {
+                        chatViewModel.setMessages(messages)
+                    }
                 }
             } catch (e: Exception) { Timber.e(e) }
         }
     }
 
-    override fun onMessageAdded(message: String, isUser: Boolean, isComplete: Boolean, image: android.graphics.Bitmap?) {
+    private fun decodeSampledBitmap(path: String, maxDim: Int): Bitmap? {
+        return try {
+            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeFile(path, bounds)
+            var sampleSize = 1
+            while (bounds.outWidth / sampleSize > maxDim || bounds.outHeight / sampleSize > maxDim) {
+                sampleSize *= 2
+            }
+            val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sampleSize }
+            android.graphics.BitmapFactory.decodeFile(path, opts)
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to decode historical image: $path")
+            null
+        }
+    }
+
+    override fun onMessageAdded(message: String, isUser: Boolean, isComplete: Boolean, image: android.graphics.Bitmap?, imageUri: String?) {
         lifecycleScope.launch(Dispatchers.Main) {
             if (isUser) {
-                chatViewModel.addMessage(ChatMessage(message, isFromUser = true, image = image))
+                chatViewModel.addMessage(ChatMessage(message, isFromUser = true, image = image, imageUri = imageUri))
             } else {
                 val current = chatViewModel.messages.value
                 val last = current.lastOrNull()
                 if (last != null && !last.isFromUser && !last.isComplete) {
-                    chatViewModel.updateLastMessage(message)
+                    chatViewModel.updateLastMessage(message, isComplete = isComplete)
                 } else {
                     chatViewModel.addMessage(ChatMessage(message, isFromUser = false, isComplete = isComplete))
                 }
@@ -281,10 +321,11 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
 
     private fun sendStagedMessage(text: String) {
         val bitmap = chatViewModel.attachedImage.value
-        chatViewModel.setAttachedImage(null)
+        val imagePath = chatViewModel.attachedImagePath.value
+        chatViewModel.setAttachedImage(null, null)
         if (bitmap != null) {
             scope.launch {
-                gemmaService?.processMultimodalFromUi(text, listOf(bitmap))
+                gemmaService?.processMultimodalFromUi(text, listOf(bitmap), imageUris = listOfNotNull(imagePath))
                 withContext(Dispatchers.Main) {
                     Toast.makeText(this@MainActivity, "Sent with image", Toast.LENGTH_SHORT).show()
                 }
@@ -307,7 +348,7 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
     private fun handlePickedImage(uri: Uri) {
         scope.launch {
             try {
-                val bitmap = withContext(Dispatchers.IO) {
+                val pair = withContext(Dispatchers.IO) {
                     val reqWidth = 1024
                     val reqHeight = 1024
                     val options = android.graphics.BitmapFactory.Options().apply {
@@ -327,11 +368,28 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
                         this.inSampleSize = inSampleSize
                         inJustDecodeBounds = false
                     }
-                    contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, options) }
+                    val bmp = contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, options) }
+                    
+                    val path = if (bmp != null) {
+                        try {
+                            val dir = java.io.File(filesDir, "chat_images").apply { mkdirs() }
+                            val file = java.io.File(dir, "picked_${System.currentTimeMillis()}.jpg")
+                            java.io.FileOutputStream(file).use { out ->
+                                bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, out)
+                            }
+                            file.absolutePath
+                        } catch (e: Exception) {
+                            null
+                        }
+                    } else null
+
+                    bmp to path
                 }
+                val bitmap = pair.first
+                val path = pair.second
                 if (bitmap != null) {
                     withContext(Dispatchers.Main) {
-                        chatViewModel.setAttachedImage(bitmap)
+                        chatViewModel.setAttachedImage(bitmap, path)
                         Toast.makeText(this@MainActivity, "Image staged. Type a prompt and send.", Toast.LENGTH_SHORT).show()
                     }
                 }
