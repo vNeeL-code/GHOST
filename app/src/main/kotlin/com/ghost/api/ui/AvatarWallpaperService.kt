@@ -717,11 +717,11 @@ class AvatarWallpaperService : WallpaperService() {
         private fun drawOptionBHexLattice(canvas: Canvas, baseCx: Float, baseCy: Float, baseRadius: Float, width: Float, height: Float) {
             val bassKick = (smoothedBass * 1.5f).coerceAtLeast(0f)
             
-            // 1. GRAND REACTOR CORE SCALING (Restored to original commanding scale)
-            val coreRadius = (baseRadius * 1.35f + bassKick * 0.60f).coerceIn(110f, 260f)
+            // 1. REFINED REACTOR CORE SCALING (True to original blue proportions)
+            val coreRadius = (baseRadius * 1.0f + bassKick * 0.45f).coerceIn(75f, 175f)
 
             // 2. GENTLE HALLWAY SPREAD (Corridor wireframes remain architecturally stable)
-            val hallwayGentleSpread = (bassKick * 0.22f + strobeFlash * 14f).coerceIn(0f, 45f)
+            val hallwayGentleSpread = (bassKick * 0.20f + strobeFlash * 12f).coerceIn(0f, 40f)
 
             // Multi-Layer Stereoscopic Parallax Offsets
             val tiltX = rollOffset * PARALLAX_MAX
@@ -737,7 +737,7 @@ class AvatarWallpaperService : WallpaperService() {
             val ambientIllumination = (smoothedIntensity * 0.40f).coerceIn(0f, 60f)
             val hallwayFlashAlpha = maxOf((strobeFlash * 255f), ambientIllumination).toInt().coerceIn(0, 255)
 
-            val nearR = coreRadius * 1.02f
+            val nearR = coreRadius * 1.05f
             val farR = maxOf(width, height) * 0.88f
             val wallColor = if (isCustomPaletteActive) currentColors[0] else COLOR_CYAN_ACCENT
 
@@ -797,10 +797,10 @@ class AvatarWallpaperService : WallpaperService() {
 
             // Concentric Vertex-Aligned Hexagonal Halos (Hallway Corridor Rings)
             // Centered on the background corridor vanishing point (corrCx, corrCy) with subtle progressive depth (0.08x - 0.16x)
-            // They stay firmly in the deep background, decoupled from the floating avatar!
+            // Mults (1.8f, 2.8f, 4.2f, 6.0f) give grand architectural corridor reach across the screen
             paint.style = Paint.Style.STROKE
             for (h in 0 until 4) {
-                val haloDepth = 0.08f + (h * 0.025f) // Deep corridor plane: 0.08x to 0.155x
+                val haloDepth = 0.08f + (h * 0.025f)
                 val haloCx = baseCx + tiltX * haloDepth
                 val haloCy = baseCy + tiltY * haloDepth
 
@@ -830,7 +830,6 @@ class AvatarWallpaperService : WallpaperService() {
             val avatarCy = baseCy + tiltY * 1.20f
 
             // 1. Stepped Concentric Blooming Hexagons behind Mother Hexagon
-            // Radiant bloom aura tightly attached to the floating avatar chamber
             for (hb in 0 until 4) {
                 val radius = coreRadius * HEX_BLOOM_CORE_MULTS[hb] + (hallwayGentleSpread * (0.20f + hb * 0.12f))
                 val swatchIndex = when (hb) {
@@ -880,14 +879,14 @@ class AvatarWallpaperService : WallpaperService() {
             paint.alpha = 200
             drawHexagon(canvas, 0f, 0f, coreRadius * 0.82f, paint)
 
-            // 2B. Six Logarithmic Spiral Hex Arms (Cohesive Sacred Geometry Flower)
-            // Balanced, proportional scaling with original grand dimensions
+            // 2B. Six Logarithmic Spiral Hex Arms (Original Sleek Crystalline Dots)
+            // Wide grand spread across the screen + delicate, crisp gem sizing (never fat!)
             val numArms = 6
             val hexesPerArm = 5
             val spiralTwist = 0.22f
 
             // Dynamic high-energy lattice spread: bass kicks + volume intensity + melodic harmonics
-            val latticeSpread = (bassKick * 1.4f + smoothedIntensity * 0.9f + smoothedMelody * 0.7f).coerceIn(0f, 320f)
+            val latticeSpread = (bassKick * 1.4f + smoothedIntensity * 0.9f + smoothedMelody * 0.7f).coerceIn(0f, 280f)
             val cohesiveScale = 1.0f + (latticeSpread / 250f) * 0.35f
 
             for (arm in 0 until numArms) {
@@ -900,21 +899,20 @@ class AvatarWallpaperService : WallpaperService() {
                     val nodeMag = nodeMagnitudes[nodeIndex]
 
                     val innerDampener = if (step == 1) 0.50f else 1.0f
-                    // Refined per-node pop: elegant subtle accent (0..7px)
-                    val nodePop = (nodeMag * 0.10f * innerDampener).coerceIn(0f, 7f)
+                    // Subtle crisp note accent (0..3.5px max)
+                    val nodePop = (nodeMag * 0.05f * innerDampener).coerceIn(0f, 3.5f)
 
-                    // Grand outward spread matching original blueprint
-                    val stepSpread = step * (40f + latticeSpread * 0.28f)
-                    val tipBloom = progress * latticeSpread * 0.45f
-                    val distance = (coreRadius * 1.25f) + stepSpread + tipBloom
+                    // Grand outward spread matching original blueprint: step * 42f ensures full screen coverage
+                    val stepSpread = step * (42f + latticeSpread * 0.25f)
+                    val distance = (coreRadius * 1.35f) + stepSpread
                     val angle = baseAngle + (step * spiralTwist) + (smoothedIntensity * 0.003f)
 
                     val hx = (cos(angle) * distance).toFloat()
                     val hy = (sin(angle) * distance).toFloat()
 
-                    // Substantial geometric crystalline hex sizing matching original blue scale
-                    val baseHexSize = coreRadius * 0.28f * (1.10f - progress * 0.50f)
-                    val hexSize = (baseHexSize * cohesiveScale + nodePop).coerceIn(10f, coreRadius * 0.45f)
+                    // Sleek, delicate crystalline sizing: 13px inner down to 7px outer in idle (exact original blue!)
+                    val baseHexSize = coreRadius * 0.15f * (1.10f - progress * 0.55f)
+                    val hexSize = (baseHexSize * cohesiveScale + nodePop).coerceIn(6f, 22f)
 
                     val colorIdx = (arm + step) % currentColors.size
                     val baseArmColor = if (isCustomPaletteActive) currentColors[colorIdx] else {
@@ -927,7 +925,7 @@ class AvatarWallpaperService : WallpaperService() {
                         }
                     }
 
-                    // Preserve rich theme palette: subtle highlight on extreme transients
+                    // Subtle highlight on extreme transients, never stark white blobs
                     val armColor = if (nodeMag > 35f) {
                         val blendRatio = ((nodeMag - 35f) / 65f).coerceIn(0f, 0.35f)
                         ColorUtils.blendARGB(baseArmColor, Color.WHITE, blendRatio)
@@ -935,8 +933,8 @@ class AvatarWallpaperService : WallpaperService() {
                         baseArmColor
                     }
 
-                    val baseAlpha = ((1f - progress * 0.30f) * 170).toInt()
-                    val nodeAlpha = (baseAlpha + (nodeMag * 0.8f).toInt() + (latticeSpread * 0.15f).toInt()).coerceIn(40, 220)
+                    val baseAlpha = ((1f - progress * 0.35f) * 220).toInt()
+                    val nodeAlpha = (baseAlpha + (nodeMag * 0.6f).toInt()).coerceIn(40, 230)
 
                     // Translucent fill
                     paint.style = Paint.Style.FILL
@@ -944,11 +942,11 @@ class AvatarWallpaperService : WallpaperService() {
                     paint.alpha = nodeAlpha
                     drawHexagon(canvas, hx, hy, hexSize, paint)
 
-                    // Crisp contour
+                    // Crisp, thin contour matching original delicate gems
                     paint.style = Paint.Style.STROKE
-                    paint.strokeWidth = 2.4f + (nodeMag * 0.02f)
+                    paint.strokeWidth = 1.6f + (nodeMag * 0.012f)
                     paint.color = if (nodeMag > 45f) ColorUtils.blendARGB(baseArmColor, Color.WHITE, 0.40f) else baseArmColor
-                    paint.alpha = ((1f - progress * 0.35f) * 180 + (nodeMag * 0.9f)).toInt().coerceIn(50, 240)
+                    paint.alpha = ((1f - progress * 0.35f) * 220 + (nodeMag * 0.7f)).toInt().coerceIn(50, 245)
                     drawHexagon(canvas, hx, hy, hexSize, paint)
                 }
             }
@@ -956,7 +954,6 @@ class AvatarWallpaperService : WallpaperService() {
             canvas.restore() // Restores unrotated frame
 
             // 3. Model Unicode Glyph (✧) Centered, Crisp White & Contained
-            // Subtle floating jewel inside the obsidian chamber
             val glyphCx = baseCx + tiltX * 1.22f
             val glyphCy = baseCy + tiltY * 1.22f
 
