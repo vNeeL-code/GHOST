@@ -139,19 +139,6 @@
             </intent-filter>
         </service>
         
-        <!-- CAMERA WALLPAPER -->
-        <service
-            android:name=".ui.CameraWallpaperService"
-            android:permission="android.permission.BIND_WALLPAPER"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.service.wallpaper.WallpaperService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.service.wallpaper"
-                android:resource="@xml/transparent_wallpaper" />
-        </service>
-        
         <!-- AVATAR WALLPAPER -->
         <service
             android:name=".ui.AvatarWallpaperService"
@@ -241,7 +228,6 @@
         <receiver android:name=".hardware.HardwareToggleReceiver"
             android:exported="false">
             <intent-filter>
-                <action android:name="com.ghost.api.ACTION_SET_CAMERA_WALLPAPER" />
                 <action android:name="com.ghost.api.ACTION_TOGGLE_EDGE_LIGHTS" />
                 <action android:name="com.ghost.api.ACTION_SET_AVATAR_WALLPAPER" />
             </intent-filter>

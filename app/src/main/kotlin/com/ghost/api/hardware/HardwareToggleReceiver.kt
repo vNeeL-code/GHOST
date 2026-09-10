@@ -17,21 +17,6 @@ class HardwareToggleReceiver : BroadcastReceiver() {
         val action = intent.action ?: return
         
         when (action) {
-            "com.ghost.api.ACTION_SET_CAMERA_WALLPAPER" -> {
-                Timber.i("Hardware Toggle: Camera Wallpaper requested")
-                Toast.makeText(context, "Launching Camera Wallpaper...", Toast.LENGTH_SHORT).show()
-                val wpIntent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).apply {
-                    putExtra(WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
-                        ComponentName(context, com.ghost.api.ui.CameraWallpaperService::class.java))
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                try {
-                    context.startActivity(wpIntent)
-                } catch (e: Exception) {
-                    Timber.e(e, "Failed to launch camera wallpaper chooser")
-                    Toast.makeText(context, "Error launching wallpaper chooser", Toast.LENGTH_SHORT).show()
-                }
-            }
             "com.ghost.api.ACTION_TOGGLE_EDGE_LIGHTS" -> {
                 Timber.i("Hardware Toggle: Edge Lights requested")
                 com.ghost.api.ui.EdgeLightsManager.toggle(context)

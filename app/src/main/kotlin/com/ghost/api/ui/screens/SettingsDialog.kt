@@ -230,21 +230,8 @@ fun SettingsDialog(
                         }
                         item {
                             SettingsActionCard(
-                                title = "Camera Wallpaper",
-                                subtitle = "Set dynamic pass-through camera background",
-                                onClick = {
-                                    context.sendBroadcast(
-                                        Intent(context, HardwareToggleReceiver::class.java).apply {
-                                            action = "com.ghost.api.ACTION_SET_CAMERA_WALLPAPER"
-                                        }
-                                    )
-                                }
-                            )
-                        }
-                        item {
-                            SettingsActionCard(
-                                title = "Visualiser",
-                                subtitle = "Set GHOST avatar wallpaper",
+                                title = "Set Live Wallpaper",
+                                subtitle = "Apply GHOST avatar visualizer to home / lock screen",
                                 onClick = {
                                     context.sendBroadcast(
                                         Intent(context, HardwareToggleReceiver::class.java).apply {
