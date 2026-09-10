@@ -3,25 +3,40 @@ package com.ghost.api.audio
 import android.content.ComponentName
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
 import android.media.MediaMetadata
 import android.media.audiofx.Visualizer
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
+import android.media.session.PlaybackState
 import androidx.palette.graphics.Palette
 import com.ghost.api.GemmaNotificationListener
 import timber.log.Timber
 
 /**
  * Singleton manager that hooks into the global system audio mix (Session 0).
- * Captures FFT data and active Media colors, then notifies listeners.
+ * Captures FFT data, active media album art, or audio-producing app icon colors,
+ * then notifies listeners (Wallpaper, EdgeLights, etc.).
  */
 object SystemVisualizer {
 
     private var visualizer: Visualizer? = null
     private var isEnabled = false
 
+    private var appContext: Context? = null
     private var mediaSessionManager: MediaSessionManager? = null
     private var activeMediaController: MediaController? = null
+
+    // Track last active foreground package reported by accessibility
+    var lastForegroundPackage: String? = null
+        private set
+
+    // Audio activity state & silence decay
+    private var lastAudioActivityTime: Long = 0L
+    private var isAudioActive: Boolean = false
     
     // Extracted Colors (null means use defaults)
     var currentAlbumColors: IntArray? = null
@@ -49,9 +64,25 @@ object SystemVisualizer {
         override fun onMetadataChanged(metadata: MediaMetadata?) {
             extractColorsFromMetadata(metadata)
         }
+
+        override fun onPlaybackStateChanged(state: PlaybackState?) {
+            if (state?.state == PlaybackState.STATE_PLAYING) {
+                if (currentAlbumColors == null) {
+                    extractColorsFromMetadata(activeMediaController?.metadata)
+                }
+            } else if (state?.state == PlaybackState.STATE_STOPPED || state?.state == PlaybackState.STATE_PAUSED) {
+                if (!isAudioActive) {
+                    currentAlbumColors = null
+                    if (overrideEmotionColors == null) {
+                        handler.post { listeners.forEach { it.onColorsChanged(null) } }
+                    }
+                }
+            }
+        }
     }
 
     fun init(context: Context) {
+        appContext = context.applicationContext
         if (visualizer != null) return
 
         try {
@@ -79,6 +110,29 @@ object SystemVisualizer {
                         
                         val intensity = totalMag / (n / 2)
                         val bass = bassMag / 10f
+
+                        // Audio Activity & Speech Detection
+                        if (intensity > 0.04f) {
+                            lastAudioActivityTime = System.currentTimeMillis()
+                            if (!isAudioActive) {
+                                isAudioActive = true
+                                if (currentAlbumColors == null) {
+                                    val pkg = activeMediaController?.packageName ?: lastForegroundPackage
+                                    if (pkg != null && pkg != "com.ghost.api") {
+                                        applyPackageColor(pkg)
+                                    }
+                                }
+                            }
+                        } else if (isAudioActive && (System.currentTimeMillis() - lastAudioActivityTime > 3500)) {
+                            isAudioActive = false
+                            val isMediaPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
+                            if (!isMediaPlaying) {
+                                currentAlbumColors = null
+                                if (overrideEmotionColors == null) {
+                                    handler.post { listeners.forEach { it.onColorsChanged(null) } }
+                                }
+                            }
+                        }
                         
                         listeners.forEach { it.onAudioData(ByteArray(0), fft, intensity, bass) }
                     }
@@ -105,7 +159,7 @@ object SystemVisualizer {
         activeMediaController?.unregisterCallback(mediaControllerCallback)
         
         activeMediaController = controllers?.firstOrNull { 
-            it.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING 
+            it.playbackState?.state == PlaybackState.STATE_PLAYING 
         } ?: controllers?.firstOrNull()
 
         activeMediaController?.registerCallback(mediaControllerCallback)
@@ -117,11 +171,20 @@ object SystemVisualizer {
             ?: metadata?.getBitmap(MediaMetadata.METADATA_KEY_ART)
             
         if (bitmap == null) {
+            val pkg = activeMediaController?.packageName
+            if (pkg != null && pkg != "com.ghost.api") {
+                applyPackageColor(pkg)
+                return
+            }
             currentAlbumColors = null
             listeners.forEach { it.onColorsChanged(null) }
             return
         }
 
+        extractPaletteFromBitmap(bitmap)
+    }
+
+    private fun extractPaletteFromBitmap(bitmap: Bitmap) {
         Palette.from(bitmap).generate { palette ->
             if (palette != null) {
                 val dominant = palette.getDominantColor(0)
@@ -132,8 +195,8 @@ object SystemVisualizer {
                 
                 // Select best non-black primary color
                 val primary = when {
-                    dominant != 0 && !isTooDark(dominant) -> dominant
-                    vibrant != 0 && !isTooDark(vibrant) -> vibrant
+                    vibrant != 0 && !isTooDark(vibrant) && !isTooLight(vibrant) -> vibrant
+                    dominant != 0 && !isTooDark(dominant) && !isTooLight(dominant) -> dominant
                     lightVibrant != 0 && !isTooDark(lightVibrant) -> lightVibrant
                     muted != 0 && !isTooDark(muted) -> muted
                     dominant != 0 -> dominant
@@ -150,59 +213,143 @@ object SystemVisualizer {
                 )
                 currentAlbumColors = extracted
                 if (overrideEmotionColors == null) {
-                    listeners.forEach { it.onColorsChanged(extracted) }
+                    handler.post { listeners.forEach { it.onColorsChanged(extracted) } }
                 }
             }
         }
     }
 
+    fun onForegroundAppChanged(packageName: String) {
+        if (packageName == "com.ghost.api") return
+        lastForegroundPackage = packageName
+        val isMediaPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
+        if (isAudioActive && !isMediaPlaying) {
+            applyPackageColor(packageName)
+        }
+    }
+
+    fun applyPackageColor(packageName: String) {
+        val lower = packageName.lowercase()
+        val brandHex = when {
+            lower.contains("claude") || lower.contains("anthropic") -> "#D97757" // Claude Terracotta
+            lower.contains("chatgpt") || lower.contains("openai") -> "#10A37F" // ChatGPT Mint Green
+            lower.contains("deepseek") -> "#4D6BFE" // DeepSeek Electric Whale Blue
+            lower.contains("qwen") || lower.contains("tongyi") -> "#7C4DFF" // Qwen Royal Purple
+            lower.contains("kimi") || lower.contains("moonshot") -> "#2B5CFF" // Kimi Moonlight Cobalt
+            lower.contains("mistral") || lower.contains("lechat") -> "#FF7000" // Mistral Solar Flame Orange
+            lower.contains("perplexity") -> "#20B2AA" // Perplexity Seafoam Teal
+            lower.contains("grok") || lower.contains("xai") -> "#3F4E4F" // Grok Gunmetal Slate
+            lower.contains("meta.ai") || lower.contains("llama") -> "#0081FB" // Meta Indigo-Blue
+            lower.contains("copilot") -> "#6B46C1" // Copilot Violet
+            lower.contains("bard") || lower.contains("gemini") -> "#4285F4" // Google Sparkle Blue
+            else -> null
+        }
+
+        if (brandHex != null) {
+            val baseColor = Color.parseColor(brandHex)
+            val palette = buildPaletteFromColor(baseColor)
+            currentAlbumColors = palette
+            if (overrideEmotionColors == null) {
+                handler.post { listeners.forEach { it.onColorsChanged(palette) } }
+            }
+            Timber.d("SystemVisualizer: Applied AI brand palette for $packageName ($brandHex)")
+        } else {
+            extractPaletteFromAppIcon(packageName)
+        }
+    }
+
+    private fun extractPaletteFromAppIcon(packageName: String) {
+        try {
+            val pm = appContext?.packageManager ?: return
+            val icon = pm.getApplicationIcon(packageName)
+            val bitmap = drawableToBitmap(icon)
+            if (bitmap != null) {
+                extractPaletteFromBitmap(bitmap)
+                Timber.d("SystemVisualizer: Extracted agnostic app icon palette for $packageName")
+            }
+        } catch (e: Exception) {
+            Timber.w("SystemVisualizer: Could not extract icon palette for $packageName: ${e.message}")
+        }
+    }
+
+    private fun drawableToBitmap(drawable: Drawable): Bitmap? {
+        if (drawable is BitmapDrawable && drawable.bitmap != null) {
+            return drawable.bitmap
+        }
+        return try {
+            val width = if (drawable.intrinsicWidth > 0) drawable.intrinsicWidth.coerceIn(48, 128) else 96
+            val height = if (drawable.intrinsicHeight > 0) drawable.intrinsicHeight.coerceIn(48, 128) else 96
+            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            drawable.setBounds(0, 0, canvas.width, canvas.height)
+            drawable.draw(canvas)
+            bitmap
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun buildPaletteFromColor(baseColor: Int): IntArray {
+        val hsv = FloatArray(3)
+        Color.colorToHSV(baseColor, hsv)
+        val c1 = baseColor
+        val hsv2 = hsv.clone().apply { this[2] = (this[2] * 0.85f).coerceIn(0f, 1f) }
+        val c2 = Color.HSVToColor(hsv2)
+        val hsv3 = hsv.clone().apply { this[2] = (this[2] * 0.65f).coerceIn(0f, 1f) }
+        val c3 = Color.HSVToColor(hsv3)
+        val hsv4 = hsv.clone().apply { this[2] = (this[2] * 0.45f).coerceIn(0f, 1f) }
+        val c4 = Color.HSVToColor(hsv4)
+        val hsv5 = hsv.clone().apply { this[1] = (this[1] * 0.60f).coerceIn(0f, 1f) }
+        val c5 = Color.HSVToColor(hsv5)
+        return intArrayOf(c1, c2, c3, c4, c5)
+    }
+
     private fun isTooDark(color: Int): Boolean {
         if (color == 0) return true
-        val r = android.graphics.Color.red(color)
-        val g = android.graphics.Color.green(color)
-        val b = android.graphics.Color.blue(color)
+        val r = Color.red(color)
+        val g = Color.green(color)
+        val b = Color.blue(color)
         val lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
         return lum < 0.12
     }
 
+    private fun isTooLight(color: Int): Boolean {
+        if (color == 0) return false
+        val r = Color.red(color)
+        val g = Color.green(color)
+        val b = Color.blue(color)
+        val lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
+        return lum > 0.88
+    }
+
     fun pushEmotionColor(emoji: String) {
         val baseColor = when (emoji) {
-            "😡", "😠", "🤬", "🛑", "❗" -> android.graphics.Color.parseColor("#FF1744") // Red
-            "💙", "🧊", "❄️", "💧", "🔵" -> android.graphics.Color.parseColor("#00E5FF") // Cyan/Blue
-            "💚", "🌿", "🔋", "🤢", "🟢" -> android.graphics.Color.parseColor("#00E676") // Green
-            "💛", "☀️", "🌟", "⚡", "🟡" -> android.graphics.Color.parseColor("#FFEA00") // Yellow
-            "💜", "🔮", "😈", "☂️", "🟣" -> android.graphics.Color.parseColor("#D500F9") // Purple
-            "🩷", "🌸", "💕", "🧠" -> android.graphics.Color.parseColor("#F50057") // Pink
-            "🧡", "🔥", "🦊", "🎃", "🟠" -> android.graphics.Color.parseColor("#FF9100") // Orange
-            "🤍", "☁️", "👻", "💀", "⚪" -> android.graphics.Color.parseColor("#FFFFFF") // White
-            else -> android.graphics.Color.parseColor("#A78BFA") // Default Purple
+            "😡", "😠", "🤬", "🛑", "❗" -> Color.parseColor("#FF1744") // Red
+            "💙", "🧊", "❄️", "💧", "🔵" -> Color.parseColor("#00E5FF") // Cyan/Blue
+            "💚", "🌿", "🔋", "🤢", "🟢" -> Color.parseColor("#00E676") // Green
+            "💛", "☀️", "🌟", "⚡", "🟡" -> Color.parseColor("#FFEA00") // Yellow
+            "💜", "🔮", "😈", "☂️", "🟣" -> Color.parseColor("#D500F9") // Purple
+            "🩷", "🌸", "💕", "🧠" -> Color.parseColor("#F50057") // Pink
+            "🧡", "🔥", "🦊", "🎃", "🟠" -> Color.parseColor("#FF9100") // Orange
+            "🤍", "☁️", "👻", "💀", "⚪" -> Color.parseColor("#FFFFFF") // White
+            else -> Color.parseColor("#A78BFA") // Default Purple
         }
         
-        // Build a palette from the base color
-        val hsv = FloatArray(3)
-        android.graphics.Color.colorToHSV(baseColor, hsv)
-        
-        val c1 = baseColor
-        hsv[2] = (hsv[2] * 0.8f).coerceIn(0f, 1f); val c2 = android.graphics.Color.HSVToColor(hsv)
-        hsv[2] = (hsv[2] * 0.6f).coerceIn(0f, 1f); val c3 = android.graphics.Color.HSVToColor(hsv)
-        hsv[2] = (hsv[2] * 0.4f).coerceIn(0f, 1f); val c4 = android.graphics.Color.HSVToColor(hsv)
-        hsv[1] = (hsv[1] * 0.5f).coerceIn(0f, 1f); val c5 = android.graphics.Color.HSVToColor(hsv)
-
-        overrideEmotionColors = intArrayOf(c1, c2, c3, c4, c5)
+        overrideEmotionColors = buildPaletteFromColor(baseColor)
         listeners.forEach { it.onColorsChanged(overrideEmotionColors) }
         
-        // Revert to album art after 2 seconds
+        // Revert to album art / app color after 2 seconds
         handler.removeCallbacks(clearEmotionRunnable)
         handler.postDelayed(clearEmotionRunnable, 2000)
     }
 
     private fun colorFallback(index: Int): Int {
         val defaultColors = intArrayOf(
-            android.graphics.Color.parseColor("#A78BFA"), // 0: Purple
-            android.graphics.Color.parseColor("#4285F4"), // 1: Blue
-            android.graphics.Color.parseColor("#EA4335"), // 2: Red
-            android.graphics.Color.parseColor("#FBBC05"), // 3: Yellow
-            android.graphics.Color.parseColor("#34A853")  // 4: Green
+            Color.parseColor("#A78BFA"), // 0: Purple
+            Color.parseColor("#4285F4"), // 1: Blue
+            Color.parseColor("#EA4335"), // 2: Red
+            Color.parseColor("#FBBC05"), // 3: Yellow
+            Color.parseColor("#34A853")  // 4: Green
         )
         return defaultColors[index % defaultColors.size]
     }

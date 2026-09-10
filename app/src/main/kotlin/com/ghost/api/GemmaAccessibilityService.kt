@@ -15,6 +15,11 @@ class GemmaAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         Timber.d("GemmaAccessibilityService connected")
+        try {
+            com.ghost.api.audio.SystemVisualizer.init(this)
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to init SystemVisualizer from AccessibilityService")
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -29,8 +34,9 @@ class GemmaAccessibilityService : AccessibilityService() {
              
              if (packageName != null) {
                  Timber.d("Window Change: $packageName / $className")
-                 // We could push this to context if needed, but for now we just log
-                 // and avoid the heavy DFS traversal.
+                 if (packageName != "com.ghost.api") {
+                     com.ghost.api.audio.SystemVisualizer.onForegroundAppChanged(packageName)
+                 }
              }
         }
     }
