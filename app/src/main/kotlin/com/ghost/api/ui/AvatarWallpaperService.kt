@@ -99,8 +99,8 @@ class AvatarWallpaperService : WallpaperService() {
                     tunnelPhase = (tunnelPhase + 0.0022f + (bassImpulse * 0.018f)) % 1.0f
                     trackZScroll = (trackZScroll + 0.008f + (bassImpulse * 0.028f)) % 1.0f
 
-                    // Exponential strobe decay (sharp beat onset, smooth falloff)
-                    strobeFlash = (strobeFlash * 0.84f).coerceAtLeast(0f)
+                    // Exponential strobe decay (sharp beat onset, sustained laser trail)
+                    strobeFlash = (strobeFlash * 0.90f).coerceAtLeast(0f)
 
                     // Hexagon node FFT energy decay: quick snap on onset, smooth release so nodes don't get stuck blown up
                     for (i in nodeMagnitudes.indices) {
@@ -189,28 +189,37 @@ class AvatarWallpaperService : WallpaperService() {
             if (fft.isNotEmpty() && fft.size >= 16) {
                 val totalBins = (fft.size / 2) - 1
 
-                // 2. LIGHT FLASHES: Snare & Clap Transient Detector
-                // Snare drums and claps have explosive energy in the 1.5kHz - 4.5kHz region (bins 16..45 in typical 512/1024 FFT).
-                // We compute the transient derivative: if snare-band energy spikes above rolling average, fire a crisp strobe flash!
-                val snareBinStart = (totalBins * 0.12f).toInt().coerceIn(4, totalBins - 4)
-                val snareBinEnd = (totalBins * 0.35f).toInt().coerceIn(snareBinStart + 2, totalBins - 1)
+                // 2. LIGHT FLASHES: Snare & Drum Attack Transient Detector
+                // In Android's Visualizer FFT, values in the byte array are signed 8-bit integers (-128..127) or unsigned (0..255).
+                // Taking abs() ensures we measure raw amplitude regardless of byte signedness.
+                // Snare drums and rimshots peak in the lower-mid / presence spectrum (bins 8..28).
+                val snareBinStart = (totalBins * 0.08f).toInt().coerceIn(3, totalBins - 6)
+                val snareBinEnd = (totalBins * 0.28f).toInt().coerceIn(snareBinStart + 2, totalBins - 1)
                 var currentSnareEnergy = 0f
                 var count = 0
                 for (b in snareBinStart..snareBinEnd) {
-                    val r = fft[b * 2].toDouble()
-                    val im = fft[b * 2 + 1].toDouble()
+                    val r = Math.abs(fft[b * 2].toInt()).toDouble()
+                    val im = Math.abs(fft[b * 2 + 1].toInt()).toDouble()
                     currentSnareEnergy += Math.hypot(r, im).toFloat()
                     count++
                 }
                 val avgSnare = if (count > 0) currentSnareEnergy / count else 0f
 
-                // Dynamic threshold: 1.45x rolling average with refractory debounce (minimum 180ms between snare hits)
-                val snareThreshold = (rollingSnareEnergy * 1.45f).coerceAtLeast(18f)
-                if (avgSnare > snareThreshold && (now - lastSnareTimestamp > 180L)) {
-                    strobeFlash = 1f // Trigger theatrical stage spotlight flash!
+                // Dynamic snare trigger:
+                // Compares current hit against rolling energy baseline with 120ms debounce.
+                // Also triggers on strong audio intensity beats so lasers never stay dead/dark!
+                val snareThreshold = (rollingSnareEnergy * 1.25f).coerceAtLeast(6f)
+                val isSnareHit = (avgSnare > snareThreshold && avgSnare > 8f && (now - lastSnareTimestamp > 120L))
+                val isIntensitySpike = (intensity > 60f && bass > 60f && (now - lastSnareTimestamp > 180L))
+
+                if (isSnareHit || isIntensitySpike) {
+                    strobeFlash = 1f // Trigger theatrical stage spotlight / laser flash!
                     lastSnareTimestamp = now
+                } else if (avgSnare > 12f) {
+                    // Continuous subtle laser energy proportional to mid-band presence so it never stays 100% dead
+                    strobeFlash = maxOf(strobeFlash, (avgSnare / 50f).coerceIn(0f, 0.45f))
                 }
-                rollingSnareEnergy = rollingSnareEnergy * 0.88f + avgSnare * 0.12f
+                rollingSnareEnergy = rollingSnareEnergy * 0.85f + avgSnare * 0.15f
 
                 // 3. INDIVIDUAL HEXAGONS / NODES POPPING: Highs, Harmonics & Melody (NO Sub-Bass!)
                 // Nodes are dedicated strictly to melody lines, synths, vocals, guitars, hi-hats, and cymbals.
@@ -223,8 +232,8 @@ class AvatarWallpaperService : WallpaperService() {
                     // Exponent 1.8 gives smooth musical octave distribution across chords, vocal formants, and crisp air
                     val binIndex = minMelodyBin + (Math.pow(frac.toDouble(), 1.8) * (melodySpan - 2)).toInt().coerceIn(0, melodySpan - 1)
                     
-                    val real = fft[binIndex * 2].toDouble()
-                    val imag = fft[binIndex * 2 + 1].toDouble()
+                    val real = Math.abs(fft[binIndex * 2].toInt()).toDouble()
+                    val imag = Math.abs(fft[binIndex * 2 + 1].toInt()).toDouble()
                     val rawMag = Math.hypot(real, imag).toFloat()
 
                     // Equalization gain to boost high frequencies so delicate hi-hats/melodies pop as strongly as chords
