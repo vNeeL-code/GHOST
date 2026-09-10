@@ -59,7 +59,7 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
     
     private var audioVisualizerView: AudioVisualizerView? = null
 
-    private val imagePicker = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris: List<Uri> ->
+    private val imagePicker = registerForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(2)) { uris: List<Uri> ->
         if (uris.isNotEmpty()) {
             handlePickedImages(uris.take(2))
         }
@@ -164,7 +164,7 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
                         handleSendAudio(audio)
                     },
                     onPickImage = {
-                        imagePicker.launch("image/*")
+                        imagePicker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                     },
                     onClearImage = {
                         chatViewModel.clearAttachedImages()
