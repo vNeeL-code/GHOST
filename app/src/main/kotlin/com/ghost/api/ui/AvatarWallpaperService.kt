@@ -718,7 +718,7 @@ class AvatarWallpaperService : WallpaperService() {
             val bassKick = (smoothedBass * 1.5f).coerceAtLeast(0f)
             
             // 1. REFINED REACTOR CORE SCALING (True to original blue proportions)
-            val coreRadius = (baseRadius * 1.0f + bassKick * 0.45f).coerceIn(75f, 175f)
+            val coreRadius = (baseRadius * 1.25f + bassKick * 0.50f).coerceIn(95f, 220f)
 
             // 2. GENTLE HALLWAY SPREAD (Corridor wireframes remain architecturally stable)
             val hallwayGentleSpread = (bassKick * 0.20f + strobeFlash * 12f).coerceIn(0f, 40f)
@@ -879,15 +879,18 @@ class AvatarWallpaperService : WallpaperService() {
             paint.alpha = 200
             drawHexagon(canvas, 0f, 0f, coreRadius * 0.82f, paint)
 
-            // 2B. Six Logarithmic Spiral Hex Arms (Original Sleek Crystalline Dots)
-            // Wide grand spread across the screen + delicate, crisp gem sizing (never fat!)
+            // 2B. Six Logarithmic Spiral Hex Arms
+            // Decoupled Architecture:
+            // 1. Macroscopic Spread: Arms open wide on music energy, creating 70-90px buffer between dots.
+            // 2. Base Idle Sizing: Calibrated weight (~13px to ~19px radius) - matching original blue reference.
+            // 3. Individual Node Reactivity: When a frequency fires and there is room, that node dynamically
+            //    flashes bright white and expands (+0..14px) without colliding with its neighbors!
             val numArms = 6
             val hexesPerArm = 5
             val spiralTwist = 0.22f
 
             // Dynamic high-energy lattice spread: bass kicks + volume intensity + melodic harmonics
-            val latticeSpread = (bassKick * 1.4f + smoothedIntensity * 0.9f + smoothedMelody * 0.7f).coerceIn(0f, 280f)
-            val cohesiveScale = 1.0f + (latticeSpread / 250f) * 0.35f
+            val latticeSpread = (bassKick * 1.5f + smoothedIntensity * 1.0f + smoothedMelody * 0.8f).coerceIn(0f, 300f)
 
             for (arm in 0 until numArms) {
                 val baseAngle = (arm * Math.PI * 2.0 / numArms).toFloat()
@@ -898,21 +901,24 @@ class AvatarWallpaperService : WallpaperService() {
                     val nodeIndex = ((step - 1) * numArms + arm).coerceIn(0, nodeMagnitudes.size - 1)
                     val nodeMag = nodeMagnitudes[nodeIndex]
 
-                    val innerDampener = if (step == 1) 0.50f else 1.0f
-                    // Subtle crisp note accent (0..3.5px max)
-                    val nodePop = (nodeMag * 0.05f * innerDampener).coerceIn(0f, 3.5f)
+                    val innerDampener = if (step == 1) 0.65f else 1.0f
 
-                    // Grand outward spread matching original blueprint: step * 42f ensures full screen coverage
-                    val stepSpread = step * (42f + latticeSpread * 0.25f)
-                    val distance = (coreRadius * 1.35f) + stepSpread
+                    // 1. MACROSCOPIC ARM SPREAD (Buffer creation)
+                    // Spreads out 38px in idle to 80px+ on beats, providing open room for individual pops
+                    val stepSpread = step * (38f + latticeSpread * 0.28f)
+                    val distance = (coreRadius * 1.30f) + stepSpread
                     val angle = baseAngle + (step * spiralTwist) + (smoothedIntensity * 0.003f)
 
                     val hx = (cos(angle) * distance).toFloat()
                     val hy = (sin(angle) * distance).toFloat()
 
-                    // Sleek, delicate crystalline sizing: 13px inner down to 7px outer in idle (exact original blue!)
-                    val baseHexSize = coreRadius * 0.15f * (1.10f - progress * 0.55f)
-                    val hexSize = (baseHexSize * cohesiveScale + nodePop).coerceIn(6f, 22f)
+                    // 2. BASE IDLE SIZING (Calibrated baseline thickness: ~19px inner down to ~13px outer)
+                    val baseHexSize = coreRadius * 0.18f * (1.08f - progress * 0.42f)
+
+                    // 3. INDIVIDUAL NODE EXPANSION (Fires into the open space!)
+                    val cohesiveBreath = 1.0f + (latticeSpread / 250f) * 0.18f
+                    val individualPop = (nodeMag * 0.22f * innerDampener).coerceIn(0f, 14f)
+                    val hexSize = baseHexSize * cohesiveBreath + individualPop
 
                     val colorIdx = (arm + step) % currentColors.size
                     val baseArmColor = if (isCustomPaletteActive) currentColors[colorIdx] else {
@@ -925,16 +931,20 @@ class AvatarWallpaperService : WallpaperService() {
                         }
                     }
 
-                    // Subtle highlight on extreme transients, never stark white blobs
-                    val armColor = if (nodeMag > 35f) {
-                        val blendRatio = ((nodeMag - 35f) / 65f).coerceIn(0f, 0.35f)
-                        ColorUtils.blendARGB(baseArmColor, Color.WHITE, blendRatio)
+                    // 4. INDIVIDUAL WHITE FLASH (Crisp electric onset on frequency spikes)
+                    val whiteFlashRatio = if (nodeMag > 16f) {
+                        ((nodeMag - 16f) / 38f).coerceIn(0f, 0.95f)
+                    } else {
+                        0f
+                    }
+                    val armColor = if (whiteFlashRatio > 0f) {
+                        ColorUtils.blendARGB(baseArmColor, Color.WHITE, whiteFlashRatio)
                     } else {
                         baseArmColor
                     }
 
-                    val baseAlpha = ((1f - progress * 0.35f) * 220).toInt()
-                    val nodeAlpha = (baseAlpha + (nodeMag * 0.6f).toInt()).coerceIn(40, 230)
+                    val baseAlpha = ((1f - progress * 0.30f) * 205).toInt()
+                    val nodeAlpha = (baseAlpha + (nodeMag * 0.8f).toInt()).coerceIn(50, 255)
 
                     // Translucent fill
                     paint.style = Paint.Style.FILL
@@ -942,11 +952,11 @@ class AvatarWallpaperService : WallpaperService() {
                     paint.alpha = nodeAlpha
                     drawHexagon(canvas, hx, hy, hexSize, paint)
 
-                    // Crisp, thin contour matching original delicate gems
+                    // Crisp contour: flashes pure white border on high frequency notes
                     paint.style = Paint.Style.STROKE
-                    paint.strokeWidth = 1.6f + (nodeMag * 0.012f)
-                    paint.color = if (nodeMag > 45f) ColorUtils.blendARGB(baseArmColor, Color.WHITE, 0.40f) else baseArmColor
-                    paint.alpha = ((1f - progress * 0.35f) * 220 + (nodeMag * 0.7f)).toInt().coerceIn(50, 245)
+                    paint.strokeWidth = 1.8f + (nodeMag * 0.025f)
+                    paint.color = if (whiteFlashRatio > 0.20f) Color.WHITE else armColor
+                    paint.alpha = (nodeAlpha + 25).coerceIn(60, 255)
                     drawHexagon(canvas, hx, hy, hexSize, paint)
                 }
             }
