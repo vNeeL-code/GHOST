@@ -189,29 +189,41 @@ class AvatarWallpaperService : WallpaperService() {
                 lastBeatTimestamp = now
             }
             
-            // Update rolling bass average with asymmetric tracking (slow rise, gentle fall)
-            rollingBassEnergy = rollingBassEnergy * 0.92f + bass * 0.08f
-            smoothedIntensity = smoothedIntensity * 0.7f + intensity * 0.3f
             smoothedBass = smoothedBass * 0.7f + bass * 0.3f
 
-            // FFT Frequency Bin Distribution for Satellite & Spiral Nodes:
-            // - Central mother geometries & bloom layers are driven directly by smoothedBass and strobeFlash.
-            // - Spiral arm nodes and satellite cubes represent harmonics, mid-tones, vocals, snares, and treble.
-            // - We skip low sub-bass bins (0..5) to avoid sustained-tone latching where a single node gets pinned.
-            // - We use smooth blend tracking (fast attack 0.55, smooth frame decay) so nodes pop crisply and recover immediately.
+            // High/Mid/Treble Audio Reactive Constellation (Equalized Logarithmic FFT Bands):
+            // FFT format: pairs of [real, imag] bytes (signed -128..127).
+            // Android capture size is typically 1024 or 512, meaning 256 to 512 complex bins.
+            // In real audio, natural energy falls off by ~6dB/octave (pink noise distribution),
+            // so raw high bins only reach 5-15 while bass reaches 80-120.
+            // To make individual hexagons and cubes pop vibrantly across the ENTIRE frequency spectrum
+            // (kicks, snares, vocals, synths, hi-hats, and cymbals), we:
+            // 1. Assign each of the 30 nodes to a distinct logarithmic frequency band across the spectrum.
+            // 2. Apply frequency equalization (boost high/mid bins by up to 3.5x).
+            // 3. Subtract a running baseline so continuous background tones don't keep nodes lit,
+            //    making transients (notes, hits, vocal syllables) pop viscerally!
             if (fft.isNotEmpty() && fft.size >= 16) {
-                val maxBin = (fft.size / 2) - 1
-                val minNodeBin = 6.coerceAtMost(maxBin)
-                val binSpan = (maxBin - minNodeBin).coerceAtLeast(1)
+                val totalBins = (fft.size / 2) - 1
                 for (n in nodeMagnitudes.indices) {
-                    val binIndex = minNodeBin + ((n * 7 + 3) % binSpan)
+                    // Logarithmic distribution across bins 2 to (totalBins - 2)
+                    // Low nodes (0..5): upper bass / kicks (bins 2..8)
+                    // Mid nodes (6..18): snares, guitars, vocals, synths (bins 9..45)
+                    // High nodes (19..29): hi-hats, percussions, air, cymbals (bins 46..totalBins)
+                    val frac = (n + 1).toFloat() / 30f
+                    // Exponent 2.2 gives natural musical octave spacing
+                    val binIndex = (2 + (Math.pow(frac.toDouble(), 2.2) * (totalBins - 4)).toInt()).coerceIn(2, totalBins)
+                    
                     val real = fft[binIndex * 2].toDouble()
                     val imag = fft[binIndex * 2 + 1].toDouble()
-                    val rawMag = Math.hypot(real, imag).toFloat().coerceIn(0f, 90f)
-                    
-                    // Smooth tracking: responsive rise without permanent peak-latch
-                    if (rawMag > nodeMagnitudes[n]) {
-                        nodeMagnitudes[n] = nodeMagnitudes[n] * 0.45f + rawMag * 0.55f
+                    val rawMag = Math.hypot(real, imag).toFloat()
+
+                    // Equalization gain: higher frequencies get boosted to match perceived loudness of bass
+                    val eqGain = 1.0f + (frac * 2.8f) // 1.0x at bass up to 3.8x at treble
+                    val normalizedMag = (rawMag * eqGain).coerceIn(0f, 100f)
+
+                    // Fast attack on musical transients, decaying naturally in frameCallback
+                    if (normalizedMag > nodeMagnitudes[n]) {
+                        nodeMagnitudes[n] = normalizedMag
                     }
                 }
             }
@@ -603,22 +615,26 @@ class AvatarWallpaperService : WallpaperService() {
                 for (step in 1..hexesPerArm) {
                     val progress = step.toFloat() / hexesPerArm.toFloat()
 
-                    // Sample from smoothly decaying per-node FFT magnitude
-                    val nodeIndex = (arm * hexesPerArm + (step - 1)).coerceIn(0, nodeMagnitudes.size - 1)
+                    // Interleaved spectral sampling: Each arm samples across the entire frequency range!
+                    // Arm 0 gets [0, 6, 12, 18, 24], Arm 1 gets [1, 7, 13, 19, 25], etc.
+                    // This distributes kicks, snares, guitars, vocals, synths, and hi-hats across ALL 6 arms!
+                    val nodeIndex = ((step - 1) * numArms + arm).coerceIn(0, nodeMagnitudes.size - 1)
                     val nodeMag = nodeMagnitudes[nodeIndex]
 
-                    // Crisp activation pop: step 1 (inner ring) is heavily dampened (0.35x) so it never blows up next to the mother hex
-                    val innerDampener = if (step == 1) 0.35f else 1.0f
-                    val activationPop = (nodeMag * 0.08f * innerDampener).coerceIn(0f, 6f)
-                    val distance = coreRadius * 1.35f + (step * (42f + bassKick * 0.30f)) + (activationPop * 0.3f)
+                    // Dynamic activation pop: scales from +0 to +11px when frequencies hit!
+                    // Inner ring (step 1) uses a 0.60x dampener so it doesn't collide with the mother hex,
+                    // but still pops noticeably on hits!
+                    val innerDampener = if (step == 1) 0.60f else 1.0f
+                    val activationPop = (nodeMag * 0.16f * innerDampener).coerceIn(0f, 11f)
+                    val distance = coreRadius * 1.35f + (step * (42f + bassKick * 0.30f)) + (activationPop * 0.4f)
                     val angle = baseAngle + (step * spiralTwist) + (smoothedIntensity * 0.003f)
 
                     val hx = (cos(angle) * distance).toFloat()
                     val hy = (sin(angle) * distance).toFloat()
 
-                    // Controlled size scaling: stays proportional and distinctly smaller than the center mother hex
+                    // Controlled size scaling: stays proportional and pops visibly with musical notes
                     val baseHexSize = coreRadius * 0.22f * (1.0f - progress * 0.45f)
-                    val hexSize = (baseHexSize + activationPop).coerceIn(5f, coreRadius * 0.32f)
+                    val hexSize = (baseHexSize + activationPop).coerceIn(6f, coreRadius * 0.45f)
 
                     val colorIdx = (arm + step) % currentColors.size
                     val baseArmColor = if (isCustomPaletteActive) currentColors[colorIdx] else {
@@ -631,16 +647,16 @@ class AvatarWallpaperService : WallpaperService() {
                         }
                     }
 
-                    // Active nodes flash brighter toward white when their frequency slice hits
-                    val armColor = if (nodeMag > 24f) {
-                        val blendRatio = (nodeMag / 80f).coerceIn(0f, 0.70f)
+                    // Active nodes flash brighter toward white when their frequency slice hits (dynamic flash trigger at 16f)
+                    val armColor = if (nodeMag > 16f) {
+                        val blendRatio = (nodeMag / 65f).coerceIn(0f, 0.85f)
                         ColorUtils.blendARGB(baseArmColor, Color.WHITE, blendRatio)
                     } else {
                         baseArmColor
                     }
 
-                    val baseAlpha = ((1f - progress * 0.35f) * 210).toInt()
-                    val nodeAlpha = (baseAlpha + (nodeMag * 1.0f).toInt()).coerceIn(40, 255)
+                    val baseAlpha = ((1f - progress * 0.35f) * 200).toInt()
+                    val nodeAlpha = (baseAlpha + (nodeMag * 1.5f).toInt()).coerceIn(50, 255)
 
                     paint.style = Paint.Style.FILL
                     paint.color = armColor
@@ -648,9 +664,9 @@ class AvatarWallpaperService : WallpaperService() {
                     drawHexagon(canvas, hx, hy, hexSize, paint)
 
                     paint.style = Paint.Style.STROKE
-                    paint.strokeWidth = 2.0f + (nodeMag * 0.02f)
-                    paint.color = if (nodeMag > 30f) Color.WHITE else baseArmColor
-                    paint.alpha = ((1f - progress * 0.5f) * 180 + (nodeMag * 1.0f)).toInt().coerceIn(30, 255)
+                    paint.strokeWidth = 2.2f + (nodeMag * 0.03f)
+                    paint.color = if (nodeMag > 22f) Color.WHITE else baseArmColor
+                    paint.alpha = ((1f - progress * 0.5f) * 180 + (nodeMag * 1.2f)).toInt().coerceIn(40, 255)
                     drawHexagon(canvas, hx, hy, hexSize, paint)
                 }
             }
@@ -958,10 +974,23 @@ class AvatarWallpaperService : WallpaperService() {
                 val satX = cx + offsetX
                 val satY = cy + offsetY
 
-                // Each satellite samples distinct FFT bins (nodes 2, 7, 12, 17, 22, 27)
-                val nodeIdx = (s * 5 + 2).coerceIn(0, nodeMagnitudes.size - 1)
+                // Each satellite samples distinct FFT bins across the spectrum:
+                // s=0 (Top Apex): node 1 (upper bass / kicks)
+                // s=1 (Top-Right): node 6 (mid-low rhythm)
+                // s=2 (Bottom-Right): node 12 (vocals / lead synths)
+                // s=3 (Bottom Apex): node 18 (snare / clap transient)
+                // s=4 (Bottom-Left): node 23 (hi-hats / percussion)
+                // s=5 (Top-Left): node 28 (high cymbals / air)
+                val nodeIdx = when (s) {
+                    0 -> 1
+                    1 -> 6
+                    2 -> 12
+                    3 -> 18
+                    4 -> 23
+                    else -> 28
+                }.coerceIn(0, nodeMagnitudes.size - 1)
                 val satMag = nodeMagnitudes[nodeIdx]
-                val satPop = (satMag * 0.10f).coerceIn(0f, 7f)
+                val satPop = (satMag * 0.16f).coerceIn(0f, 10f)
 
                 val satSize = satelliteBaseSize + satPop
 
@@ -979,9 +1008,9 @@ class AvatarWallpaperService : WallpaperService() {
                 }
                 val baseSatColor = ensureVisibleBloomColor(rawSatColor, colorCobaltGlow)
 
-                // Active popping satellites flash brighter toward white
-                val satColor = if (satMag > 24f) {
-                    val ratio = (satMag / 80f).coerceIn(0f, 0.70f)
+                // Active popping satellites flash brighter toward white on notes & hits
+                val satColor = if (satMag > 16f) {
+                    val ratio = (satMag / 65f).coerceIn(0f, 0.85f)
                     ColorUtils.blendARGB(baseSatColor, Color.WHITE, ratio)
                 } else {
                     baseSatColor
@@ -990,14 +1019,14 @@ class AvatarWallpaperService : WallpaperService() {
                 // Vibrant translucent planar fill using the stolen color!
                 paint.style = Paint.Style.FILL
                 paint.color = satColor
-                paint.alpha = (50 + (satMag * 0.8f).toInt()).coerceIn(40, 140)
+                paint.alpha = (55 + (satMag * 1.4f).toInt()).coerceIn(45, 180)
                 drawDiamond(canvas, satX, satY, satSize, paint)
 
                 // Glowing neon contour
                 paint.style = Paint.Style.STROKE
-                paint.strokeWidth = 3.2f + (satMag * 0.02f)
-                paint.color = satColor
-                paint.alpha = (180 + (satMag * 0.9f).toInt()).coerceIn(160, 255)
+                paint.strokeWidth = 3.2f + (satMag * 0.04f)
+                paint.color = if (satMag > 22f) Color.WHITE else satColor
+                paint.alpha = (180 + (satMag * 1.1f).toInt()).coerceIn(160, 255)
                 drawDiamond(canvas, satX, satY, satSize, paint)
             }
         }
