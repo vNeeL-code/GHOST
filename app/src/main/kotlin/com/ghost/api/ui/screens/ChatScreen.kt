@@ -10,14 +10,19 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import com.ghost.api.Constants
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -296,10 +301,27 @@ fun ChatMessageRow(
     
     val textColor = if (isUser) UserCyan else AiGreen
     
+    val prefs = remember(context) { context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE) }
+    var operatorAvatar by remember { mutableStateOf(prefs.getString(Constants.PREF_OPERATOR_AVATAR, "🦑") ?: "🦑") }
+    var showAvatarDialog by remember { mutableStateOf(false) }
+
+    if (showAvatarDialog) {
+        OperatorAvatarDialog(
+            currentAvatar = operatorAvatar,
+            onDismiss = { showAvatarDialog = false },
+            onAvatarSelected = { newEmoji ->
+                operatorAvatar = newEmoji
+                prefs.edit().putString(Constants.PREF_OPERATOR_AVATAR, newEmoji).apply()
+                showAvatarDialog = false
+                Toast.makeText(context, "Operator callsign updated: Δ $newEmoji ∇", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+
     val headerText = when {
         message.eventType == "LOGIC_TRACE" -> "⌬ REASONING TRACE ⌬"
         message.eventType == "DREAM" -> "✧ DREAM STATE ✧"
-        isUser -> "Δ 🦑 ∇"
+        isUser -> "Δ $operatorAvatar ∇"
         else -> "Δ 👾 ∇"
     }
     val headerColor = when {
@@ -310,7 +332,7 @@ fun ChatMessageRow(
     }
 
     val ucfFormattedContent = if (isUser) {
-        "Δ 🦑 ∇:\n$displayContent\n\n[$timeStr]"
+        "Δ $operatorAvatar ∇:\n$displayContent\n\n[$timeStr]"
     } else {
         "$aiHeaderTag:\n$displayContent\n\n[$timeStr]"
     }
@@ -332,26 +354,44 @@ fun ChatMessageRow(
                 .widthIn(max = 380.dp)
                 .background(bubbleColor, shape)
                 .border(1.dp, AccentBorder, shape)
-                .padding(16.dp)
         ) {
-            // Header with 1-tap Copy Button (UCF format) and Play (TTS) Button
+            // Code block header line (file extension / avatar callout & actions)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 6.dp),
+                    .background(Color(0x22000000), shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
+                    .padding(horizontal = 14.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(
-                    text = headerText,
-                    color = headerColor,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.1.sp
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = if (isUser) {
+                        Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { showAvatarDialog = true }
+                            .padding(vertical = 2.dp, horizontal = 4.dp)
+                    } else Modifier
+                ) {
+                    Text(
+                        text = headerText,
+                        color = headerColor,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.1.sp
+                    )
+                    if (isUser) {
+                        Text(
+                            text = " ▾",
+                            color = headerColor.copy(alpha = 0.6f),
+                            fontSize = 11.sp
+                        )
+                    }
+                }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (displayContent.isNotEmpty()) {
+                    // Speaker only on AI / assistant cards!
+                    if (!isUser && displayContent.isNotEmpty()) {
                         Text(
                             text = "🔊",
                             fontSize = 13.sp,
@@ -360,7 +400,7 @@ fun ChatMessageRow(
                                     onPlayMessage(displayContent)
                                 }
                                 .alpha(0.7f)
-                                .padding(end = 8.dp)
+                                .padding(end = 10.dp)
                         )
                     }
 
@@ -376,6 +416,19 @@ fun ChatMessageRow(
                     )
                 }
             }
+
+            // Crisp separating line between code block header and body
+            HorizontalDivider(
+                color = Color(0x228BB4F6),
+                thickness = 1.dp
+            )
+
+            // Padded Card Body
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp)
+            ) {
             
             // Thinking block
             if (!message.thought.isNullOrEmpty()) {
@@ -451,6 +504,140 @@ fun ChatMessageRow(
                     fontSize = 15.sp,
                     lineHeight = 20.sp
                 )
+            }
+        }
+    }
+}
+}
+
+@Composable
+fun OperatorAvatarDialog(
+    currentAvatar: String,
+    onDismiss: () -> Unit,
+    onAvatarSelected: (String) -> Unit
+) {
+    val defaultAvatars = listOf(
+        "🦑", "🐙", "🦊", "⚡", "💎", "🐉",
+        "🥷", "🤖", "🛸", "👁️", "👑", "👾",
+        "💀", "🔮", "🧬", "⚔️", "🐺", "🪐"
+    )
+    var customAvatar by remember { mutableStateOf("") }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = Color(0xFF0D1219),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E2C3D)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "OPERATOR CALLSIGN",
+                    color = UserCyan,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp
+                )
+                Text(
+                    text = "Select avatar glyph for terminal identification",
+                    color = Color(0x88FFFFFF),
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 4.dp, bottom = 16.dp)
+                )
+
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(6),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 160.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(defaultAvatars) { emoji ->
+                        val isSelected = emoji == currentAvatar
+                        Box(
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) Color(0x338BB4F6) else Color(0x11FFFFFF))
+                                .border(
+                                    width = if (isSelected) 1.5.dp else 1.dp,
+                                    color = if (isSelected) UserCyan else Color(0x22FFFFFF),
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+                                .clickable { onAvatarSelected(emoji) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(text = emoji, fontSize = 20.sp)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Custom Emoji / String Input
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .background(Color(0x15FFFFFF), RoundedCornerShape(8.dp))
+                            .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        if (customAvatar.isEmpty()) {
+                            Text("Custom glyph...", color = Color(0x44FFFFFF), fontSize = 12.sp)
+                        }
+                        BasicTextField(
+                            value = customAvatar,
+                            onValueChange = { if (it.length <= 4) customAvatar = it },
+                            textStyle = TextStyle(
+                                color = Color.White,
+                                fontSize = 14.sp
+                            ),
+                            singleLine = true,
+                            cursorBrush = SolidColor(UserCyan),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    Button(
+                        onClick = {
+                            if (customAvatar.isNotBlank()) {
+                                onAvatarSelected(customAvatar.trim())
+                            }
+                        },
+                        enabled = customAvatar.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = UserCyan,
+                            disabledContainerColor = Color(0x22FFFFFF)
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                    ) {
+                        Text("SET", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text("CLOSE", color = Color(0x88FFFFFF), fontSize = 12.sp)
+                }
             }
         }
     }
