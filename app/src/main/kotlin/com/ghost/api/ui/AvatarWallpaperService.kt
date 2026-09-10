@@ -770,10 +770,14 @@ class AvatarWallpaperService : WallpaperService() {
             }
 
             // 2. Continuous Corkscrewing Infinite Triangular Tunnel (Seven Nation Army Corridor)
-            // Triangles continuously zoom outward and smoothly corkscrew around the Z-axis,
-            // creating the real geometric corridor illusion!
+            // Triangles continuously zoom outward and smoothly corkscrew around the Z-axis.
+            // Loop continuity: We use a smooth sine-squared bell envelope so triangles fade in
+            // from complete invisibility (alpha 0) at the focal point and fade out to complete
+            // invisibility (alpha 0) at screen edges, eliminating any visual pop or loop seam!
+            val triangleStep = (Math.PI * 2.0 / 3.0).toFloat() // 120° rotational symmetry
             for (i in 0 until numTriangles) {
-                val p = ((tunnelPhase + (i.toFloat() / numTriangles)) % 1.0f)
+                val rawP = (tunnelPhase + (i.toFloat() / numTriangles))
+                val p = (rawP % 1.0f + 1.0f) % 1.0f // strictly [0, 1)
                 val scale = (baseSize * exp(p * 3.4f)).toFloat()
 
                 // Layered tunnel parallax: outer foreground rings drift further than deep core
@@ -781,24 +785,30 @@ class AvatarWallpaperService : WallpaperService() {
                 val triCenterX = rollOffset * parallaxZ
                 val triCenterY = pitchOffset * parallaxZ
 
-                val fadeIn = (p * 5f).coerceIn(0f, 1f)
-                val fadeOut = ((1f - p) * 3.0f).coerceIn(0f, 1f)
-                val totalAlpha = (fadeIn * fadeOut * 245f).toInt().coerceIn(0, 255)
+                // C1 mathematically seamless window function: sin^2(pi * p)
+                // Exactly 0 at p=0 (core), peaks at p=0.5, and exactly 0 at p=1 (outer rim).
+                // Zero derivative at both ends = absolutely zero pops, seams, or bad-gif hiccups!
+                val window = sin(p * Math.PI.toFloat())
+                val smoothEnvelope = (window * window).coerceIn(0f, 1f)
+                val totalAlpha = (smoothEnvelope * 255f).toInt().coerceIn(0, 255)
 
-                val colorIdx = i % currentColors.size
-                val baseColor = if (isCustomPaletteActive) currentColors[colorIdx] else {
+                // Seamless color cycling: uses raw continuous index so color smoothly flows with depth
+                val cycleIdx = ((rawP * numTriangles).toInt() % currentColors.size + currentColors.size) % currentColors.size
+                val baseColor = if (isCustomPaletteActive) currentColors[cycleIdx] else {
                     if (i % 2 == 0) Color.parseColor("#38BDF8") else Color.parseColor("#F1F5F9")
                 }
 
-                // True corkscrew twist: continuous rotation that rolls through depth (z-twist)
-                val corkscrewAngle = (p * 1.8f) + (animTime * 0.4f) + (tunnelPhase * 2.5f)
+                // Seamless corkscrew:
+                // p * (2 * PI / 3) rotates through exactly one triangle symmetry period as p goes 0->1.
+                // Added to animTime for smooth rolling through time, with zero jump across the boundary!
+                val corkscrewAngle = (p * triangleStep * 2f) + (animTime * 0.5f)
 
                 // Translucent "Color Wall" facet fill:
                 // Retains translucent color and flashes vibrantly during kicks/snares,
                 // so the corkscrewing tunnel walls become a dynamic kaleidoscope of colored light!
-                val baseFacetAlpha = (12f * fadeIn * fadeOut).toInt()
-                val flashFacetAlpha = if (strobeFlash > 0.04f) ((strobeFlash * 90f) * fadeIn * fadeOut).toInt() else 0
-                val facetAlpha = (baseFacetAlpha + flashFacetAlpha).coerceIn(0, 110)
+                val baseFacetAlpha = (14f * smoothEnvelope).toInt()
+                val flashFacetAlpha = if (strobeFlash > 0.04f) ((strobeFlash * 95f) * smoothEnvelope).toInt() else 0
+                val facetAlpha = (baseFacetAlpha + flashFacetAlpha).coerceIn(0, 115)
 
                 if (facetAlpha > 0) {
                     paint.style = Paint.Style.FILL
