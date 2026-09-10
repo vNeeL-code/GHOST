@@ -783,13 +783,10 @@ class AvatarWallpaperService : WallpaperService() {
 
             canvas.save()
             canvas.translate(cx, cy)
-            
-            // Subtle slow rotational drift for the floating outer spirals and halos
-            canvas.rotate(rotationAngle * 0.35f)
-
             paint.clearShadowLayer()
 
-            // 2. Concentric Vertex-Aligned Hexagonal Halos (Multi-Pass Bloom for Geometry)
+            // 2. Concentric Vertex-Aligned Hexagonal Halos (Unrotated / Decoupled from core spin)
+            // Aligned directly with the 6 hallway guide rails to act as "intensity of hallway illumination"
             paint.style = Paint.Style.STROKE
             for (h in 0 until 4) {
                 val radius = coreRadius * HEX_HALO_RADII_MULTS[h] + bassKick * HEX_HALO_BASS_MULTS[h]
@@ -799,7 +796,7 @@ class AvatarWallpaperService : WallpaperService() {
                 drawHexagon(canvas, 0f, 0f, radius, paint)
             }
 
-            // High-energy strobe halo on prominent outer hex during beat flash
+            // High-energy strobe halo on prominent outer hex during beat flash (unrotated hallway pulse)
             if (strobeFlash > 0.10f) {
                 paint.strokeWidth = 5f
                 paint.color = wallColor
@@ -808,8 +805,7 @@ class AvatarWallpaperService : WallpaperService() {
             }
 
             // 3. Stepped Concentric Blooming Hexagons behind Mother Hexagon (Layered Fake Bloom)
-            // Mirrors the rich, vibrant layered fake bloom of Option A, grabbing the stolen wallpaper palette colors
-            // Booms outward dramatically on bass hits so the center is the primary reactor!
+            // Unrotated: Radiant light volume expanding down the corridor as hallway illumination
             for (hb in 0 until 4) {
                 val radius = coreRadius * HEX_BLOOM_CORE_MULTS[hb] + (bassKick * HEX_BLOOM_BASS_MULTS[hb])
                 val swatchIndex = when (hb) {
@@ -835,8 +831,31 @@ class AvatarWallpaperService : WallpaperService() {
                 drawHexagon(canvas, 0f, 0f, radius, paint)
             }
 
-            // 4. Six Logarithmic Spiral Hex Arms (Mixture of Experts / Neural Parameter Activation)
-            // Drawn in the foreground with controlled activation pops so they never drown out the center mother hex!
+            // 4. DECOUPLED ROTATING CYBER CORE & SACRED GEOMETRY FLOWER
+            // The black obsidian core chamber and the sacred geometry spiral hex arms ("flower" lattice)
+            // boom with bass AND spin dynamically together!
+            canvas.save()
+            canvas.rotate(rotationAngle * 0.35f)
+
+            // 4A. Mother Hexagon (Hollow Obsidian Cyber Chamber) — booming and spinning!
+            paint.style = Paint.Style.FILL
+            paint.color = COLOR_VOID
+            paint.alpha = 245
+            drawHexagon(canvas, 0f, 0f, coreRadius, paint)
+
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 4f
+            paint.color = COLOR_STAR_CORE
+            paint.alpha = 255
+            drawHexagon(canvas, 0f, 0f, coreRadius, paint)
+
+            paint.strokeWidth = 2.5f
+            paint.color = if (isCustomPaletteActive) currentColors[0] else COLOR_CYAN_ACCENT
+            paint.alpha = 200
+            drawHexagon(canvas, 0f, 0f, coreRadius * 0.82f, paint)
+
+            // 4B. Six Logarithmic Spiral Hex Arms ("Flower" Lattice on top of the black core)
+            // Spinning on top of the black core, spectral nodes popping with discrete audio frequencies
             val numArms = 6
             val hexesPerArm = 5
             val spiralTwist = 0.22f
@@ -847,15 +866,9 @@ class AvatarWallpaperService : WallpaperService() {
                 for (step in 1..hexesPerArm) {
                     val progress = step.toFloat() / hexesPerArm.toFloat()
 
-                    // Interleaved spectral sampling: Each arm samples across the entire frequency range!
-                    // Arm 0 gets [0, 6, 12, 18, 24], Arm 1 gets [1, 7, 13, 19, 25], etc.
-                    // This distributes kicks, snares, guitars, vocals, synths, and hi-hats across ALL 6 arms!
                     val nodeIndex = ((step - 1) * numArms + arm).coerceIn(0, nodeMagnitudes.size - 1)
                     val nodeMag = nodeMagnitudes[nodeIndex]
 
-                    // Dynamic activation pop: scales from +0 to +11px when frequencies hit!
-                    // Inner ring (step 1) uses a 0.60x dampener so it doesn't collide with the mother hex,
-                    // but still pops noticeably on hits!
                     val innerDampener = if (step == 1) 0.60f else 1.0f
                     val activationPop = (nodeMag * 0.16f * innerDampener).coerceIn(0f, 11f)
                     val distance = coreRadius * 1.35f + (step * (42f + bassKick * 0.30f)) + (activationPop * 0.4f)
@@ -864,7 +877,6 @@ class AvatarWallpaperService : WallpaperService() {
                     val hx = (cos(angle) * distance).toFloat()
                     val hy = (sin(angle) * distance).toFloat()
 
-                    // Controlled size scaling: stays proportional and pops visibly with musical notes
                     val baseHexSize = coreRadius * 0.22f * (1.0f - progress * 0.45f)
                     val hexSize = (baseHexSize + activationPop).coerceIn(6f, coreRadius * 0.45f)
 
@@ -879,7 +891,6 @@ class AvatarWallpaperService : WallpaperService() {
                         }
                     }
 
-                    // Active nodes flash brighter toward white when their frequency slice hits (dynamic flash trigger at 16f)
                     val armColor = if (nodeMag > 16f) {
                         val blendRatio = (nodeMag / 65f).coerceIn(0f, 0.85f)
                         ColorUtils.blendARGB(baseArmColor, Color.WHITE, blendRatio)
@@ -903,29 +914,10 @@ class AvatarWallpaperService : WallpaperService() {
                 }
             }
 
-            // 5. Mother Hexagon (Hollow Obsidian Cyber Chamber)
-            paint.style = Paint.Style.FILL
-            paint.color = COLOR_VOID
-            paint.alpha = 240
-            drawHexagon(canvas, 0f, 0f, coreRadius, paint)
+            canvas.restore() // Restores unrotated frame for the central star glyph
 
-            paint.style = Paint.Style.STROKE
-            paint.strokeWidth = 4f
-            paint.color = COLOR_STAR_CORE
-            paint.alpha = 255
-            drawHexagon(canvas, 0f, 0f, coreRadius, paint)
-
-            paint.strokeWidth = 2.5f
-            paint.color = if (isCustomPaletteActive) currentColors[0] else COLOR_CYAN_ACCENT
-            paint.alpha = 200
-            drawHexagon(canvas, 0f, 0f, coreRadius * 0.82f, paint)
-
-            canvas.restore() // Restore unrotated frame for the central star glyph
-
-            // 6. Model Unicode Glyph (✧) Centered, Crisp White & Unrotated
+            // 5. Model Unicode Glyph (✧) Centered, Crisp White & Unrotated
             // Isolated from avatar spin and without blurry star bloom text
-            canvas.save()
-            canvas.translate(cx, cy)
             logoPaint.clearShadowLayer()
             logoPaint.color = Color.WHITE
             logoPaint.alpha = 255
