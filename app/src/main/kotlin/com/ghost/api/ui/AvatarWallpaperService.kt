@@ -174,54 +174,64 @@ class AvatarWallpaperService : WallpaperService() {
             } catch (e: Exception) {}
         }
 
-        // Beat detection: rolling energy tracking + temporal refractory debounce
-        private var rollingBassEnergy = 30f
-        private var lastBeatTimestamp = 0L
+        // Snare transient detector (mid-band 1.5kHz - 4.5kHz energy spike tracker)
+        private var rollingSnareEnergy = 15f
+        private var lastSnareTimestamp = 0L
 
         override fun onAudioData(waveform: ByteArray, fft: ByteArray, intensity: Float, bass: Float) {
             currentFft = fft
             val now = System.currentTimeMillis()
-            
-            // Dynamic threshold: 1.32x rolling average bass with minimum floor of 45
-            val beatThreshold = (rollingBassEnergy * 1.32f).coerceAtLeast(45f)
-            if (bass > beatThreshold && (now - lastBeatTimestamp > 220L)) {
-                strobeFlash = 1f
-                lastBeatTimestamp = now
-            }
-            
-            smoothedBass = smoothedBass * 0.7f + bass * 0.3f
 
-            // High/Mid/Treble Audio Reactive Constellation (Equalized Logarithmic FFT Bands):
-            // FFT format: pairs of [real, imag] bytes (signed -128..127).
-            // Android capture size is typically 1024 or 512, meaning 256 to 512 complex bins.
-            // In real audio, natural energy falls off by ~6dB/octave (pink noise distribution),
-            // so raw high bins only reach 5-15 while bass reaches 80-120.
-            // To make individual hexagons and cubes pop vibrantly across the ENTIRE frequency spectrum
-            // (kicks, snares, vocals, synths, hi-hats, and cymbals), we:
-            // 1. Assign each of the 30 nodes to a distinct logarithmic frequency band across the spectrum.
-            // 2. Apply frequency equalization (boost high/mid bins by up to 3.5x).
-            // 3. Subtract a running baseline so continuous background tones don't keep nodes lit,
-            //    making transients (notes, hits, vocal syllables) pop viscerally!
+            // 1. CENTRE BOOMING: Dedicated Sub-Bass & Kick tracking
+            // Controls the central mother geometry expansion, concentric bloom pulses, and breathing
+            smoothedBass = smoothedBass * 0.70f + bass * 0.30f
+
             if (fft.isNotEmpty() && fft.size >= 16) {
                 val totalBins = (fft.size / 2) - 1
+
+                // 2. LIGHT FLASHES: Snare & Clap Transient Detector
+                // Snare drums and claps have explosive energy in the 1.5kHz - 4.5kHz region (bins 16..45 in typical 512/1024 FFT).
+                // We compute the transient derivative: if snare-band energy spikes above rolling average, fire a crisp strobe flash!
+                val snareBinStart = (totalBins * 0.12f).toInt().coerceIn(4, totalBins - 4)
+                val snareBinEnd = (totalBins * 0.35f).toInt().coerceIn(snareBinStart + 2, totalBins - 1)
+                var currentSnareEnergy = 0f
+                var count = 0
+                for (b in snareBinStart..snareBinEnd) {
+                    val r = fft[b * 2].toDouble()
+                    val im = fft[b * 2 + 1].toDouble()
+                    currentSnareEnergy += Math.hypot(r, im).toFloat()
+                    count++
+                }
+                val avgSnare = if (count > 0) currentSnareEnergy / count else 0f
+
+                // Dynamic threshold: 1.45x rolling average with refractory debounce (minimum 180ms between snare hits)
+                val snareThreshold = (rollingSnareEnergy * 1.45f).coerceAtLeast(18f)
+                if (avgSnare > snareThreshold && (now - lastSnareTimestamp > 180L)) {
+                    strobeFlash = 1f // Trigger theatrical stage spotlight flash!
+                    lastSnareTimestamp = now
+                }
+                rollingSnareEnergy = rollingSnareEnergy * 0.88f + avgSnare * 0.12f
+
+                // 3. INDIVIDUAL HEXAGONS / NODES POPPING: Highs, Harmonics & Melody (NO Sub-Bass!)
+                // Nodes are dedicated strictly to melody lines, synths, vocals, guitars, hi-hats, and cymbals.
+                // We start above bass (bin 10+ / ~450Hz) and logarithmically cover up to 14kHz.
+                val minMelodyBin = (totalBins * 0.06f).toInt().coerceAtLeast(8)
+                val melodySpan = (totalBins - minMelodyBin).coerceAtLeast(1)
+
                 for (n in nodeMagnitudes.indices) {
-                    // Logarithmic distribution across bins 2 to (totalBins - 2)
-                    // Low nodes (0..5): upper bass / kicks (bins 2..8)
-                    // Mid nodes (6..18): snares, guitars, vocals, synths (bins 9..45)
-                    // High nodes (19..29): hi-hats, percussions, air, cymbals (bins 46..totalBins)
                     val frac = (n + 1).toFloat() / 30f
-                    // Exponent 2.2 gives natural musical octave spacing
-                    val binIndex = (2 + (Math.pow(frac.toDouble(), 2.2) * (totalBins - 4)).toInt()).coerceIn(2, totalBins)
+                    // Exponent 1.8 gives smooth musical octave distribution across chords, vocal formants, and crisp air
+                    val binIndex = minMelodyBin + (Math.pow(frac.toDouble(), 1.8) * (melodySpan - 2)).toInt().coerceIn(0, melodySpan - 1)
                     
                     val real = fft[binIndex * 2].toDouble()
                     val imag = fft[binIndex * 2 + 1].toDouble()
                     val rawMag = Math.hypot(real, imag).toFloat()
 
-                    // Equalization gain: higher frequencies get boosted to match perceived loudness of bass
-                    val eqGain = 1.0f + (frac * 2.8f) // 1.0x at bass up to 3.8x at treble
+                    // Equalization gain to boost high frequencies so delicate hi-hats/melodies pop as strongly as chords
+                    val eqGain = 1.3f + (frac * 3.2f)
                     val normalizedMag = (rawMag * eqGain).coerceIn(0f, 100f)
 
-                    // Fast attack on musical transients, decaying naturally in frameCallback
+                    // Fast attack for crisp individual note pops
                     if (normalizedMag > nodeMagnitudes[n]) {
                         nodeMagnitudes[n] = normalizedMag
                     }
