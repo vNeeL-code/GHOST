@@ -1627,7 +1627,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
                 val sessionId = java.util.UUID.randomUUID().toString()
                 // Tell the model to listen to the attached audio
-                processQuery("[Operator sent voice message - listen and respond to the audio]", sessionId)
+                processQuery("(operator sent a voice message - please respond to contents of message)", sessionId)
             }
         }
     }

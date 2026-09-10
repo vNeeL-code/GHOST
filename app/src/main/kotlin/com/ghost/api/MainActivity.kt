@@ -340,7 +340,7 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
 
     private fun handleSendAudio(audio: ByteArray) {
         scope.launch {
-            gemmaService?.processMultimodalFromUi("Listen to my spoken voice audio message and respond directly to what I said.", audio = audio)
+            gemmaService?.processMultimodalFromUi("(operator sent a voice message - please respond to contents of message)", audio = audio)
             withContext(Dispatchers.Main) {
                 Toast.makeText(this@MainActivity, "Voice audio transmitted", Toast.LENGTH_SHORT).show()
             }
