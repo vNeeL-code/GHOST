@@ -1100,7 +1100,17 @@ class KoogAgent(
         _turnsSinceKvFlush.incrementAndGet()
 
         val contextBlock = contextManager.buildContext()
-        val fullPrompt = "$contextBlock\n$userMessage"
+        val mediaCue = when {
+            images != null && images.isNotEmpty() && audio != null -> "[Multimodal Input: User attached image and voice audio recording]"
+            images != null && images.isNotEmpty() -> "[Multimodal Input: User attached image]"
+            audio != null -> "[Multimodal Input: User attached voice audio recording]"
+            else -> null
+        }
+        val fullPrompt = if (mediaCue != null) {
+            "$contextBlock\n$mediaCue\n$userMessage"
+        } else {
+            "$contextBlock\n$userMessage"
+        }
         
         // Proactive Smooth Restart: Flush KV cache if context is saturating (Approx 10 turns)
         // Removed: Proactive Smooth Restart (It was destroying KV cache and causing 20s latency)

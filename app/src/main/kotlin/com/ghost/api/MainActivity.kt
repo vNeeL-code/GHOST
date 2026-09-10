@@ -324,22 +324,23 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
         val bitmap = chatViewModel.attachedImage.value
         val imagePath = chatViewModel.attachedImagePath.value
         chatViewModel.setAttachedImage(null, null)
+        val promptText = if (text.isBlank() && bitmap != null) "Analyze and describe what you see in the attached image." else text
         if (bitmap != null) {
             scope.launch {
-                gemmaService?.processMultimodalFromUi(text, listOf(bitmap), imageUris = listOfNotNull(imagePath))
+                gemmaService?.processMultimodalFromUi(promptText, listOf(bitmap), imageUris = listOfNotNull(imagePath))
                 withContext(Dispatchers.Main) {
                     Toast.makeText(this@MainActivity, "Sent with image", Toast.LENGTH_SHORT).show()
                 }
             }
         } else {
-            gemmaService?.processQueryFromUi(text)
+            gemmaService?.processQueryFromUi(promptText)
             Toast.makeText(this@MainActivity, "Transmission sent", Toast.LENGTH_SHORT).show()
         }
     }
 
     private fun handleSendAudio(audio: ByteArray) {
         scope.launch {
-            gemmaService?.processMultimodalFromUi("[Audio message received]", audio = audio)
+            gemmaService?.processMultimodalFromUi("Listen to my spoken voice audio message and respond directly to what I said.", audio = audio)
             withContext(Dispatchers.Main) {
                 Toast.makeText(this@MainActivity, "Voice audio transmitted", Toast.LENGTH_SHORT).show()
             }

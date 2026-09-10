@@ -116,6 +116,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                     visionBackend = visionBackend,  // Match CPU/GPU mode cleanly
                     audioBackend = if (enableAudio) Backend.CPU() else null,    // must be CPU for Gemma
                     maxNumTokens = Constants.MAX_TOKENS,
+                    maxNumImages = if (enableVision) 2 else 0,
                     cacheDir = context.codeCacheDir.absolutePath  // Private internal storage (safe from Samsung Knox SELinux sandbox blocks)
                 )
 
