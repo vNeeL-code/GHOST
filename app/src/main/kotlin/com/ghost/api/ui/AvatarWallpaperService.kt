@@ -194,23 +194,24 @@ class AvatarWallpaperService : WallpaperService() {
             smoothedIntensity = smoothedIntensity * 0.7f + intensity * 0.3f
             smoothedBass = smoothedBass * 0.7f + bass * 0.3f
 
-            // Sample FFT frequency bins for the 30 spiral hexagon nodes
-            // Bins 0..3 represent monolithic sub-bass (which drives the central booming mother hex & bloom).
-            // Spiral arm nodes are mapped across higher bass, mid-range harmonics, vocal presence, and treble (bins 4..maxBin)
-            // with arm interleaving so each arm samples different frequency bands without single-tentacle bias!
-            if (fft.isNotEmpty() && fft.size >= 8) {
+            // FFT Frequency Bin Distribution for Satellite & Spiral Nodes:
+            // - Central mother geometries & bloom layers are driven directly by smoothedBass and strobeFlash.
+            // - Spiral arm nodes and satellite cubes represent harmonics, mid-tones, vocals, snares, and treble.
+            // - We skip low sub-bass bins (0..5) to avoid sustained-tone latching where a single node gets pinned.
+            // - We use smooth blend tracking (fast attack 0.55, smooth frame decay) so nodes pop crisply and recover immediately.
+            if (fft.isNotEmpty() && fft.size >= 16) {
                 val maxBin = (fft.size / 2) - 1
-                val minArmBin = 4.coerceAtMost(maxBin)
-                val binSpan = (maxBin - minArmBin).coerceAtLeast(1)
+                val minNodeBin = 6.coerceAtMost(maxBin)
+                val binSpan = (maxBin - minNodeBin).coerceAtLeast(1)
                 for (n in nodeMagnitudes.indices) {
-                    // Stride across bins 4..maxBin using prime step for maximum harmonic distribution
-                    val binIndex = minArmBin + ((n * 7 + (n / 5) * 3) % binSpan)
+                    val binIndex = minNodeBin + ((n * 7 + 3) % binSpan)
                     val real = fft[binIndex * 2].toDouble()
                     val imag = fft[binIndex * 2 + 1].toDouble()
                     val rawMag = Math.hypot(real, imag).toFloat().coerceIn(0f, 90f)
-                    // Fast attack if new magnitude is higher, otherwise let frame loop smoothly decay
+                    
+                    // Smooth tracking: responsive rise without permanent peak-latch
                     if (rawMag > nodeMagnitudes[n]) {
-                        nodeMagnitudes[n] = rawMag
+                        nodeMagnitudes[n] = nodeMagnitudes[n] * 0.45f + rawMag * 0.55f
                     }
                 }
             }
@@ -554,81 +555,16 @@ class AvatarWallpaperService : WallpaperService() {
                 drawHexagon(canvas, 0f, 0f, coreRadius * 2.8f + bassKick * 1.5f, paint)
             }
 
-            // 3. Six Logarithmic Spiral Hex Arms (Mixture of Experts / Neural Parameter Activation)
-            // Each individual hexagon is wired to a distinct audio FFT frequency bin,
-            // so individual weights/nodes "pop" and flash independently on harmonics, snares, and basslines!
-            val numArms = 6
-            val hexesPerArm = 5
-            val spiralTwist = 0.22f
-            val fftAvailable = currentFft.isNotEmpty() && currentFft.size >= 4
-            val maxBin = if (fftAvailable) (currentFft.size / 2) - 1 else 1
-
-            for (arm in 0 until numArms) {
-                val baseAngle = (arm * Math.PI * 2.0 / numArms).toFloat()
-
-                for (step in 1..hexesPerArm) {
-                    val progress = step.toFloat() / hexesPerArm.toFloat()
-
-                    // Sample from smoothly decaying per-node FFT magnitude
-                    val nodeIndex = (arm * hexesPerArm + (step - 1)).coerceIn(0, nodeMagnitudes.size - 1)
-                    val nodeMag = nodeMagnitudes[nodeIndex]
-
-                    // Subtle, crisp activation pop (capped at max 9px so it never blows up out of proportion)
-                    val activationPop = (nodeMag * 0.12f).coerceIn(0f, 9f)
-                    val distance = coreRadius * 1.35f + (step * (42f + bassKick * 0.35f)) + (activationPop * 0.3f)
-                    val angle = baseAngle + (step * spiralTwist) + (smoothedIntensity * 0.003f)
-
-                    val hx = (cos(angle) * distance).toFloat()
-                    val hy = (sin(angle) * distance).toFloat()
-
-                    // Controlled size scaling: stays small and proportional to the constellation
-                    val baseHexSize = coreRadius * 0.28f * (1.0f - progress * 0.50f)
-                    val hexSize = (baseHexSize + activationPop).coerceIn(6f, coreRadius * 0.42f)
-
-                    val colorIdx = (arm + step) % currentColors.size
-                    val baseArmColor = if (isCustomPaletteActive) currentColors[colorIdx] else {
-                        when (step) {
-                            1 -> Color.parseColor("#F1F5F9")
-                            2 -> Color.parseColor("#93C5FD")
-                            3 -> Color.parseColor("#38BDF8")
-                            4 -> Color.parseColor("#818CF8")
-                            else -> Color.parseColor("#A78BFA")
-                        }
-                    }
-
-                    // Active nodes flash brighter/whiter when their frequency slice hits
-                    val armColor = if (nodeMag > 22f) {
-                        val blendRatio = (nodeMag / 80f).coerceIn(0f, 0.70f)
-                        ColorUtils.blendARGB(baseArmColor, Color.WHITE, blendRatio)
-                    } else {
-                        baseArmColor
-                    }
-
-                    val baseAlpha = ((1f - progress * 0.35f) * 210).toInt()
-                    val nodeAlpha = (baseAlpha + (nodeMag * 1.2f).toInt()).coerceIn(40, 255)
-
-                    paint.style = Paint.Style.FILL
-                    paint.color = armColor
-                    paint.alpha = nodeAlpha
-                    drawHexagon(canvas, hx, hy, hexSize, paint)
-
-                    paint.style = Paint.Style.STROKE
-                    paint.strokeWidth = 2.0f + (nodeMag * 0.02f)
-                    paint.color = if (nodeMag > 30f) Color.WHITE else baseArmColor
-                    paint.alpha = ((1f - progress * 0.5f) * 180 + (nodeMag * 1.0f)).toInt().coerceIn(30, 255)
-                    drawHexagon(canvas, hx, hy, hexSize, paint)
-                }
-            }
-
-            // Stepped Concentric Blooming Hexagons behind the Mother Hexagon (Layered Fake Bloom)
+            // 3. Stepped Concentric Blooming Hexagons behind Mother Hexagon (Layered Fake Bloom)
             // Mirrors the rich, vibrant layered fake bloom of Option A, grabbing the stolen wallpaper palette colors
+            // Booms outward dramatically on bass hits so the center is the primary reactor!
             val hexBloomRadii = floatArrayOf(
-                coreRadius * 2.05f + (bassKick * 0.95f),
-                coreRadius * 1.68f + (bassKick * 0.65f),
-                coreRadius * 1.35f + (bassKick * 0.40f),
-                coreRadius * 1.12f + (bassKick * 0.18f)
+                coreRadius * 2.50f + (bassKick * 1.50f),
+                coreRadius * 1.95f + (bassKick * 1.10f),
+                coreRadius * 1.50f + (bassKick * 0.70f),
+                coreRadius * 1.20f + (bassKick * 0.35f)
             )
-            val hexBloomAlphas = intArrayOf(28, 55, 95, 145)
+            val hexBloomAlphas = intArrayOf(35, 65, 110, 160)
             val hexBloomBorderWidths = floatArrayOf(5.5f, 4.2f, 3.2f, 2.5f)
 
             for (hb in hexBloomRadii.indices) {
@@ -644,7 +580,7 @@ class AvatarWallpaperService : WallpaperService() {
                 // Translucent solid planar aura fill for radiant bloom volume
                 paint.style = Paint.Style.FILL
                 paint.color = hexGlowColor
-                paint.alpha = (hexBloomAlphas[hb] * 0.42f).toInt().coerceIn(10, 80)
+                paint.alpha = (hexBloomAlphas[hb] * 0.45f).toInt().coerceIn(15, 90)
                 drawHexagon(canvas, 0f, 0f, hexBloomRadii[hb], paint)
 
                 // Rich neon boundary contour
@@ -655,10 +591,74 @@ class AvatarWallpaperService : WallpaperService() {
                 drawHexagon(canvas, 0f, 0f, hexBloomRadii[hb], paint)
             }
 
-            // 4. Mother Hexagon (Hollow Obsidian Cyber Chamber)
+            // 4. Six Logarithmic Spiral Hex Arms (Mixture of Experts / Neural Parameter Activation)
+            // Drawn in the foreground with controlled activation pops so they never drown out the center mother hex!
+            val numArms = 6
+            val hexesPerArm = 5
+            val spiralTwist = 0.22f
+
+            for (arm in 0 until numArms) {
+                val baseAngle = (arm * Math.PI * 2.0 / numArms).toFloat()
+
+                for (step in 1..hexesPerArm) {
+                    val progress = step.toFloat() / hexesPerArm.toFloat()
+
+                    // Sample from smoothly decaying per-node FFT magnitude
+                    val nodeIndex = (arm * hexesPerArm + (step - 1)).coerceIn(0, nodeMagnitudes.size - 1)
+                    val nodeMag = nodeMagnitudes[nodeIndex]
+
+                    // Crisp activation pop: step 1 (inner ring) is heavily dampened (0.35x) so it never blows up next to the mother hex
+                    val innerDampener = if (step == 1) 0.35f else 1.0f
+                    val activationPop = (nodeMag * 0.08f * innerDampener).coerceIn(0f, 6f)
+                    val distance = coreRadius * 1.35f + (step * (42f + bassKick * 0.30f)) + (activationPop * 0.3f)
+                    val angle = baseAngle + (step * spiralTwist) + (smoothedIntensity * 0.003f)
+
+                    val hx = (cos(angle) * distance).toFloat()
+                    val hy = (sin(angle) * distance).toFloat()
+
+                    // Controlled size scaling: stays proportional and distinctly smaller than the center mother hex
+                    val baseHexSize = coreRadius * 0.22f * (1.0f - progress * 0.45f)
+                    val hexSize = (baseHexSize + activationPop).coerceIn(5f, coreRadius * 0.32f)
+
+                    val colorIdx = (arm + step) % currentColors.size
+                    val baseArmColor = if (isCustomPaletteActive) currentColors[colorIdx] else {
+                        when (step) {
+                            1 -> Color.parseColor("#F1F5F9")
+                            2 -> Color.parseColor("#93C5FD")
+                            3 -> Color.parseColor("#38BDF8")
+                            4 -> Color.parseColor("#818CF8")
+                            else -> Color.parseColor("#A78BFA")
+                        }
+                    }
+
+                    // Active nodes flash brighter toward white when their frequency slice hits
+                    val armColor = if (nodeMag > 24f) {
+                        val blendRatio = (nodeMag / 80f).coerceIn(0f, 0.70f)
+                        ColorUtils.blendARGB(baseArmColor, Color.WHITE, blendRatio)
+                    } else {
+                        baseArmColor
+                    }
+
+                    val baseAlpha = ((1f - progress * 0.35f) * 210).toInt()
+                    val nodeAlpha = (baseAlpha + (nodeMag * 1.0f).toInt()).coerceIn(40, 255)
+
+                    paint.style = Paint.Style.FILL
+                    paint.color = armColor
+                    paint.alpha = nodeAlpha
+                    drawHexagon(canvas, hx, hy, hexSize, paint)
+
+                    paint.style = Paint.Style.STROKE
+                    paint.strokeWidth = 2.0f + (nodeMag * 0.02f)
+                    paint.color = if (nodeMag > 30f) Color.WHITE else baseArmColor
+                    paint.alpha = ((1f - progress * 0.5f) * 180 + (nodeMag * 1.0f)).toInt().coerceIn(30, 255)
+                    drawHexagon(canvas, hx, hy, hexSize, paint)
+                }
+            }
+
+            // 5. Mother Hexagon (Hollow Obsidian Cyber Chamber)
             paint.style = Paint.Style.FILL
             paint.color = Color.parseColor("#060A10")
-            paint.alpha = 235
+            paint.alpha = 240
             drawHexagon(canvas, 0f, 0f, coreRadius, paint)
 
             paint.style = Paint.Style.STROKE
@@ -674,7 +674,7 @@ class AvatarWallpaperService : WallpaperService() {
 
             canvas.restore() // Restore unrotated frame for the central star glyph
 
-            // 5. Model Unicode Glyph (✧) Centered, Crisp White & Unrotated
+            // 6. Model Unicode Glyph (✧) Centered, Crisp White & Unrotated
             // Isolated from avatar spin and without blurry star bloom text
             canvas.save()
             canvas.translate(cx, cy)
@@ -862,28 +862,32 @@ class AvatarWallpaperService : WallpaperService() {
             canvas.save()
             canvas.translate(cx, cy)
 
-            // 3-Layer Concentric Stepped Fake Bloom behind Central Cube
+            // 4-Layer Stepped Concentric Fake Bloom behind Central Cube
+            // Booms massively on bass kicks and extends far beyond the central pill,
+            // matching the radiant bloom presence of Option A
             val cubeBloomRadii = floatArrayOf(
-                coreCubeRadius * 1.55f + (bassKick * 0.55f),
-                coreCubeRadius * 1.30f + (bassKick * 0.35f),
-                coreCubeRadius * 1.12f + (bassKick * 0.18f)
+                coreCubeRadius * 2.40f + (bassKick * 1.30f),
+                coreCubeRadius * 1.85f + (bassKick * 0.90f),
+                coreCubeRadius * 1.45f + (bassKick * 0.55f),
+                coreCubeRadius * 1.18f + (bassKick * 0.25f)
             )
-            val cubeBloomAlphas = intArrayOf(30, 65, 110)
-            val cubeBloomWidths = floatArrayOf(4.5f, 3.5f, 2.5f)
+            val cubeBloomAlphas = intArrayOf(35, 70, 115, 160)
+            val cubeBloomWidths = floatArrayOf(5.5f, 4.2f, 3.2f, 2.2f)
 
             for (cb in cubeBloomRadii.indices) {
                 val swatchIndex = when (cb) {
-                    2 -> 1 % currentColors.size // Vibrant
-                    1 -> 0 % currentColors.size // Dominant
-                    else -> 2 % currentColors.size // Muted
+                    3 -> 1 % currentColors.size // Vibrant / Inner
+                    2 -> 0 % currentColors.size // Dominant
+                    1 -> 2 % currentColors.size // Muted
+                    else -> 3 % currentColors.size // Outer
                 }
                 val rawColor = if (isCustomPaletteActive) currentColors[swatchIndex] else colorCobaltGlow
                 val bloomColor = ensureVisibleBloomColor(rawColor, colorCobaltGlow)
 
-                // Translucent fill for planar glow
+                // Translucent fill for planar glow volume
                 paint.style = Paint.Style.FILL
                 paint.color = bloomColor
-                paint.alpha = (cubeBloomAlphas[cb] * 0.35f).toInt().coerceIn(10, 70)
+                paint.alpha = (cubeBloomAlphas[cb] * 0.45f).toInt().coerceIn(15, 95)
                 drawDiamond(canvas, 0f, 0f, cubeBloomRadii[cb], paint)
 
                 // Crisp border contour
@@ -901,12 +905,12 @@ class AvatarWallpaperService : WallpaperService() {
             drawDiamond(canvas, 0f, 0f, coreCubeRadius, paint)
 
             paint.style = Paint.Style.STROKE
-            paint.strokeWidth = 3.5f + (strobeFlash * 2.5f)
+            paint.strokeWidth = 4f + (strobeFlash * 2.5f)
             paint.color = if (strobeFlash > 0.05f) Color.WHITE else Color.parseColor("#F8FAFC")
             paint.alpha = 255
             drawDiamond(canvas, 0f, 0f, coreCubeRadius, paint)
 
-            paint.strokeWidth = 2f
+            paint.strokeWidth = 2.5f
             paint.color = if (isCustomPaletteActive) currentColors[0] else Color.parseColor("#38BDF8")
             paint.alpha = 200
             drawDiamond(canvas, 0f, 0f, coreCubeRadius * 0.82f, paint)
@@ -921,52 +925,79 @@ class AvatarWallpaperService : WallpaperService() {
 
             canvas.restore()
 
-            // 4. Six Satellite Diamonds / Cubes (Orbiting in Hexagonal Formation)
-            // Exactly matching the user diagram: Top, Bottom, Top-Left, Top-Right, Bottom-Left, Bottom-Right
+            // 4. Six Satellite Diamonds / Cubes (Aligned Exactly with Overlay Nodes)
+            // Blueprint mapping:
+            // 0: Top Apex (Orange Tape Reel Launcher) -> (0, -apex)
+            // 1: Top-Right (Blue Search)               -> (+dx, -dy)
+            // 2: Bottom-Right (Yellow Tools)          -> (+dx, +dy)
+            // 3: Bottom Apex (Cyan 4-Way Puck)         -> (0, +apex)
+            // 4: Bottom-Left (Green Diary)            -> (-dx, +dy)
+            // 5: Top-Left (Red Camera)                -> (-dx, -dy)
             val numSatellites = 6
-            val satelliteOrbitRadius = orbitCircleRadius * 1.48f + (bassKick * 0.25f)
-            val satelliteBaseSize = coreCubeRadius * 0.42f
+            val density = canvas.density.toFloat().let { if (it > 0f) it / 160f else width / 360f }
+            val isLandscape = width > height
+
+            val horizontalSpread = if (isLandscape) 1.55f else 1.0f
+            val nodeDx = 90f * density * horizontalSpread
+            val nodeDy = (if (isLandscape) 56f else 105f) * density
+            val nodeApex = (if (isLandscape) 102f else 182f) * density
+
+            val satelliteOffsets = arrayOf(
+                Pair(0f, -nodeApex),           // 0: Top Apex
+                Pair(nodeDx, -nodeDy),         // 1: Top-Right
+                Pair(nodeDx, nodeDy),          // 2: Bottom-Right
+                Pair(0f, nodeApex),            // 3: Bottom Apex
+                Pair(-nodeDx, nodeDy),         // 4: Bottom-Left
+                Pair(-nodeDx, -nodeDy)         // 5: Top-Left
+            )
+
+            val satelliteBaseSize = 24f * density // matches 48dp button radius
 
             for (s in 0 until numSatellites) {
-                // Hexagonal orientation: top is s=0 (-90°), then 60° increments
-                val angle = (s * Math.PI / 3.0 - Math.PI / 2.0).toFloat()
-                val satX = cx + (satelliteOrbitRadius * cos(angle))
-                val satY = cy + (satelliteOrbitRadius * sin(angle))
+                val (offsetX, offsetY) = satelliteOffsets[s]
+                val satX = cx + offsetX
+                val satY = cy + offsetY
 
-                // Each satellite samples distinct FFT bins (0, 5, 10, 15, 20, 25)
-                val nodeIdx = (s * 5).coerceIn(0, nodeMagnitudes.size - 1)
+                // Each satellite samples distinct FFT bins (nodes 2, 7, 12, 17, 22, 27)
+                val nodeIdx = (s * 5 + 2).coerceIn(0, nodeMagnitudes.size - 1)
                 val satMag = nodeMagnitudes[nodeIdx]
-                val satPop = (satMag * 0.14f).coerceIn(0f, 10f)
+                val satPop = (satMag * 0.10f).coerceIn(0f, 7f)
 
                 val satSize = satelliteBaseSize + satPop
-                val colorIdx = (s + 1) % currentColors.size
-                val baseSatColor = if (isCustomPaletteActive) currentColors[colorIdx] else {
-                    when (s % 3) {
-                        0 -> Color.parseColor("#93C5FD")
-                        1 -> Color.parseColor("#38BDF8")
-                        else -> Color.parseColor("#F8FAFC")
+
+                // Distinct stolen palette color per satellite
+                val colorIdx = s % currentColors.size
+                val rawSatColor = if (isCustomPaletteActive) currentColors[colorIdx] else {
+                    when (s) {
+                        0 -> Color.parseColor("#F97316") // Orange Apex
+                        1 -> Color.parseColor("#4285F4") // Google Blue
+                        2 -> Color.parseColor("#FBBC05") // Google Yellow
+                        3 -> Color.parseColor("#00F0FF") // Cyan Apex
+                        4 -> Color.parseColor("#34A853") // Google Green
+                        else -> Color.parseColor("#EA4335") // Google Red
                     }
                 }
+                val baseSatColor = ensureVisibleBloomColor(rawSatColor, colorCobaltGlow)
 
                 // Active popping satellites flash brighter toward white
-                val satColor = if (satMag > 22f) {
-                    val ratio = (satMag / 80f).coerceIn(0f, 0.75f)
+                val satColor = if (satMag > 24f) {
+                    val ratio = (satMag / 80f).coerceIn(0f, 0.70f)
                     ColorUtils.blendARGB(baseSatColor, Color.WHITE, ratio)
                 } else {
                     baseSatColor
                 }
 
-                // Subtle dark interior so background stars / flares show through neatly
+                // Vibrant translucent planar fill using the stolen color!
                 paint.style = Paint.Style.FILL
-                paint.color = Color.parseColor("#070B14")
-                paint.alpha = 225
+                paint.color = satColor
+                paint.alpha = (50 + (satMag * 0.8f).toInt()).coerceIn(40, 140)
                 drawDiamond(canvas, satX, satY, satSize, paint)
 
                 // Glowing neon contour
                 paint.style = Paint.Style.STROKE
-                paint.strokeWidth = 2.8f + (satMag * 0.03f)
+                paint.strokeWidth = 3.2f + (satMag * 0.02f)
                 paint.color = satColor
-                paint.alpha = (160 + (satMag * 1.2f).toInt()).coerceIn(120, 255)
+                paint.alpha = (180 + (satMag * 0.9f).toInt()).coerceIn(160, 255)
                 drawDiamond(canvas, satX, satY, satSize, paint)
             }
         }
