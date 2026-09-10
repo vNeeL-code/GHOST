@@ -104,7 +104,7 @@ fun SettingsDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "✧ GHOST Settings",
+                            text = "✧ Settings",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
                             color = accentColor,
@@ -131,12 +131,12 @@ fun SettingsDialog(
                     ) {
                         // === Perception & Signals ===
                         item {
-                            SettingsSectionHeader(title = "Perception & Signals")
+                            SettingsSectionHeader(title = "Visual signals")
                         }
                         item {
                             SettingsToggleRow(
                                 title = "Edge Lights",
-                                subtitle = "Ambient neon pulses on voice & thinking",
+                                subtitle = "Ambient audio equaliser",
                                 checked = edgeLightsEnabled,
                                 onCheckedChange = { checked ->
                                     edgeLightsEnabled = checked
@@ -151,7 +151,7 @@ fun SettingsDialog(
                         item {
                             SettingsToggleRow(
                                 title = "Passive Notification TTS",
-                                subtitle = "Read incoming notifications hands-free",
+                                subtitle = "Read incoming notifications automatically",
                                 checked = passiveTtsEnabled,
                                 onCheckedChange = { checked ->
                                     passiveTtsEnabled = checked
@@ -309,12 +309,12 @@ fun SettingsDialog(
 
                         // === Live Wallpapers ===
                         item {
-                            SettingsSectionHeader(title = "Live Wallpapers & Avatar Geometry")
+                            SettingsSectionHeader(title = "Live Wallpapers & Visualisers")
                         }
                         item {
                             Column {
                                 Text(
-                                    text = "Avatar Visualizer Geometry",
+                                    text = "Live Wallpapers",
                                     fontSize = 12.sp,
                                     color = textDim,
                                     modifier = Modifier.padding(bottom = 8.dp)
@@ -322,12 +322,12 @@ fun SettingsDialog(
                                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     val rows = listOf(
                                         listOf(
-                                            "OPTION_A" to "Option A (Orbital)",
-                                            "OPTION_B" to "Option B (Hexagons)"
+                                            "OPTION_A" to "Radial",
+                                            "OPTION_B" to "Hexagonal"
                                         ),
                                         listOf(
-                                            "OPTION_C" to "Option C (Prisms)",
-                                            "OPTION_D" to "Option D (Sunset)"
+                                            "OPTION_C" to "Prismatic",
+                                            "OPTION_D" to "Cuboid"
                                         )
                                     )
                                     for (presetRow in rows) {
@@ -381,8 +381,8 @@ fun SettingsDialog(
                         }
                         item {
                             SettingsActionCard(
-                                title = "Avatar Wallpaper",
-                                subtitle = "Set interactive GHOST avatar wallpaper",
+                                title = "Visualiser",
+                                subtitle = "Set GHOST avatar wallpaper",
                                 onClick = {
                                     context.sendBroadcast(
                                         Intent(context, HardwareToggleReceiver::class.java).apply {
@@ -430,7 +430,7 @@ fun SettingsDialog(
                         }
                         item {
                             SettingsActionCard(
-                                title = "View Diary History",
+                                title = "View Log History",
                                 subtitle = "Inspect recent episodic memory logs",
                                 onClick = onShowDiaryHistory
                             )
