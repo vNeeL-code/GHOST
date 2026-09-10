@@ -1101,9 +1101,9 @@ class KoogAgent(
 
         val contextBlock = contextManager.buildContext()
         val mediaCue = when {
-            images != null && images.isNotEmpty() && audio != null -> "[Multimodal Input: User attached image and voice audio recording]"
-            images != null && images.isNotEmpty() -> "[Multimodal Input: User attached image]"
-            audio != null -> "[Multimodal Input: User attached voice audio recording]"
+            images != null && images.isNotEmpty() && audio != null -> "[Multimodal Input: User attached image and voice audio recording. Inspect image and listen to audio.]"
+            images != null && images.isNotEmpty() -> "[Multimodal Input: User attached image. Inspect image directly.]"
+            audio != null -> "[Multimodal Input: User attached voice audio recording. Listen to the audio and respond directly to what was spoken.]"
             else -> null
         }
         val fullPrompt = if (mediaCue != null) {

@@ -55,13 +55,24 @@ class AudioRecorder(private val context: Context) {
 
         return withContext(Dispatchers.IO) {
             try {
-                audioRecord = AudioRecord(
-                    MediaRecorder.AudioSource.MIC,
+                var record = AudioRecord(
+                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
                     SAMPLE_RATE,
                     CHANNEL_CONFIG,
                     AUDIO_FORMAT,
                     maxOf(bufferSize * 2, SAMPLE_RATE * duration * 2) 
                 )
+                if (record.state != AudioRecord.STATE_INITIALIZED) {
+                    try { record.release() } catch (_: Exception) {}
+                    record = AudioRecord(
+                        MediaRecorder.AudioSource.MIC,
+                        SAMPLE_RATE,
+                        CHANNEL_CONFIG,
+                        AUDIO_FORMAT,
+                        maxOf(bufferSize * 2, SAMPLE_RATE * duration * 2) 
+                    )
+                }
+                audioRecord = record
 
                 if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
                     Timber.e("AudioRecord failed to initialize")
@@ -130,6 +141,7 @@ class AudioRecorder(private val context: Context) {
             null
         } finally {
             this@AudioRecorder.stopRecording()
+            this@AudioRecorder.releaseRecord()
         }
         }
     }
@@ -207,6 +219,9 @@ class AudioRecorder(private val context: Context) {
     fun stopRecording() {
         isRecording = false
         isAnyRecordingActive = false
+    }
+
+    private fun releaseRecord() {
         try {
             audioRecord?.stop()
             audioRecord?.release()
