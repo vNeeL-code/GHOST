@@ -420,7 +420,7 @@ class AvatarWallpaperService : WallpaperService() {
                             drawOptionDCubeLattice(canvas, cx + 12f, cy + 40f, dynamicBaseRadius, width, height)
                         }
                         else -> {
-                            drawOptionAOrbitalStar(canvas, cx, cy, dynamicBaseRadius, height, isNoisy)
+                            drawOptionAOrbitalStar(canvas, cx, cy, dynamicBaseRadius, width, height, isNoisy)
                         }
                     }
                 }
@@ -503,13 +503,111 @@ class AvatarWallpaperService : WallpaperService() {
         }
 
         /**
-         * Option A: Orbital Star / Iris (Classic Baseline)
-         * Enhanced with dynamic booming bass expansion, ambient grounding pool at the bottom app dock,
-         * and subtle idle harmonic breathing.
+         * Option A: Orbital Star / Iris (Radial Baseline)
+         * Enhanced with:
+         * 1. Theatrical Square Cyber Corridor & Corner Laser Guide Rails flashing on snare drum attacks
+         * 2. High-definition wireframe contour outlines around the glow corona and central white sparkle
+         * 3. Geometric wireframe diamond cage framing the star core
+         * 4. Dynamic booming bass expansion, ambient grounding pool, and harmonic breathing
          */
-        private fun drawOptionAOrbitalStar(canvas: Canvas, cx: Float, cy: Float, dynamicBaseRadius: Float, height: Float, isNoisy: Boolean) {
+        private fun drawOptionAOrbitalStar(canvas: Canvas, cx: Float, cy: Float, dynamicBaseRadius: Float, width: Float, height: Float, isNoisy: Boolean) {
             val bassBoost = smoothedBass * 3.2f // Booming expansion on audio beats!
             val idleBreath = sin(rotationAngle * 0.4f) * 25f
+            val corridorColor = if (isCustomPaletteActive) currentColors[0] else COLOR_CYAN_ACCENT
+
+            // 1. Perspective Square Cyber Corridor & Corner Laser Guide Rails (Snare / Transient Lighting Flashes)
+            val hallwayFlashAlpha = if (strobeFlash > 0.03f) {
+                (strobeFlash * 255f).toInt().coerceIn(0, 255)
+            } else {
+                0
+            }
+
+            if (hallwayFlashAlpha > 0) {
+                canvas.save()
+                paint.clearShadowLayer()
+
+                val nearSpan = (dynamicBaseRadius * 0.92f + (smoothedBass * 1.2f).coerceAtLeast(0f) * 0.45f).coerceIn(40f, 220f)
+                val nTLx = cx - nearSpan; val nTLy = cy - nearSpan
+                val nTRx = cx + nearSpan; val nTRy = cy - nearSpan
+                val nBRx = cx + nearSpan; val nBRy = cy + nearSpan
+                val nBLx = cx - nearSpan; val nBLy = cy + nearSpan
+
+                val cTLx = 0f; val cTLy = 0f
+                val cTRx = width; val cTRy = 0f
+                val cBRx = width; val cBRy = height
+                val cBLx = 0f; val cBLy = height
+
+                // Top Perspective Corridor Facet - Zero-GC
+                cachedWallPath.reset()
+                cachedWallPath.moveTo(nTLx, nTLy)
+                cachedWallPath.lineTo(cTLx, cTLy)
+                cachedWallPath.lineTo(cTRx, cTRy)
+                cachedWallPath.lineTo(nTRx, nTRy)
+                cachedWallPath.close()
+                paint.style = Paint.Style.FILL
+                paint.color = corridorColor
+                paint.alpha = (hallwayFlashAlpha * 0.16f).toInt().coerceIn(0, 50)
+                canvas.drawPath(cachedWallPath, paint)
+
+                // Right Perspective Corridor Facet
+                cachedWallPath.reset()
+                cachedWallPath.moveTo(nTRx, nTRy)
+                cachedWallPath.lineTo(cTRx, cTRy)
+                cachedWallPath.lineTo(cBRx, cBRy)
+                cachedWallPath.lineTo(nBRx, nBRy)
+                cachedWallPath.close()
+                paint.alpha = (hallwayFlashAlpha * 0.22f).toInt().coerceIn(0, 65)
+                canvas.drawPath(cachedWallPath, paint)
+
+                // Bottom Perspective Corridor Facet
+                cachedWallPath.reset()
+                cachedWallPath.moveTo(nBRx, nBRy)
+                cachedWallPath.lineTo(cBRx, cBRy)
+                cachedWallPath.lineTo(cBLx, cBLy)
+                cachedWallPath.lineTo(nBLx, nBLy)
+                cachedWallPath.close()
+                paint.alpha = (hallwayFlashAlpha * 0.16f).toInt().coerceIn(0, 50)
+                canvas.drawPath(cachedWallPath, paint)
+
+                // Left Perspective Corridor Facet
+                cachedWallPath.reset()
+                cachedWallPath.moveTo(nBLx, nBLy)
+                cachedWallPath.lineTo(cBLx, cBLy)
+                cachedWallPath.lineTo(cTLx, cTLy)
+                cachedWallPath.lineTo(nTLx, nTLy)
+                cachedWallPath.close()
+                paint.alpha = (hallwayFlashAlpha * 0.22f).toInt().coerceIn(0, 65)
+                canvas.drawPath(cachedWallPath, paint)
+
+                // 4 Corner Laser Guide Rails shooting into the 4 screen corners (snare drum attack flashes!)
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = 3f + (strobeFlash * 4.5f)
+                val laserColor = if (strobeFlash > 0.35f) {
+                    ColorUtils.blendARGB(corridorColor, Color.WHITE, ((strobeFlash - 0.35f) / 0.65f).coerceIn(0f, 0.9f))
+                } else {
+                    corridorColor
+                }
+                paint.color = laserColor
+                paint.alpha = (hallwayFlashAlpha * 0.92f).toInt().coerceIn(0, 245)
+                canvas.drawLine(nTLx, nTLy, cTLx, cTLy, paint)
+                canvas.drawLine(nTRx, nTRy, cTRx, cTRy, paint)
+                canvas.drawLine(nBRx, nBRy, cBRx, cBRy, paint)
+                canvas.drawLine(nBLx, nBLy, cBLx, cBLy, paint)
+
+                // Concentric square corridor frames stepping along perspective depth
+                for (step in 1..2) {
+                    val t = step * 0.38f
+                    val fx1 = nTLx + (cTLx - nTLx) * t
+                    val fy1 = nTLy + (cTLy - nTLy) * t
+                    val fx2 = nBRx + (cBRx - nBRx) * t
+                    val fy2 = nBRy + (cBRy - nBRy) * t
+                    paint.strokeWidth = 2f + (strobeFlash * 1.5f)
+                    paint.alpha = (hallwayFlashAlpha * 0.55f).toInt().coerceIn(0, 160)
+                    canvas.drawRect(fx1, fy1, fx2, fy2, paint)
+                }
+
+                canvas.restore()
+            }
 
             canvas.save()
             // Nudge rings slightly right and down to optically align with the ✧ glyph
@@ -530,10 +628,23 @@ class AvatarWallpaperService : WallpaperService() {
             }
             
             canvas.restore()
-            
-            // Multi-pass bloom glow:
+
+            // 2. Geometric Wireframe Diamond Cage Framing the Star Core
+            val wireframeAccent = corridorColor
+            val baseStarSize = 1200f
+            val textOffset = (logoPaint.descent() + logoPaint.ascent()) / 2f
+
+            paint.style = Paint.Style.STROKE
+            for (d in 0 until 3) {
+                val r = (dynamicBaseRadius * (0.80f + d * 0.40f) + bassBoost * 0.42f)
+                paint.strokeWidth = if (d == 0) 2.6f + (strobeFlash * 2.2f) else 1.5f
+                paint.color = if (d == 0 && strobeFlash > 0.2f) Color.WHITE else wireframeAccent
+                paint.alpha = if (d == 0) (150 + (strobeFlash * 105f).toInt()).coerceIn(0, 255) else 75
+                drawDiamond(canvas, cx, cy - textOffset, r, paint)
+            }
+
+            // 3. Multi-pass bloom glow with crisp wireframe contours:
             // Idle harmonic breathing + explosive booming on audio kicks
-            val baseStarSize = 1200f 
             logoPaint.clearShadowLayer()
             for (i in 0 until 4) {
                 val bloomSize = when (i) {
@@ -555,19 +666,45 @@ class AvatarWallpaperService : WallpaperService() {
                     COLOR_COBALT_GLOW
                 }
 
+                val off = (logoPaint.descent() + logoPaint.ascent()) / 2f
+
+                // Soft filled bloom glow
+                logoPaint.style = Paint.Style.FILL
                 logoPaint.color = layerColor
                 logoPaint.textSize = bloomSize
                 logoPaint.alpha = BLOOM_ALPHAS_OPTION_A[i]
-                val off = (logoPaint.descent() + logoPaint.ascent()) / 2f
                 canvas.drawText("✧", cx, cy - off, logoPaint)
+
+                // High-definition wireframe contour outline around the glow aura
+                logoPaint.style = Paint.Style.STROKE
+                logoPaint.strokeWidth = if (i == 0) 2.5f else 1.5f
+                logoPaint.color = layerColor
+                val outlineAlpha = ((BLOOM_ALPHAS_OPTION_A[i] * 1.8f).toInt() + (strobeFlash * 55f).toInt()).coerceIn(0, 255)
+                logoPaint.alpha = outlineAlpha
+                canvas.drawText("✧", cx, cy - off, logoPaint)
+                logoPaint.style = Paint.Style.FILL
             }
             
-            // Crisp Core star
+            // 4. Crisp Core star with razor wireframe outline around the white sparkle
+            logoPaint.style = Paint.Style.FILL
             logoPaint.color = COLOR_STAR_CORE
             logoPaint.alpha = 255
             logoPaint.textSize = baseStarSize
-            val textOffset = (logoPaint.descent() + logoPaint.ascent()) / 2f
             canvas.drawText("✧", cx, cy - textOffset, logoPaint)
+
+            // Sharp wireframe outline around the central sparkle glyph
+            logoPaint.style = Paint.Style.STROKE
+            logoPaint.strokeWidth = 3.8f + (strobeFlash * 3f)
+            logoPaint.color = wireframeAccent
+            logoPaint.alpha = (210 + (strobeFlash * 45f).toInt()).coerceIn(0, 255)
+            canvas.drawText("✧", cx, cy - textOffset, logoPaint)
+
+            // Ultra-crisp inner white edge contour
+            logoPaint.strokeWidth = 1.5f
+            logoPaint.color = Color.WHITE
+            logoPaint.alpha = 245
+            canvas.drawText("✧", cx, cy - textOffset, logoPaint)
+            logoPaint.style = Paint.Style.FILL
         }
 
         /**
