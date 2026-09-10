@@ -107,8 +107,7 @@ abstract class MemoryDatabase : RoomDatabase() {
 
         fun getDatabase(context: Context): MemoryDatabase {
             return INSTANCE ?: synchronized(this) {
-                val legacyDb = context.getDatabasePath("oracle_database")
-                val dbName = if (legacyDb.exists()) "oracle_database" else "ghost_memory_database"
+                val dbName = "ghost_memory_database"
 
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
@@ -118,8 +117,7 @@ abstract class MemoryDatabase : RoomDatabase() {
                 .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
                 // Apply migrations in order
                 .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
-                // CRITICAL: If ANY migration fails, wipe the database rather than crash.
-                // Data loss is acceptable vs bootloop.
+                // Active development: wipe rather than crash on schema conflict
                 .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance

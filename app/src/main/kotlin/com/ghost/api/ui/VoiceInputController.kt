@@ -97,6 +97,12 @@ class VoiceInputController(
             Toast.makeText(context, "Microphone permission required", Toast.LENGTH_SHORT).show()
             return
         }
+        // Shut up TTS immediately when user initiates microphone input
+        try {
+            com.ghost.api.GemmaService.instance?.ttsManager?.stop()
+        } catch (e: Exception) {
+            Timber.d("Could not stop TTS: ${e.message}")
+        }
         haptic()
         voiceState = VoiceState.RECORDING
         pendingAudio = null

@@ -21,6 +21,10 @@ class AudioRecorder(private val context: Context) {
         const val SAMPLE_RATE = 16000  // Gemma 3n expects 16kHz
         const val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
         const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
+
+        @Volatile
+        var isAnyRecordingActive: Boolean = false
+            private set
     }
 
     private var audioRecord: AudioRecord? = null
@@ -70,6 +74,13 @@ class AudioRecorder(private val context: Context) {
                 var samplesRead = 0
             
             isRecording = true
+            isAnyRecordingActive = true
+            // Stop TTS immediately when microphone starts recording
+            try {
+                com.ghost.api.GemmaService.instance?.ttsManager?.stop()
+            } catch (e: Exception) {
+                Timber.d("Could not stop TTS on record start: ${e.message}")
+            }
             audioRecord?.startRecording()
             Timber.i("Recording ${duration}s of audio...")
 
@@ -195,6 +206,7 @@ class AudioRecorder(private val context: Context) {
 
     fun stopRecording() {
         isRecording = false
+        isAnyRecordingActive = false
         try {
             audioRecord?.stop()
             audioRecord?.release()

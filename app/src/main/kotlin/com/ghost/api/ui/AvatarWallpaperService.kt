@@ -410,13 +410,13 @@ class AvatarWallpaperService : WallpaperService() {
                     val preset = cachedPreset
                     
                     when (preset) {
-                        "OPTION_B", "SUDA" -> {
+                        "OPTION_B" -> {
                             drawOptionBHexLattice(canvas, cx + 12f, cy + 40f, dynamicBaseRadius, width, height)
                         }
                         "OPTION_C" -> {
                             drawOptionCDeltaTunnel(canvas, cx + 12f, cy + 40f, dynamicBaseRadius)
                         }
-                        "OPTION_D", "AUDIOSURF", "MATRIX" -> {
+                        "OPTION_D" -> {
                             drawOptionDCubeLattice(canvas, cx + 12f, cy + 40f, dynamicBaseRadius, width, height)
                         }
                         else -> {
@@ -571,7 +571,7 @@ class AvatarWallpaperService : WallpaperService() {
         }
 
         /**
-         * Option B: Hex Lattice & Stage Lighting (Sacred Geometry / Suda)
+         * Option B: Hex Lattice & Stage Lighting (Hexagonal Sacred Geometry)
          * Hollow cyber-hex chamber with centered model unicode glyph (✧),
          * vertex-aligned concentric hex halos, Beat Saber theatrical stage spotlight trapezoids
          * (flash photography effect illuminating the space), and spiral arms.
@@ -799,7 +799,7 @@ class AvatarWallpaperService : WallpaperService() {
         }
 
         /**
-         * Option C: Delta Tunnel & Prisms (Seven Nation Army / Cephalon Cy & Suda tier)
+         * Option C: Delta Tunnel & Prisms (Prismatic Delta Geometry)
          * Audio architecture:
          * 1. Speed: Continuous tunnel zoom and corkscrewing rotation driven non-stop by sub-bass/kicks.
          * 2. Central Expansion & Bloom: Driven by melody and harmonics (vocals, synths, chords).

@@ -418,6 +418,10 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
             Timber.d("TTS: Speech skipped — Voice output is disabled in settings")
             return false
         }
+        if (com.ghost.api.hardware.AudioRecorder.isAnyRecordingActive) {
+            Timber.d("TTS: Speech suppressed — Microphone is actively recording")
+            return false
+        }
         val cleanText = cleanMarkdownForSpeech(text)
         if (!isReady || cleanText.isBlank()) return false
 
@@ -589,6 +593,7 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
     }
 
     fun speakQueued(text: String) {
+        if (com.ghost.api.hardware.AudioRecorder.isAnyRecordingActive) return
         val cleanText = cleanMarkdownForSpeech(text)
         if (isReady && cleanText.isNotBlank()) {
             tts?.speak(cleanText, TextToSpeech.QUEUE_ADD, null, "GemmaResponse_${System.currentTimeMillis()}")
@@ -599,6 +604,7 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
      * Check if it's currently appropriate to speak
      */
     fun canSpeakNow(): Boolean {
+        if (com.ghost.api.hardware.AudioRecorder.isAnyRecordingActive) return false
         val state = getDeviceState()
         return state != DeviceState.POCKET &&
                (state == DeviceState.ACTIVE || state == DeviceState.PRIVATE_AUDIO)

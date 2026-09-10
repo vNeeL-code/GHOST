@@ -1037,6 +1037,8 @@ fun InputBar(
                                 if (!audioRecorder.hasPermission()) {
                                     Toast.makeText(context, "Microphone permission required", Toast.LENGTH_SHORT).show()
                                 } else {
+                                    // Shut up TTS immediately when user initiates microphone input
+                                    com.ghost.api.GemmaService.instance?.ttsManager?.stop()
                                     voiceState = VoiceState.RECORDING
                                     pendingAudio = null
                                     recordingJob = coroutineScope.launch {

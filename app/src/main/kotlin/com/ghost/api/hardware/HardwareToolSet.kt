@@ -12,7 +12,7 @@ import com.google.ai.edge.litertlm.ToolParam
 import com.google.ai.edge.litertlm.ToolSet
 
 /**
- * HARDWARE BRIDGE - The "Hands" of Oracle_OS
+ * HARDWARE BRIDGE - The "Hands" of GHOST
  * Direct Android hardware manipulation helper properly aligned with LiteRT @Tool Architecture.
  */
 class HardwareToolSet(

@@ -50,14 +50,7 @@ fun SettingsDialog(
     var diaryCadence by remember { mutableStateOf(prefs.getString(Constants.PREF_DIARY_CADENCE, "12") ?: "12") }
     var ttsEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_TTS_ENABLED, true)) }
     var backend by remember { mutableStateOf(prefs.getString(Constants.PREF_USER_BACKEND, "AUTO") ?: "AUTO") }
-    val rawPreset = prefs.getString(Constants.PREF_VISUALIZER_PRESET, "OPTION_A") ?: "OPTION_A"
-    val initialPreset = when (rawPreset) {
-        "GHOST" -> "OPTION_A"
-        "SUDA" -> "OPTION_B"
-        "AUDIOSURF" -> "OPTION_D"
-        else -> rawPreset
-    }
-    var visualizerPreset by remember { mutableStateOf(initialPreset) }
+    var visualizerPreset by remember { mutableStateOf(prefs.getString(Constants.PREF_VISUALIZER_PRESET, "OPTION_A") ?: "OPTION_A") }
 
     val accentColor = Color(0xFF8BB4F6)
     val cardBg = Color(0xFF141418)
@@ -208,10 +201,7 @@ fun SettingsDialog(
                                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
                                             for ((key, label) in presetRow) {
-                                                val isSelected = visualizerPreset == key ||
-                                                    (key == "OPTION_A" && visualizerPreset == "GHOST") ||
-                                                    (key == "OPTION_B" && visualizerPreset == "SUDA") ||
-                                                    (key == "OPTION_D" && visualizerPreset == "AUDIOSURF")
+                                                val isSelected = visualizerPreset == key
                                                 Box(
                                                     modifier = Modifier
                                                         .weight(1f)
