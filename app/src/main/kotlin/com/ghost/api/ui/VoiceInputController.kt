@@ -99,7 +99,7 @@ class VoiceInputController(
         }
         // Shut up TTS immediately when user initiates microphone input
         try {
-            com.ghost.api.GemmaService.instance?.ttsManager?.stop()
+            com.ghost.api.services.TTSManager.stopAll()
         } catch (e: Exception) {
             Timber.d("Could not stop TTS: ${e.message}")
         }

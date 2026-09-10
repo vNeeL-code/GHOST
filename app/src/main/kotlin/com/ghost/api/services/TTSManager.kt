@@ -31,6 +31,21 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
 
     companion object {
         private const val LUX_POCKET_THRESHOLD = 10f
+        
+        // Process-wide registry of active TTSManager instances
+        private val activeInstances: MutableSet<TTSManager> = java.util.Collections.newSetFromMap(java.util.WeakHashMap<TTSManager, Boolean>())
+
+        fun stopAll() {
+            synchronized(activeInstances) {
+                activeInstances.toList().forEach { manager ->
+                    try {
+                        manager.stop()
+                    } catch (e: Exception) {
+                        Timber.d("Error stopping TTS instance: ${e.message}")
+                    }
+                }
+            }
+        }
     }
 
     private var tts: TextToSpeech? = null
@@ -98,6 +113,9 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
     )
 
     init {
+        synchronized(activeInstances) {
+            activeInstances.add(this)
+        }
         // Offload heavy discovery to background to prevent service-boot ANR
         val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         scope.launch {
@@ -625,11 +643,19 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
 
     fun stop() {
         abandonAudioDucking()
+        deferredQueue.clear()
         tts?.stop()
+        try {
+            context.sendBroadcast(android.content.Intent("com.ghost.api.ACTION_TTS_STOP").setPackage(context.packageName))
+        } catch (e: Exception) {}
     }
 
     fun shutdown() {
+        synchronized(activeInstances) {
+            activeInstances.remove(this)
+        }
         abandonAudioDucking()
+        deferredQueue.clear()
         tts?.shutdown()
     }
 

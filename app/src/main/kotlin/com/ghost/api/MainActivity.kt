@@ -172,7 +172,8 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
                         showSettings = true
                     },
                     onPlayMessage = { text ->
-                        ttsManager.forceSpeak(text)
+                        val activeTts = gemmaService?.ttsManager ?: ttsManager
+                        activeTts.forceSpeak(text)
                     },
                     visualizerViewFactory = { context ->
                         AudioVisualizerView(context).apply {

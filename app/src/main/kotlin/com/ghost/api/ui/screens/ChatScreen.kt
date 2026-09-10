@@ -965,6 +965,7 @@ fun InputBar(
                         recordingJob?.cancel()
                         pendingAudio = null
                         voiceState = VoiceState.IDLE
+                        com.ghost.api.services.TTSManager.stopAll()
                     }
                 }
                 .padding(12.dp)
@@ -1038,7 +1039,7 @@ fun InputBar(
                                     Toast.makeText(context, "Microphone permission required", Toast.LENGTH_SHORT).show()
                                 } else {
                                     // Shut up TTS immediately when user initiates microphone input
-                                    com.ghost.api.GemmaService.instance?.ttsManager?.stop()
+                                    com.ghost.api.services.TTSManager.stopAll()
                                     voiceState = VoiceState.RECORDING
                                     pendingAudio = null
                                     recordingJob = coroutineScope.launch {
@@ -1056,6 +1057,7 @@ fun InputBar(
                             }
                             VoiceState.RECORDING -> {
                                 audioRecorder.stopRecording()
+                                com.ghost.api.services.TTSManager.stopAll()
                             }
                             VoiceState.CONFIRM -> {
                                 val audio = pendingAudio

@@ -77,7 +77,7 @@ class AudioRecorder(private val context: Context) {
             isAnyRecordingActive = true
             // Stop TTS immediately when microphone starts recording
             try {
-                com.ghost.api.GemmaService.instance?.ttsManager?.stop()
+                com.ghost.api.services.TTSManager.stopAll()
             } catch (e: Exception) {
                 Timber.d("Could not stop TTS on record start: ${e.message}")
             }

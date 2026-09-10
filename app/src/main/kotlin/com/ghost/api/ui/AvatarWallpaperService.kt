@@ -494,7 +494,7 @@ class AvatarWallpaperService : WallpaperService() {
                 paint.color = color
                 paint.strokeWidth = 20f + (smoothedIntensity / 8f) - (i * 1.5f)
                 
-                val radius = startRadius + (i * 140f) + (smoothedBass * (i * 0.9f))
+                val radius = startRadius + (i * 130f) + (smoothedBass * (i * 0.6f))
                 
                 if (i == 0) {
                     drawOscilloscopeFlower(canvas, startRadius)
@@ -653,7 +653,7 @@ class AvatarWallpaperService : WallpaperService() {
             
             canvas.restore()
 
-            val baseStarSize = (minOf(width, height) * 0.95f).coerceIn(450f, 1050f)
+            val baseStarSize = 1250f
 
             // 3. Multi-pass bloom glow:
             // Soft radiant ethereal glow - strictly concentric with core star
@@ -661,10 +661,10 @@ class AvatarWallpaperService : WallpaperService() {
             logoPaint.style = Paint.Style.FILL
             for (i in 0 until 4) {
                 val bloomSize = when (i) {
-                    0 -> baseStarSize + 480f + bassBoost + idleBreath         // 0: Outermost Corona
-                    1 -> baseStarSize + 300f + bassBoost + (idleBreath * 0.6f) // 1: Mid-Outer Halo
-                    2 -> baseStarSize + 150f + (bassBoost * 0.7f)              // 2: Mid-Inner Aura
-                    else -> baseStarSize + 40f + (bassBoost * 0.3f)            // 3: Inner (Closest to Star)
+                    0 -> baseStarSize + 550f + bassBoost + idleBreath         // 0: Outermost Corona
+                    1 -> baseStarSize + 340f + bassBoost + (idleBreath * 0.6f) // 1: Mid-Outer Halo
+                    2 -> baseStarSize + 170f + (bassBoost * 0.7f)              // 2: Mid-Inner Aura
+                    else -> baseStarSize + 50f + (bassBoost * 0.3f)            // 3: Inner (Closest to Star)
                 }
                 val layerColor = if (isCustomPaletteActive) {
                     val swatchIndex = when (i) {
