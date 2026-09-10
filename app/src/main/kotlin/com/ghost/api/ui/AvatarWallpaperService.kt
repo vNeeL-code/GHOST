@@ -21,6 +21,9 @@ import kotlin.math.*
 class AvatarWallpaperService : WallpaperService() {
 
     companion object {
+        // Universal maximum parallax shift for gyroscope/accelerometer tilt tracking
+        private const val PARALLAX_MAX = 100f
+
         // Pre-computed static colors to eliminate runtime String parsing in 60fps render loop
         private val COLOR_BACKGROUND = Color.parseColor("#0A0A0A")
         private val COLOR_VOID = Color.parseColor("#060A10")
@@ -400,10 +403,6 @@ class AvatarWallpaperService : WallpaperService() {
                     val baseCx = width / 2f - 15f
                     val baseCy = height / 2f - 75f
 
-                    // Global tilt offset for single-depth presets
-                    val cx = baseCx + rollOffset * 150f
-                    val cy = baseCy + pitchOffset * 150f
-                    
                     canvas.drawColor(COLOR_BACKGROUND)
                     
                     rotationAngle += 0.2f + (smoothedBass / 100f)
@@ -414,17 +413,16 @@ class AvatarWallpaperService : WallpaperService() {
                     
                     when (preset) {
                         "OPTION_B" -> {
-                            // Option B uses multi-layer stereoscopic parallax rooted at optical center (baseCx + 12f, baseCy + 40f)
-                            drawOptionBHexLattice(canvas, baseCx + 12f, baseCy + 40f, dynamicBaseRadius, width, height)
+                            drawOptionBHexLattice(canvas, baseCx, baseCy, dynamicBaseRadius, width, height)
                         }
                         "OPTION_C" -> {
-                            drawOptionCDeltaTunnel(canvas, cx + 12f, cy + 40f, dynamicBaseRadius)
+                            drawOptionCDeltaTunnel(canvas, baseCx, baseCy, dynamicBaseRadius)
                         }
                         "OPTION_D" -> {
-                            drawOptionDCubeLattice(canvas, cx + 12f, cy + 40f, dynamicBaseRadius, width, height)
+                            drawOptionDCubeLattice(canvas, baseCx, baseCy, dynamicBaseRadius, width, height)
                         }
                         else -> {
-                            drawOptionAOrbitalStar(canvas, cx, cy, dynamicBaseRadius, width, height, isNoisy)
+                            drawOptionAOrbitalStar(canvas, baseCx, baseCy, dynamicBaseRadius, width, height, isNoisy)
                         }
                     }
                 }
@@ -514,10 +512,37 @@ class AvatarWallpaperService : WallpaperService() {
          * 3. Geometric wireframe diamond cage framing the star core
          * 4. Dynamic booming bass expansion, ambient grounding pool, and harmonic breathing
          */
-        private fun drawOptionAOrbitalStar(canvas: Canvas, cx: Float, cy: Float, dynamicBaseRadius: Float, width: Float, height: Float, isNoisy: Boolean) {
+        /**
+         * Option A: Orbital Star / Iris (Radial Baseline)
+         * Upgraded Architecture:
+         * 1. Multi-Layer Stereoscopic Parallax:
+         *    - Corridor Background: 0.08x depth (ultra-slow vanishing point)
+         *    - Oscilloscope Flower / Iris: 0.55x depth (mid-field harmonics)
+         *    - Diamond Cage & Bloom Corona: 0.90x depth (avatar chamber container)
+         *    - Central ✧ Sparkle: 0.96x depth (floating jewel, cannot breach container)
+         * 2. Concentric Zero-Offset Alignment:
+         *    - Bloom layers, diamond cage, and star core aligned with exact font metrics
+         */
+        private fun drawOptionAOrbitalStar(canvas: Canvas, baseCx: Float, baseCy: Float, dynamicBaseRadius: Float, width: Float, height: Float, isNoisy: Boolean) {
             val bassBoost = smoothedBass * 3.2f // Booming expansion on audio beats!
             val idleBreath = sin(rotationAngle * 0.4f) * 25f
             val corridorColor = if (isCustomPaletteActive) currentColors[0] else COLOR_CYAN_ACCENT
+
+            val tiltX = rollOffset * PARALLAX_MAX
+            val tiltY = pitchOffset * PARALLAX_MAX
+
+            // Multi-layer optical center coordinates
+            val corrCx = baseCx + tiltX * 0.08f
+            val corrCy = baseCy + tiltY * 0.08f
+
+            val flowerCx = baseCx + tiltX * 0.55f
+            val flowerCy = baseCy + tiltY * 0.55f
+
+            val cageCx = baseCx + tiltX * 0.90f
+            val cageCy = baseCy + tiltY * 0.90f
+
+            val starCx = baseCx + tiltX * 0.96f
+            val starCy = baseCy + tiltY * 0.96f
 
             // 1. Perspective Square Cyber Corridor & Corner Laser Guide Rails (Snare / Transient Lighting Flashes)
             val hallwayFlashAlpha = if (strobeFlash > 0.03f) {
@@ -531,10 +556,10 @@ class AvatarWallpaperService : WallpaperService() {
                 paint.clearShadowLayer()
 
                 val nearSpan = (dynamicBaseRadius * 0.92f + (smoothedBass * 1.2f).coerceAtLeast(0f) * 0.45f).coerceIn(40f, 220f)
-                val nTLx = cx - nearSpan; val nTLy = cy - nearSpan
-                val nTRx = cx + nearSpan; val nTRy = cy - nearSpan
-                val nBRx = cx + nearSpan; val nBRy = cy + nearSpan
-                val nBLx = cx - nearSpan; val nBLy = cy + nearSpan
+                val nTLx = corrCx - nearSpan; val nTLy = corrCy - nearSpan
+                val nTRx = corrCx + nearSpan; val nTRy = corrCy - nearSpan
+                val nBRx = corrCx + nearSpan; val nBRy = corrCy + nearSpan
+                val nBLx = corrCx - nearSpan; val nBLy = corrCy + nearSpan
 
                 val cTLx = 0f; val cTLy = 0f
                 val cTRx = width; val cTRy = 0f
@@ -613,9 +638,9 @@ class AvatarWallpaperService : WallpaperService() {
                 canvas.restore()
             }
 
+            // 2. Harmonic Oscilloscope Flower / Iris in Mid-Depth
             canvas.save()
-            // Nudge rings slightly right and down to optically align with the ✧ glyph
-            canvas.translate(cx + 12f, cy + 40f)
+            canvas.translate(flowerCx, flowerCy)
             canvas.rotate(rotationAngle)
             
             // Faint idle celestial resonance ring (gives ambient life even in silence)
@@ -633,10 +658,13 @@ class AvatarWallpaperService : WallpaperService() {
             
             canvas.restore()
 
-            // 2. Geometric Wireframe Diamond Cage Framing the Star Core
+            // 3. Geometric Wireframe Diamond Cage Framing the Star Core
             val wireframeAccent = corridorColor
             val baseStarSize = (minOf(width, height) * 0.95f).coerceIn(450f, 1050f)
-            val textOffset = (logoPaint.descent() + logoPaint.ascent()) / 2f
+
+            // Calculate exact font vertical center offset for baseStarSize
+            logoPaint.textSize = baseStarSize
+            val starCenterOffset = (logoPaint.descent() + logoPaint.ascent()) / 2f
 
             paint.style = Paint.Style.STROKE
             for (d in 0 until 3) {
@@ -644,11 +672,11 @@ class AvatarWallpaperService : WallpaperService() {
                 paint.strokeWidth = if (d == 0) 2.6f + (strobeFlash * 2.2f) else 1.5f
                 paint.color = if (d == 0 && strobeFlash > 0.2f) Color.WHITE else wireframeAccent
                 paint.alpha = if (d == 0) (150 + (strobeFlash * 105f).toInt()).coerceIn(0, 255) else 75
-                drawDiamond(canvas, cx, cy - textOffset, r, paint)
+                drawDiamond(canvas, cageCx, cageCy, r, paint)
             }
 
-            // 3. Multi-pass bloom glow:
-            // Soft radiant ethereal glow - pure fill, zero stroked font artifacts
+            // 4. Multi-pass bloom glow:
+            // Soft radiant ethereal glow - strictly concentric with core star
             logoPaint.clearShadowLayer()
             logoPaint.style = Paint.Style.FILL
             for (i in 0 until 4) {
@@ -671,38 +699,31 @@ class AvatarWallpaperService : WallpaperService() {
                     COLOR_COBALT_GLOW
                 }
 
-                val off = (logoPaint.descent() + logoPaint.ascent()) / 2f
-
-                // Soft filled bloom glow
+                // Set textSize BEFORE calculating descent/ascent so optical center is EXACT!
                 logoPaint.color = layerColor
                 logoPaint.textSize = bloomSize
                 logoPaint.alpha = BLOOM_ALPHAS_OPTION_A[i]
-                canvas.drawText("✧", cx, cy - off, logoPaint)
+                val bloomCenterOffset = (logoPaint.descent() + logoPaint.ascent()) / 2f
+                canvas.drawText("✧", cageCx, cageCy - bloomCenterOffset, logoPaint)
             }
             
-            // 4. Crisp Core star (pure solid white sparkle)
+            // 5. Crisp Core star (pure solid white sparkle)
             logoPaint.style = Paint.Style.FILL
             logoPaint.color = COLOR_STAR_CORE
             logoPaint.alpha = 255
             logoPaint.textSize = baseStarSize
-            canvas.drawText("✧", cx, cy - textOffset, logoPaint)
+            canvas.drawText("✧", starCx, starCy - starCenterOffset, logoPaint)
         }
 
         /**
          * Option B: Hex Lattice & Stage Lighting (Hexagonal Sacred Geometry)
-         * Hollow cyber-hex chamber with centered model unicode glyph (✧),
-         * vertex-aligned concentric hex halos, Beat Saber theatrical stage spotlight trapezoids
-         * (flash photography effect illuminating the space), and spiral arms.
-         */
-        /**
-         * Option B: Hex Lattice & Stage Lighting (Hexagonal Sacred Geometry)
          * Upgraded Architecture:
          * 1. Multi-Layer Stereoscopic Parallax:
-         *    - Corridor Background: 0.35x depth
-         *    - Hallway Wireframe Halos: 0.60x - 0.96x progressive depth
-         *    - Hallway Bloom Volume: 0.82x - 1.03x progressive depth
-         *    - Obsidian Core & Flower: 1.30x foreground depth
-         *    - Central ✧ Sparkle: 1.55x jewel depth
+         *    - Corridor Background: 0.08x depth (ultra-slow vanishing point)
+         *    - Hallway Wireframe Halos: 0.40x - 0.67x progressive depth
+         *    - Hallway Bloom Volume: 0.65x - 0.80x progressive depth
+         *    - Obsidian Core & Flower: 0.90x foreground depth (avatar container)
+         *    - Central ✧ Sparkle: 0.96x jewel depth (subtle float, cannot breach container)
          * 2. Disproportionate Violent Wireframe Reactivity:
          *    - Flower & Obsidian Core: Tight, disciplined mechanical scale (0.35x bass)
          *    - Outer Wireframes: Explosive non-linear boom (quad power curve + 150f strobe)
@@ -720,12 +741,11 @@ class AvatarWallpaperService : WallpaperService() {
             val wireframeViolentBoom = bassKick * 1.8f + (bassKick * bassKick * 0.015f) + (strobeFlash * 150f)
 
             // Multi-Layer Stereoscopic Parallax Offsets
-            val parallaxMax = 150f
-            val tiltX = rollOffset * parallaxMax
-            val tiltY = pitchOffset * parallaxMax
+            val tiltX = rollOffset * PARALLAX_MAX
+            val tiltY = pitchOffset * PARALLAX_MAX
 
             // 1. Perspective Hexagonal Cyber Hallway / Corridor in the Environment (Behind Avatar)
-            // Deep background parallax (0.35x), static to screen / not coupled to avatar spin
+            // Ultra-slow deep background parallax (0.08x), static to screen / not coupled to avatar spin
             val hallwayFlashAlpha = if (strobeFlash > 0.04f) {
                 (strobeFlash * 255f).toInt().coerceIn(0, 255)
             } else {
@@ -737,8 +757,8 @@ class AvatarWallpaperService : WallpaperService() {
             val wallColor = if (isCustomPaletteActive) currentColors[0] else COLOR_CYAN_ACCENT
 
             if (hallwayFlashAlpha > 0) {
-                val corrCx = baseCx + tiltX * 0.35f
-                val corrCy = baseCy + tiltY * 0.35f
+                val corrCx = baseCx + tiltX * 0.08f
+                val corrCy = baseCy + tiltY * 0.08f
 
                 canvas.save()
                 canvas.translate(corrCx, corrCy)
@@ -797,7 +817,7 @@ class AvatarWallpaperService : WallpaperService() {
             // Disproportionately violently reactive: explosive non-linear expansion + individual parallax depth
             paint.style = Paint.Style.STROKE
             for (h in 0 until 4) {
-                val haloDepth = 0.60f + (3 - h) * 0.12f // h=3 (outer) -> 0.60f, h=0 (inner) -> 0.96f
+                val haloDepth = 0.40f + (3 - h) * 0.09f // h=3 (outer) -> 0.40f, h=0 (inner) -> 0.67f
                 val haloCx = baseCx + tiltX * haloDepth
                 val haloCy = baseCy + tiltY * haloDepth
 
@@ -811,8 +831,8 @@ class AvatarWallpaperService : WallpaperService() {
 
             // High-energy strobe halo on prominent outer hex during beat flash (unrotated hallway pulse)
             if (strobeFlash > 0.10f) {
-                val strobeCx = baseCx + tiltX * 0.72f
-                val strobeCy = baseCy + tiltY * 0.72f
+                val strobeCx = baseCx + tiltX * 0.55f
+                val strobeCy = baseCy + tiltY * 0.55f
                 paint.strokeWidth = 5.5f
                 paint.color = wallColor
                 paint.alpha = (strobeFlash * 255f).toInt().coerceIn(0, 255)
@@ -822,7 +842,7 @@ class AvatarWallpaperService : WallpaperService() {
             // 3. Stepped Concentric Blooming Hexagons behind Mother Hexagon (Layered Fake Bloom)
             // Floods the corridor with expanding light volume in sync with the violent boom
             for (hb in 0 until 4) {
-                val bloomDepth = 0.82f + (hb * 0.07f) // hb=0 (outer) -> 0.82f, hb=3 (inner) -> 1.03f
+                val bloomDepth = 0.65f + (hb * 0.05f) // hb=0 (outer) -> 0.65f, hb=3 (inner) -> 0.80f
                 val bloomCx = baseCx + tiltX * bloomDepth
                 val bloomCy = baseCy + tiltY * bloomDepth
 
@@ -851,9 +871,9 @@ class AvatarWallpaperService : WallpaperService() {
             }
 
             // 4. DECOUPLED ROTATING CYBER CORE & SACRED GEOMETRY FLOWER
-            // Foreground stage parallax depth (1.30x): floats proudly in front of the hallway rings!
-            val coreCx = baseCx + tiltX * 1.30f
-            val coreCy = baseCy + tiltY * 1.30f
+            // Foreground stage parallax depth (0.90x): anchored avatar chamber container!
+            val coreCx = baseCx + tiltX * 0.90f
+            val coreCy = baseCy + tiltY * 0.90f
 
             canvas.save()
             canvas.translate(coreCx, coreCy)
@@ -939,9 +959,9 @@ class AvatarWallpaperService : WallpaperService() {
             canvas.restore() // Restores unrotated frame
 
             // 5. Model Unicode Glyph (✧) Centered, Crisp White & Unrotated
-            // Highest parallax threshold (1.55x): floats like a holographic jewel right on top!
-            val glyphCx = baseCx + tiltX * 1.55f
-            val glyphCy = baseCy + tiltY * 1.55f
+            // Parallax threshold (0.96x): subtle floating jewel, physically impossible to breach container walls!
+            val glyphCx = baseCx + tiltX * 0.96f
+            val glyphCy = baseCy + tiltY * 0.96f
 
             logoPaint.clearShadowLayer()
             logoPaint.style = Paint.Style.FILL
@@ -962,18 +982,31 @@ class AvatarWallpaperService : WallpaperService() {
          *    as triangles corkscrew past, producing an immersive "color wall" corridor in motion.
          * 4. Central Glyph (✧): Clean, centered, crisp white core.
          */
-        private fun drawOptionCDeltaTunnel(canvas: Canvas, cx: Float, cy: Float, baseRadius: Float) {
-            canvas.save()
-            canvas.translate(cx, cy)
-
+        /**
+         * Option C: Delta Tunnel & Prisms (Prismatic Delta Geometry)
+         * Upgraded with stereoscopic parallax:
+         * - Corner laser guide rails: 0.08x depth (ultra-slow vanishing point anchor)
+         * - Corkscrewing tunnel triangles: 0.20x - 0.70x progressive depth
+         * - Focal triangle housing: 0.90x depth (avatar chamber container)
+         * - Central ✧ Sparkle: 0.96x jewel depth (cannot breach container)
+         */
+        private fun drawOptionCDeltaTunnel(canvas: Canvas, baseCx: Float, baseCy: Float, baseRadius: Float) {
             val bassKick = (smoothedBass * 1.5f).coerceAtLeast(0f)
             val melodyExpansion = (smoothedMelody * 1.3f).coerceAtLeast(0f)
             val numTriangles = 9
             val baseSize = (baseRadius * 0.75f + melodyExpansion * 0.35f).coerceIn(30f, 180f)
 
+            val tiltX = rollOffset * PARALLAX_MAX
+            val tiltY = pitchOffset * PARALLAX_MAX
+
+            val corrCx = baseCx + tiltX * 0.08f
+            val corrCy = baseCy + tiltY * 0.08f
+
             // 1. Perspective Corner Laser Guide Rails (Shooting through the 3 vertices into deep space)
-            // They corkscrew in sync with the tunnel vanishing point!
+            // Ultra-slow vanishing point anchor (0.08x depth)
             if (strobeFlash > 0.03f) {
+                canvas.save()
+                canvas.translate(corrCx, corrCy)
                 val reach = (canvas.width + canvas.height) * 0.95f
                 val wallFlashAlpha = (strobeFlash * 255f).toInt().coerceIn(0, 255)
                 val primaryColor = if (isCustomPaletteActive) currentColors[0] else COLOR_CYAN_ACCENT
@@ -988,13 +1021,10 @@ class AvatarWallpaperService : WallpaperService() {
                     val ry = (sin(railAngle) * reach).toFloat()
                     canvas.drawLine(0f, 0f, rx, ry, paint)
                 }
+                canvas.restore()
             }
 
             // 2. Continuous Corkscrewing Infinite Triangular Tunnel (Seven Nation Army Corridor)
-            // Triangles continuously zoom outward and smoothly corkscrew around the Z-axis.
-            // Loop continuity: We use a smooth sine-squared bell envelope so triangles fade in
-            // from complete invisibility (alpha 0) at the focal point and fade out to complete
-            // invisibility (alpha 0) at screen edges, eliminating any visual pop or loop seam!
             val triangleStep = (Math.PI * 2.0 / 3.0).toFloat() // 120° rotational symmetry
             for (i in 0 until numTriangles) {
                 val rawP = (tunnelPhase + (i.toFloat() / numTriangles))
@@ -1002,31 +1032,21 @@ class AvatarWallpaperService : WallpaperService() {
                 val scale = (baseSize * exp(p * 3.4f)).toFloat()
 
                 // Layered tunnel parallax: outer foreground rings drift further than deep core
-                val parallaxZ = p * p * 55f
-                val triCenterX = rollOffset * parallaxZ
-                val triCenterY = pitchOffset * parallaxZ
+                val tunnelDepth = 0.20f + p * 0.50f
+                val triCenterX = baseCx + tiltX * tunnelDepth
+                val triCenterY = baseCy + tiltY * tunnelDepth
 
-                // C1 mathematically seamless window function: sin^2(pi * p)
-                // Exactly 0 at p=0 (core), peaks at p=0.5, and exactly 0 at p=1 (outer rim).
-                // Zero derivative at both ends = absolutely zero pops, seams, or bad-gif hiccups!
                 val window = sin(p * Math.PI.toFloat())
                 val smoothEnvelope = (window * window).coerceIn(0f, 1f)
                 val totalAlpha = (smoothEnvelope * 255f).toInt().coerceIn(0, 255)
 
-                // Seamless color cycling: uses raw continuous index so color smoothly flows with depth
                 val cycleIdx = ((rawP * numTriangles).toInt() % currentColors.size + currentColors.size) % currentColors.size
                 val baseColor = if (isCustomPaletteActive) currentColors[cycleIdx] else {
                     if (i % 2 == 0) COLOR_CYAN_ACCENT else COLOR_PALE_SLATE
                 }
 
-                // Seamless corkscrew:
-                // p * (2 * PI / 3) rotates through exactly one triangle symmetry period as p goes 0->1.
-                // Added to animTime for smooth rolling through time, with zero jump across the boundary!
                 val corkscrewAngle = (p * triangleStep * 2f) + (animTime * 0.5f)
 
-                // Translucent "Color Wall" facet fill:
-                // Retains translucent color and flashes vibrantly during kicks/snares,
-                // so the corkscrewing tunnel walls become a dynamic kaleidoscope of colored light!
                 val baseFacetAlpha = (14f * smoothEnvelope).toInt()
                 val flashFacetAlpha = if (strobeFlash > 0.04f) ((strobeFlash * 95f) * smoothEnvelope).toInt() else 0
                 val facetAlpha = (baseFacetAlpha + flashFacetAlpha).coerceIn(0, 115)
@@ -1038,7 +1058,6 @@ class AvatarWallpaperService : WallpaperService() {
                     drawEquilateralTriangle(canvas, triCenterX, triCenterY, scale, corkscrewAngle, paint)
                 }
 
-                // Crisp solid laser edges zooming past the camera
                 paint.style = Paint.Style.STROKE
                 paint.strokeWidth = (3.5f * (1f - p * 0.4f) + (strobeFlash * 1.5f)).coerceIn(1.5f, 6.0f)
                 paint.color = baseColor
@@ -1047,29 +1066,29 @@ class AvatarWallpaperService : WallpaperService() {
             }
 
             // 3. Vanishing Point Focal Core & Central Triangle Housing
-            // The central triangle expansion and concentric bloom layers are permanently driven by melody!
             val focalRadius = (baseSize * 1.25f + melodyExpansion * 0.65f).coerceIn(40f, 180f)
+            val focalCx = baseCx + tiltX * 0.90f
+            val focalCy = baseCy + tiltY * 0.90f
 
-            // Permanent living concentric fake bloom layers attached to the Triangle Housing:
-            // Swells and shrinks continuously with melodic energy (not flashing on/off with kicks!)
+            canvas.save()
+            canvas.translate(focalCx, focalCy)
+
             for (tb in 0 until 4) {
                 val radius = focalRadius * TRI_BLOOM_FOCAL_MULTS[tb] + (melodyExpansion * TRI_BLOOM_MELODY_MULTS[tb])
                 val swatchIndex = when (tb) {
-                    3 -> 1 % currentColors.size // Vibrant / Inner
-                    2 -> 0 % currentColors.size // Dominant
-                    1 -> 2 % currentColors.size // Muted
-                    else -> 3 % currentColors.size // Outer
+                    3 -> 1 % currentColors.size
+                    2 -> 0 % currentColors.size
+                    1 -> 2 % currentColors.size
+                    else -> 3 % currentColors.size
                 }
                 val rawColor = if (isCustomPaletteActive) currentColors[swatchIndex] else COLOR_COBALT_GLOW
                 val bloomColor = ensureVisibleBloomColor(rawColor, COLOR_COBALT_GLOW)
 
-                // Translucent planar fill for permanent glowing triangle volume
                 paint.style = Paint.Style.FILL
                 paint.color = bloomColor
                 paint.alpha = (TRI_BLOOM_ALPHAS[tb] * 0.45f).toInt().coerceIn(15, 95)
                 drawEquilateralTriangle(canvas, 0f, 0f, radius, 0f, paint)
 
-                // Crisp bloom contour line
                 paint.style = Paint.Style.STROKE
                 paint.strokeWidth = TRI_BLOOM_WIDTHS[tb]
                 paint.color = bloomColor
@@ -1083,7 +1102,6 @@ class AvatarWallpaperService : WallpaperService() {
             paint.alpha = 240
             drawEquilateralTriangle(canvas, 0f, 0f, focalRadius, 0f, paint)
 
-            // Inner triangle ambient glow (swells with melody and gets a subtle punch on kicks)
             val innerColor = if (isCustomPaletteActive) currentColors[0] else COLOR_CYAN_ACCENT
             val baseInnerAlpha = (25 + (melodyExpansion * 1.8f).toInt()).coerceIn(20, 90)
             val kickInnerAlpha = if (strobeFlash > 0.04f) (strobeFlash * 70f).toInt() else 0
@@ -1092,48 +1110,54 @@ class AvatarWallpaperService : WallpaperService() {
             paint.alpha = (baseInnerAlpha + kickInnerAlpha).coerceIn(20, 160)
             drawEquilateralTriangle(canvas, 0f, 0f, focalRadius * 0.85f, 0f, paint)
 
-            // Crisp White Triangle Housing Contour
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 3.8f + (strobeFlash * 2.5f)
             paint.color = if (strobeFlash > 0.05f) Color.WHITE else COLOR_STAR_CORE
             paint.alpha = 255
             drawEquilateralTriangle(canvas, 0f, 0f, focalRadius, 0f, paint)
 
-            // Secondary inner accent contour
             paint.strokeWidth = 2.2f
             paint.color = innerColor
             paint.alpha = 200
             drawEquilateralTriangle(canvas, 0f, 0f, focalRadius * 0.80f, 0f, paint)
 
             // 4. Center Model Unicode Glyph (✧): Clean, Crisp, Centered White Core
+            // Jewel depth 0.96f (subtle float, cannot breach container)
             val glyphSize = focalRadius * 1.15f
             logoPaint.clearShadowLayer()
             logoPaint.color = COLOR_STAR_CORE
             logoPaint.textSize = glyphSize
             logoPaint.alpha = 255
             val off = (logoPaint.descent() + logoPaint.ascent()) / 2f
-            // Center slightly higher to optically sit in the centroid of the equilateral triangle
-            canvas.drawText("✧", 0f, -off - (focalRadius * 0.12f), logoPaint)
+            val shiftX = tiltX * 0.06f
+            val shiftY = tiltY * 0.06f
+            canvas.drawText("✧", shiftX, -off - (focalRadius * 0.12f) + shiftY, logoPaint)
 
             canvas.restore()
         }
 
         /**
          * Option D: Cyber Matrix / Cube Lattice (Salvation of the Black Sun)
-         * Inspired by sacred cube geometry and the overlay controller layout:
-         * - Majestic Black Hole Sun singularity at center with explosive solar flare rings
-         * - Faint orbital halo ring encircling the singularity
-         * - Centered Mother Diamond/Cube with 3 stepped fake bloom layers & white unicode ✧ glyph
-         * - 6 Orbiting Satellite Cubes / Diamonds (Mixture of Experts) that pop and flash
-         *   independently to discrete live audio FFT bands with subtle parallax drift
+         * Upgraded with stereoscopic parallax:
+         * - Deep space Black Sun flares & singularity: 0.15x depth
+         * - Orbital halo circle: 0.55x depth
+         * - Central Mother Cube & Fake Bloom: 0.90x depth (avatar chamber container)
+         * - Central ✧ Sparkle: 0.96x jewel depth (cannot breach container)
+         * - Satellites: 0.92x depth
          */
-        private fun drawOptionDCubeLattice(canvas: Canvas, cx: Float, cy: Float, dynamicBaseRadius: Float, width: Float, height: Float) {
+        private fun drawOptionDCubeLattice(canvas: Canvas, baseCx: Float, baseCy: Float, dynamicBaseRadius: Float, width: Float, height: Float) {
             val bassKick = (smoothedBass * 1.6f).coerceAtLeast(0f)
             val coreCubeRadius = (dynamicBaseRadius * 1.85f + bassKick * 0.45f).coerceIn(40f, 200f)
 
-            // 1. Center Singularities: Parallax-anchored to screen / widget center
+            val tiltX = rollOffset * PARALLAX_MAX
+            val tiltY = pitchOffset * PARALLAX_MAX
+
+            // 1. Center Singularities: Parallax-anchored to screen / widget center (0.15x depth)
             val sunRadius = (min(width, height) * 0.22f + bassKick * 0.25f).coerceIn(60f, 240f)
             val flareBoom = (bassKick * 0.75f) + (strobeFlash * 80f)
+
+            val sunCx = baseCx + tiltX * 0.15f
+            val sunCy = baseCy + tiltY * 0.15f
 
             // Deep Space Black Sun with Hot Concentric Solar Flares (Salvation of the Sun)
             paint.style = Paint.Style.FILL
@@ -1143,55 +1167,55 @@ class AvatarWallpaperService : WallpaperService() {
                 val flareColor = if (isCustomPaletteActive) currentColors[sb % currentColors.size] else SUN_BLOOM_COLORS[sb]
                 paint.color = ensureVisibleBloomColor(flareColor, COLOR_COBALT_GLOW)
                 paint.alpha = ((SUN_BLOOM_ALPHAS[sb] + (strobeFlash * 75f).toInt())).coerceIn(15, 240)
-                canvas.drawCircle(cx, cy, r, paint)
+                canvas.drawCircle(sunCx, sunCy, r, paint)
             }
 
             // Black Hole Singularity Core (Deep obsidian dark void)
             paint.style = Paint.Style.FILL
             paint.color = COLOR_SINGULARITY
             paint.alpha = 255
-            canvas.drawCircle(cx, cy, sunRadius, paint)
+            canvas.drawCircle(sunCx, sunCy, sunRadius, paint)
 
             // Fiery Accretion Rim
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 3f + (strobeFlash * 3f)
             paint.color = if (strobeFlash > 0.05f) Color.WHITE else COLOR_GOLD_RIM
             paint.alpha = 240
-            canvas.drawCircle(cx, cy, sunRadius, paint)
+            canvas.drawCircle(sunCx, sunCy, sunRadius, paint)
 
-            // 2. Orbital Halo Enclosing Circle (matching user diagram around mother cube)
+            // 2. Orbital Halo Enclosing Circle (0.55x depth)
             val orbitCircleRadius = sunRadius * 1.08f
+            val orbitCx = baseCx + tiltX * 0.55f
+            val orbitCy = baseCy + tiltY * 0.55f
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 2.5f + (strobeFlash * 2.0f)
             paint.color = if (isCustomPaletteActive) currentColors[1 % currentColors.size] else COLOR_ORBIT_HALO
             paint.alpha = (140 + (strobeFlash * 100f).toInt()).coerceIn(100, 255)
-            canvas.drawCircle(cx, cy, orbitCircleRadius, paint)
+            canvas.drawCircle(orbitCx, orbitCy, orbitCircleRadius, paint)
 
-            // 3. Central Mother Cube / Diamond (45° diamond inside orbital ring)
+            // 3. Central Mother Cube / Diamond (45° diamond inside orbital ring, 0.90x depth)
+            val cubeCx = baseCx + tiltX * 0.90f
+            val cubeCy = baseCy + tiltY * 0.90f
+
             canvas.save()
-            canvas.translate(cx, cy)
+            canvas.translate(cubeCx, cubeCy)
 
-            // 4-Layer Stepped Concentric Fake Bloom behind Central Cube
-            // Booms massively on bass kicks and extends far beyond the central pill,
-            // matching the radiant bloom presence of Option A
             for (cb in 0 until 4) {
                 val radius = coreCubeRadius * CUBE_BLOOM_CORE_MULTS[cb] + (bassKick * CUBE_BLOOM_BASS_MULTS[cb])
                 val swatchIndex = when (cb) {
-                    3 -> 1 % currentColors.size // Vibrant / Inner
-                    2 -> 0 % currentColors.size // Dominant
-                    1 -> 2 % currentColors.size // Muted
-                    else -> 3 % currentColors.size // Outer
+                    3 -> 1 % currentColors.size
+                    2 -> 0 % currentColors.size
+                    1 -> 2 % currentColors.size
+                    else -> 3 % currentColors.size
                 }
                 val rawColor = if (isCustomPaletteActive) currentColors[swatchIndex] else COLOR_COBALT_GLOW
                 val bloomColor = ensureVisibleBloomColor(rawColor, COLOR_COBALT_GLOW)
 
-                // Translucent fill for planar glow volume
                 paint.style = Paint.Style.FILL
                 paint.color = bloomColor
                 paint.alpha = (CUBE_BLOOM_ALPHAS[cb] * 0.45f).toInt().coerceIn(15, 95)
                 drawDiamond(canvas, 0f, 0f, radius, paint)
 
-                // Crisp border contour
                 paint.style = Paint.Style.STROKE
                 paint.strokeWidth = CUBE_BLOOM_WIDTHS[cb]
                 paint.color = bloomColor
@@ -1199,7 +1223,6 @@ class AvatarWallpaperService : WallpaperService() {
                 drawDiamond(canvas, 0f, 0f, radius, paint)
             }
 
-            // Solid Obsidian Cyber Chamber for Central Cube
             paint.style = Paint.Style.FILL
             paint.color = COLOR_VOID
             paint.alpha = 240
@@ -1216,17 +1239,19 @@ class AvatarWallpaperService : WallpaperService() {
             paint.alpha = 200
             drawDiamond(canvas, 0f, 0f, coreCubeRadius * 0.82f, paint)
 
-            // Centered crisp white ✧ star glyph
+            // Centered crisp white ✧ star glyph (0.96x depth, cannot breach cube container)
             logoPaint.clearShadowLayer()
             logoPaint.color = Color.WHITE
             logoPaint.alpha = 255
             logoPaint.textSize = coreCubeRadius * 1.35f
             val cOff = (logoPaint.descent() + logoPaint.ascent()) / 2f
-            canvas.drawText("✧", 0f, -cOff, logoPaint)
+            val shiftX = tiltX * 0.06f
+            val shiftY = tiltY * 0.06f
+            canvas.drawText("✧", shiftX, -cOff + shiftY, logoPaint)
 
             canvas.restore()
 
-            // 4. Six Satellite Diamonds / Cubes (Aligned Exactly with Overlay Nodes)
+            // 4. Six Satellite Diamonds / Cubes (Aligned Exactly with Overlay Nodes, 0.92x depth)
             // Blueprint mapping:
             // 0: Top Apex (Orange Tape Reel Launcher) -> (0, -apex)
             // 1: Top-Right (Blue Search)               -> (+dx, -dy)
@@ -1245,6 +1270,9 @@ class AvatarWallpaperService : WallpaperService() {
 
             val satelliteBaseSize = 24f * density // matches 48dp button radius
 
+            val satBaseX = baseCx + tiltX * 0.92f
+            val satBaseY = baseCy + tiltY * 0.92f
+
             for (s in 0 until numSatellites) {
                 // Zero-allocation coordinate computation
                 val offsetX = when (s) {
@@ -1258,8 +1286,8 @@ class AvatarWallpaperService : WallpaperService() {
                     1, 5 -> -nodeDy
                     else -> nodeDy
                 }
-                val satX = cx + offsetX
-                val satY = cy + offsetY
+                val satX = satBaseX + offsetX
+                val satY = satBaseY + offsetY
 
                 // Interleaved spectral pooling across all 30 nodeMagnitudes:
                 // Each satellite samples 5 interleaved bands across the entire frequency range,
