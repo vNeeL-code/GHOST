@@ -70,7 +70,14 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     
     // UI streaming interface for the native chat activity
     interface UiCallback {
-        fun onMessageAdded(message: String, isUser: Boolean, isComplete: Boolean = true, image: android.graphics.Bitmap? = null, imageUri: String? = null)
+        fun onMessageAdded(
+            message: String,
+            isUser: Boolean,
+            isComplete: Boolean = true,
+            image: android.graphics.Bitmap? = null,
+            imageUri: String? = null,
+            images: List<android.graphics.Bitmap> = emptyList()
+        )
         fun onThinkingStateChanged(isThinking: Boolean)
         fun onThoughtUpdated(thought: String)
         fun onDownloadProgress(progressText: String?) {}
@@ -962,7 +969,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
         // Emit user message with attached image preview
         val primaryUri = persistentUris?.firstOrNull()
-        uiCallback?.onMessageAdded(query, isUser = true, image = images?.firstOrNull(), imageUri = primaryUri)
+        uiCallback?.onMessageAdded(query, isUser = true, image = images?.firstOrNull(), imageUri = primaryUri, images = images ?: emptyList())
         uiCallback?.onThinkingStateChanged(true)
 
         serviceScope.launch {

@@ -58,7 +58,8 @@ fun ChatScreen(
     messages: List<ChatMessage>,
     isThinking: Boolean,
     thinkingText: String,
-    attachedImage: Bitmap?,
+    attachedImage: Bitmap? = null,
+    attachedImages: List<Bitmap> = listOfNotNull(attachedImage),
     isTtsActive: Boolean = false,
     downloadProgress: String? = null,
     onSendMessage: (String) -> Unit,
@@ -229,6 +230,7 @@ fun ChatScreen(
         // Input Bar Area with complete voice & multimodal state mechanics
         InputBar(
             attachedImage = attachedImage,
+            attachedImages = attachedImages,
             onSendMessage = onSendMessage,
             onSendAudio = onSendAudio,
             onPickImage = onPickImage,
@@ -474,27 +476,45 @@ fun ChatMessageRow(
                 }
             }
 
-            // Attached / Sent Image Thumbnail
-            val safeImageBitmap = remember(message.image) {
-                try {
-                    val bmp = message.image
-                    if (bmp != null && !bmp.isRecycled) bmp.asImageBitmap() else null
-                } catch (e: Exception) {
-                    null
-                }
+            // Attached / Sent Image Thumbnail(s)
+            val safeImages = remember(message.images, message.image) {
+                val list = if (message.images.isNotEmpty()) message.images else listOfNotNull(message.image)
+                list.filter { !it.isRecycled }
             }
-            if (safeImageBitmap != null) {
-                Image(
-                    bitmap = safeImageBitmap,
-                    contentDescription = "Message Image Attachment",
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 240.dp)
-                        .padding(bottom = 8.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .border(1.dp, Color(0x338BB4F6), RoundedCornerShape(12.dp)),
-                    contentScale = ContentScale.Crop
-                )
+            if (safeImages.isNotEmpty()) {
+                if (safeImages.size == 1) {
+                    Image(
+                        bitmap = safeImages[0].asImageBitmap(),
+                        contentDescription = "Message Image Attachment",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 240.dp)
+                            .padding(bottom = 8.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .border(1.dp, Color(0x338BB4F6), RoundedCornerShape(12.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        safeImages.take(2).forEach { bmp ->
+                            Image(
+                                bitmap = bmp.asImageBitmap(),
+                                contentDescription = "Comparison Image",
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(160.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .border(1.dp, Color(0x338BB4F6), RoundedCornerShape(10.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                    }
+                }
             }
             
             // Message Content
@@ -877,7 +897,8 @@ private enum class VoiceState { IDLE, RECORDING, CONFIRM }
 
 @Composable
 fun InputBar(
-    attachedImage: Bitmap?,
+    attachedImage: Bitmap? = null,
+    attachedImages: List<Bitmap> = listOfNotNull(attachedImage),
     onSendMessage: (String) -> Unit,
     onSendAudio: (ByteArray) -> Unit,
     onPickImage: () -> Unit,
@@ -921,20 +942,31 @@ fun InputBar(
             .padding(horizontal = 16.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Sparkle / Image Attachment Button
-        if (attachedImage != null) {
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable { onClearImage() },
-                contentAlignment = Alignment.Center
+        // Sparkle / Image Attachment Button(s)
+        val currentImages = remember(attachedImages, attachedImage) {
+            if (attachedImages.isNotEmpty()) attachedImages else listOfNotNull(attachedImage)
+        }
+        if (currentImages.isNotEmpty()) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Image(
-                    bitmap = attachedImage.asImageBitmap(),
-                    contentDescription = "Attached Image",
-                    modifier = Modifier.fillMaxSize()
-                )
+                currentImages.take(2).forEach { bmp ->
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onClearImage() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Image(
+                            bitmap = bmp.asImageBitmap(),
+                            contentDescription = "Attached Image",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+                }
             }
         } else {
             Text(
@@ -984,7 +1016,8 @@ fun InputBar(
                 decorationBox = { innerTextField ->
                     if (text.isEmpty()) {
                         val hint = when {
-                            attachedImage != null -> "[📎 Image attached ]"
+                            currentImages.size > 1 -> "[📎 2 images attached]"
+                            currentImages.size == 1 -> "[📎 Image attached]"
                             voiceState == VoiceState.RECORDING -> "Recording..."
                             voiceState == VoiceState.CONFIRM -> "Send or tap here to cancel"
                             else -> "Δ 👾 ∇"

@@ -59,8 +59,10 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
     
     private var audioVisualizerView: AudioVisualizerView? = null
 
-    private val imagePicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        uri?.let { handlePickedImage(it) }
+    private val imagePicker = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            handlePickedImages(uris.take(2))
+        }
     }
 
     private val serviceConnection = object : ServiceConnection {
@@ -141,6 +143,7 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
                 val isThinking by chatViewModel.isThinking.collectAsState()
                 val thinkingText by chatViewModel.thinkingText.collectAsState()
                 val attachedImage by chatViewModel.attachedImage.collectAsState()
+                val attachedImages by chatViewModel.attachedImages.collectAsState()
                 val isTtsActive by chatViewModel.isTtsActive.collectAsState()
                 val downloadProgress by chatViewModel.downloadProgress.collectAsState()
 
@@ -151,6 +154,7 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
                     isThinking = isThinking,
                     thinkingText = thinkingText,
                     attachedImage = attachedImage,
+                    attachedImages = attachedImages,
                     isTtsActive = isTtsActive,
                     downloadProgress = downloadProgress,
                     onSendMessage = { text ->
@@ -163,7 +167,7 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
                         imagePicker.launch("image/*")
                     },
                     onClearImage = {
-                        chatViewModel.setAttachedImage(null)
+                        chatViewModel.clearAttachedImages()
                     },
                     onToggleThinking = { message ->
                         // Future reasoning toggle expansion
@@ -290,10 +294,24 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
         }
     }
 
-    override fun onMessageAdded(message: String, isUser: Boolean, isComplete: Boolean, image: android.graphics.Bitmap?, imageUri: String?) {
+    override fun onMessageAdded(
+        message: String,
+        isUser: Boolean,
+        isComplete: Boolean,
+        image: android.graphics.Bitmap?,
+        imageUri: String?,
+        images: List<android.graphics.Bitmap>
+    ) {
         lifecycleScope.launch(Dispatchers.Main) {
+            val allImages = if (images.isNotEmpty()) images else listOfNotNull(image)
             if (isUser) {
-                chatViewModel.addMessage(ChatMessage(message, isFromUser = true, image = image, imageUri = imageUri))
+                chatViewModel.addMessage(ChatMessage(
+                    content = message,
+                    isFromUser = true,
+                    image = allImages.firstOrNull(),
+                    imageUri = imageUri,
+                    images = allImages
+                ))
             } else {
                 val current = chatViewModel.messages.value
                 val last = current.lastOrNull()
@@ -321,15 +339,18 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
     }
 
     private fun sendStagedMessage(text: String) {
-        val bitmap = chatViewModel.attachedImage.value
-        val imagePath = chatViewModel.attachedImagePath.value
-        chatViewModel.setAttachedImage(null, null)
-        val promptText = if (text.isBlank() && bitmap != null) "Analyze and describe what you see in the attached image." else text
-        if (bitmap != null) {
+        val bitmaps = chatViewModel.attachedImages.value
+        val imagePaths = chatViewModel.attachedImagePaths.value
+        chatViewModel.clearAttachedImages()
+        val promptText = if (text.isBlank() && bitmaps.isNotEmpty()) {
+            if (bitmaps.size > 1) "Analyze and compare the attached images." else "Analyze and describe what you see in the attached image."
+        } else text
+        if (bitmaps.isNotEmpty()) {
             scope.launch {
-                gemmaService?.processMultimodalFromUi(promptText, listOf(bitmap), imageUris = listOfNotNull(imagePath))
+                gemmaService?.processMultimodalFromUi(promptText, bitmaps, imageUris = imagePaths)
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(this@MainActivity, "Sent with image", Toast.LENGTH_SHORT).show()
+                    val toastMsg = if (bitmaps.size > 1) "Sent with 2 images" else "Sent with image"
+                    Toast.makeText(this@MainActivity, toastMsg, Toast.LENGTH_SHORT).show()
                 }
             }
         } else {
@@ -347,52 +368,53 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
         }
     }
 
-    private fun handlePickedImage(uri: Uri) {
+    private fun handlePickedImages(uris: List<Uri>) {
         scope.launch {
             try {
-                val pair = withContext(Dispatchers.IO) {
-                    val reqWidth = 1024
-                    val reqHeight = 1024
-                    val options = android.graphics.BitmapFactory.Options().apply {
-                        inJustDecodeBounds = true
-                        contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, this) }
+                val results = withContext(Dispatchers.IO) {
+                    uris.take(2).mapNotNull { uri ->
+                        val reqWidth = 1024
+                        val reqHeight = 1024
+                        val options = android.graphics.BitmapFactory.Options().apply {
+                            inJustDecodeBounds = true
+                            contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, this) }
+                            
+                            val height: Int = outHeight
+                            val width: Int = outWidth
+                            var inSampleSize = 1
+                            if (height > reqHeight || width > reqWidth) {
+                                val halfHeight = height / 2
+                                val halfWidth = width / 2
+                                while ((halfHeight / inSampleSize) >= reqHeight && (halfWidth / inSampleSize) >= reqWidth) {
+                                    inSampleSize *= 2
+                                }
+                            }
+                            this.inSampleSize = inSampleSize
+                            inJustDecodeBounds = false
+                        }
+                        val bmp = contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, options) }
                         
-                        val height: Int = outHeight
-                        val width: Int = outWidth
-                        var inSampleSize = 1
-                        if (height > reqHeight || width > reqWidth) {
-                            val halfHeight = height / 2
-                            val halfWidth = width / 2
-                            while ((halfHeight / inSampleSize) >= reqHeight && (halfWidth / inSampleSize) >= reqWidth) {
-                                inSampleSize *= 2
+                        val path = if (bmp != null) {
+                            try {
+                                val dir = java.io.File(filesDir, "chat_images").apply { mkdirs() }
+                                val file = java.io.File(dir, "picked_${System.currentTimeMillis()}_${System.identityHashCode(bmp)}.jpg")
+                                java.io.FileOutputStream(file).use { out ->
+                                    bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, out)
+                                }
+                                file.absolutePath
+                            } catch (e: Exception) {
+                                null
                             }
-                        }
-                        this.inSampleSize = inSampleSize
-                        inJustDecodeBounds = false
-                    }
-                    val bmp = contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, options) }
-                    
-                    val path = if (bmp != null) {
-                        try {
-                            val dir = java.io.File(filesDir, "chat_images").apply { mkdirs() }
-                            val file = java.io.File(dir, "picked_${System.currentTimeMillis()}.jpg")
-                            java.io.FileOutputStream(file).use { out ->
-                                bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, out)
-                            }
-                            file.absolutePath
-                        } catch (e: Exception) {
-                            null
-                        }
-                    } else null
+                        } else null
 
-                    bmp to path
+                        if (bmp != null) bmp to path else null
+                    }
                 }
-                val bitmap = pair.first
-                val path = pair.second
-                if (bitmap != null) {
+                if (results.isNotEmpty()) {
                     withContext(Dispatchers.Main) {
-                        chatViewModel.setAttachedImage(bitmap, path)
-                        Toast.makeText(this@MainActivity, "Image staged. Type a prompt and send.", Toast.LENGTH_SHORT).show()
+                        chatViewModel.setAttachedImages(results.map { it.first }, results.mapNotNull { it.second })
+                        val msg = if (results.size > 1) "2 images staged. Type a prompt and send." else "Image staged. Type a prompt and send."
+                        Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
                     }
                 }
             } catch (e: Exception) { Timber.e(e) }
