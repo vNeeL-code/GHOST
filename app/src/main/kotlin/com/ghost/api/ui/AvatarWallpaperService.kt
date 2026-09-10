@@ -195,10 +195,16 @@ class AvatarWallpaperService : WallpaperService() {
             smoothedBass = smoothedBass * 0.7f + bass * 0.3f
 
             // Sample FFT frequency bins for the 30 spiral hexagon nodes
-            if (fft.isNotEmpty() && fft.size >= 4) {
+            // Bins 0..3 represent monolithic sub-bass (which drives the central booming mother hex & bloom).
+            // Spiral arm nodes are mapped across higher bass, mid-range harmonics, vocal presence, and treble (bins 4..maxBin)
+            // with arm interleaving so each arm samples different frequency bands without single-tentacle bias!
+            if (fft.isNotEmpty() && fft.size >= 8) {
                 val maxBin = (fft.size / 2) - 1
+                val minArmBin = 4.coerceAtMost(maxBin)
+                val binSpan = (maxBin - minArmBin).coerceAtLeast(1)
                 for (n in nodeMagnitudes.indices) {
-                    val binIndex = ((n * 3) + 1).coerceIn(0, maxBin)
+                    // Stride across bins 4..maxBin using prime step for maximum harmonic distribution
+                    val binIndex = minArmBin + ((n * 7 + (n / 5) * 3) % binSpan)
                     val real = fft[binIndex * 2].toDouble()
                     val imag = fft[binIndex * 2 + 1].toDouble()
                     val rawMag = Math.hypot(real, imag).toFloat().coerceIn(0f, 90f)
@@ -283,8 +289,8 @@ class AvatarWallpaperService : WallpaperService() {
                         "OPTION_C" -> {
                             drawOptionCDeltaTunnel(canvas, cx + 12f, cy + 40f, dynamicBaseRadius)
                         }
-                        "OPTION_D", "AUDIOSURF" -> {
-                            drawOptionDNeonSunset(canvas, cx, cy, width, height)
+                        "OPTION_D", "AUDIOSURF", "MATRIX" -> {
+                            drawOptionDCubeLattice(canvas, cx + 12f, cy + 40f, dynamicBaseRadius, width, height)
                         }
                         else -> {
                             drawOptionAOrbitalStar(canvas, cx, cy, dynamicBaseRadius, height, isNoisy)
@@ -795,85 +801,25 @@ class AvatarWallpaperService : WallpaperService() {
         }
 
         /**
-         * Option D: Neon Sunset (Outrun / Synthwave Horizon)
-         * Inspired by the classic Wallpaper Engine "Neon Sunset":
-         * - Giant striped synthwave sun with horizontal perspective scanline slits
-         * - Expansive full-width 3D wireframe terrain mesh
-         * - Left & right equalizer mountain ridges bouncing on live audio FFT
-         * - Dynamic ~90° look-around parallax via device tilt & launcher swipe
-         * - Audio-triggered strobelight threshold bursts
+         * Option D: Cyber Matrix / Cube Lattice (Salvation of the Black Sun)
+         * Inspired by sacred cube geometry and the overlay controller layout:
+         * - Majestic Black Hole Sun singularity at center with explosive solar flare rings
+         * - Faint orbital halo ring encircling the singularity
+         * - Centered Mother Diamond/Cube with 3 stepped fake bloom layers & white unicode ✧ glyph
+         * - 6 Orbiting Satellite Cubes / Diamonds (Mixture of Experts) that pop and flash
+         *   independently to discrete live audio FFT bands with subtle parallax drift
          */
-        private fun drawOptionDNeonSunset(canvas: Canvas, cx: Float, cy: Float, width: Float, height: Float) {
-            val horizonY = height * 0.50f
-            // Road and horizon remain completely solid and stable at screen center
-            val roadCenterX = width * 0.5f
-            // Upper sky elements (sun & sky) retain gentle look-around parallax
-            val skyCenterX = width * 0.5f + (rollOffset * 100f) + (launcherSwipeOffset * 90f)
-            val bassKick = (smoothedBass * 1.5f).coerceAtLeast(0f)
+        private fun drawOptionDCubeLattice(canvas: Canvas, cx: Float, cy: Float, dynamicBaseRadius: Float, width: Float, height: Float) {
+            val bassKick = (smoothedBass * 1.6f).coerceAtLeast(0f)
+            val coreCubeRadius = (dynamicBaseRadius * 1.85f + bassKick * 0.45f).coerceIn(40f, 200f)
 
-            // 1. Deep Space Night Sky & Twinkling Stars
-            paint.style = Paint.Style.FILL
-            paint.shader = null
-            paint.color = Color.parseColor("#05050D")
-            canvas.drawRect(0f, 0f, width, horizonY, paint)
+            // 1. Center Singularities: Parallax-anchored to screen / widget center
+            val sunRadius = (min(width, height) * 0.22f + bassKick * 0.25f).coerceIn(60f, 240f)
+            val flareBoom = (bassKick * 0.75f) + (strobeFlash * 80f)
 
-            // Faint retro starfield (upper sky)
-            paint.style = Paint.Style.STROKE
-            paint.strokeWidth = 1.5f
-            val numStars = 28
-            for (s in 0 until numStars) {
-                val seed = s * 73
-                val starX = ((seed * 19) % width.toInt()).toFloat()
-                val starY = ((seed * 31) % (horizonY * 0.75f).toInt()).toFloat()
-                val twinkle = (sin(animTime * 2f + s) * 0.5f + 0.5f)
-                paint.color = Color.WHITE
-                paint.alpha = (twinkle * 130).toInt().coerceIn(20, 180)
-                canvas.drawPoint(starX, starY, paint)
-            }
-
-            // 2. Audio Lightning Crack Flashes across the Sky
-            val skyFlashAlpha = if (strobeFlash > 0.04f) {
-                (strobeFlash * 255f).toInt().coerceIn(0, 255)
-            } else {
-                0
-            }
-
-            if (skyFlashAlpha > 0) {
-                // Jagged branching lightning bolts discharging from upper clouds
-                paint.style = Paint.Style.STROKE
-                paint.strokeWidth = 2.5f + (strobeFlash * 2.5f)
-                paint.color = Color.WHITE
-                paint.alpha = skyFlashAlpha
-
-                // Lightning Bolt 1 (Left sky strike)
-                val boltL = Path().apply {
-                    moveTo(width * 0.22f, 0f)
-                    lineTo(width * 0.26f, horizonY * 0.32f)
-                    lineTo(width * 0.20f, horizonY * 0.55f)
-                    lineTo(width * 0.29f, horizonY * 0.85f)
-                }
-                canvas.drawPath(boltL, paint)
-
-                // Lightning Bolt 2 (Right sky strike)
-                val boltR = Path().apply {
-                    moveTo(width * 0.78f, 0f)
-                    lineTo(width * 0.72f, horizonY * 0.28f)
-                    lineTo(width * 0.80f, horizonY * 0.60f)
-                    lineTo(width * 0.73f, horizonY * 0.90f)
-                }
-                canvas.drawPath(boltR, paint)
-            }
-
-            // 3. The Black Hole Sun with Hot Neon Concentric Solar Flares
-            // Obsidian dark singularity center surrounded by explosive coronal flare rings
-            val sunRadius = (min(width, height) * 0.28f + bassKick * 0.25f).coerceIn(80f, 300f)
-            val sunCenterX = skyCenterX
-            val sunCenterY = horizonY - (sunRadius * 0.18f)
-
-            // Coronal solar flare rings expanding dramatically with bass beats
-            val flareBoom = (bassKick * 0.75f) + (strobeFlash * 90f)
+            // Deep Space Black Sun with Hot Concentric Solar Flares (Salvation of the Sun)
             val sunBloomMultipliers = floatArrayOf(2.2f, 1.75f, 1.4f, 1.15f)
-            val sunBloomAlphas = intArrayOf(25, 50, 90, 150)
+            val sunBloomAlphas = intArrayOf(25, 45, 80, 140)
             val sunBloomColors = intArrayOf(
                 Color.parseColor("#991B1B"), // 0: Deep crimson outer storm
                 Color.parseColor("#DC2626"), // 1: Neon red flare
@@ -885,239 +831,158 @@ class AvatarWallpaperService : WallpaperService() {
             paint.shader = null
             for (sb in sunBloomMultipliers.indices) {
                 val r = (sunRadius * sunBloomMultipliers[sb]) + flareBoom
-                paint.color = if (isCustomPaletteActive) currentColors[sb % currentColors.size] else sunBloomColors[sb]
-                paint.alpha = ((sunBloomAlphas[sb] + (strobeFlash * 85f).toInt())).coerceIn(15, 255)
-                canvas.drawCircle(sunCenterX, sunCenterY, r, paint)
+                val flareColor = if (isCustomPaletteActive) currentColors[sb % currentColors.size] else sunBloomColors[sb]
+                paint.color = ensureVisibleBloomColor(flareColor, colorCobaltGlow)
+                paint.alpha = ((sunBloomAlphas[sb] + (strobeFlash * 75f).toInt())).coerceIn(15, 240)
+                canvas.drawCircle(cx, cy, r, paint)
             }
 
-            // Black Hole Singularity Core (Crisp obsidian black interior)
+            // Black Hole Singularity Core (Deep obsidian dark void)
             paint.style = Paint.Style.FILL
             paint.color = Color.parseColor("#05050A")
             paint.alpha = 255
-            canvas.drawCircle(sunCenterX, sunCenterY, sunRadius, paint)
+            canvas.drawCircle(cx, cy, sunRadius, paint)
 
-            // Fiery Accretion Disk Outline around the black hole core
+            // Fiery Accretion Rim
             paint.style = Paint.Style.STROKE
-            paint.strokeWidth = 3.5f + (strobeFlash * 3f)
+            paint.strokeWidth = 3f + (strobeFlash * 3f)
             paint.color = if (strobeFlash > 0.05f) Color.WHITE else Color.parseColor("#FBBF24")
-            paint.alpha = 255
-            canvas.drawCircle(sunCenterX, sunCenterY, sunRadius, paint)
+            paint.alpha = 240
+            canvas.drawCircle(cx, cy, sunRadius, paint)
 
-            // 4. Horizon Neon Glow Line
+            // 2. Orbital Halo Enclosing Circle (matching user diagram around mother cube)
+            val orbitCircleRadius = sunRadius * 1.08f
             paint.style = Paint.Style.STROKE
-            paint.strokeWidth = 3f + (strobeFlash * 4f)
-            paint.color = if (strobeFlash > 0.05f) Color.WHITE else Color.parseColor("#38BDF8")
-            paint.alpha = (160 + (strobeFlash * 95f).toInt()).coerceIn(120, 255)
-            canvas.drawLine(0f, horizonY, width, horizonY, paint)
+            paint.strokeWidth = 2.5f + (strobeFlash * 2.0f)
+            paint.color = if (isCustomPaletteActive) currentColors[1 % currentColors.size] else Color.parseColor("#E0F2FE")
+            paint.alpha = (140 + (strobeFlash * 100f).toInt()).coerceIn(100, 255)
+            canvas.drawCircle(cx, cy, orbitCircleRadius, paint)
 
-            // 5. Full-Screen 3D Perspective Terrain Mesh with Equalizer Mountain Ridges
-            // Solid, grounded road grid with stationary Y rows and stable road center
-            val numRows = 22
-            val numCols = 16 // -8 to +8 columns
-            val gridGroundBottom = height * 1.05f
-
-            val bassFFT = smoothedBass * 0.8f
-            val midFFT = smoothedIntensity * 0.7f
-
-            val meshX = Array(numRows + 1) { FloatArray(numCols + 1) }
-            val meshY = Array(numRows + 1) { FloatArray(numCols + 1) }
-
-            for (r in 0..numRows) {
-                // Fixed row perspective depth: Y is completely static and NEVER hops or bobs
-                val depthZ = (r.toFloat() / numRows.toFloat()).let { it * it }
-                val baseRowY = horizonY + (gridGroundBottom - horizonY) * depthZ
-                val rowHalfWidth = (width * 0.65f) * (depthZ + 0.05f) * 2.6f
-
-                for (c in 0..numCols) {
-                    val colNorm = (c.toFloat() / numCols.toFloat()) * 2f - 1f // -1.0 to +1.0
-                    val colIndexFromCenter = (c - numCols / 2) // negative is left, positive is right
-                    val absCol = abs(colIndexFromCenter)
-
-                    val rawX = roadCenterX + (colNorm * rowHalfWidth)
-
-                    // Equalizer Mountain Elevation on outer flanks (|absCol| >= 3)
-                    var elevation = 0f
-                    if (absCol >= 3 && depthZ > 0.01f) {
-                        val flankFactor = (absCol - 2).toFloat()
-                        val peakBase = flankFactor * (12f + (22f * depthZ))
-                        val tooth = if (c % 2 == 0) 1.3f else 0.8f
-                        val audioDeform = if (colIndexFromCenter < 0) {
-                            bassFFT * (flankFactor * 0.18f)
-                        } else {
-                            midFFT * (flankFactor * 0.18f)
-                        }
-                        elevation = ((peakBase * tooth) + audioDeform) * depthZ.coerceIn(0f, 1f)
-                    }
-
-                    meshX[r][c] = rawX
-                    // Road center (highway lanes) stays 100% planar at baseRowY
-                    meshY[r][c] = if (absCol <= 2) baseRowY else (baseRowY - elevation).coerceAtLeast(horizonY)
-                }
-            }
-
-            // A) 100% Solid Opaque Ground Floor (Completely occludes the sun and sky below the horizon line)
-            paint.style = Paint.Style.FILL
-            paint.shader = null
-            val baseGroundColor = if (strobeFlash > 0.05f) Color.parseColor("#150B24") else Color.parseColor("#080512")
-            paint.color = baseGroundColor
-            paint.alpha = 255
-            canvas.drawRect(0f, horizonY, width, height, paint)
-
-            // B) Center Illuminated Highway Bed
-            val highwayBedPath = Path()
-            val centerColL = numCols / 2 - 1
-            val centerColR = numCols / 2 + 1
-            highwayBedPath.moveTo(meshX[0][centerColL], meshY[0][centerColL])
-            highwayBedPath.lineTo(meshX[0][centerColR], meshY[0][centerColR])
-            highwayBedPath.lineTo(meshX[numRows][centerColR], meshY[numRows][centerColR])
-            highwayBedPath.lineTo(meshX[numRows][centerColL], meshY[numRows][centerColL])
-            highwayBedPath.close()
-
-            paint.color = if (strobeFlash > 0.05f) Color.parseColor("#1E3A5F") else Color.parseColor("#0E1F38")
-            paint.alpha = (90 + (smoothedBass * 0.4f).toInt() + (strobeFlash * 50f).toInt()).coerceIn(60, 200)
-            canvas.drawPath(highwayBedPath, paint)
-
-            // Draw Wireframe Terrain Mesh:
-            val terrainColor = if (strobeFlash > 0.05f) {
-                ColorUtils.blendARGB(Color.parseColor("#E11D48"), Color.WHITE, strobeFlash)
-            } else if (isCustomPaletteActive) {
-                currentColors[0]
-            } else {
-                Color.parseColor("#C026D3") // Vibrant synthwave magenta
-            }
-
-            paint.style = Paint.Style.STROKE
-
-            // C) Scrolling Horizontal Rung Lines (traveling down the road towards the screen)
-            val scrollFrac = trackZScroll % 1f
-            for (r in 0..numRows) {
-                val p = ((r.toFloat() + scrollFrac) / numRows.toFloat()).coerceIn(0f, 1f)
-                val depthZ = p * p
-                val rungY = horizonY + (gridGroundBottom - horizonY) * depthZ
-                val rungHalfWidth = (width * 0.65f) * (depthZ + 0.05f) * 2.6f
-                paint.strokeWidth = (1.2f + (depthZ * 2.8f)).coerceIn(1f, 4.5f)
-                val alphaBase = (depthZ * 170f + (strobeFlash * 80f)).toInt().coerceIn(20, 255)
-                paint.color = terrainColor
-                paint.alpha = alphaBase
-
-                canvas.drawLine(roadCenterX - rungHalfWidth, rungY, roadCenterX + rungHalfWidth, rungY, paint)
-            }
-
-            // D) Longitudinal Lines (connecting depth rows from horizon to foreground)
-            for (c in 0..numCols) {
-                val colIndexFromCenter = (c - numCols / 2)
-                val absCol = abs(colIndexFromCenter)
-                val isHighway = absCol <= 2
-                val isHighwayEdge = absCol == 2
-                val colColor = if (isHighwayEdge) {
-                    if (strobeFlash > 0.05f) Color.WHITE else Color.parseColor("#38BDF8") // Glowing cyan boundary rails
-                } else if (isHighway) {
-                    Color.parseColor("#67E8F9") // Light sky cyan road rungs
-                } else {
-                    terrainColor
-                }
-
-                for (r in 0 until numRows) {
-                    val p = r.toFloat() / numRows.toFloat()
-                    val depthZ = p * p
-                    paint.strokeWidth = (1.2f + (depthZ * 2.5f)).coerceIn(1f, 4f)
-                    val alphaBase = (depthZ * 160f + (strobeFlash * 90f)).toInt().coerceIn(15, 255)
-                    paint.color = colColor
-                    paint.alpha = alphaBase
-
-                    canvas.drawLine(meshX[r][c], meshY[r][c], meshX[r + 1][c], meshY[r + 1][c], paint)
-
-                    // Diagonal wireframe mountain braces on flanks
-                    if (absCol >= 3 && r % 2 == 0) {
-                        val nextC = if (colIndexFromCenter < 0) c + 1 else c - 1
-                        if (nextC in 0..numCols) {
-                            paint.strokeWidth = 1f
-                            paint.alpha = (alphaBase * 0.6f).toInt().coerceIn(10, 150)
-                            canvas.drawLine(meshX[r][c], meshY[r][c], meshX[r + 1][nextC], meshY[r + 1][nextC], paint)
-                        }
-                    }
-                }
-            }
-
-            // 6. Gemma Jet Craft with Direct Horizontal Tilt Steering
-            // Craft height (Y) is 100% constant on the screen.
-            // When phone tilts, the craft slides left and right across the road lanes, banking its chassis!
-            val craftRow = (numRows * 0.82f).toInt().coerceIn(0, numRows)
-            val centerCol = numCols / 2
-
-            val leftRoadEdgeX = meshX[craftRow][centerCol - 2]
-            val centerRoadX = meshX[craftRow][centerCol]
-            val rightRoadEdgeX = meshX[craftRow][centerCol + 2]
-            val roadHalfSpan = (rightRoadEdgeX - centerRoadX) * 0.85f
-
-            // Phone tilt directly steers the craft left/right across the road span
-            // Normal held orientation tilt range: rollOffset clamped within road width
-            val tiltSteerFactor = (rollOffset * 2.5f).coerceIn(-1.0f, 1.0f)
-            val craftX = centerRoadX + (tiltSteerFactor * roadHalfSpan)
-
-            // Craft height is strictly static — absolutely zero vertical hopping or jumping
-            val craftY = meshY[craftRow][centerCol]
-
-            // Dynamic banking lean: vehicle rolls into the tilt steering angle
-            val chassisBankAngle = tiltSteerFactor * 32f
-
+            // 3. Central Mother Cube / Diamond (45° diamond inside orbital ring)
             canvas.save()
-            canvas.translate(craftX, craftY)
-            canvas.rotate(chassisBankAngle)
+            canvas.translate(cx, cy)
 
-            val craftSize = (width * 0.062f).coerceIn(26f, 75f)
+            // 3-Layer Concentric Stepped Fake Bloom behind Central Cube
+            val cubeBloomRadii = floatArrayOf(
+                coreCubeRadius * 1.55f + (bassKick * 0.55f),
+                coreCubeRadius * 1.30f + (bassKick * 0.35f),
+                coreCubeRadius * 1.12f + (bassKick * 0.18f)
+            )
+            val cubeBloomAlphas = intArrayOf(30, 65, 110)
+            val cubeBloomWidths = floatArrayOf(4.5f, 3.5f, 2.5f)
 
-            // Trailing Jet Thruster Plasma Bubbles (Stream of glowing propulsion bubbles trailing behind the engines)
-            val bubbleColor = if (isCustomPaletteActive) currentColors[0] else Color.parseColor("#38BDF8")
-            val numBubbles = 4
-            paint.style = Paint.Style.FILL
-            for (b in 1..numBubbles) {
-                val bProgress = b.toFloat() / numBubbles.toFloat()
-                val bubbleY = craftSize * (0.55f + bProgress * 0.95f)
-                val bubbleRadius = craftSize * (0.24f * (1.15f - bProgress * 0.55f)) + (bassKick * 0.02f)
-                // Slight dynamic wake turbulence wobble
-                val bubbleX = sin(animTime * 12f + b * 1.8f) * (bProgress * 4.5f)
-                val bubbleAlpha = ((1f - bProgress * 0.70f) * (180f + bassKick * 15f)).toInt().coerceIn(20, 240)
-
-                paint.color = bubbleColor
-                paint.alpha = bubbleAlpha
-                canvas.drawCircle(bubbleX, bubbleY, bubbleRadius, paint)
-
-                // White energetic core inside the nearest primary bubble
-                if (b == 1) {
-                    paint.color = Color.WHITE
-                    paint.alpha = 220
-                    canvas.drawCircle(0f, bubbleY * 0.92f, bubbleRadius * 0.45f, paint)
+            for (cb in cubeBloomRadii.indices) {
+                val swatchIndex = when (cb) {
+                    2 -> 1 % currentColors.size // Vibrant
+                    1 -> 0 % currentColors.size // Dominant
+                    else -> 2 % currentColors.size // Muted
                 }
+                val rawColor = if (isCustomPaletteActive) currentColors[swatchIndex] else colorCobaltGlow
+                val bloomColor = ensureVisibleBloomColor(rawColor, colorCobaltGlow)
+
+                // Translucent fill for planar glow
+                paint.style = Paint.Style.FILL
+                paint.color = bloomColor
+                paint.alpha = (cubeBloomAlphas[cb] * 0.35f).toInt().coerceIn(10, 70)
+                drawDiamond(canvas, 0f, 0f, cubeBloomRadii[cb], paint)
+
+                // Crisp border contour
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = cubeBloomWidths[cb]
+                paint.color = bloomColor
+                paint.alpha = cubeBloomAlphas[cb]
+                drawDiamond(canvas, 0f, 0f, cubeBloomRadii[cb], paint)
             }
 
-            // Sleek vector jet craft body (Solid dark obsidian fuselage)
-            paint.color = Color.parseColor("#090D16")
-            paint.alpha = 250
-            val craftPath = Path().apply {
-                moveTo(0f, -craftSize)
-                lineTo(craftSize * 0.75f, craftSize * 0.60f)
-                lineTo(0f, craftSize * 0.38f)
-                lineTo(-craftSize * 0.75f, craftSize * 0.60f)
-                close()
-            }
-            canvas.drawPath(craftPath, paint)
+            // Solid Obsidian Cyber Chamber for Central Cube
+            paint.style = Paint.Style.FILL
+            paint.color = Color.parseColor("#060A10")
+            paint.alpha = 240
+            drawDiamond(canvas, 0f, 0f, coreCubeRadius, paint)
 
-            // Sharp White Craft Outline
             paint.style = Paint.Style.STROKE
-            paint.strokeWidth = 2.5f
-            paint.color = Color.WHITE
+            paint.strokeWidth = 3.5f + (strobeFlash * 2.5f)
+            paint.color = if (strobeFlash > 0.05f) Color.WHITE else Color.parseColor("#F8FAFC")
             paint.alpha = 255
-            canvas.drawPath(craftPath, paint)
+            drawDiamond(canvas, 0f, 0f, coreCubeRadius, paint)
 
-            // Center Model Glyph (✧)
+            paint.strokeWidth = 2f
+            paint.color = if (isCustomPaletteActive) currentColors[0] else Color.parseColor("#38BDF8")
+            paint.alpha = 200
+            drawDiamond(canvas, 0f, 0f, coreCubeRadius * 0.82f, paint)
+
+            // Centered crisp white ✧ star glyph
+            logoPaint.clearShadowLayer()
             logoPaint.color = Color.WHITE
             logoPaint.alpha = 255
-            logoPaint.textSize = craftSize * 0.95f
+            logoPaint.textSize = coreCubeRadius * 1.35f
             val cOff = (logoPaint.descent() + logoPaint.ascent()) / 2f
-            canvas.drawText("✧", 0f, -cOff - (craftSize * 0.12f), logoPaint)
+            canvas.drawText("✧", 0f, -cOff, logoPaint)
 
             canvas.restore()
+
+            // 4. Six Satellite Diamonds / Cubes (Orbiting in Hexagonal Formation)
+            // Exactly matching the user diagram: Top, Bottom, Top-Left, Top-Right, Bottom-Left, Bottom-Right
+            val numSatellites = 6
+            val satelliteOrbitRadius = orbitCircleRadius * 1.48f + (bassKick * 0.25f)
+            val satelliteBaseSize = coreCubeRadius * 0.42f
+
+            for (s in 0 until numSatellites) {
+                // Hexagonal orientation: top is s=0 (-90°), then 60° increments
+                val angle = (s * Math.PI / 3.0 - Math.PI / 2.0).toFloat()
+                val satX = cx + (satelliteOrbitRadius * cos(angle))
+                val satY = cy + (satelliteOrbitRadius * sin(angle))
+
+                // Each satellite samples distinct FFT bins (0, 5, 10, 15, 20, 25)
+                val nodeIdx = (s * 5).coerceIn(0, nodeMagnitudes.size - 1)
+                val satMag = nodeMagnitudes[nodeIdx]
+                val satPop = (satMag * 0.14f).coerceIn(0f, 10f)
+
+                val satSize = satelliteBaseSize + satPop
+                val colorIdx = (s + 1) % currentColors.size
+                val baseSatColor = if (isCustomPaletteActive) currentColors[colorIdx] else {
+                    when (s % 3) {
+                        0 -> Color.parseColor("#93C5FD")
+                        1 -> Color.parseColor("#38BDF8")
+                        else -> Color.parseColor("#F8FAFC")
+                    }
+                }
+
+                // Active popping satellites flash brighter toward white
+                val satColor = if (satMag > 22f) {
+                    val ratio = (satMag / 80f).coerceIn(0f, 0.75f)
+                    ColorUtils.blendARGB(baseSatColor, Color.WHITE, ratio)
+                } else {
+                    baseSatColor
+                }
+
+                // Subtle dark interior so background stars / flares show through neatly
+                paint.style = Paint.Style.FILL
+                paint.color = Color.parseColor("#070B14")
+                paint.alpha = 225
+                drawDiamond(canvas, satX, satY, satSize, paint)
+
+                // Glowing neon contour
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = 2.8f + (satMag * 0.03f)
+                paint.color = satColor
+                paint.alpha = (160 + (satMag * 1.2f).toInt()).coerceIn(120, 255)
+                drawDiamond(canvas, satX, satY, satSize, paint)
+            }
+        }
+
+        /**
+         * Regular 4-vertex diamond generator (rotated 45° square)
+         */
+        private fun drawDiamond(canvas: Canvas, x: Float, y: Float, radius: Float, paint: Paint) {
+            val path = Path().apply {
+                moveTo(x, y - radius)      // Top
+                lineTo(x + radius, y)      // Right
+                lineTo(x, y + radius)      // Bottom
+                lineTo(x - radius, y)      // Left
+                close()
+            }
+            canvas.drawPath(path, paint)
         }
 
         /**
