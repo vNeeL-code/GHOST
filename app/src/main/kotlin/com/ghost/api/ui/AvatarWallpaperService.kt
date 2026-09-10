@@ -53,15 +53,15 @@ class AvatarWallpaperService : WallpaperService() {
             Color.parseColor("#EA4335")  // 5: Google Red
         )
 
-        private val BLOOM_ALPHAS_OPTION_A = intArrayOf(38, 65, 105, 150)
+        private val BLOOM_ALPHAS_OPTION_A = intArrayOf(18, 32, 52, 80)
 
-        private val HEX_HALO_RADII_MULTS = floatArrayOf(1.8f, 2.8f, 4.2f, 6.0f)
-        private val HEX_HALO_BASS_MULTS = floatArrayOf(0.8f, 1.5f, 2.4f, 3.5f)
-        private val HEX_HALO_ALPHAS = intArrayOf(75, 45, 25, 12)
-        private val HEX_HALO_WIDTHS = floatArrayOf(3.5f, 2.5f, 1.8f, 1.2f)
+        private val HEX_HALO_RADII_MULTS = floatArrayOf(1.45f, 2.25f, 3.35f, 4.80f)
+        private val HEX_HALO_BASS_MULTS = floatArrayOf(0.50f, 1.10f, 2.00f, 3.20f)
+        private val HEX_HALO_ALPHAS = intArrayOf(90, 65, 45, 25)
+        private val HEX_HALO_WIDTHS = floatArrayOf(3.5f, 2.8f, 2.2f, 1.8f)
 
         private val HEX_BLOOM_CORE_MULTS = floatArrayOf(2.50f, 1.95f, 1.50f, 1.20f)
-        private val HEX_BLOOM_BASS_MULTS = floatArrayOf(1.50f, 1.10f, 0.70f, 0.35f)
+        private val HEX_BLOOM_BASS_MULTS = floatArrayOf(2.20f, 1.60f, 1.05f, 0.50f)
         private val HEX_BLOOM_ALPHAS = intArrayOf(35, 65, 110, 160)
         private val HEX_BLOOM_WIDTHS = floatArrayOf(5.5f, 4.2f, 3.2f, 2.5f)
 
@@ -396,10 +396,13 @@ class AvatarWallpaperService : WallpaperService() {
                     // Small base so rings start tight to center and explode outward on beats
                     val dynamicBaseRadius = min(width, height) * 0.08f
                     
-                    // Nudged slightly left to perfectly center mathematically on screen (-15f)
-                    val cx = width / 2f - 15f + rollOffset * 150f
-                    // Nudged slightly up to align with the widget/input bar center
-                    val cy = height / 2f - 75f + pitchOffset * 150f
+                    // Baseline geometric center coordinates
+                    val baseCx = width / 2f - 15f
+                    val baseCy = height / 2f - 75f
+
+                    // Global tilt offset for single-depth presets
+                    val cx = baseCx + rollOffset * 150f
+                    val cy = baseCy + pitchOffset * 150f
                     
                     canvas.drawColor(COLOR_BACKGROUND)
                     
@@ -411,7 +414,8 @@ class AvatarWallpaperService : WallpaperService() {
                     
                     when (preset) {
                         "OPTION_B" -> {
-                            drawOptionBHexLattice(canvas, cx + 12f, cy + 40f, dynamicBaseRadius, width, height)
+                            // Option B uses multi-layer stereoscopic parallax rooted at optical center (baseCx + 12f, baseCy + 40f)
+                            drawOptionBHexLattice(canvas, baseCx + 12f, baseCy + 40f, dynamicBaseRadius, width, height)
                         }
                         "OPTION_C" -> {
                             drawOptionCDeltaTunnel(canvas, cx + 12f, cy + 40f, dynamicBaseRadius)
@@ -631,7 +635,7 @@ class AvatarWallpaperService : WallpaperService() {
 
             // 2. Geometric Wireframe Diamond Cage Framing the Star Core
             val wireframeAccent = corridorColor
-            val baseStarSize = 1200f
+            val baseStarSize = (minOf(width, height) * 0.95f).coerceIn(450f, 1050f)
             val textOffset = (logoPaint.descent() + logoPaint.ascent()) / 2f
 
             paint.style = Paint.Style.STROKE
@@ -643,15 +647,16 @@ class AvatarWallpaperService : WallpaperService() {
                 drawDiamond(canvas, cx, cy - textOffset, r, paint)
             }
 
-            // 3. Multi-pass bloom glow with crisp wireframe contours:
-            // Idle harmonic breathing + explosive booming on audio kicks
+            // 3. Multi-pass bloom glow:
+            // Soft radiant ethereal glow - pure fill, zero stroked font artifacts
             logoPaint.clearShadowLayer()
+            logoPaint.style = Paint.Style.FILL
             for (i in 0 until 4) {
                 val bloomSize = when (i) {
-                    0 -> baseStarSize + 550f + bassBoost + idleBreath         // 0: Outermost Corona
-                    1 -> baseStarSize + 340f + bassBoost + (idleBreath * 0.6f) // 1: Mid-Outer Halo
-                    2 -> baseStarSize + 170f + (bassBoost * 0.7f)              // 2: Mid-Inner Aura
-                    else -> baseStarSize + 50f + (bassBoost * 0.3f)            // 3: Inner (Closest to Star)
+                    0 -> baseStarSize + 480f + bassBoost + idleBreath         // 0: Outermost Corona
+                    1 -> baseStarSize + 300f + bassBoost + (idleBreath * 0.6f) // 1: Mid-Outer Halo
+                    2 -> baseStarSize + 150f + (bassBoost * 0.7f)              // 2: Mid-Inner Aura
+                    else -> baseStarSize + 40f + (bassBoost * 0.3f)            // 3: Inner (Closest to Star)
                 }
                 val layerColor = if (isCustomPaletteActive) {
                     val swatchIndex = when (i) {
@@ -669,42 +674,18 @@ class AvatarWallpaperService : WallpaperService() {
                 val off = (logoPaint.descent() + logoPaint.ascent()) / 2f
 
                 // Soft filled bloom glow
-                logoPaint.style = Paint.Style.FILL
                 logoPaint.color = layerColor
                 logoPaint.textSize = bloomSize
                 logoPaint.alpha = BLOOM_ALPHAS_OPTION_A[i]
                 canvas.drawText("✧", cx, cy - off, logoPaint)
-
-                // High-definition wireframe contour outline around the glow aura
-                logoPaint.style = Paint.Style.STROKE
-                logoPaint.strokeWidth = if (i == 0) 2.5f else 1.5f
-                logoPaint.color = layerColor
-                val outlineAlpha = ((BLOOM_ALPHAS_OPTION_A[i] * 1.8f).toInt() + (strobeFlash * 55f).toInt()).coerceIn(0, 255)
-                logoPaint.alpha = outlineAlpha
-                canvas.drawText("✧", cx, cy - off, logoPaint)
-                logoPaint.style = Paint.Style.FILL
             }
             
-            // 4. Crisp Core star with razor wireframe outline around the white sparkle
+            // 4. Crisp Core star (pure solid white sparkle)
             logoPaint.style = Paint.Style.FILL
             logoPaint.color = COLOR_STAR_CORE
             logoPaint.alpha = 255
             logoPaint.textSize = baseStarSize
             canvas.drawText("✧", cx, cy - textOffset, logoPaint)
-
-            // Sharp wireframe outline around the central sparkle glyph
-            logoPaint.style = Paint.Style.STROKE
-            logoPaint.strokeWidth = 3.8f + (strobeFlash * 3f)
-            logoPaint.color = wireframeAccent
-            logoPaint.alpha = (210 + (strobeFlash * 45f).toInt()).coerceIn(0, 255)
-            canvas.drawText("✧", cx, cy - textOffset, logoPaint)
-
-            // Ultra-crisp inner white edge contour
-            logoPaint.strokeWidth = 1.5f
-            logoPaint.color = Color.WHITE
-            logoPaint.alpha = 245
-            canvas.drawText("✧", cx, cy - textOffset, logoPaint)
-            logoPaint.style = Paint.Style.FILL
         }
 
         /**
@@ -713,12 +694,38 @@ class AvatarWallpaperService : WallpaperService() {
          * vertex-aligned concentric hex halos, Beat Saber theatrical stage spotlight trapezoids
          * (flash photography effect illuminating the space), and spiral arms.
          */
-        private fun drawOptionBHexLattice(canvas: Canvas, cx: Float, cy: Float, baseRadius: Float, width: Float, height: Float) {
+        /**
+         * Option B: Hex Lattice & Stage Lighting (Hexagonal Sacred Geometry)
+         * Upgraded Architecture:
+         * 1. Multi-Layer Stereoscopic Parallax:
+         *    - Corridor Background: 0.35x depth
+         *    - Hallway Wireframe Halos: 0.60x - 0.96x progressive depth
+         *    - Hallway Bloom Volume: 0.82x - 1.03x progressive depth
+         *    - Obsidian Core & Flower: 1.30x foreground depth
+         *    - Central ✧ Sparkle: 1.55x jewel depth
+         * 2. Disproportionate Violent Wireframe Reactivity:
+         *    - Flower & Obsidian Core: Tight, disciplined mechanical scale (0.35x bass)
+         *    - Outer Wireframes: Explosive non-linear boom (quad power curve + 150f strobe)
+         *      producing massive visual contrast between the spinning inner engine and violent outer shockwaves!
+         */
+        private fun drawOptionBHexLattice(canvas: Canvas, baseCx: Float, baseCy: Float, baseRadius: Float, width: Float, height: Float) {
             val bassKick = (smoothedBass * 1.5f).coerceAtLeast(0f)
-            val coreRadius = (baseRadius * 0.95f + bassKick * 0.6f).coerceIn(45f, 240f)
+            
+            // 1. TIGHT & DISCIPLINED REACTOR CORE SCALING
+            // The flower and obsidian core remain compact, mechanical, and anchored
+            val coreRadius = (baseRadius * 0.88f + bassKick * 0.35f).coerceIn(40f, 185f)
+
+            // 2. DISPROPORTIONATELY VIOLENT WIREFRAME REACTIVITY
+            // Non-linear power curve + strobe transients trigger explosive expansion down the hallway
+            val wireframeViolentBoom = bassKick * 1.8f + (bassKick * bassKick * 0.015f) + (strobeFlash * 150f)
+
+            // Multi-Layer Stereoscopic Parallax Offsets
+            val parallaxMax = 150f
+            val tiltX = rollOffset * parallaxMax
+            val tiltY = pitchOffset * parallaxMax
 
             // 1. Perspective Hexagonal Cyber Hallway / Corridor in the Environment (Behind Avatar)
-            // Static to the environment/screen (not coupled to avatar's spin), using stolen wallpaper color palette
+            // Deep background parallax (0.35x), static to screen / not coupled to avatar spin
             val hallwayFlashAlpha = if (strobeFlash > 0.04f) {
                 (strobeFlash * 255f).toInt().coerceIn(0, 255)
             } else {
@@ -730,8 +737,11 @@ class AvatarWallpaperService : WallpaperService() {
             val wallColor = if (isCustomPaletteActive) currentColors[0] else COLOR_CYAN_ACCENT
 
             if (hallwayFlashAlpha > 0) {
+                val corrCx = baseCx + tiltX * 0.35f
+                val corrCy = baseCy + tiltY * 0.35f
+
                 canvas.save()
-                canvas.translate(cx, cy)
+                canvas.translate(corrCx, corrCy)
                 paint.clearShadowLayer()
 
                 for (v in 0 until 6) {
@@ -763,7 +773,7 @@ class AvatarWallpaperService : WallpaperService() {
                     paint.alpha = (hallwayFlashAlpha * 0.22f * facetFactor).toInt().coerceIn(0, 75)
                     canvas.drawPath(cachedWallPath, paint)
 
-                    // Crisp architectural perspective corner guide lines in stolen palette accent (solid lines grabbing stolen color)
+                    // Crisp architectural perspective corner guide lines in stolen palette accent
                     paint.style = Paint.Style.STROKE
                     paint.strokeWidth = 2.5f + (strobeFlash * 2.5f)
                     paint.color = wallColor
@@ -781,33 +791,42 @@ class AvatarWallpaperService : WallpaperService() {
                 canvas.restore()
             }
 
-            canvas.save()
-            canvas.translate(cx, cy)
             paint.clearShadowLayer()
 
             // 2. Concentric Vertex-Aligned Hexagonal Halos (Unrotated / Decoupled from core spin)
-            // Aligned directly with the 6 hallway guide rails to act as "intensity of hallway illumination"
+            // Disproportionately violently reactive: explosive non-linear expansion + individual parallax depth
             paint.style = Paint.Style.STROKE
             for (h in 0 until 4) {
-                val radius = coreRadius * HEX_HALO_RADII_MULTS[h] + bassKick * HEX_HALO_BASS_MULTS[h]
-                paint.strokeWidth = HEX_HALO_WIDTHS[h]
+                val haloDepth = 0.60f + (3 - h) * 0.12f // h=3 (outer) -> 0.60f, h=0 (inner) -> 0.96f
+                val haloCx = baseCx + tiltX * haloDepth
+                val haloCy = baseCy + tiltY * haloDepth
+
+                val radius = coreRadius * HEX_HALO_RADII_MULTS[h] + wireframeViolentBoom * HEX_HALO_BASS_MULTS[h]
+                paint.strokeWidth = HEX_HALO_WIDTHS[h] + (strobeFlash * 2.0f) + (bassKick * 0.02f)
                 paint.color = if (isCustomPaletteActive) currentColors[h % currentColors.size] else COLOR_CYAN_ACCENT
-                paint.alpha = HEX_HALO_ALPHAS[h]
-                drawHexagon(canvas, 0f, 0f, radius, paint)
+                val surgeAlpha = (HEX_HALO_ALPHAS[h] + (strobeFlash * 75f).toInt() + (bassKick * 0.35f).toInt()).coerceIn(0, 255)
+                paint.alpha = surgeAlpha
+                drawHexagon(canvas, haloCx, haloCy, radius, paint)
             }
 
             // High-energy strobe halo on prominent outer hex during beat flash (unrotated hallway pulse)
             if (strobeFlash > 0.10f) {
-                paint.strokeWidth = 5f
+                val strobeCx = baseCx + tiltX * 0.72f
+                val strobeCy = baseCy + tiltY * 0.72f
+                paint.strokeWidth = 5.5f
                 paint.color = wallColor
                 paint.alpha = (strobeFlash * 255f).toInt().coerceIn(0, 255)
-                drawHexagon(canvas, 0f, 0f, coreRadius * 2.8f + bassKick * 1.5f, paint)
+                drawHexagon(canvas, strobeCx, strobeCy, coreRadius * 2.6f + wireframeViolentBoom * 1.8f, paint)
             }
 
             // 3. Stepped Concentric Blooming Hexagons behind Mother Hexagon (Layered Fake Bloom)
-            // Unrotated: Radiant light volume expanding down the corridor as hallway illumination
+            // Floods the corridor with expanding light volume in sync with the violent boom
             for (hb in 0 until 4) {
-                val radius = coreRadius * HEX_BLOOM_CORE_MULTS[hb] + (bassKick * HEX_BLOOM_BASS_MULTS[hb])
+                val bloomDepth = 0.82f + (hb * 0.07f) // hb=0 (outer) -> 0.82f, hb=3 (inner) -> 1.03f
+                val bloomCx = baseCx + tiltX * bloomDepth
+                val bloomCy = baseCy + tiltY * bloomDepth
+
+                val radius = coreRadius * HEX_BLOOM_CORE_MULTS[hb] + (wireframeViolentBoom * HEX_BLOOM_BASS_MULTS[hb] * 0.65f)
                 val swatchIndex = when (hb) {
                     3 -> 1 % currentColors.size // Vibrant / Inner
                     2 -> 0 % currentColors.size // Dominant
@@ -821,23 +840,26 @@ class AvatarWallpaperService : WallpaperService() {
                 paint.style = Paint.Style.FILL
                 paint.color = hexGlowColor
                 paint.alpha = (HEX_BLOOM_ALPHAS[hb] * 0.45f).toInt().coerceIn(15, 90)
-                drawHexagon(canvas, 0f, 0f, radius, paint)
+                drawHexagon(canvas, bloomCx, bloomCy, radius, paint)
 
                 // Rich neon boundary contour
                 paint.style = Paint.Style.STROKE
-                paint.strokeWidth = HEX_BLOOM_WIDTHS[hb]
+                paint.strokeWidth = HEX_BLOOM_WIDTHS[hb] + (strobeFlash * 1.5f)
                 paint.color = hexGlowColor
                 paint.alpha = HEX_BLOOM_ALPHAS[hb]
-                drawHexagon(canvas, 0f, 0f, radius, paint)
+                drawHexagon(canvas, bloomCx, bloomCy, radius, paint)
             }
 
             // 4. DECOUPLED ROTATING CYBER CORE & SACRED GEOMETRY FLOWER
-            // The black obsidian core chamber and the sacred geometry spiral hex arms ("flower" lattice)
-            // boom with bass AND spin dynamically together!
+            // Foreground stage parallax depth (1.30x): floats proudly in front of the hallway rings!
+            val coreCx = baseCx + tiltX * 1.30f
+            val coreCy = baseCy + tiltY * 1.30f
+
             canvas.save()
+            canvas.translate(coreCx, coreCy)
             canvas.rotate(rotationAngle * 0.35f)
 
-            // 4A. Mother Hexagon (Hollow Obsidian Cyber Chamber) — booming and spinning!
+            // 4A. Mother Hexagon (Hollow Obsidian Cyber Chamber) — booming with tight composure!
             paint.style = Paint.Style.FILL
             paint.color = COLOR_VOID
             paint.alpha = 245
@@ -871,14 +893,14 @@ class AvatarWallpaperService : WallpaperService() {
 
                     val innerDampener = if (step == 1) 0.60f else 1.0f
                     val activationPop = (nodeMag * 0.16f * innerDampener).coerceIn(0f, 11f)
-                    val distance = coreRadius * 1.35f + (step * (42f + bassKick * 0.30f)) + (activationPop * 0.4f)
+                    val distance = coreRadius * 1.25f + (step * (36f + bassKick * 0.20f)) + (activationPop * 0.4f)
                     val angle = baseAngle + (step * spiralTwist) + (smoothedIntensity * 0.003f)
 
                     val hx = (cos(angle) * distance).toFloat()
                     val hy = (sin(angle) * distance).toFloat()
 
-                    val baseHexSize = coreRadius * 0.22f * (1.0f - progress * 0.45f)
-                    val hexSize = (baseHexSize + activationPop).coerceIn(6f, coreRadius * 0.45f)
+                    val baseHexSize = coreRadius * 0.20f * (1.0f - progress * 0.45f)
+                    val hexSize = (baseHexSize + activationPop).coerceIn(5f, coreRadius * 0.38f)
 
                     val colorIdx = (arm + step) % currentColors.size
                     val baseArmColor = if (isCustomPaletteActive) currentColors[colorIdx] else {
@@ -914,17 +936,20 @@ class AvatarWallpaperService : WallpaperService() {
                 }
             }
 
-            canvas.restore() // Restores unrotated frame for the central star glyph
+            canvas.restore() // Restores unrotated frame
 
             // 5. Model Unicode Glyph (✧) Centered, Crisp White & Unrotated
-            // Isolated from avatar spin and without blurry star bloom text
+            // Highest parallax threshold (1.55x): floats like a holographic jewel right on top!
+            val glyphCx = baseCx + tiltX * 1.55f
+            val glyphCy = baseCy + tiltY * 1.55f
+
             logoPaint.clearShadowLayer()
+            logoPaint.style = Paint.Style.FILL
             logoPaint.color = Color.WHITE
             logoPaint.alpha = 255
             logoPaint.textSize = coreRadius * 1.35f
             val off = (logoPaint.descent() + logoPaint.ascent()) / 2f
-            canvas.drawText("✧", 0f, -off, logoPaint)
-            canvas.restore()
+            canvas.drawText("✧", glyphCx, glyphCy - off, logoPaint)
         }
 
         /**
