@@ -535,12 +535,6 @@ class AvatarWallpaperService : WallpaperService() {
             val corrCx = baseCx + tiltX * 0.08f
             val corrCy = baseCy + tiltY * 0.08f
 
-            val flowerCx = baseCx + tiltX * 0.55f
-            val flowerCy = baseCy + tiltY * 0.55f
-
-            val cageCx = baseCx + tiltX * 0.90f
-            val cageCy = baseCy + tiltY * 0.90f
-
             val starCx = baseCx + tiltX * 0.96f
             val starCy = baseCy + tiltY * 0.96f
 
@@ -638,9 +632,10 @@ class AvatarWallpaperService : WallpaperService() {
                 canvas.restore()
             }
 
-            // 2. Harmonic Oscilloscope Flower / Iris in Mid-Depth
+            // 2. Harmonic Oscilloscope Flower / Iris centered inside the ✧ glyph aperture
             canvas.save()
-            canvas.translate(flowerCx, flowerCy)
+            // Nudge rings slightly right and down (+12f, +40f) to optically align with the ✧ glyph aperture (exact vanilla alignment)
+            canvas.translate(starCx + 12f, starCy + 40f)
             canvas.rotate(rotationAngle)
             
             // Faint idle celestial resonance ring (gives ambient life even in silence)
@@ -658,24 +653,9 @@ class AvatarWallpaperService : WallpaperService() {
             
             canvas.restore()
 
-            // 3. Geometric Wireframe Diamond Cage Framing the Star Core
-            val wireframeAccent = corridorColor
             val baseStarSize = (minOf(width, height) * 0.95f).coerceIn(450f, 1050f)
 
-            // Calculate exact font vertical center offset for baseStarSize
-            logoPaint.textSize = baseStarSize
-            val starCenterOffset = (logoPaint.descent() + logoPaint.ascent()) / 2f
-
-            paint.style = Paint.Style.STROKE
-            for (d in 0 until 3) {
-                val r = (dynamicBaseRadius * (0.80f + d * 0.40f) + bassBoost * 0.42f)
-                paint.strokeWidth = if (d == 0) 2.6f + (strobeFlash * 2.2f) else 1.5f
-                paint.color = if (d == 0 && strobeFlash > 0.2f) Color.WHITE else wireframeAccent
-                paint.alpha = if (d == 0) (150 + (strobeFlash * 105f).toInt()).coerceIn(0, 255) else 75
-                drawDiamond(canvas, cageCx, cageCy, r, paint)
-            }
-
-            // 4. Multi-pass bloom glow:
+            // 3. Multi-pass bloom glow:
             // Soft radiant ethereal glow - strictly concentric with core star
             logoPaint.clearShadowLayer()
             logoPaint.style = Paint.Style.FILL
@@ -704,14 +684,15 @@ class AvatarWallpaperService : WallpaperService() {
                 logoPaint.textSize = bloomSize
                 logoPaint.alpha = BLOOM_ALPHAS_OPTION_A[i]
                 val bloomCenterOffset = (logoPaint.descent() + logoPaint.ascent()) / 2f
-                canvas.drawText("✧", cageCx, cageCy - bloomCenterOffset, logoPaint)
+                canvas.drawText("✧", starCx, starCy - bloomCenterOffset, logoPaint)
             }
             
-            // 5. Crisp Core star (pure solid white sparkle)
+            // 4. Crisp Core star (pure solid white sparkle)
             logoPaint.style = Paint.Style.FILL
             logoPaint.color = COLOR_STAR_CORE
             logoPaint.alpha = 255
             logoPaint.textSize = baseStarSize
+            val starCenterOffset = (logoPaint.descent() + logoPaint.ascent()) / 2f
             canvas.drawText("✧", starCx, starCy - starCenterOffset, logoPaint)
         }
 
@@ -734,7 +715,7 @@ class AvatarWallpaperService : WallpaperService() {
             
             // 1. TIGHT & DISCIPLINED REACTOR CORE SCALING
             // The flower and obsidian core remain compact, mechanical, and anchored
-            val coreRadius = (baseRadius * 0.88f + bassKick * 0.35f).coerceIn(40f, 185f)
+            val coreRadius = (baseRadius * 0.88f + bassKick * 0.45f).coerceIn(40f, 230f)
 
             // 2. DISPROPORTIONATELY VIOLENT WIREFRAME REACTIVITY
             // Non-linear power curve + strobe transients trigger explosive expansion down the hallway
@@ -902,6 +883,10 @@ class AvatarWallpaperService : WallpaperService() {
             val hexesPerArm = 5
             val spiralTwist = 0.22f
 
+            // Dynamic outward blooming: expands further than previously capped,
+            // producing dramatic contrast between idle state and active audio hits!
+            val latticeGrowth = (bassKick * 0.70f + smoothedIntensity * 0.35f).coerceIn(0f, 180f)
+
             for (arm in 0 until numArms) {
                 val baseAngle = (arm * Math.PI * 2.0 / numArms).toFloat()
 
@@ -912,15 +897,15 @@ class AvatarWallpaperService : WallpaperService() {
                     val nodeMag = nodeMagnitudes[nodeIndex]
 
                     val innerDampener = if (step == 1) 0.60f else 1.0f
-                    val activationPop = (nodeMag * 0.16f * innerDampener).coerceIn(0f, 11f)
-                    val distance = coreRadius * 1.25f + (step * (36f + bassKick * 0.20f)) + (activationPop * 0.4f)
+                    val activationPop = (nodeMag * 0.16f * innerDampener).coerceIn(0f, 13f)
+                    val distance = (coreRadius * 1.15f) + (step * (34f + latticeGrowth * 0.25f)) + (progress * latticeGrowth * 0.50f) + (activationPop * 0.5f)
                     val angle = baseAngle + (step * spiralTwist) + (smoothedIntensity * 0.003f)
 
                     val hx = (cos(angle) * distance).toFloat()
                     val hy = (sin(angle) * distance).toFloat()
 
-                    val baseHexSize = coreRadius * 0.20f * (1.0f - progress * 0.45f)
-                    val hexSize = (baseHexSize + activationPop).coerceIn(5f, coreRadius * 0.38f)
+                    val baseHexSize = coreRadius * 0.20f * (1.0f - progress * 0.40f)
+                    val hexSize = (baseHexSize * (1.0f + latticeGrowth * 0.002f) + activationPop).coerceIn(5f, coreRadius * 0.42f)
 
                     val colorIdx = (arm + step) % currentColors.size
                     val baseArmColor = if (isCustomPaletteActive) currentColors[colorIdx] else {
@@ -1025,16 +1010,12 @@ class AvatarWallpaperService : WallpaperService() {
             }
 
             // 2. Continuous Corkscrewing Infinite Triangular Tunnel (Seven Nation Army Corridor)
+            // Vanishing point anchored steadily to corrCx, corrCy so corridor perspective is rock-solid and never jiggles on tilt
             val triangleStep = (Math.PI * 2.0 / 3.0).toFloat() // 120° rotational symmetry
             for (i in 0 until numTriangles) {
                 val rawP = (tunnelPhase + (i.toFloat() / numTriangles))
                 val p = (rawP % 1.0f + 1.0f) % 1.0f // strictly [0, 1)
                 val scale = (baseSize * exp(p * 3.4f)).toFloat()
-
-                // Layered tunnel parallax: outer foreground rings drift further than deep core
-                val tunnelDepth = 0.20f + p * 0.50f
-                val triCenterX = baseCx + tiltX * tunnelDepth
-                val triCenterY = baseCy + tiltY * tunnelDepth
 
                 val window = sin(p * Math.PI.toFloat())
                 val smoothEnvelope = (window * window).coerceIn(0f, 1f)
@@ -1055,20 +1036,21 @@ class AvatarWallpaperService : WallpaperService() {
                     paint.style = Paint.Style.FILL
                     paint.color = baseColor
                     paint.alpha = facetAlpha
-                    drawEquilateralTriangle(canvas, triCenterX, triCenterY, scale, corkscrewAngle, paint)
+                    drawEquilateralTriangle(canvas, corrCx, corrCy, scale, corkscrewAngle, paint)
                 }
 
                 paint.style = Paint.Style.STROKE
                 paint.strokeWidth = (3.5f * (1f - p * 0.4f) + (strobeFlash * 1.5f)).coerceIn(1.5f, 6.0f)
                 paint.color = baseColor
                 paint.alpha = totalAlpha
-                drawEquilateralTriangle(canvas, triCenterX, triCenterY, scale, corkscrewAngle, paint)
+                drawEquilateralTriangle(canvas, corrCx, corrCy, scale, corkscrewAngle, paint)
             }
 
             // 3. Vanishing Point Focal Core & Central Triangle Housing
+            // Strong foreground parallax (1.25x depth vs 0.08x background): dramatic 3D float!
             val focalRadius = (baseSize * 1.25f + melodyExpansion * 0.65f).coerceIn(40f, 180f)
-            val focalCx = baseCx + tiltX * 0.90f
-            val focalCy = baseCy + tiltY * 0.90f
+            val focalCx = baseCx + tiltX * 1.25f
+            val focalCy = baseCy + tiltY * 1.25f
 
             canvas.save()
             canvas.translate(focalCx, focalCy)
@@ -1268,27 +1250,16 @@ class AvatarWallpaperService : WallpaperService() {
             val nodeDy = (if (isLandscape) 56f else 105f) * density
             val nodeApex = (if (isLandscape) 102f else 182f) * density
 
+            val diagDist = Math.hypot(nodeDx.toDouble(), nodeDy.toDouble()).toFloat().coerceAtLeast(1f)
+            val diagUnitX = nodeDx / diagDist
+            val diagUnitY = nodeDy / diagDist
+
             val satelliteBaseSize = 24f * density // matches 48dp button radius
 
             val satBaseX = baseCx + tiltX * 0.92f
             val satBaseY = baseCy + tiltY * 0.92f
 
             for (s in 0 until numSatellites) {
-                // Zero-allocation coordinate computation
-                val offsetX = when (s) {
-                    1, 2 -> nodeDx
-                    4, 5 -> -nodeDx
-                    else -> 0f
-                }
-                val offsetY = when (s) {
-                    0 -> -nodeApex
-                    3 -> nodeApex
-                    1, 5 -> -nodeDy
-                    else -> nodeDy
-                }
-                val satX = satBaseX + offsetX
-                val satY = satBaseY + offsetY
-
                 // Interleaved spectral pooling across all 30 nodeMagnitudes:
                 // Each satellite samples 5 interleaved bands across the entire frequency range,
                 // taking the peak transient hit so every cube (top, bottom, left, right) responds
@@ -1303,6 +1274,25 @@ class AvatarWallpaperService : WallpaperService() {
                 }
                 val satMag = peakSatMag
                 val satPop = (satMag * 0.22f).coerceIn(0f, 14f)
+
+                // Active radial outward spreading on bass kicks and frequency pops:
+                // Tightly bounded range (0 to 18dp), active and dynamic!
+                val spread = (bassKick * 0.18f + satMag * 0.28f).coerceIn(0f, 18f * density)
+
+                // Zero-allocation coordinate computation with dynamic radial breathing
+                val offsetX = when (s) {
+                    1, 2 -> nodeDx + diagUnitX * spread
+                    4, 5 -> -(nodeDx + diagUnitX * spread)
+                    else -> 0f
+                }
+                val offsetY = when (s) {
+                    0 -> -(nodeApex + spread)
+                    3 -> (nodeApex + spread)
+                    1, 5 -> -(nodeDy + diagUnitY * spread)
+                    else -> (nodeDy + diagUnitY * spread)
+                }
+                val satX = satBaseX + offsetX
+                val satY = satBaseY + offsetY
 
                 val satSize = satelliteBaseSize + satPop
 
