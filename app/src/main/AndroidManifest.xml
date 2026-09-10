@@ -50,6 +50,7 @@
     
     <!-- NOTIFICATION ACCESS (for context awareness) -->
     <uses-permission android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" xmlns:tools="http://schemas.android.com/tools" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" xmlns:tools="http://schemas.android.com/tools" tools:ignore="ProtectedPermissions" />
     
     <!-- Package visibility (Android 11+): needed to resolve app names from
          media session / notification package names via getApplicationInfo() -->

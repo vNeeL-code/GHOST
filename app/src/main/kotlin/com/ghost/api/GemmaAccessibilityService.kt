@@ -25,19 +25,16 @@ class GemmaAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         event ?: return
         
-        // Audit Fix: "Stop the Scraping"
-        // Only wake up for major window state changes (App switching)
-        // Ignoring TYPE_VIEW_SCROLLED, TYPE_VIEW_CLICKED, etc. to save CPU/Battery.
-        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-             val packageName = event.packageName?.toString()
-             val className = event.className?.toString()
-             
-             if (packageName != null) {
-                 Timber.d("Window Change: $packageName / $className")
-                 if (packageName != "com.ghost.api") {
-                     com.ghost.api.audio.SystemVisualizer.onForegroundAppChanged(packageName)
-                 }
-             }
+        when (event.eventType) {
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+            AccessibilityEvent.TYPE_VIEW_FOCUSED,
+            AccessibilityEvent.TYPE_VIEW_CLICKED,
+            AccessibilityEvent.TYPE_WINDOWS_CHANGED -> {
+                val packageName = event.packageName?.toString() ?: return
+                if (packageName != "com.ghost.api") {
+                    com.ghost.api.audio.SystemVisualizer.onForegroundAppChanged(packageName)
+                }
+            }
         }
     }
 

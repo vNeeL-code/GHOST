@@ -1,5 +1,7 @@
 package com.ghost.api.audio
 
+import android.app.usage.UsageEvents
+import android.app.usage.UsageStatsManager
 import android.content.ComponentName
 import android.content.Context
 import android.graphics.Bitmap
@@ -7,12 +9,17 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import android.media.AudioPlaybackConfiguration
+import android.media.AudioManager
 import android.media.MediaMetadata
 import android.media.audiofx.Visualizer
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
+import android.os.Build
+import android.provider.Settings
 import androidx.palette.graphics.Palette
+import com.ghost.api.GemmaAccessibilityService
 import com.ghost.api.GemmaNotificationListener
 import timber.log.Timber
 
@@ -29,6 +36,8 @@ object SystemVisualizer {
     private var appContext: Context? = null
     private var mediaSessionManager: MediaSessionManager? = null
     private var activeMediaController: MediaController? = null
+    private var audioManager: AudioManager? = null
+    private var playbackCallback: AudioManager.AudioPlaybackCallback? = null
 
     // Track last active foreground package and last known AI package
     var lastForegroundPackage: String? = null
@@ -162,6 +171,121 @@ object SystemVisualizer {
         }?.second
     }
 
+    fun isIgnoredPackage(packageName: String?): Boolean {
+        if (packageName.isNullOrBlank()) return true
+        val lower = packageName.lowercase()
+        return lower == "com.ghost.api" ||
+               lower == "android" ||
+               lower == "com.android.systemui" ||
+               lower.contains("launcher") ||
+               lower.contains("inputmethod") ||
+               lower.contains("keyboard") ||
+               lower == "cn.zte.aigcinput" ||
+               lower.startsWith("cn.nubia.game") ||
+               lower.startsWith("cn.zte.game") ||
+               lower == "com.zte.floatassist" ||
+               lower == "com.android.permissioncontroller"
+    }
+
+    fun ensureAccessibilityServiceEnabled(context: Context) {
+        try {
+            val cr = context.contentResolver
+            val enabledServices = Settings.Secure.getString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: ""
+            val myService = ComponentName(context, GemmaAccessibilityService::class.java).flattenToString()
+            if (!enabledServices.contains(myService)) {
+                val newServices = if (enabledServices.isEmpty()) myService else "$enabledServices:$myService"
+                Settings.Secure.putString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, newServices)
+                Settings.Secure.putString(cr, Settings.Secure.ACCESSIBILITY_ENABLED, "1")
+                Timber.i("SystemVisualizer: Auto-enabled GemmaAccessibilityService")
+            }
+        } catch (e: Exception) {
+            Timber.d("SystemVisualizer: Accessibility auto-enable skipped (${e.message})")
+        }
+    }
+
+    private fun resolveAudioPlayingApp(configs: List<AudioPlaybackConfiguration>?): String? {
+        configs ?: return null
+        val pm = appContext?.packageManager ?: return null
+        val myUid = android.os.Process.myUid()
+
+        for (config in configs) {
+            try {
+                val isActive = try {
+                    val method = config.javaClass.getMethod("isActive")
+                    method.invoke(config) as? Boolean ?: true
+                } catch (e: Exception) {
+                    try {
+                        val stateMethod = config.javaClass.getMethod("getPlayerState")
+                        val state = stateMethod.invoke(config) as? Int
+                        state == 2 // AudioPlaybackConfiguration.PLAYER_STATE_STARTED
+                    } catch (e2: Exception) {
+                        true
+                    }
+                }
+                if (!isActive) continue
+
+                val clientUid = try {
+                    val method = config.javaClass.getMethod("getClientUid")
+                    method.invoke(config) as? Int
+                } catch (e: Exception) {
+                    try {
+                        val field = config.javaClass.getDeclaredField("mClientUid").apply { isAccessible = true }
+                        field.getInt(config)
+                    } catch (e2: Exception) {
+                        null
+                    }
+                }
+
+                if (clientUid != null && clientUid != myUid && clientUid > 10000) {
+                    val packages = pm.getPackagesForUid(clientUid)
+                    if (packages != null) {
+                        for (pkg in packages) {
+                            if (!isIgnoredPackage(pkg)) {
+                                if (findBrandPalette(pkg) != null) {
+                                    lastActiveAiPackage = pkg
+                                    return pkg
+                                }
+                            }
+                        }
+                        val firstValid = packages.firstOrNull { !isIgnoredPackage(it) }
+                        if (firstValid != null) return firstValid
+                    }
+                }
+            } catch (e: Exception) {
+                // Safeguard against ROM reflection limits
+            }
+        }
+        return null
+    }
+
+    private fun getForegroundAppFromUsageStats(): String? {
+        val ctx = appContext ?: return null
+        return try {
+            val usm = ctx.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return null
+            val time = System.currentTimeMillis()
+            val events = usm.queryEvents(time - 15000L, time)
+            val event = UsageEvents.Event()
+            var lastPkg: String? = null
+            var lastTime = 0L
+            while (events.hasNextEvent()) {
+                events.getNextEvent(event)
+                if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED && event.timeStamp > lastTime) {
+                    val pkg = event.packageName
+                    if (!isIgnoredPackage(pkg)) {
+                        lastPkg = pkg
+                        lastTime = event.timeStamp
+                    }
+                }
+            }
+            if (lastPkg != null && findBrandPalette(lastPkg) != null) {
+                lastActiveAiPackage = lastPkg
+            }
+            lastPkg
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     interface AudioListener {
         fun onAudioData(waveform: ByteArray, fft: ByteArray, intensity: Float, bass: Float)
         fun onColorsChanged(colors: IntArray?) {}
@@ -197,6 +321,30 @@ object SystemVisualizer {
 
     fun init(context: Context) {
         appContext = context.applicationContext
+        ensureAccessibilityServiceEnabled(context)
+
+        if (audioManager == null) {
+            audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && playbackCallback == null) {
+                playbackCallback = object : AudioManager.AudioPlaybackCallback() {
+                    override fun onPlaybackConfigChanged(configs: MutableList<AudioPlaybackConfiguration>?) {
+                        super.onPlaybackConfigChanged(configs)
+                        if (isAudioActive) {
+                            val app = resolveAudioPlayingApp(configs)
+                            if (app != null && app != currentAppliedPackage) {
+                                applyPackageColor(app)
+                            }
+                        }
+                    }
+                }
+                try {
+                    audioManager?.registerAudioPlaybackCallback(playbackCallback!!, handler)
+                } catch (e: Exception) {
+                    Timber.w(e, "Could not register AudioPlaybackCallback")
+                }
+            }
+        }
+
         if (visualizer != null) return
 
         try {
@@ -232,22 +380,32 @@ object SystemVisualizer {
                                 isAudioActive = true
                             }
 
-                            // Robust Attribution:
-                            // 1. If user is currently looking at a non-launcher app on screen, that app ALWAYS takes priority!
-                            // 2. Otherwise (user on home screen), check if active media session is truly in STATE_PLAYING.
-                            // 3. If media session is idle/stale, fall back to lastActiveAiPackage.
+                            // 5-Layer Multi-Stage Audio Attribution:
+                            // 1. Direct active audio playback configs (which app is physically feeding audio buffers)
+                            val hardwareAudioPkg = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                resolveAudioPlayingApp(audioManager?.activePlaybackConfigurations)
+                            } else null
+
+                            // 2. Focused on-screen app
+                            val screenApp = if (!isIgnoredPackage(lastForegroundPackage)) lastForegroundPackage else null
+
+                            // 3. MediaSession if actively playing
                             val isMediaPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
-                            val isScreenApp = lastForegroundPackage != null && 
-                                             !lastForegroundPackage!!.contains("launcher") && 
-                                             lastForegroundPackage != "com.android.systemui"
+                            val mediaPkg = if (isMediaPlaying) activeMediaController?.packageName else null
 
-                            val pkgToApply = when {
-                                isScreenApp -> lastForegroundPackage
-                                isMediaPlaying -> activeMediaController?.packageName ?: lastActiveAiPackage
-                                else -> lastActiveAiPackage ?: lastForegroundPackage ?: activeMediaController?.packageName
-                            }
+                            // 4. UsageStats fallback (most recently resumed non-system app)
+                            val usagePkg = if (hardwareAudioPkg == null && screenApp == null && mediaPkg == null) {
+                                getForegroundAppFromUsageStats()
+                            } else null
 
-                            if (pkgToApply != null && pkgToApply != "com.ghost.api" && pkgToApply != currentAppliedPackage) {
+                            val pkgToApply = hardwareAudioPkg 
+                                ?: screenApp 
+                                ?: mediaPkg 
+                                ?: usagePkg 
+                                ?: lastActiveAiPackage 
+                                ?: activeMediaController?.packageName
+
+                            if (pkgToApply != null && !isIgnoredPackage(pkgToApply) && pkgToApply != currentAppliedPackage) {
                                 applyPackageColor(pkgToApply)
                             }
                         } else if (isAudioActive && (System.currentTimeMillis() - lastAudioActivityTime > 3000)) {
@@ -352,17 +510,16 @@ object SystemVisualizer {
     }
 
     fun onForegroundAppChanged(packageName: String) {
-        if (packageName == "com.ghost.api") return
-        val isLauncher = packageName.contains("launcher") || packageName == "com.android.systemui"
-        if (!isLauncher) {
-            lastForegroundPackage = packageName
-            if (findBrandPalette(packageName) != null) {
-                lastActiveAiPackage = packageName
-            }
+        if (isIgnoredPackage(packageName)) return
+        if (packageName == lastForegroundPackage) return
+
+        lastForegroundPackage = packageName
+        if (findBrandPalette(packageName) != null) {
+            lastActiveAiPackage = packageName
         }
 
         // If audio is actively playing, immediately adopt this foreground app's palette
-        if (isAudioActive && !isLauncher) {
+        if (isAudioActive) {
             applyPackageColor(packageName)
         }
     }
@@ -514,6 +671,12 @@ object SystemVisualizer {
         visualizer?.release()
         visualizer = null
         isEnabled = false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && playbackCallback != null) {
+            try {
+                audioManager?.unregisterAudioPlaybackCallback(playbackCallback!!)
+            } catch (e: Exception) {}
+            playbackCallback = null
+        }
         mediaSessionManager?.removeOnActiveSessionsChangedListener(activeSessionsListener)
         activeMediaController?.unregisterCallback(mediaControllerCallback)
         listeners.clear()
