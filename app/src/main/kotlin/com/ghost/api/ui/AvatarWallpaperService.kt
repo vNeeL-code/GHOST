@@ -698,40 +698,38 @@ class AvatarWallpaperService : WallpaperService() {
 
         /**
          * Option B: Hex Lattice & Stage Lighting (Hexagonal Sacred Geometry)
-         * Upgraded Architecture:
-         * 1. Multi-Layer Stereoscopic Parallax:
-         *    - Corridor Background: 0.08x depth (ultra-slow vanishing point)
+         * Architectural Roles:
+         * 1. Hallway Lighting & Wireframes: GENTLE in physical spread, HIGHLY REACTIVE in illumination intensity.
+         *    - Corridor structure & halos stay physically composed and stable along the perspective hallway.
+         *    - Illumination (alphas, glow fill volume, strobe flashes, neon accents) surges intensely with audio energy.
+         * 2. Sacred Geometry Flower Lattice: HIGHLY REACTIVE in both physical SPREAD and SCALING.
+         *    - Idle: tightly gathered around the obsidian mother hexagon with delicate geometric nodes.
+         *    - Audio Active: 6 spiral arms blossom aggressively outward into the corridor, and the individual
+         *      hex nodes swell dramatically in scale (2x-3x) with individual frequency pops!
+         * 3. Multi-Layer Stereoscopic Parallax:
+         *    - Corridor Background: 0.08x depth
          *    - Hallway Wireframe Halos: 0.40x - 0.67x progressive depth
          *    - Hallway Bloom Volume: 0.65x - 0.80x progressive depth
-         *    - Obsidian Core & Flower: 0.90x foreground depth (avatar container)
-         *    - Central ✧ Sparkle: 0.96x jewel depth (subtle float, cannot breach container)
-         * 2. Disproportionate Violent Wireframe Reactivity:
-         *    - Flower & Obsidian Core: Tight, disciplined mechanical scale (0.35x bass)
-         *    - Outer Wireframes: Explosive non-linear boom (quad power curve + 150f strobe)
-         *      producing massive visual contrast between the spinning inner engine and violent outer shockwaves!
+         *    - Obsidian Core & Flower: 0.90x foreground depth
+         *    - Central ✧ Sparkle: 0.96x jewel depth
          */
         private fun drawOptionBHexLattice(canvas: Canvas, baseCx: Float, baseCy: Float, baseRadius: Float, width: Float, height: Float) {
             val bassKick = (smoothedBass * 1.5f).coerceAtLeast(0f)
             
-            // 1. TIGHT & DISCIPLINED REACTOR CORE SCALING
-            // The flower and obsidian core remain compact, mechanical, and anchored
-            val coreRadius = (baseRadius * 0.88f + bassKick * 0.45f).coerceIn(40f, 230f)
+            // 1. DISCIPLINED REACTOR CORE SCALING
+            val coreRadius = (baseRadius * 0.85f + bassKick * 0.28f).coerceIn(40f, 195f)
 
-            // 2. DISPROPORTIONATELY VIOLENT WIREFRAME REACTIVITY
-            // Non-linear power curve + strobe transients trigger explosive expansion down the hallway
-            val wireframeViolentBoom = bassKick * 1.8f + (bassKick * bassKick * 0.015f) + (strobeFlash * 150f)
+            // 2. GENTLE HALLWAY SPREAD (Stable architectural structure, restrained physical expansion)
+            val hallwayGentleSpread = (bassKick * 0.25f + strobeFlash * 15f).coerceIn(0f, 50f)
 
             // Multi-Layer Stereoscopic Parallax Offsets
             val tiltX = rollOffset * PARALLAX_MAX
             val tiltY = pitchOffset * PARALLAX_MAX
 
             // 1. Perspective Hexagonal Cyber Hallway / Corridor in the Environment (Behind Avatar)
-            // Ultra-slow deep background parallax (0.08x), static to screen / not coupled to avatar spin
-            val hallwayFlashAlpha = if (strobeFlash > 0.04f) {
-                (strobeFlash * 255f).toInt().coerceIn(0, 255)
-            } else {
-                0
-            }
+            // Ultra-slow deep background parallax (0.08x), static to screen / decoupled from avatar spin
+            val ambientIllumination = (smoothedIntensity * 0.40f).coerceIn(0f, 60f)
+            val hallwayFlashAlpha = maxOf((strobeFlash * 255f), ambientIllumination).toInt().coerceIn(0, 255)
 
             val nearR = coreRadius * 1.05f
             val farR = maxOf(width, height) * 0.85f
@@ -795,39 +793,39 @@ class AvatarWallpaperService : WallpaperService() {
             paint.clearShadowLayer()
 
             // 2. Concentric Vertex-Aligned Hexagonal Halos (Unrotated / Decoupled from core spin)
-            // Disproportionately violently reactive: explosive non-linear expansion + individual parallax depth
+            // Stable geometric radii + dynamic illumination intensity on audio surges
             paint.style = Paint.Style.STROKE
             for (h in 0 until 4) {
                 val haloDepth = 0.40f + (3 - h) * 0.09f // h=3 (outer) -> 0.40f, h=0 (inner) -> 0.67f
                 val haloCx = baseCx + tiltX * haloDepth
                 val haloCy = baseCy + tiltY * haloDepth
 
-                val radius = coreRadius * HEX_HALO_RADII_MULTS[h] + wireframeViolentBoom * HEX_HALO_BASS_MULTS[h]
-                paint.strokeWidth = HEX_HALO_WIDTHS[h] + (strobeFlash * 2.0f) + (bassKick * 0.02f)
+                val radius = coreRadius * HEX_HALO_RADII_MULTS[h] + hallwayGentleSpread * (0.35f + h * 0.25f)
+                paint.strokeWidth = HEX_HALO_WIDTHS[h] + (strobeFlash * 3.0f) + (smoothedIntensity * 0.035f)
                 paint.color = if (isCustomPaletteActive) currentColors[h % currentColors.size] else COLOR_CYAN_ACCENT
-                val surgeAlpha = (HEX_HALO_ALPHAS[h] + (strobeFlash * 75f).toInt() + (bassKick * 0.35f).toInt()).coerceIn(0, 255)
+                val surgeAlpha = (HEX_HALO_ALPHAS[h] + (strobeFlash * 120f).toInt() + (smoothedIntensity * 0.60f).toInt()).coerceIn(0, 255)
                 paint.alpha = surgeAlpha
                 drawHexagon(canvas, haloCx, haloCy, radius, paint)
             }
 
             // High-energy strobe halo on prominent outer hex during beat flash (unrotated hallway pulse)
-            if (strobeFlash > 0.10f) {
+            if (strobeFlash > 0.08f) {
                 val strobeCx = baseCx + tiltX * 0.55f
                 val strobeCy = baseCy + tiltY * 0.55f
-                paint.strokeWidth = 5.5f
+                paint.strokeWidth = 4.5f + (strobeFlash * 3.5f)
                 paint.color = wallColor
                 paint.alpha = (strobeFlash * 255f).toInt().coerceIn(0, 255)
-                drawHexagon(canvas, strobeCx, strobeCy, coreRadius * 2.6f + wireframeViolentBoom * 1.8f, paint)
+                drawHexagon(canvas, strobeCx, strobeCy, coreRadius * 2.8f + hallwayGentleSpread * 0.6f, paint)
             }
 
             // 3. Stepped Concentric Blooming Hexagons behind Mother Hexagon (Layered Fake Bloom)
-            // Floods the corridor with expanding light volume in sync with the violent boom
+            // Floods the corridor with dynamic light volume proportional to illumination intensity
             for (hb in 0 until 4) {
                 val bloomDepth = 0.65f + (hb * 0.05f) // hb=0 (outer) -> 0.65f, hb=3 (inner) -> 0.80f
                 val bloomCx = baseCx + tiltX * bloomDepth
                 val bloomCy = baseCy + tiltY * bloomDepth
 
-                val radius = coreRadius * HEX_BLOOM_CORE_MULTS[hb] + (wireframeViolentBoom * HEX_BLOOM_BASS_MULTS[hb] * 0.65f)
+                val radius = coreRadius * HEX_BLOOM_CORE_MULTS[hb] + (hallwayGentleSpread * (0.25f + hb * 0.15f))
                 val swatchIndex = when (hb) {
                     3 -> 1 % currentColors.size // Vibrant / Inner
                     2 -> 0 % currentColors.size // Dominant
@@ -837,17 +835,19 @@ class AvatarWallpaperService : WallpaperService() {
                 val rawColor = if (isCustomPaletteActive) currentColors[swatchIndex] else COLOR_COBALT_GLOW
                 val hexGlowColor = ensureVisibleBloomColor(rawColor, COLOR_COBALT_GLOW)
 
-                // Translucent solid planar aura fill for radiant bloom volume
+                // Translucent solid planar aura fill for radiant bloom volume — intensity reactive
                 paint.style = Paint.Style.FILL
                 paint.color = hexGlowColor
-                paint.alpha = (HEX_BLOOM_ALPHAS[hb] * 0.45f).toInt().coerceIn(15, 90)
+                val fillAlphaMult = 0.35f + (smoothedIntensity / 140f) + (strobeFlash * 0.30f)
+                paint.alpha = (HEX_BLOOM_ALPHAS[hb] * fillAlphaMult).toInt().coerceIn(15, 140)
                 drawHexagon(canvas, bloomCx, bloomCy, radius, paint)
 
                 // Rich neon boundary contour
                 paint.style = Paint.Style.STROKE
-                paint.strokeWidth = HEX_BLOOM_WIDTHS[hb] + (strobeFlash * 1.5f)
+                paint.strokeWidth = HEX_BLOOM_WIDTHS[hb] + (strobeFlash * 2.0f) + (smoothedIntensity * 0.02f)
                 paint.color = hexGlowColor
-                paint.alpha = HEX_BLOOM_ALPHAS[hb]
+                val strokeAlpha = (HEX_BLOOM_ALPHAS[hb] + (strobeFlash * 70f).toInt() + (smoothedIntensity * 0.45f).toInt()).coerceIn(0, 255)
+                paint.alpha = strokeAlpha
                 drawHexagon(canvas, bloomCx, bloomCy, radius, paint)
             }
 
@@ -878,14 +878,14 @@ class AvatarWallpaperService : WallpaperService() {
             drawHexagon(canvas, 0f, 0f, coreRadius * 0.82f, paint)
 
             // 4B. Six Logarithmic Spiral Hex Arms ("Flower" Lattice on top of the black core)
-            // Spinning on top of the black core, spectral nodes popping with discrete audio frequencies
+            // HIGHLY REACTIVE IN SPREAD AND SCALE:
+            // Arms reach out aggressively into the hallway, and hex nodes swell dramatically with audio!
             val numArms = 6
             val hexesPerArm = 5
             val spiralTwist = 0.22f
 
-            // Dynamic outward blooming: expands further than previously capped,
-            // producing dramatic contrast between idle state and active audio hits!
-            val latticeGrowth = (bassKick * 0.70f + smoothedIntensity * 0.35f).coerceIn(0f, 180f)
+            // Dynamic high-energy lattice spread: bass kicks + volume intensity + melodic harmonics
+            val latticeSpread = (bassKick * 1.6f + smoothedIntensity * 1.1f + smoothedMelody * 0.85f).coerceIn(0f, 360f)
 
             for (arm in 0 until numArms) {
                 val baseAngle = (arm * Math.PI * 2.0 / numArms).toFloat()
@@ -896,16 +896,22 @@ class AvatarWallpaperService : WallpaperService() {
                     val nodeIndex = ((step - 1) * numArms + arm).coerceIn(0, nodeMagnitudes.size - 1)
                     val nodeMag = nodeMagnitudes[nodeIndex]
 
-                    val innerDampener = if (step == 1) 0.60f else 1.0f
-                    val activationPop = (nodeMag * 0.16f * innerDampener).coerceIn(0f, 13f)
-                    val distance = (coreRadius * 1.15f) + (step * (34f + latticeGrowth * 0.25f)) + (progress * latticeGrowth * 0.50f) + (activationPop * 0.5f)
+                    val innerDampener = if (step == 1) 0.55f else 1.0f
+                    val activationPop = (nodeMag * 0.28f * innerDampener).coerceIn(0f, 24f)
+
+                    // Aggressive outward spread across the screen
+                    val stepSpread = step * (26f + latticeSpread * 0.26f)
+                    val tipBloom = progress * progress * latticeSpread * 0.70f
+                    val distance = (coreRadius * 1.08f) + stepSpread + tipBloom + (activationPop * 1.2f)
                     val angle = baseAngle + (step * spiralTwist) + (smoothedIntensity * 0.003f)
 
                     val hx = (cos(angle) * distance).toFloat()
                     val hy = (sin(angle) * distance).toFloat()
 
-                    val baseHexSize = coreRadius * 0.20f * (1.0f - progress * 0.40f)
-                    val hexSize = (baseHexSize * (1.0f + latticeGrowth * 0.002f) + activationPop).coerceIn(5f, coreRadius * 0.42f)
+                    // Dynamic scale: nodes swell significantly with energy and discrete musical notes
+                    val scaleMultiplier = 1.0f + (latticeSpread / 130f) * 0.90f + (nodeMag / 40f) * 0.80f
+                    val baseHexSize = coreRadius * 0.18f * (1.0f - progress * 0.28f)
+                    val hexSize = (baseHexSize * scaleMultiplier + (activationPop * 1.2f)).coerceIn(6f, coreRadius * 0.65f)
 
                     val colorIdx = (arm + step) % currentColors.size
                     val baseArmColor = if (isCustomPaletteActive) currentColors[colorIdx] else {
@@ -918,15 +924,15 @@ class AvatarWallpaperService : WallpaperService() {
                         }
                     }
 
-                    val armColor = if (nodeMag > 16f) {
-                        val blendRatio = (nodeMag / 65f).coerceIn(0f, 0.85f)
+                    val armColor = if (nodeMag > 14f) {
+                        val blendRatio = (nodeMag / 55f).coerceIn(0f, 0.90f)
                         ColorUtils.blendARGB(baseArmColor, Color.WHITE, blendRatio)
                     } else {
                         baseArmColor
                     }
 
-                    val baseAlpha = ((1f - progress * 0.35f) * 200).toInt()
-                    val nodeAlpha = (baseAlpha + (nodeMag * 1.5f).toInt()).coerceIn(50, 255)
+                    val baseAlpha = ((1f - progress * 0.30f) * 190).toInt()
+                    val nodeAlpha = (baseAlpha + (nodeMag * 1.8f).toInt() + (latticeSpread * 0.25f).toInt()).coerceIn(50, 255)
 
                     paint.style = Paint.Style.FILL
                     paint.color = armColor
@@ -934,9 +940,9 @@ class AvatarWallpaperService : WallpaperService() {
                     drawHexagon(canvas, hx, hy, hexSize, paint)
 
                     paint.style = Paint.Style.STROKE
-                    paint.strokeWidth = 2.2f + (nodeMag * 0.03f)
-                    paint.color = if (nodeMag > 22f) Color.WHITE else baseArmColor
-                    paint.alpha = ((1f - progress * 0.5f) * 180 + (nodeMag * 1.2f)).toInt().coerceIn(40, 255)
+                    paint.strokeWidth = 2.0f + (nodeMag * 0.06f) + (latticeSpread * 0.006f)
+                    paint.color = if (nodeMag > 18f) Color.WHITE else baseArmColor
+                    paint.alpha = ((1f - progress * 0.40f) * 180 + (nodeMag * 1.4f)).toInt().coerceIn(50, 255)
                     drawHexagon(canvas, hx, hy, hexSize, paint)
                 }
             }
