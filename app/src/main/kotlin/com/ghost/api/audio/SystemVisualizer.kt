@@ -30,9 +30,12 @@ object SystemVisualizer {
     private var mediaSessionManager: MediaSessionManager? = null
     private var activeMediaController: MediaController? = null
 
-    // Track last active foreground package reported by accessibility
+    // Track last active foreground package and last known AI package
     var lastForegroundPackage: String? = null
         private set
+    var lastActiveAiPackage: String? = null
+        private set
+    private var currentAppliedPackage: String? = null
 
     // Audio activity state & silence decay
     private var lastAudioActivityTime: Long = 0L
@@ -47,6 +50,116 @@ object SystemVisualizer {
     private val clearEmotionRunnable = Runnable {
         overrideEmotionColors = null
         listeners.forEach { it.onColorsChanged(currentAlbumColors) }
+    }
+
+    // Curated 5-color harmonic palettes for AI brands
+    // Eliminates muddy programmatic darkening and introduces signature secondary highlights (e.g. Claude's warm cream/light gray)
+    private val AI_BRAND_PALETTES = listOf(
+        // Claude (Anthropic): Terracotta, Warm Linen Light Gray, Warm Amber Coral, Espresso Slate, Soft Parchment
+        Triple(listOf("claude", "anthropic"), intArrayOf(
+            Color.parseColor("#D97757"), // 0: Terracotta Accent
+            Color.parseColor("#E8E5DE"), // 1: Claude Warm Linen / Light Gray
+            Color.parseColor("#E59866"), // 2: Warm Amber Coral
+            Color.parseColor("#3B322C"), // 3: Warm Espresso Slate
+            Color.parseColor("#F5EBE6")  // 4: Soft Parchment Glow
+        ), "Claude"),
+
+        // Qwen (Alibaba): Royal Iris Purple, Soft Lavender, Electric Violet, Deep Nebula, Cyber Indigo
+        Triple(listOf("qwen", "qwenlm", "tongyi"), intArrayOf(
+            Color.parseColor("#7C4DFF"), // 0: Royal Iris Purple
+            Color.parseColor("#E9D5FF"), // 1: Soft Lavender Frost
+            Color.parseColor("#A855F7"), // 2: Electric Violet
+            Color.parseColor("#241442"), // 3: Deep Nebula Obsidian
+            Color.parseColor("#6366F1")  // 4: Cyber Indigo
+        ), "Qwen"),
+
+        // Kimi (Moonshot AI): Moonlight Cobalt, Ice Pale Blue, Vivid Cyan Flare, Midnight Slate, Sky Aqua
+        Triple(listOf("kimi", "kimichat", "moonshot"), intArrayOf(
+            Color.parseColor("#2B5CFF"), // 0: Moonlight Cobalt
+            Color.parseColor("#E0F2FE"), // 1: Ice Pale Blue / Crisp White
+            Color.parseColor("#00D2FF"), // 2: Vivid Cyan Flare
+            Color.parseColor("#0F172A"), // 3: Midnight Slate
+            Color.parseColor("#38BDF8")  // 4: Sky Aqua
+        ), "Kimi"),
+
+        // Mistral (Le Chat): Solar Flame Orange, Champagne Sand, Amber Gold, Volcanic Basalt, Deep Fire
+        Triple(listOf("mistral", "lechat"), intArrayOf(
+            Color.parseColor("#FF7000"), // 0: Solar Flame Orange
+            Color.parseColor("#FFF3E0"), // 1: Champagne Sand
+            Color.parseColor("#FFB300"), // 2: Amber Gold
+            Color.parseColor("#261C14"), // 3: Volcanic Basalt
+            Color.parseColor("#FF5722")  // 4: Deep Fire Orange
+        ), "Mistral"),
+
+        // Grok (xAI): Gunmetal Slate, Platinum Silver Spark, Titanium Gray, Deep Obsidian, Dark Carbon
+        Triple(listOf("grok", "xai"), intArrayOf(
+            Color.parseColor("#4A5568"), // 0: Gunmetal Slate
+            Color.parseColor("#F3F4F6"), // 1: Platinum Silver / White Spark
+            Color.parseColor("#9CA3AF"), // 2: Titanium Gray
+            Color.parseColor("#111827"), // 3: Deep Obsidian
+            Color.parseColor("#374151")  // 4: Dark Carbon
+        ), "Grok"),
+
+        // ChatGPT (OpenAI): Signature Mint, Crisp Off-White Slate, Emerald Glow, Charcoal Slate, Pine Forest
+        Triple(listOf("chatgpt", "openai"), intArrayOf(
+            Color.parseColor("#10A37F"), // 0: Signature Mint Green
+            Color.parseColor("#F7F7F8"), // 1: Crisp Off-White Slate
+            Color.parseColor("#74AA9C"), // 2: Soft Emerald Glow
+            Color.parseColor("#202123"), // 3: Charcoal Slate
+            Color.parseColor("#054E3B")  // 4: Deep Pine Forest
+        ), "ChatGPT"),
+
+        // DeepSeek: Electric Whale Blue, Polar Ice Slate, Bioluminescent Cyan, Abyssal Trench, Ocean Blue
+        Triple(listOf("deepseek"), intArrayOf(
+            Color.parseColor("#4D6BFE"), // 0: Electric Whale Blue
+            Color.parseColor("#E2E8F0"), // 1: Polar Ice Slate
+            Color.parseColor("#00F2FE"), // 2: Bioluminescent Cyan
+            Color.parseColor("#0B132B"), // 3: Abyssal Trench Navy
+            Color.parseColor("#3B82F6")  // 4: Ocean Blue
+        ), "DeepSeek"),
+
+        // Perplexity: Seafoam Teal, Clean Teal Mist, Deep Jade, Dark Pine, Turquoise
+        Triple(listOf("perplexity"), intArrayOf(
+            Color.parseColor("#20B2AA"), // 0: Seafoam Teal
+            Color.parseColor("#F0FDFA"), // 1: Clean Teal Mist
+            Color.parseColor("#0D9488"), // 2: Deep Jade
+            Color.parseColor("#134E4A"), // 3: Dark Pine
+            Color.parseColor("#5EEAD4")  // 4: Bright Turquoise
+        ), "Perplexity"),
+
+        // Meta AI / Llama: Vivid Meta Blue, Soft Azure White, Electric Indigo, Deep Midnight, Royal Cyan
+        Triple(listOf("meta.ai", "llama"), intArrayOf(
+            Color.parseColor("#0081FB"), // 0: Vivid Meta Blue
+            Color.parseColor("#EFF6FF"), // 1: Soft Azure White
+            Color.parseColor("#6366F1"), // 2: Electric Indigo
+            Color.parseColor("#0B132B"), // 3: Deep Midnight
+            Color.parseColor("#06B6D4")  // 4: Royal Cyan
+        ), "Meta AI"),
+
+        // Microsoft Copilot: Copilot Violet, Lavender Frost, Coral Accent, Deep Obsidian, Royal Purple
+        Triple(listOf("copilot"), intArrayOf(
+            Color.parseColor("#6B46C1"), // 0: Copilot Violet
+            Color.parseColor("#F3E8FF"), // 1: Lavender Frost
+            Color.parseColor("#FF6B6B"), // 2: Coral Accent
+            Color.parseColor("#1E1035"), // 3: Deep Obsidian
+            Color.parseColor("#9333EA")  // 4: Royal Purple
+        ), "Copilot"),
+
+        // Google Gemini / Bard: Google Sparkle Blue, Google Off-White, Sparkle Violet, Deep Space Slate, Electric Cyan
+        Triple(listOf("bard", "gemini"), intArrayOf(
+            Color.parseColor("#4285F4"), // 0: Google Sparkle Blue
+            Color.parseColor("#F8F9FA"), // 1: Google Off-White
+            Color.parseColor("#9B51E0"), // 2: Sparkle Violet
+            Color.parseColor("#1A1D20"), // 3: Deep Space Slate
+            Color.parseColor("#00E5FF")  // 4: Electric Cyan
+        ), "Gemini")
+    )
+
+    private fun findBrandPalette(packageName: String): IntArray? {
+        val lower = packageName.lowercase()
+        return AI_BRAND_PALETTES.firstOrNull { (keys, _, _) ->
+            keys.any { lower.contains(it) }
+        }?.second
     }
 
     interface AudioListener {
@@ -73,6 +186,7 @@ object SystemVisualizer {
             } else if (state?.state == PlaybackState.STATE_STOPPED || state?.state == PlaybackState.STATE_PAUSED) {
                 if (!isAudioActive) {
                     currentAlbumColors = null
+                    currentAppliedPackage = null
                     if (overrideEmotionColors == null) {
                         handler.post { listeners.forEach { it.onColorsChanged(null) } }
                     }
@@ -116,15 +230,29 @@ object SystemVisualizer {
                             lastAudioActivityTime = System.currentTimeMillis()
                             if (!isAudioActive) {
                                 isAudioActive = true
-                                if (currentAlbumColors == null) {
-                                    val pkg = activeMediaController?.packageName ?: lastForegroundPackage
-                                    if (pkg != null && pkg != "com.ghost.api") {
-                                        applyPackageColor(pkg)
-                                    }
-                                }
                             }
-                        } else if (isAudioActive && (System.currentTimeMillis() - lastAudioActivityTime > 3500)) {
+
+                            // Robust Attribution:
+                            // 1. If user is currently looking at a non-launcher app on screen, that app ALWAYS takes priority!
+                            // 2. Otherwise (user on home screen), check if active media session is truly in STATE_PLAYING.
+                            // 3. If media session is idle/stale, fall back to lastActiveAiPackage.
+                            val isMediaPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
+                            val isScreenApp = lastForegroundPackage != null && 
+                                             !lastForegroundPackage!!.contains("launcher") && 
+                                             lastForegroundPackage != "com.android.systemui"
+
+                            val pkgToApply = when {
+                                isScreenApp -> lastForegroundPackage
+                                isMediaPlaying -> activeMediaController?.packageName ?: lastActiveAiPackage
+                                else -> lastActiveAiPackage ?: lastForegroundPackage ?: activeMediaController?.packageName
+                            }
+
+                            if (pkgToApply != null && pkgToApply != "com.ghost.api" && pkgToApply != currentAppliedPackage) {
+                                applyPackageColor(pkgToApply)
+                            }
+                        } else if (isAudioActive && (System.currentTimeMillis() - lastAudioActivityTime > 3000)) {
                             isAudioActive = false
+                            currentAppliedPackage = null
                             val isMediaPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
                             if (!isMediaPlaying) {
                                 currentAlbumColors = null
@@ -171,13 +299,17 @@ object SystemVisualizer {
             ?: metadata?.getBitmap(MediaMetadata.METADATA_KEY_ART)
             
         if (bitmap == null) {
+            val isPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
             val pkg = activeMediaController?.packageName
-            if (pkg != null && pkg != "com.ghost.api") {
+            if (isPlaying && pkg != null && pkg != "com.ghost.api") {
                 applyPackageColor(pkg)
                 return
             }
-            currentAlbumColors = null
-            listeners.forEach { it.onColorsChanged(null) }
+            if (!isAudioActive) {
+                currentAlbumColors = null
+                currentAppliedPackage = null
+                listeners.forEach { it.onColorsChanged(null) }
+            }
             return
         }
 
@@ -221,38 +353,30 @@ object SystemVisualizer {
 
     fun onForegroundAppChanged(packageName: String) {
         if (packageName == "com.ghost.api") return
-        lastForegroundPackage = packageName
-        val isMediaPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
-        if (isAudioActive && !isMediaPlaying) {
+        val isLauncher = packageName.contains("launcher") || packageName == "com.android.systemui"
+        if (!isLauncher) {
+            lastForegroundPackage = packageName
+            if (findBrandPalette(packageName) != null) {
+                lastActiveAiPackage = packageName
+            }
+        }
+
+        // If audio is actively playing, immediately adopt this foreground app's palette
+        if (isAudioActive && !isLauncher) {
             applyPackageColor(packageName)
         }
     }
 
     fun applyPackageColor(packageName: String) {
-        val lower = packageName.lowercase()
-        val brandHex = when {
-            lower.contains("claude") || lower.contains("anthropic") -> "#D97757" // Claude Terracotta
-            lower.contains("chatgpt") || lower.contains("openai") -> "#10A37F" // ChatGPT Mint Green
-            lower.contains("deepseek") -> "#4D6BFE" // DeepSeek Electric Whale Blue
-            lower.contains("qwen") || lower.contains("tongyi") -> "#7C4DFF" // Qwen Royal Purple
-            lower.contains("kimi") || lower.contains("moonshot") -> "#2B5CFF" // Kimi Moonlight Cobalt
-            lower.contains("mistral") || lower.contains("lechat") -> "#FF7000" // Mistral Solar Flame Orange
-            lower.contains("perplexity") -> "#20B2AA" // Perplexity Seafoam Teal
-            lower.contains("grok") || lower.contains("xai") -> "#3F4E4F" // Grok Gunmetal Slate
-            lower.contains("meta.ai") || lower.contains("llama") -> "#0081FB" // Meta Indigo-Blue
-            lower.contains("copilot") -> "#6B46C1" // Copilot Violet
-            lower.contains("bard") || lower.contains("gemini") -> "#4285F4" // Google Sparkle Blue
-            else -> null
-        }
+        currentAppliedPackage = packageName
+        val brandPalette = findBrandPalette(packageName)
 
-        if (brandHex != null) {
-            val baseColor = Color.parseColor(brandHex)
-            val palette = buildPaletteFromColor(baseColor)
-            currentAlbumColors = palette
+        if (brandPalette != null) {
+            currentAlbumColors = brandPalette
             if (overrideEmotionColors == null) {
-                handler.post { listeners.forEach { it.onColorsChanged(palette) } }
+                handler.post { listeners.forEach { it.onColorsChanged(brandPalette) } }
             }
-            Timber.d("SystemVisualizer: Applied AI brand palette for $packageName ($brandHex)")
+            Timber.d("SystemVisualizer: Applied curated AI brand palette for $packageName")
         } else {
             extractPaletteFromAppIcon(packageName)
         }

@@ -135,6 +135,8 @@ class AvatarWallpaperService : WallpaperService() {
         // Default neutral star glow matches Ethereal Off-White Cobalt (#8BB4F6) from the App Icon & HUD Sparkle
         private val colorCobaltGlow = COLOR_COBALT_GLOW
         private var isCustomPaletteActive = false
+        private var customPaletteWeight = 0f
+        private var targetPaletteWeight = 0f
         
         // Target and Current colors for smooth transitions
         private var targetColors: IntArray = defaultColors.copyOf()
@@ -348,7 +350,7 @@ class AvatarWallpaperService : WallpaperService() {
         }
 
         override fun onColorsChanged(colors: IntArray?) {
-            isCustomPaletteActive = (colors != null)
+            targetPaletteWeight = if (colors != null) 1f else 0f
             targetColors = colors ?: defaultColors.copyOf()
         }
 
@@ -365,9 +367,25 @@ class AvatarWallpaperService : WallpaperService() {
         }
 
         private fun interpolateColors() {
+            // Smoothly lerp palette weight at 0.04f per frame (~1.5s buttery fade)
+            customPaletteWeight += (targetPaletteWeight - customPaletteWeight) * 0.04f
+            if (customPaletteWeight < 0.001f) customPaletteWeight = 0f
+            if (customPaletteWeight > 0.999f) customPaletteWeight = 1f
+            isCustomPaletteActive = (customPaletteWeight > 0.001f)
+
             val limit = minOf(currentColors.size, targetColors.size)
             for (i in 0 until limit) {
-                currentColors[i] = ColorUtils.blendARGB(currentColors[i], targetColors[i], 0.05f)
+                currentColors[i] = ColorUtils.blendARGB(currentColors[i], targetColors[i], 0.04f)
+            }
+        }
+
+        private fun resolveColor(defaultColor: Int, customColor: Int): Int {
+            return if (customPaletteWeight <= 0.001f) {
+                defaultColor
+            } else if (customPaletteWeight >= 0.999f) {
+                customColor
+            } else {
+                ColorUtils.blendARGB(defaultColor, customColor, customPaletteWeight)
             }
         }
 
@@ -526,7 +544,7 @@ class AvatarWallpaperService : WallpaperService() {
         private fun drawOptionAOrbitalStar(canvas: Canvas, baseCx: Float, baseCy: Float, dynamicBaseRadius: Float, width: Float, height: Float, isNoisy: Boolean) {
             val bassBoost = smoothedBass * 3.2f // Booming expansion on audio beats!
             val idleBreath = sin(rotationAngle * 0.4f) * 25f
-            val corridorColor = if (isCustomPaletteActive) currentColors[0] else COLOR_CYAN_ACCENT
+            val corridorColor = resolveColor(COLOR_CYAN_ACCENT, currentColors[0])
 
             val tiltX = rollOffset * PARALLAX_MAX
             val tiltY = pitchOffset * PARALLAX_MAX
@@ -641,7 +659,7 @@ class AvatarWallpaperService : WallpaperService() {
             // Faint idle celestial resonance ring (gives ambient life even in silence)
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 1.2f
-            paint.color = if (isCustomPaletteActive) currentColors[1 % currentColors.size] else COLOR_CYAN_ACCENT
+            paint.color = resolveColor(COLOR_CYAN_ACCENT, currentColors[1 % currentColors.size])
             paint.alpha = 25
             canvas.drawCircle(0f, 0f, dynamicBaseRadius * 2.8f + (sin(rotationAngle * 0.3f) * 12f), paint)
 
@@ -666,18 +684,14 @@ class AvatarWallpaperService : WallpaperService() {
                     2 -> baseStarSize + 170f + (bassBoost * 0.7f)              // 2: Mid-Inner Aura
                     else -> baseStarSize + 50f + (bassBoost * 0.3f)            // 3: Inner (Closest to Star)
                 }
-                val layerColor = if (isCustomPaletteActive) {
-                    val swatchIndex = when (i) {
-                        3 -> 1 % currentColors.size // Vibrant
-                        2 -> 0 % currentColors.size // Dominant
-                        1 -> 2 % currentColors.size // Muted
-                        else -> 3 % currentColors.size // Dark Vibrant
-                    }
-                    val rawColor = currentColors[swatchIndex]
-                    ensureVisibleBloomColor(rawColor, COLOR_COBALT_GLOW)
-                } else {
-                    COLOR_COBALT_GLOW
+                val swatchIndex = when (i) {
+                    3 -> 1 % currentColors.size // Vibrant
+                    2 -> 0 % currentColors.size // Dominant
+                    1 -> 2 % currentColors.size // Muted
+                    else -> 3 % currentColors.size // Dark Vibrant
                 }
+                val rawColor = resolveColor(COLOR_COBALT_GLOW, currentColors[swatchIndex])
+                val layerColor = ensureVisibleBloomColor(rawColor, COLOR_COBALT_GLOW)
 
                 // Set textSize BEFORE calculating descent/ascent so optical center is EXACT!
                 logoPaint.color = layerColor
@@ -739,7 +753,7 @@ class AvatarWallpaperService : WallpaperService() {
 
             val nearR = coreRadius * 1.05f
             val farR = maxOf(width, height) * 0.88f
-            val wallColor = if (isCustomPaletteActive) currentColors[0] else COLOR_CYAN_ACCENT
+            val wallColor = resolveColor(COLOR_CYAN_ACCENT, currentColors[0])
 
             if (hallwayFlashAlpha > 0) {
                 canvas.save()
@@ -806,7 +820,7 @@ class AvatarWallpaperService : WallpaperService() {
 
                 val radius = coreRadius * HEX_HALO_RADII_MULTS[h] + hallwayGentleSpread * (0.35f + h * 0.25f)
                 paint.strokeWidth = HEX_HALO_WIDTHS[h] + (strobeFlash * 3.0f) + (smoothedIntensity * 0.035f)
-                paint.color = if (isCustomPaletteActive) currentColors[h % currentColors.size] else COLOR_CYAN_ACCENT
+                paint.color = resolveColor(COLOR_CYAN_ACCENT, currentColors[h % currentColors.size])
                 val surgeAlpha = (HEX_HALO_ALPHAS[h] + (strobeFlash * 120f).toInt() + (smoothedIntensity * 0.60f).toInt()).coerceIn(0, 255)
                 paint.alpha = surgeAlpha
                 drawHexagon(canvas, haloCx, haloCy, radius, paint)
@@ -838,7 +852,7 @@ class AvatarWallpaperService : WallpaperService() {
                     1 -> 2 % currentColors.size
                     else -> 3 % currentColors.size
                 }
-                val rawColor = if (isCustomPaletteActive) currentColors[swatchIndex] else COLOR_COBALT_GLOW
+                val rawColor = resolveColor(COLOR_COBALT_GLOW, currentColors[swatchIndex])
                 val hexGlowColor = ensureVisibleBloomColor(rawColor, COLOR_COBALT_GLOW)
 
                 // Translucent aura fill
@@ -875,7 +889,7 @@ class AvatarWallpaperService : WallpaperService() {
             drawHexagon(canvas, 0f, 0f, coreRadius, paint)
 
             paint.strokeWidth = 2.5f
-            paint.color = if (isCustomPaletteActive) currentColors[0] else COLOR_CYAN_ACCENT
+            paint.color = resolveColor(COLOR_CYAN_ACCENT, currentColors[0])
             paint.alpha = 200
             drawHexagon(canvas, 0f, 0f, coreRadius * 0.82f, paint)
 
@@ -921,15 +935,14 @@ class AvatarWallpaperService : WallpaperService() {
                     val hexSize = baseHexSize * cohesiveBreath + individualPop
 
                     val colorIdx = (arm + step) % currentColors.size
-                    val baseArmColor = if (isCustomPaletteActive) currentColors[colorIdx] else {
-                        when (step) {
-                            1 -> COLOR_PALE_SLATE
-                            2 -> COLOR_SOFT_BLUE
-                            3 -> COLOR_CYAN_ACCENT
-                            4 -> COLOR_INDIGO
-                            else -> COLOR_ELECTRIC_PURPLE
-                        }
+                    val defaultArm = when (step) {
+                        1 -> COLOR_PALE_SLATE
+                        2 -> COLOR_SOFT_BLUE
+                        3 -> COLOR_CYAN_ACCENT
+                        4 -> COLOR_INDIGO
+                        else -> COLOR_ELECTRIC_PURPLE
                     }
+                    val baseArmColor = resolveColor(defaultArm, currentColors[colorIdx])
 
                     // 4. INDIVIDUAL WHITE FLASH (Crisp electric onset on frequency spikes)
                     val whiteFlashRatio = if (nodeMag > 16f) {
@@ -1013,7 +1026,7 @@ class AvatarWallpaperService : WallpaperService() {
                 canvas.translate(corrCx, corrCy)
                 val reach = (canvas.width + canvas.height) * 0.95f
                 val wallFlashAlpha = (strobeFlash * 255f).toInt().coerceIn(0, 255)
-                val primaryColor = if (isCustomPaletteActive) currentColors[0] else COLOR_CYAN_ACCENT
+                val primaryColor = resolveColor(COLOR_CYAN_ACCENT, currentColors[0])
 
                 paint.style = Paint.Style.STROKE
                 paint.strokeWidth = 3.2f + (strobeFlash * 3.0f)
@@ -1041,9 +1054,8 @@ class AvatarWallpaperService : WallpaperService() {
                 val totalAlpha = (smoothEnvelope * 255f).toInt().coerceIn(0, 255)
 
                 val cycleIdx = ((rawP * numTriangles).toInt() % currentColors.size + currentColors.size) % currentColors.size
-                val baseColor = if (isCustomPaletteActive) currentColors[cycleIdx] else {
-                    if (i % 2 == 0) COLOR_CYAN_ACCENT else COLOR_PALE_SLATE
-                }
+                val defaultBaseColor = if (i % 2 == 0) COLOR_CYAN_ACCENT else COLOR_PALE_SLATE
+                val baseColor = resolveColor(defaultBaseColor, currentColors[cycleIdx])
 
                 val corkscrewAngle = (p * triangleStep * 2f) + (animTime * 0.5f)
 
@@ -1082,7 +1094,7 @@ class AvatarWallpaperService : WallpaperService() {
                     1 -> 2 % currentColors.size
                     else -> 3 % currentColors.size
                 }
-                val rawColor = if (isCustomPaletteActive) currentColors[swatchIndex] else COLOR_COBALT_GLOW
+                val rawColor = resolveColor(COLOR_COBALT_GLOW, currentColors[swatchIndex])
                 val bloomColor = ensureVisibleBloomColor(rawColor, COLOR_COBALT_GLOW)
 
                 paint.style = Paint.Style.FILL
@@ -1103,7 +1115,7 @@ class AvatarWallpaperService : WallpaperService() {
             paint.alpha = 240
             drawEquilateralTriangle(canvas, 0f, 0f, focalRadius, 0f, paint)
 
-            val innerColor = if (isCustomPaletteActive) currentColors[0] else COLOR_CYAN_ACCENT
+            val innerColor = resolveColor(COLOR_CYAN_ACCENT, currentColors[0])
             val baseInnerAlpha = (25 + (melodyExpansion * 1.8f).toInt()).coerceIn(20, 90)
             val kickInnerAlpha = if (strobeFlash > 0.04f) (strobeFlash * 70f).toInt() else 0
             paint.style = Paint.Style.FILL
@@ -1165,7 +1177,7 @@ class AvatarWallpaperService : WallpaperService() {
             paint.shader = null
             for (sb in 0 until 4) {
                 val r = (sunRadius * SUN_BLOOM_MULTIPLIERS[sb]) + flareBoom
-                val flareColor = if (isCustomPaletteActive) currentColors[sb % currentColors.size] else SUN_BLOOM_COLORS[sb]
+                val flareColor = resolveColor(SUN_BLOOM_COLORS[sb], currentColors[sb % currentColors.size])
                 paint.color = ensureVisibleBloomColor(flareColor, COLOR_COBALT_GLOW)
                 paint.alpha = ((SUN_BLOOM_ALPHAS[sb] + (strobeFlash * 75f).toInt())).coerceIn(15, 240)
                 canvas.drawCircle(sunCx, sunCy, r, paint)
@@ -1190,7 +1202,7 @@ class AvatarWallpaperService : WallpaperService() {
             val orbitCy = baseCy + tiltY * 0.55f
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 2.5f + (strobeFlash * 2.0f)
-            paint.color = if (isCustomPaletteActive) currentColors[1 % currentColors.size] else COLOR_ORBIT_HALO
+            paint.color = resolveColor(COLOR_ORBIT_HALO, currentColors[1 % currentColors.size])
             paint.alpha = (140 + (strobeFlash * 100f).toInt()).coerceIn(100, 255)
             canvas.drawCircle(orbitCx, orbitCy, orbitCircleRadius, paint)
 
@@ -1209,7 +1221,7 @@ class AvatarWallpaperService : WallpaperService() {
                     1 -> 2 % currentColors.size
                     else -> 3 % currentColors.size
                 }
-                val rawColor = if (isCustomPaletteActive) currentColors[swatchIndex] else COLOR_COBALT_GLOW
+                val rawColor = resolveColor(COLOR_COBALT_GLOW, currentColors[swatchIndex])
                 val bloomColor = ensureVisibleBloomColor(rawColor, COLOR_COBALT_GLOW)
 
                 paint.style = Paint.Style.FILL
@@ -1236,7 +1248,7 @@ class AvatarWallpaperService : WallpaperService() {
             drawDiamond(canvas, 0f, 0f, coreCubeRadius, paint)
 
             paint.strokeWidth = 2.5f
-            paint.color = if (isCustomPaletteActive) currentColors[0] else COLOR_CYAN_ACCENT
+            paint.color = resolveColor(COLOR_CYAN_ACCENT, currentColors[0])
             paint.alpha = 200
             drawDiamond(canvas, 0f, 0f, coreCubeRadius * 0.82f, paint)
 
@@ -1317,7 +1329,7 @@ class AvatarWallpaperService : WallpaperService() {
 
                 // Distinct stolen palette color per satellite
                 val colorIdx = s % currentColors.size
-                val rawSatColor = if (isCustomPaletteActive) currentColors[colorIdx] else SATELLITE_COLORS[s]
+                val rawSatColor = resolveColor(SATELLITE_COLORS[s], currentColors[colorIdx])
                 val baseSatColor = ensureVisibleBloomColor(rawSatColor, COLOR_COBALT_GLOW)
 
                 // Layered Colorful Glass Fill:
