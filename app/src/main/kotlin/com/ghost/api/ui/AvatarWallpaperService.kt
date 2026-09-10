@@ -34,6 +34,7 @@ class AvatarWallpaperService : WallpaperService() {
         private var currentFft = ByteArray(0)
         private var smoothedIntensity = 0f
         private var smoothedBass = 0f
+        private var smoothedMelody = 0f
         
         // Default Google Colors + Accent Purple
         private val defaultColors = intArrayOf(
@@ -245,6 +246,14 @@ class AvatarWallpaperService : WallpaperService() {
                         nodeMagnitudes[n] = normalizedMag
                     }
                 }
+
+                // Melodic activity level (average of mid/high active notes)
+                var melodySum = 0f
+                for (n in 0 until 18) {
+                    melodySum += nodeMagnitudes[n]
+                }
+                val instantMelody = melodySum / 18f
+                smoothedMelody = smoothedMelody * 0.75f + instantMelody * 0.25f
             }
         }
 
@@ -723,31 +732,53 @@ class AvatarWallpaperService : WallpaperService() {
         }
 
         /**
-         * Option C: Delta Tunnel (Seven Nation Army / Infinite Triangle Mirror)
-         * Continuous logarithmic zoom through nested equilateral triangles,
-         * 3 corner laser guide rails, center focal triangle with unicode glyph (✧),
-         * and audio-reactive Beat Saber laser strobe flashes.
+         * Option C: Delta Tunnel & Prisms (Seven Nation Army / Cephalon Cy & Suda tier)
+         * Audio architecture:
+         * 1. Speed: Continuous tunnel zoom speed is driven directly by non-stop sub-bass/kicks.
+         * 2. Central Expansion & Bloom: Driven by melody and harmonics (vocals, synths, chords).
+         *    Concentric bloom layers live on the triangle housing, with inner color glow flashing.
+         * 3. Kick / Snare: Fires corner perspective lasers AND summons expanding translucent
+         *    "color wall" triangles that retain rich stolen palette color as they zoom outward.
+         * 4. Central Glyph (✧): Clean, centered, crisp white core.
          */
         private fun drawOptionCDeltaTunnel(canvas: Canvas, cx: Float, cy: Float, baseRadius: Float) {
             canvas.save()
             canvas.translate(cx, cy)
 
             val bassKick = (smoothedBass * 1.6f).coerceAtLeast(0f)
-            val numTriangles = 8
-            val baseSize = (baseRadius * 0.7f + bassKick * 0.3f).coerceIn(30f, 180f)
+            val melodyExpansion = (smoothedMelody * 1.2f).coerceAtLeast(0f)
+            val numTriangles = 9
+            val baseSize = (baseRadius * 0.75f + melodyExpansion * 0.35f).coerceIn(30f, 180f)
 
-            // 1. Audio-Triggered Central Corner Laser Guide Rails
-            // 3 Clean perspective lasers shooting through the vertices of the triangle tunnel into deep space
-            // Strictly grabbing rich stolen palette colors instead of harsh cutting white
-            if (strobeFlash > 0.04f) {
-                val reach = (canvas.width + canvas.height) * 0.9f
-                val strobeAlpha = (strobeFlash * 255f).toInt().coerceIn(0, 255)
-                val railColor = if (isCustomPaletteActive) currentColors[0] else Color.parseColor("#38BDF8")
+            // 1. Kick / Snare Translucent "Color Wall" Shockwave Triangles
+            // When a beat hits, this projects an expanding translucent color plane outward,
+            // producing an immersive "color wall" effect through the corridor
+            if (strobeFlash > 0.03f) {
+                val wallFlashAlpha = (strobeFlash * 255f).toInt().coerceIn(0, 255)
+                val primaryColor = if (isCustomPaletteActive) currentColors[0] else Color.parseColor("#38BDF8")
+                val secondaryColor = if (isCustomPaletteActive) currentColors[1 % currentColors.size] else Color.parseColor("#818CF8")
 
+                // Expanding translucent colored polygon shockwave
+                for (w in 1..3) {
+                    val shockRadius = baseSize * (1.8f + (w * 1.6f) + (strobeFlash * 3.5f))
+                    paint.style = Paint.Style.FILL
+                    paint.color = if (w % 2 == 0) secondaryColor else primaryColor
+                    paint.alpha = (wallFlashAlpha * (0.28f / w)).toInt().coerceIn(5, 80)
+                    drawEquilateralTriangle(canvas, 0f, 0f, shockRadius, 0f, paint)
+
+                    paint.style = Paint.Style.STROKE
+                    paint.strokeWidth = 3f + (strobeFlash * 3f)
+                    paint.color = if (w % 2 == 0) secondaryColor else primaryColor
+                    paint.alpha = (wallFlashAlpha * (0.75f / w)).toInt().coerceIn(10, 200)
+                    drawEquilateralTriangle(canvas, 0f, 0f, shockRadius, 0f, paint)
+                }
+
+                // Perspective Corner Laser Guide Rails shooting through vertices
+                val reach = (canvas.width + canvas.height) * 0.95f
                 paint.style = Paint.Style.STROKE
-                paint.strokeWidth = 3.0f + (strobeFlash * 2.5f)
-                paint.color = railColor
-                paint.alpha = strobeAlpha
+                paint.strokeWidth = 3.2f + (strobeFlash * 3.0f)
+                paint.color = primaryColor
+                paint.alpha = wallFlashAlpha
                 for (v in 0..2) {
                     val railAngle = (v * Math.PI * 2.0 / 3.0 - Math.PI / 2.0).toFloat()
                     val rx = (cos(railAngle) * reach).toFloat()
@@ -756,11 +787,11 @@ class AvatarWallpaperService : WallpaperService() {
                 }
             }
 
-            // 2. Infinite Nested Equilateral Triangles Zooming Outward (Seven Nation Army Tunnel)
+            // 2. Infinite Nested Equilateral Triangles Zooming Outward (Tunnel Driven by Bass Speed)
             // Enhanced with 3D tunnel parallax layering (outer triangles shift more with device tilt than inner core)
             for (i in 0 until numTriangles) {
                 val p = ((tunnelPhase + (i.toFloat() / numTriangles)) % 1.0f)
-                val scale = (baseSize * exp(p * 3.4f)).toFloat()
+                val scale = (baseSize * exp(p * 3.5f)).toFloat()
 
                 // Layered tunnel parallax: outer foreground rings drift further than deep core
                 val parallaxZ = p * p * 60f
@@ -768,7 +799,7 @@ class AvatarWallpaperService : WallpaperService() {
                 val triCenterY = pitchOffset * parallaxZ
 
                 val fadeIn = (p * 5f).coerceIn(0f, 1f)
-                val fadeOut = ((1f - p) * 3f).coerceIn(0f, 1f)
+                val fadeOut = ((1f - p) * 3.2f).coerceIn(0f, 1f)
                 val totalAlpha = (fadeIn * fadeOut * 240f).toInt().coerceIn(0, 255)
 
                 val colorIdx = i % currentColors.size
@@ -778,59 +809,98 @@ class AvatarWallpaperService : WallpaperService() {
 
                 val rotation = (sin(p * Math.PI.toFloat()) * 0.15f) + (if (i % 2 == 1) Math.PI.toFloat() else 0f)
 
+                // Translucent tinted glass facet for tunnel depth
+                if (strobeFlash > 0.05f) {
+                    paint.style = Paint.Style.FILL
+                    paint.color = baseColor
+                    paint.alpha = ((strobeFlash * 45f) * fadeIn * fadeOut).toInt().coerceIn(0, 40)
+                    drawEquilateralTriangle(canvas, triCenterX, triCenterY, scale, rotation, paint)
+                }
+
                 // Crisp solid laser edges (clean infinite zoom without violent full-screen flash)
                 paint.style = Paint.Style.STROKE
-                paint.strokeWidth = (3.5f * (1f - p * 0.4f)).coerceIn(1.5f, 5.5f)
+                paint.strokeWidth = (3.5f * (1f - p * 0.4f) + (strobeFlash * 1.5f)).coerceIn(1.5f, 6.0f)
                 paint.color = baseColor
                 paint.alpha = totalAlpha
                 drawEquilateralTriangle(canvas, triCenterX, triCenterY, scale, rotation, paint)
             }
 
-            // 3. Vanishing Point Focal Core (Center Triangle with Model Glyph ✧)
-            val focalRadius = (baseSize * 1.15f + bassKick * 0.4f + (strobeFlash * 15f)).coerceIn(35f, 160f)
+            // 3. Vanishing Point Focal Core & Central Triangle Housing
+            // The central triangle expansion and concentric bloom layers are driven by melody!
+            val focalRadius = (baseSize * 1.25f + melodyExpansion * 0.65f).coerceIn(40f, 180f)
 
+            // Stepped Concentric Fake Bloom Layers attached to the Triangle Housing
+            val triBloomRadii = floatArrayOf(
+                focalRadius * 2.40f + (melodyExpansion * 1.20f),
+                focalRadius * 1.85f + (melodyExpansion * 0.85f),
+                focalRadius * 1.45f + (melodyExpansion * 0.50f),
+                focalRadius * 1.18f + (melodyExpansion * 0.25f)
+            )
+            val triBloomAlphas = intArrayOf(35, 65, 110, 160)
+            val triBloomWidths = floatArrayOf(5.5f, 4.2f, 3.2f, 2.2f)
+
+            for (tb in triBloomRadii.indices) {
+                val swatchIndex = when (tb) {
+                    3 -> 1 % currentColors.size // Vibrant / Inner
+                    2 -> 0 % currentColors.size // Dominant
+                    1 -> 2 % currentColors.size // Muted
+                    else -> 3 % currentColors.size // Outer
+                }
+                val rawColor = if (isCustomPaletteActive) currentColors[swatchIndex] else colorCobaltGlow
+                val bloomColor = ensureVisibleBloomColor(rawColor, colorCobaltGlow)
+
+                // Translucent planar fill for glowing triangle volume
+                paint.style = Paint.Style.FILL
+                paint.color = bloomColor
+                paint.alpha = (triBloomAlphas[tb] * 0.45f).toInt().coerceIn(15, 95)
+                drawEquilateralTriangle(canvas, 0f, 0f, triBloomRadii[tb], 0f, paint)
+
+                // Crisp bloom contour line
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = triBloomWidths[tb]
+                paint.color = bloomColor
+                paint.alpha = triBloomAlphas[tb]
+                drawEquilateralTriangle(canvas, 0f, 0f, triBloomRadii[tb], 0f, paint)
+            }
+
+            // Solid Obsidian Cyber Chamber for Central Triangle
             paint.style = Paint.Style.FILL
             paint.color = Color.parseColor("#060A10")
             paint.alpha = 240
             drawEquilateralTriangle(canvas, 0f, 0f, focalRadius, 0f, paint)
 
+            // Inside of triangle flashing the stolen color on hits/kicks!
+            if (strobeFlash > 0.04f || smoothedBass > 40f) {
+                val innerFlashAlpha = ((strobeFlash * 140f) + (bassKick * 0.5f)).toInt().coerceIn(0, 160)
+                val innerColor = if (isCustomPaletteActive) currentColors[0] else Color.parseColor("#38BDF8")
+                paint.style = Paint.Style.FILL
+                paint.color = innerColor
+                paint.alpha = innerFlashAlpha
+                drawEquilateralTriangle(canvas, 0f, 0f, focalRadius * 0.85f, 0f, paint)
+            }
+
+            // Crisp White Triangle Housing Contour
             paint.style = Paint.Style.STROKE
-            paint.strokeWidth = 3.5f + (strobeFlash * 3f)
+            paint.strokeWidth = 3.8f + (strobeFlash * 2.5f)
             paint.color = if (strobeFlash > 0.05f) Color.WHITE else Color.parseColor("#F8FAFC")
             paint.alpha = 255
             drawEquilateralTriangle(canvas, 0f, 0f, focalRadius, 0f, paint)
 
-            paint.strokeWidth = 2f
+            // Secondary inner accent contour
+            paint.strokeWidth = 2.2f
             paint.color = if (isCustomPaletteActive) currentColors[0] else Color.parseColor("#38BDF8")
             paint.alpha = 200
-            drawEquilateralTriangle(canvas, 0f, 0f, focalRadius * 0.78f, 0f, paint)
+            drawEquilateralTriangle(canvas, 0f, 0f, focalRadius * 0.80f, 0f, paint)
 
-            // Center Model Unicode Glyph (✧) with Multi-Pass Bloom
-            val glyphSize = focalRadius * 1.25f + (strobeFlash * 20f)
-            val glyphBloomSizes = floatArrayOf(
-                glyphSize * 1.8f + (bassKick * 0.6f) + (strobeFlash * 35f),
-                glyphSize * 1.45f + (bassKick * 0.3f) + (strobeFlash * 20f),
-                glyphSize * 1.18f,
-                glyphSize
-            )
-            val glyphBloomAlphas = intArrayOf(35, 70, 115, 255)
-
+            // 4. Center Model Unicode Glyph (✧): Clean, Crisp, Centered White Core
+            val glyphSize = focalRadius * 1.15f
             logoPaint.clearShadowLayer()
-            for (g in glyphBloomSizes.indices) {
-                val color = if (g == 3) {
-                    Color.parseColor("#F8FAFC")
-                } else if (isCustomPaletteActive) {
-                    ensureVisibleBloomColor(currentColors[g % currentColors.size], colorCobaltGlow)
-                } else {
-                    colorCobaltGlow
-                }
-                logoPaint.color = color
-                logoPaint.textSize = glyphBloomSizes[g]
-                logoPaint.alpha = glyphBloomAlphas[g]
-                val off = (logoPaint.descent() + logoPaint.ascent()) / 2f
-                // Center slightly higher to optically sit in the centroid of the equilateral triangle
-                canvas.drawText("✧", 0f, -off - (focalRadius * 0.08f), logoPaint)
-            }
+            logoPaint.color = Color.parseColor("#F8FAFC")
+            logoPaint.textSize = glyphSize
+            logoPaint.alpha = 255
+            val off = (logoPaint.descent() + logoPaint.ascent()) / 2f
+            // Center slightly higher to optically sit in the centroid of the equilateral triangle
+            canvas.drawText("✧", 0f, -off - (focalRadius * 0.08f), logoPaint)
 
             canvas.restore()
         }
@@ -993,23 +1063,20 @@ class AvatarWallpaperService : WallpaperService() {
                 val satX = cx + offsetX
                 val satY = cy + offsetY
 
-                // Each satellite samples distinct FFT bins across the spectrum:
-                // s=0 (Top Apex): node 1 (upper bass / kicks)
-                // s=1 (Top-Right): node 6 (mid-low rhythm)
-                // s=2 (Bottom-Right): node 12 (vocals / lead synths)
-                // s=3 (Bottom Apex): node 18 (snare / clap transient)
-                // s=4 (Bottom-Left): node 23 (hi-hats / percussion)
-                // s=5 (Top-Left): node 28 (high cymbals / air)
-                val nodeIdx = when (s) {
-                    0 -> 1
-                    1 -> 6
-                    2 -> 12
-                    3 -> 18
-                    4 -> 23
-                    else -> 28
-                }.coerceIn(0, nodeMagnitudes.size - 1)
-                val satMag = nodeMagnitudes[nodeIdx]
-                val satPop = (satMag * 0.16f).coerceIn(0f, 10f)
+                // Interleaved spectral pooling across all 30 nodeMagnitudes:
+                // Each satellite samples 5 interleaved bands across the entire frequency range,
+                // taking the peak transient hit so every cube (top, bottom, left, right) responds
+                // actively to melody notes, solos, chord hits, and rhythm!
+                // s=0 gets [0, 6, 12, 18, 24], s=1 gets [1, 7, 13, 19, 25], etc.
+                var peakSatMag = 0f
+                for (b in 0 until 5) {
+                    val idx = (b * numSatellites + s).coerceIn(0, nodeMagnitudes.size - 1)
+                    if (nodeMagnitudes[idx] > peakSatMag) {
+                        peakSatMag = nodeMagnitudes[idx]
+                    }
+                }
+                val satMag = peakSatMag
+                val satPop = (satMag * 0.22f).coerceIn(0f, 14f)
 
                 val satSize = satelliteBaseSize + satPop
 
@@ -1027,25 +1094,34 @@ class AvatarWallpaperService : WallpaperService() {
                 }
                 val baseSatColor = ensureVisibleBloomColor(rawSatColor, colorCobaltGlow)
 
-                // Active popping satellites flash brighter toward white on notes & hits
-                val satColor = if (satMag > 16f) {
-                    val ratio = (satMag / 65f).coerceIn(0f, 0.85f)
+                // Layered Colorful Glass Fill:
+                // On hit, the translucent glass interior flashes intensely in stolen color / tinted white,
+                // not just the outline!
+                val satColor = if (satMag > 15f) {
+                    val ratio = (satMag / 60f).coerceIn(0f, 0.75f)
                     ColorUtils.blendARGB(baseSatColor, Color.WHITE, ratio)
                 } else {
                     baseSatColor
                 }
 
-                // Vibrant translucent planar fill using the stolen color!
+                // Vibrant translucent layered colored glass fill
+                val glassFillAlpha = (40 + (satMag * 2.2f).toInt()).coerceIn(35, 230)
                 paint.style = Paint.Style.FILL
                 paint.color = satColor
-                paint.alpha = (55 + (satMag * 1.4f).toInt()).coerceIn(45, 180)
+                paint.alpha = glassFillAlpha
                 drawDiamond(canvas, satX, satY, satSize, paint)
+
+                // Concentric inner glass facet for layered depth
+                paint.style = Paint.Style.FILL
+                paint.color = baseSatColor
+                paint.alpha = (glassFillAlpha * 0.45f).toInt().coerceIn(15, 120)
+                drawDiamond(canvas, satX, satY, satSize * 0.62f, paint)
 
                 // Glowing neon contour
                 paint.style = Paint.Style.STROKE
-                paint.strokeWidth = 3.2f + (satMag * 0.04f)
-                paint.color = if (satMag > 22f) Color.WHITE else satColor
-                paint.alpha = (180 + (satMag * 1.1f).toInt()).coerceIn(160, 255)
+                paint.strokeWidth = 3.2f + (satMag * 0.05f)
+                paint.color = if (satMag > 20f) Color.WHITE else satColor
+                paint.alpha = (160 + (satMag * 1.4f).toInt()).coerceIn(140, 255)
                 drawDiamond(canvas, satX, satY, satSize, paint)
             }
         }
