@@ -620,6 +620,18 @@ class AvatarWallpaperService : WallpaperService() {
                 paint.alpha = (hallwayFlashAlpha * 0.22f).toInt().coerceIn(0, 65)
                 canvas.drawPath(cachedWallPath, paint)
 
+                // Back Perspective Corridor Wall (Fill the rear opening square)
+                paint.style = Paint.Style.FILL
+                paint.color = corridorColor
+                paint.alpha = (hallwayFlashAlpha * 0.18f).toInt().coerceIn(0, 55)
+                canvas.drawRect(nTLx, nTLy, nBRx, nBRy, paint)
+
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = 2.5f + (strobeFlash * 1.5f)
+                paint.color = corridorColor
+                paint.alpha = (hallwayFlashAlpha * 0.60f).toInt().coerceIn(0, 180)
+                canvas.drawRect(nTLx, nTLy, nBRx, nBRy, paint)
+
                 // 4 Corner Laser Guide Rails shooting into the 4 screen corners (snare drum attack flashes!)
                 paint.style = Paint.Style.STROKE
                 paint.strokeWidth = 3f + (strobeFlash * 4.5f)
@@ -1165,12 +1177,18 @@ class AvatarWallpaperService : WallpaperService() {
             val tiltX = rollOffset * PARALLAX_MAX
             val tiltY = pitchOffset * PARALLAX_MAX
 
+            val density = resources.displayMetrics.density
+            val isLandscape = width > height
+            val overlayCenterOffsetY = (if (isLandscape) 38f else 15f) * density
+            val cubeBaseX = width / 2f
+            val cubeBaseY = height / 2f - overlayCenterOffsetY
+
             // 1. Center Singularities: Parallax-anchored to screen / widget center (0.15x depth)
             val sunRadius = (min(width, height) * 0.22f + bassKick * 0.25f).coerceIn(60f, 240f)
             val flareBoom = (bassKick * 0.75f) + (strobeFlash * 80f)
 
-            val sunCx = baseCx + tiltX * 0.15f
-            val sunCy = baseCy + tiltY * 0.15f
+            val sunCx = cubeBaseX + tiltX * 0.15f
+            val sunCy = cubeBaseY + tiltY * 0.15f
 
             // Deep Space Black Sun with Hot Concentric Solar Flares (Salvation of the Sun)
             paint.style = Paint.Style.FILL
@@ -1198,8 +1216,8 @@ class AvatarWallpaperService : WallpaperService() {
 
             // 2. Orbital Halo Enclosing Circle (0.55x depth)
             val orbitCircleRadius = sunRadius * 1.08f
-            val orbitCx = baseCx + tiltX * 0.55f
-            val orbitCy = baseCy + tiltY * 0.55f
+            val orbitCx = cubeBaseX + tiltX * 0.55f
+            val orbitCy = cubeBaseY + tiltY * 0.55f
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 2.5f + (strobeFlash * 2.0f)
             paint.color = resolveColor(COLOR_ORBIT_HALO, currentColors[1 % currentColors.size])
@@ -1207,8 +1225,8 @@ class AvatarWallpaperService : WallpaperService() {
             canvas.drawCircle(orbitCx, orbitCy, orbitCircleRadius, paint)
 
             // 3. Central Mother Cube / Diamond (45° diamond inside orbital ring, 0.90x depth)
-            val cubeCx = baseCx + tiltX * 0.90f
-            val cubeCy = baseCy + tiltY * 0.90f
+            val cubeCx = cubeBaseX + tiltX * 0.90f
+            val cubeCy = cubeBaseY + tiltY * 0.90f
 
             canvas.save()
             canvas.translate(cubeCx, cubeCy)
@@ -1264,8 +1282,8 @@ class AvatarWallpaperService : WallpaperService() {
 
             canvas.restore()
 
-            // 4. Six Satellite Diamonds / Cubes (Aligned Exactly with Overlay Nodes, 0.92x depth)
-            // Blueprint mapping:
+            // 4. Six Satellite Diamonds / Cubes (Locked Exactly to Overlay Buttons)
+            // Blueprint mapping matching InputOverlay:
             // 0: Top Apex (Orange Tape Reel Launcher) -> (0, -apex)
             // 1: Top-Right (Blue Search)               -> (+dx, -dy)
             // 2: Bottom-Right (Yellow Tools)          -> (+dx, +dy)
@@ -1273,22 +1291,15 @@ class AvatarWallpaperService : WallpaperService() {
             // 4: Bottom-Left (Green Diary)            -> (-dx, +dy)
             // 5: Top-Left (Red Camera)                -> (-dx, -dy)
             val numSatellites = 6
-            val density = canvas.density.toFloat().let { if (it > 0f) it / 160f else width / 360f }
-            val isLandscape = width > height
-
             val horizontalSpread = if (isLandscape) 1.55f else 1.0f
             val nodeDx = 90f * density * horizontalSpread
             val nodeDy = (if (isLandscape) 56f else 105f) * density
             val nodeApex = (if (isLandscape) 102f else 182f) * density
 
-            val diagDist = Math.hypot(nodeDx.toDouble(), nodeDy.toDouble()).toFloat().coerceAtLeast(1f)
-            val diagUnitX = nodeDx / diagDist
-            val diagUnitY = nodeDy / diagDist
-
             val satelliteBaseSize = 24f * density // matches 48dp button radius
 
-            val satBaseX = baseCx + tiltX * 0.92f
-            val satBaseY = baseCy + tiltY * 0.92f
+            val satBaseX = cubeBaseX
+            val satBaseY = cubeBaseY
 
             for (s in 0 until numSatellites) {
                 // Interleaved spectral pooling across all 30 nodeMagnitudes:
@@ -1304,23 +1315,19 @@ class AvatarWallpaperService : WallpaperService() {
                     }
                 }
                 val satMag = peakSatMag
-                val satPop = (satMag * 0.22f).coerceIn(0f, 14f)
+                val satPop = (satMag * 0.18f).coerceIn(0f, 12f)
 
-                // Active radial outward spreading on bass kicks and frequency pops:
-                // Tightly bounded range (0 to 18dp), active and dynamic!
-                val spread = (bassKick * 0.18f + satMag * 0.28f).coerceIn(0f, 18f * density)
-
-                // Zero-allocation coordinate computation with dynamic radial breathing
+                // Satellite coordinates locked to exact InputOverlay button positions
                 val offsetX = when (s) {
-                    1, 2 -> nodeDx + diagUnitX * spread
-                    4, 5 -> -(nodeDx + diagUnitX * spread)
+                    1, 2 -> nodeDx
+                    4, 5 -> -nodeDx
                     else -> 0f
                 }
                 val offsetY = when (s) {
-                    0 -> -(nodeApex + spread)
-                    3 -> (nodeApex + spread)
-                    1, 5 -> -(nodeDy + diagUnitY * spread)
-                    else -> (nodeDy + diagUnitY * spread)
+                    0 -> -nodeApex
+                    3 -> nodeApex
+                    1, 5 -> -nodeDy
+                    else -> nodeDy
                 }
                 val satX = satBaseX + offsetX
                 val satY = satBaseY + offsetY
