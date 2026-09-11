@@ -130,7 +130,11 @@ class GhostWorkIndicatorOverlay(
         setMeasuredDimension(w, h)
     }
 
+    private var showTimestamp: Long = 0L
+    private val minDisplayDurationMs = 1200L
+
     fun show(tag: String = "WORKING", durationMs: Long = 0) {
+        showTimestamp = System.currentTimeMillis()
         currentTag = tag.trim().uppercase()
         
         // Attach to window manager if not already attached
@@ -186,6 +190,13 @@ class GhostWorkIndicatorOverlay(
     fun hide() {
         removeCallbacks(autoHideRunnable)
         if (!isAttachedToWindow) return
+
+        // Ensure the indicator stays visible long enough to be appreciated even on sub-second operations
+        val elapsed = System.currentTimeMillis() - showTimestamp
+        if (elapsed < minDisplayDurationMs) {
+            postDelayed({ hide() }, minDisplayDurationMs - elapsed)
+            return
+        }
 
         // Animate Wings Closing
         openAnimator?.cancel()
