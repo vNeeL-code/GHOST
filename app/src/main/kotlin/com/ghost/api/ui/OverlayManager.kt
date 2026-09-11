@@ -258,8 +258,6 @@ class OverlayManager(private val context: Context) {
      * Shows the Destiny Ghost HUD work signal in the screen corner during background operations.
      */
     fun showWorkSignal(tag: String = "WORKING", durationMs: Long = 0) {
-        val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-        if (!prefs.getBoolean(Constants.PREF_WORK_SIGNAL_ENABLED, true)) return
         if (!canDrawOverlay()) return
 
         activeWorkCounter.incrementAndGet()

@@ -17,15 +17,14 @@ import timber.log.Timber
 import kotlin.math.sin
 
 /**
- * Destiny Ghost-inspired floating HUD work indicator.
- * Appears in the screen corner during headless background operations (web search,
- * shell execution, reasoning) to provide clear visual feedback without a heavy WebView.
+ * Lightweight floating HUD work indicator.
+ * Positioned in the sweet spot gap directly below the status bar icons and above the top widgets.
  *
  * Features:
- * - 4 geometric shell wings that open outward, tilt, and breathe during operation
- * - Concentric glowing eye / iris (reminiscent of Wallpaper Option A)
- * - Tracked "G H O S T" label with operational tag (e.g. "// SEARCH")
- * - Pure Android Canvas rendering: zero WebView, zero GPU context collisions, hardware accelerated
+ * - Playful terminal monospace flavor text (Minecraft / Terraria / Claude Code style)
+ * - Animated 4-wing cyber star / ghost shell that expands, tilts, and breathes
+ * - Concentric glowing eye / iris (Option A inspired)
+ * - Zero WebView, zero GPU collisions, hardware-accelerated 2D Canvas rendering
  */
 @SuppressLint("ViewConstructor")
 class GhostWorkIndicatorOverlay(
@@ -35,13 +34,69 @@ class GhostWorkIndicatorOverlay(
 
     private val density = context.resources.displayMetrics.density
 
+    // Flavor text dictionaries for operations
+    object FlavorTexts {
+        private val SEARCH_FLAVORS = listOf(
+            "querying the ether...",
+            "spelunking duckduckgo...",
+            "scouring the infosphere...",
+            "consulting the oracle...",
+            "intercepting web packets...",
+            "surfing the datastream...",
+            "fishing for answers...",
+            "reading the matrix...",
+            "crawling the web web...",
+            "asking the void..."
+        )
+
+        private val TERMINAL_FLAVORS = listOf(
+            "bashing bits...",
+            "talking to the kernel...",
+            "invoking root magic...",
+            "wrestling adb daemon...",
+            "running shady bash...",
+            "allocating more ram...",
+            "poking the shell...",
+            "compiling chaos..."
+        )
+
+        private val FETCH_FLAVORS = listOf(
+            "scraping electrons...",
+            "downloading reality...",
+            "parsing raw html...",
+            "vacuuming data...",
+            "ingesting payload..."
+        )
+
+        private val GENERAL_FLAVORS = listOf(
+            "pondering the orb...",
+            "brewing thoughts...",
+            "herding electric sheep...",
+            "recalibrating flux...",
+            "spinning up synapses...",
+            "crunching tensors...",
+            "defying gravity...",
+            "untangling strings..."
+        )
+
+        fun pick(tag: String): String {
+            val list = when {
+                tag.contains("SEARCH") -> SEARCH_FLAVORS
+                tag.contains("TERMINAL") || tag.contains("BASH") || tag.contains("ADB") -> TERMINAL_FLAVORS
+                tag.contains("FETCH") -> FETCH_FLAVORS
+                else -> GENERAL_FLAVORS
+            }
+            return "> " + list.random()
+        }
+    }
+
     // Drawing Paints - Preallocated for Zero-GC 60fps/120fps rendering
     private val paintCapsuleBg = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
     }
     private val paintCapsuleStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 1.2f * density
+        strokeWidth = 1.0f * density
     }
     private val paintEyeCore = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
@@ -49,7 +104,7 @@ class GhostWorkIndicatorOverlay(
     }
     private val paintEyeIris = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 1.4f * density
+        strokeWidth = 1.1f * density
     }
     private val paintEyePupil = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
@@ -64,42 +119,39 @@ class GhostWorkIndicatorOverlay(
     }
     private val paintWingRight = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = Color.rgb(172, 185, 196) // Shaded titanium facet
+        color = Color.rgb(168, 180, 192) // Shaded titanium facet
     }
     private val paintWingStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 1.0f * density
+        strokeWidth = 0.9f * density
         color = Color.rgb(28, 34, 40)
     }
-    private val paintTextTitle = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(235, 245, 255)
-        textSize = 11.5f * density
-        typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-        letterSpacing = 0.15f
-    }
-    private val paintTextTag = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(0, 229, 255)
-        textSize = 8.5f * density
-        typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-        letterSpacing = 0.18f
+    private val paintText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(180, 240, 248) // Soft terminal cyan
+        textSize = 9.5f * density
+        typeface = Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL)
+        letterSpacing = 0.04f
     }
 
-    // Wing Paths - Preallocated
+    // Preallocated Paths & Rects
     private val wingPathLeft = Path()
     private val wingPathRight = Path()
     private val capsuleRect = RectF()
 
     // State & Animation
     private var currentAlpha = 0f
-    private var openProgress = 0f // 0f = closed tight diamond, 1f = fully opened wings
+    private var openProgress = 0f
     private var animTime = 0f
     private var isFrameCallbackRunning = false
-    private var currentTag = "WORKING"
+    private var currentFlavorText = "> querying the ether..."
     private var isAttachedToWindow = false
+    private var showTimestamp: Long = 0L
+    private val minDisplayDurationMs = 1300L
 
     private var alphaAnimator: ValueAnimator? = null
     private var openAnimator: ValueAnimator? = null
 
+    // Window layout: Hugs the top gap right below status bar (y = 28dp), above top widgets
     val windowParams: WindowManager.LayoutParams = WindowManager.LayoutParams(
         WindowManager.LayoutParams.WRAP_CONTENT,
         WindowManager.LayoutParams.WRAP_CONTENT,
@@ -116,8 +168,8 @@ class GhostWorkIndicatorOverlay(
         PixelFormat.TRANSLUCENT
     ).apply {
         gravity = Gravity.TOP or Gravity.END
-        x = (16 * density).toInt()
-        y = (48 * density).toInt()
+        x = (14 * density).toInt()
+        y = (28 * density).toInt() // Hugs top bar gap cleanly above widgets
     }
 
     init {
@@ -125,18 +177,18 @@ class GhostWorkIndicatorOverlay(
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val w = (142 * density).toInt()
-        val h = (38 * density).toInt()
+        val textWidth = paintText.measureText(currentFlavorText)
+        val h = (27 * density).toInt()
+        // text + left padding (10dp) + gap between text & star (8dp) + star diameter (20dp) + right padding (6dp)
+        val w = (textWidth + 44 * density).toInt()
         setMeasuredDimension(w, h)
     }
 
-    private var showTimestamp: Long = 0L
-    private val minDisplayDurationMs = 1200L
-
     fun show(tag: String = "WORKING", durationMs: Long = 0) {
         showTimestamp = System.currentTimeMillis()
-        currentTag = tag.trim().uppercase()
-        
+        currentFlavorText = FlavorTexts.pick(tag)
+        requestLayout()
+
         // Attach to window manager if not already attached
         if (!isAttachedToWindow) {
             try {
@@ -146,6 +198,12 @@ class GhostWorkIndicatorOverlay(
                 Timber.w(e, "GhostWorkIndicatorOverlay failed to attach to WindowManager")
                 return
             }
+        } else {
+            try {
+                windowManager.updateViewLayout(this, windowParams)
+            } catch (e: Exception) {
+                Timber.w(e, "GhostWorkIndicatorOverlay layout update failed")
+            }
         }
 
         visibility = View.VISIBLE
@@ -153,7 +211,7 @@ class GhostWorkIndicatorOverlay(
         // Animate in Alpha
         alphaAnimator?.cancel()
         alphaAnimator = ValueAnimator.ofFloat(currentAlpha, 1f).apply {
-            duration = 200
+            duration = 180
             interpolator = DecelerateInterpolator()
             addUpdateListener {
                 currentAlpha = it.animatedValue as Float
@@ -165,8 +223,8 @@ class GhostWorkIndicatorOverlay(
         // Animate Wing Opening
         openAnimator?.cancel()
         openAnimator = ValueAnimator.ofFloat(openProgress, 1f).apply {
-            duration = 340
-            interpolator = OvershootInterpolator(1.3f)
+            duration = 320
+            interpolator = OvershootInterpolator(1.25f)
             addUpdateListener {
                 openProgress = it.animatedValue as Float
                 invalidate()
@@ -176,7 +234,6 @@ class GhostWorkIndicatorOverlay(
 
         startAnimationLoop()
 
-        // Optional safety auto-hide
         removeCallbacks(autoHideRunnable)
         if (durationMs > 0) {
             postDelayed(autoHideRunnable, durationMs)
@@ -201,7 +258,7 @@ class GhostWorkIndicatorOverlay(
         // Animate Wings Closing
         openAnimator?.cancel()
         openAnimator = ValueAnimator.ofFloat(openProgress, 0f).apply {
-            duration = 240
+            duration = 220
             interpolator = AccelerateDecelerateInterpolator()
             addUpdateListener {
                 openProgress = it.animatedValue as Float
@@ -213,7 +270,7 @@ class GhostWorkIndicatorOverlay(
         // Animate Fade Out
         alphaAnimator?.cancel()
         alphaAnimator = ValueAnimator.ofFloat(currentAlpha, 0f).apply {
-            duration = 260
+            duration = 240
             interpolator = AccelerateDecelerateInterpolator()
             addUpdateListener {
                 currentAlpha = it.animatedValue as Float
@@ -269,52 +326,46 @@ class GhostWorkIndicatorOverlay(
         val h = height.toFloat()
         val accentCyan = SystemVisualizer.currentAlbumColors?.getOrNull(0) ?: Color.rgb(0, 229, 255)
 
-        // 1. Sleek Cyber Capsule Container
-        capsuleRect.set(1.5f * density, 1.5f * density, w - 1.5f * density, h - 1.5f * density)
-        val capsuleRadius = (h - 3f * density) / 2f
+        // 1. Sleek Cyber Capsule Container (height = 27dp)
+        capsuleRect.set(1.2f * density, 1.2f * density, w - 1.2f * density, h - 1.2f * density)
+        val capsuleRadius = (h - 2.4f * density) / 2f
 
         paintCapsuleBg.color = Color.argb((185 * currentAlpha).toInt(), 10, 14, 20)
         canvas.drawRoundRect(capsuleRect, capsuleRadius, capsuleRadius, paintCapsuleBg)
 
         paintCapsuleStroke.color = Color.argb(
-            (75 * currentAlpha * (0.8f + 0.2f * sin(animTime * 3f))).toInt().coerceIn(0, 255),
+            (70 * currentAlpha * (0.8f + 0.2f * sin(animTime * 3f))).toInt().coerceIn(0, 255),
             Color.red(accentCyan), Color.green(accentCyan), Color.blue(accentCyan)
         )
         canvas.drawRoundRect(capsuleRect, capsuleRadius, capsuleRadius, paintCapsuleStroke)
 
-        // 2. Tracked HUD Text: "G H O S T" and Operational Tag
-        paintTextTitle.alpha = (245 * currentAlpha).toInt()
-        val textStartX = 14f * density
-        val titleY = if (currentTag.isNotBlank()) 16.5f * density else 23.5f * density
-        canvas.drawText("G H O S T", textStartX, titleY, paintTextTitle)
+        // 2. Terminal Monospace Flavor Text
+        paintText.alpha = (245 * currentAlpha).toInt()
+        val textStartX = 11f * density
+        val textY = h / 2f + (3.4f * density)
+        canvas.drawText(currentFlavorText, textStartX, textY, paintText)
 
-        if (currentTag.isNotBlank()) {
-            paintTextTag.color = accentCyan
-            paintTextTag.alpha = (230 * currentAlpha * (0.7f + 0.3f * sin(animTime * 4f))).toInt().coerceIn(0, 255)
-            canvas.drawText("// $currentTag", textStartX, 29f * density, paintTextTag)
-        }
-
-        // 3. Animated Destiny Ghost Shell (Right side)
-        val ghostCx = w - 23f * density
+        // 3. Compact Cyber Ghost Shell (Right side)
+        val ghostCx = w - 16f * density
         val ghostCy = h / 2f
 
         val pulse = (0.5f + 0.5f * sin(animTime * 5.0f)).coerceIn(0f, 1f)
-        val breathing = sin(animTime * 3.2f) * (1.2f * density)
-        val spread = openProgress * (7.5f * density) + (if (openProgress > 0.4f) breathing else 0f)
-        val tiltAngle = if (openProgress > 0.1f) sin(animTime * 2.2f) * 16f else 0f
+        val breathing = sin(animTime * 3.2f) * (0.9f * density)
+        val spread = openProgress * (5.2f * density) + (if (openProgress > 0.4f) breathing else 0f)
+        val tiltAngle = if (openProgress > 0.1f) sin(animTime * 2.2f) * 14f else 0f
 
         canvas.save()
         canvas.translate(ghostCx, ghostCy)
         canvas.rotate(tiltAngle)
 
-        // 3A. Central Eye Core (Dark Sphere with Glowing Cyan Concentric Iris)
-        val eyeRadius = 5.2f * density
+        // 3A. Central Eye Core (Dark Sphere with Glowing Concentric Iris)
+        val eyeRadius = 3.8f * density
         paintEyeCore.alpha = (255 * currentAlpha).toInt()
         canvas.drawCircle(0f, 0f, eyeRadius, paintEyeCore)
 
         // Iris Bloom Aura
         paintEyeGlow.color = Color.argb(
-            (110 * pulse * currentAlpha * openProgress.coerceAtLeast(0.3f)).toInt().coerceIn(0, 255),
+            (100 * pulse * currentAlpha * openProgress.coerceAtLeast(0.3f)).toInt().coerceIn(0, 255),
             Color.red(accentCyan), Color.green(accentCyan), Color.blue(accentCyan)
         )
         canvas.drawCircle(0f, 0f, eyeRadius * (1.3f + 0.4f * pulse), paintEyeGlow)
@@ -328,15 +379,15 @@ class GhostWorkIndicatorOverlay(
 
         // Center Pupil Dot
         paintEyePupil.alpha = (255 * currentAlpha).toInt()
-        canvas.drawCircle(0f, 0f, 1.8f * density * (0.85f + 0.25f * pulse), paintEyePupil)
+        canvas.drawCircle(0f, 0f, 1.3f * density * (0.85f + 0.25f * pulse), paintEyePupil)
 
-        // 3B. The 4 Geometric Shell Wings (Top-Right, Bottom-Right, Bottom-Left, Top-Left at 45°)
-        val apexR = 13.5f * density
-        val shoulderR = 8.5f * density
-        val wingWidth = 5.8f * density
-        val innerR = 5.2f * density
-        val baseWidth = 3.8f * density
-        val notchR = 4.2f * density
+        // 3B. The 4 Geometric Shell Wings (Compact scaled for 27dp capsule)
+        val apexR = 9.8f * density
+        val shoulderR = 6.2f * density
+        val wingWidth = 4.2f * density
+        val innerR = 3.8f * density
+        val baseWidth = 2.8f * density
+        val notchR = 3.1f * density
 
         paintWingLeft.alpha = (245 * currentAlpha).toInt()
         paintWingRight.alpha = (235 * currentAlpha).toInt()
@@ -346,7 +397,7 @@ class GhostWorkIndicatorOverlay(
             val wingAngle = i * 90f - 45f
             canvas.save()
             canvas.rotate(wingAngle)
-            canvas.translate(0f, -spread) // Translate radially outward
+            canvas.translate(0f, -spread)
 
             // Left Facet (Lit titanium)
             wingPathLeft.reset()

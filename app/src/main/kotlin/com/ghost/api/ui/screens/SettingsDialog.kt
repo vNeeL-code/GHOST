@@ -43,9 +43,8 @@ fun SettingsDialog(
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE) }
 
-    var edgeLightsEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_EDGE_LIGHTS_ENABLED, EdgeLightsManager.isShowing)) }
+    var edgeLightsEnabled by remember { mutableStateOf(EdgeLightsManager.isShowing) }
     var passiveTtsEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_PASSIVE_TTS, true)) }
-    var workSignalEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_WORK_SIGNAL_ENABLED, true)) }
     var diaryActive by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_AUTONOMOUS_DIARY, true)) }
     var diaryCadence by remember { mutableStateOf(prefs.getString(Constants.PREF_DIARY_CADENCE, "12") ?: "12") }
     var ttsEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_TTS_ENABLED, true)) }
@@ -248,23 +247,13 @@ fun SettingsDialog(
                                 checked = edgeLightsEnabled,
                                 onCheckedChange = { checked ->
                                     edgeLightsEnabled = checked
-                                    context.sendBroadcast(
-                                        Intent(context, HardwareToggleReceiver::class.java).apply {
-                                            action = "com.ghost.api.ACTION_TOGGLE_EDGE_LIGHTS"
-                                        }
-                                    )
-                                }
-                            )
-                        }
-                        item {
-                            SettingsToggleRow(
-                                title = "Ghost HUD Work Signal",
-                                subtitle = "Corner holographic animation during background operations",
-                                checked = workSignalEnabled,
-                                onCheckedChange = { checked ->
-                                    workSignalEnabled = checked
-                                    prefs.edit().putBoolean(Constants.PREF_WORK_SIGNAL_ENABLED, checked).apply()
-                                    Toast.makeText(context, if (checked) "Work signal enabled" else "Work signal disabled", Toast.LENGTH_SHORT).show()
+                                    if (checked) {
+                                        EdgeLightsManager.show(context)
+                                    } else {
+                                        EdgeLightsManager.hide(context)
+                                    }
+                                    val status = if (EdgeLightsManager.isShowing) "ON" else "OFF"
+                                    Toast.makeText(context, "Edge Lights $status", Toast.LENGTH_SHORT).show()
                                 }
                             )
                         }
