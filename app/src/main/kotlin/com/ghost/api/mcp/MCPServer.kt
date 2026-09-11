@@ -37,6 +37,7 @@ class MCPServer(
     private val toolRegistry = mapOf(
         // Hardware
         "flashlight"      to ToolDefinition("flashlight", "Toggle the device flashlight", mapOf("state" to ParameterSpec("string", "ON or OFF"))),
+        "set_edge_lights" to ToolDefinition("set_edge_lights", "Controls or toggles ambient screen equalizer edge lights rim lighting", mapOf("state" to ParameterSpec("string", "ON, OFF, or TOGGLE"))),
         // System / Apps
         "app"             to ToolDefinition("app", "Launch an installed app by name", mapOf("name" to ParameterSpec("string", "App name"))),
         "media"           to ToolDefinition("media", "Control media playback", mapOf("action" to ParameterSpec("string", "PLAY, PAUSE, NEXT, or PREV"))),
@@ -119,6 +120,11 @@ class MCPServer(
                     val state = params["state"]?.toString()?.uppercase() ?: "OFF"
                     hardwareTools.flashlight(state)
                     ToolResult(true, "Flashlight $state")
+                }
+                "set_edge_lights" -> {
+                    val state = params["state"]?.toString() ?: "TOGGLE"
+                    val res = hardwareTools.set_edge_lights(state)
+                    ToolResult(res["result"] == "success", res["message"] ?: "")
                 }
                 // System / Apps
                 "app" -> {

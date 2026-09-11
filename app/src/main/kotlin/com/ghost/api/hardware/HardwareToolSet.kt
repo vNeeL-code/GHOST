@@ -70,5 +70,22 @@ class HardwareToolSet(
         }
     }
 
-
+    @Tool(description = "Controls or toggles the ambient screen equalizer edge lights rim lighting")
+    fun set_edge_lights(
+        @ToolParam(description = "Set to 'ON' to turn on, 'OFF' to turn off, or 'TOGGLE' to switch") state: String
+    ): Map<String, String> {
+        return try {
+            when (state.uppercase()) {
+                "ON" -> com.ghost.api.ui.EdgeLightsManager.show(context)
+                "OFF" -> com.ghost.api.ui.EdgeLightsManager.hide(context)
+                "TOGGLE" -> com.ghost.api.ui.EdgeLightsManager.toggle(context)
+                else -> return mapOf("result" to "error", "message" to "Invalid state: $state. Use ON, OFF, or TOGGLE.")
+            }
+            val status = if (com.ghost.api.ui.EdgeLightsManager.isShowing) "ON" else "OFF"
+            mapOf("result" to "success", "message" to "Edge lights are now $status")
+        } catch (e: Exception) {
+            mapOf("result" to "error", "message" to (e.message ?: "Unknown error"))
+        }
+    }
 }
+

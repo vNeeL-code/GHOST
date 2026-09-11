@@ -5,9 +5,12 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.PixelFormat
+import android.hardware.display.DisplayManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
+import android.view.Surface
 import android.view.View
 import android.view.WindowManager
 import androidx.core.graphics.ColorUtils
@@ -20,12 +23,102 @@ import kotlin.math.min
 object EdgeLightsManager : SystemVisualizer.AudioListener {
 
     private var windowManager: WindowManager? = null
+    private var displayManager: DisplayManager? = null
+    private var appContext: Context? = null
     private var topView: TopEdgeView? = null
     private var bottomView: BottomEdgeView? = null
     var isShowing = false
         private set
 
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) {}
+        override fun onDisplayRemoved(displayId: Int) {}
+        override fun onDisplayChanged(displayId: Int) {
+            handleDisplayChanged()
+        }
+    }
+
+    /**
+     * Rock-solid landscape detection across all Android API levels, orientations, and form factors.
+     * Service contexts do not reliably update resources.configuration on rotation, so we directly
+     * query display rotation, window metrics bounds, and real display metrics.
+     */
+    fun isLandscape(context: Context? = appContext): Boolean {
+        val ctx = context ?: topView?.context ?: bottomView?.context ?: return false
+        val wm = windowManager ?: ctx.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+
+        // 1. Check Display rotation (90° or 270° is landscape on any handheld device)
+        val rotation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                ctx.display?.rotation ?: wm?.defaultDisplay?.rotation ?: Surface.ROTATION_0
+            } catch (e: Exception) {
+                wm?.defaultDisplay?.rotation ?: Surface.ROTATION_0
+            }
+        } else {
+            wm?.defaultDisplay?.rotation ?: Surface.ROTATION_0
+        }
+
+        if (rotation == Surface.ROTATION_90 || rotation == Surface.ROTATION_270) {
+            return true
+        }
+
+        // 2. Physical display dimensions / window bounds check (width > height)
+        if (wm != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                try {
+                    val bounds = wm.currentWindowMetrics.bounds
+                    if (bounds.width() > bounds.height()) return true
+                } catch (e: Exception) {}
+            }
+            try {
+                val metrics = android.util.DisplayMetrics()
+                wm.defaultDisplay.getRealMetrics(metrics)
+                if (metrics.widthPixels > metrics.heightPixels) return true
+            } catch (e: Exception) {}
+        }
+
+        // 3. View resources configuration check
+        val viewConfig = topView?.resources?.configuration ?: bottomView?.resources?.configuration
+        if (viewConfig?.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
+            return true
+        }
+
+        // 4. Context configuration check
+        if (ctx.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
+            return true
+        }
+
+        return false
+    }
+
+    private fun handleDisplayChanged() {
+        if (!isShowing) return
+        val landscape = isLandscape()
+        val targetVis = if (landscape) View.GONE else View.VISIBLE
+
+        mainHandler.post {
+            topView?.let {
+                if (it.visibility != targetVis) {
+                    it.visibility = targetVis
+                }
+                if (!landscape) it.invalidate()
+            }
+            bottomView?.let {
+                if (it.visibility != targetVis) {
+                    it.visibility = targetVis
+                }
+                if (!landscape) it.invalidate()
+            }
+        }
+    }
+
     fun restoreState(context: Context) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { restoreState(context) }
+            return
+        }
         val prefs = context.getSharedPreferences(com.ghost.api.Constants.PREFS_NAME, Context.MODE_PRIVATE)
         if (prefs.getBoolean(com.ghost.api.Constants.PREF_EDGE_LIGHTS_ENABLED, false)) {
             show(context)
@@ -33,15 +126,24 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
     }
 
     fun toggle(context: Context) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { toggle(context) }
+            return
+        }
         if (isShowing) hide(context) else show(context)
     }
 
     fun show(context: Context) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { show(context) }
+            return
+        }
         if (isShowing) return
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M && !android.provider.Settings.canDrawOverlays(context)) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !android.provider.Settings.canDrawOverlays(context)) {
             return
         }
 
+        appContext = context.applicationContext
         windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val density = context.resources.displayMetrics.density
         // 52dp strip height covers subtle equalizer rim lighting along top/bottom bezels
@@ -57,14 +159,14 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
         val topParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             stripHeight,
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else WindowManager.LayoutParams.TYPE_PHONE,
             baseFlags,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             }
         }
@@ -72,14 +174,14 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
         val bottomParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             stripHeight,
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else WindowManager.LayoutParams.TYPE_PHONE,
             baseFlags,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.BOTTOM
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             }
         }
@@ -87,9 +189,22 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
         topView = TopEdgeView(context)
         bottomView = BottomEdgeView(context)
 
+        // Set initial visibility based on current orientation
+        val initialLandscape = isLandscape(context)
+        val initialVis = if (initialLandscape) View.GONE else View.VISIBLE
+        topView?.visibility = initialVis
+        bottomView?.visibility = initialVis
+
         try {
             windowManager?.addView(topView, topParams)
             windowManager?.addView(bottomView, bottomParams)
+
+            // Register DisplayListener for instant rotation detection
+            if (displayManager == null) {
+                displayManager = context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
+                displayManager?.registerDisplayListener(displayListener, mainHandler)
+            }
+
             SystemVisualizer.init(context)
             SystemVisualizer.addListener(this)
             isShowing = true
@@ -102,13 +217,29 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
     }
 
     fun hide(context: Context) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { hide(context) }
+            return
+        }
         context.getSharedPreferences(com.ghost.api.Constants.PREFS_NAME, Context.MODE_PRIVATE)
             .edit().putBoolean(com.ghost.api.Constants.PREF_EDGE_LIGHTS_ENABLED, false).apply()
         if (!isShowing && topView == null && bottomView == null) return
         SystemVisualizer.removeListener(this)
+
         try {
-            topView?.let { windowManager?.removeView(it) }
-            bottomView?.let { windowManager?.removeView(it) }
+            displayManager?.unregisterDisplayListener(displayListener)
+        } catch (e: Exception) {
+            Timber.w(e, "Error unregistering DisplayListener")
+        }
+        displayManager = null
+
+        try {
+            topView?.let {
+                if (it.isAttachedToWindow) windowManager?.removeView(it)
+            }
+            bottomView?.let {
+                if (it.isAttachedToWindow) windowManager?.removeView(it)
+            }
         } catch (e: Exception) {
             Timber.w(e, "Error removing edge light views")
         }
@@ -118,11 +249,13 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
     }
 
     override fun onAudioData(waveform: ByteArray, fft: ByteArray, intensity: Float, bass: Float) {
+        if (!isShowing || isLandscape()) return
         topView?.updateAudioData(fft, intensity, bass)
         bottomView?.updateAudioData(fft, intensity, bass)
     }
 
     override fun onColorsChanged(colors: IntArray?) {
+        if (!isShowing || isLandscape()) return
         topView?.updateColors(colors)
         bottomView?.updateColors(colors)
     }
@@ -159,7 +292,30 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
         protected var targetColors: IntArray = defaultColors
         protected var currentColors: IntArray = defaultColors.clone()
 
+        override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+            super.onConfigurationChanged(newConfig)
+            post {
+                val landscape = isLandscape(context)
+                val targetVis = if (landscape) GONE else VISIBLE
+                if (visibility != targetVis) {
+                    visibility = targetVis
+                }
+                if (!landscape) invalidate()
+            }
+        }
+
         fun updateAudioData(fft: ByteArray, intensity: Float, bass: Float) {
+            if (isLandscape(context)) {
+                if (visibility != GONE) {
+                    mainHandler.post { visibility = GONE }
+                }
+                return
+            }
+
+            if (visibility != VISIBLE) {
+                mainHandler.post { visibility = VISIBLE }
+            }
+
             smoothedBass = smoothedBass * 0.72f + bass * 0.28f
 
             fftHistory.addFirst(fft.copyOf())
@@ -172,7 +328,9 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
 
         fun updateColors(colors: IntArray?) {
             targetColors = colors ?: defaultColors
-            mainHandler.post { invalidate() }
+            if (!isLandscape(context)) {
+                mainHandler.post { invalidate() }
+            }
         }
     }
 
@@ -183,7 +341,10 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
     private class TopEdgeView(context: Context) : BaseEdgeView(context) {
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
-            if (context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
+            if (isLandscape(context)) {
+                if (visibility != GONE) {
+                    visibility = GONE
+                }
                 return
             }
 
@@ -240,7 +401,10 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
     private class BottomEdgeView(context: Context) : BaseEdgeView(context) {
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
-            if (context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
+            if (isLandscape(context)) {
+                if (visibility != GONE) {
+                    visibility = GONE
+                }
                 return
             }
 
@@ -292,3 +456,4 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
         }
     }
 }
+
