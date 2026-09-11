@@ -45,7 +45,7 @@ fun SettingsDialog(
 
     var edgeLightsEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_EDGE_LIGHTS_ENABLED, EdgeLightsManager.isShowing)) }
     var passiveTtsEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_PASSIVE_TTS, true)) }
-    var pipVisibilityEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_PIP_VISIBILITY, true)) }
+    var workSignalEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_WORK_SIGNAL_ENABLED, true)) }
     var diaryActive by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_AUTONOMOUS_DIARY, true)) }
     var diaryCadence by remember { mutableStateOf(prefs.getString(Constants.PREF_DIARY_CADENCE, "12") ?: "12") }
     var ttsEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_TTS_ENABLED, true)) }
@@ -258,13 +258,13 @@ fun SettingsDialog(
                         }
                         item {
                             SettingsToggleRow(
-                                title = "PiP Tool Overlays",
-                                subtitle = "Floating tool windows and live output preview",
-                                checked = pipVisibilityEnabled,
+                                title = "Ghost HUD Work Signal",
+                                subtitle = "Corner holographic animation during background operations",
+                                checked = workSignalEnabled,
                                 onCheckedChange = { checked ->
-                                    pipVisibilityEnabled = checked
-                                    prefs.edit().putBoolean(Constants.PREF_PIP_VISIBILITY, checked).apply()
-                                    Toast.makeText(context, if (checked) "PiP overlays on" else "PiP overlays off", Toast.LENGTH_SHORT).show()
+                                    workSignalEnabled = checked
+                                    prefs.edit().putBoolean(Constants.PREF_WORK_SIGNAL_ENABLED, checked).apply()
+                                    Toast.makeText(context, if (checked) "Work signal enabled" else "Work signal disabled", Toast.LENGTH_SHORT).show()
                                 }
                             )
                         }

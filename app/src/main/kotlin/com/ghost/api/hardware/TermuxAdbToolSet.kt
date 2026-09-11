@@ -86,7 +86,7 @@ class TermuxAdbToolSet(private val context: Context) : ToolSet {
     fun bash(
         @ToolParam(description = "The command") command: String
     ): Map<String, String> {
-        com.ghost.api.GemmaService.instance?.showPipContent("Terminal", "Executing: ${command.take(20)}...")
+        com.ghost.api.GemmaService.instance?.showWorkSignal("TERMINAL")
         return try {
             val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
             val outputFuture = java.util.concurrent.CompletableFuture.supplyAsync {
@@ -95,6 +95,10 @@ class TermuxAdbToolSet(private val context: Context) : ToolSet {
             process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)
             val output = try { outputFuture.get(2, java.util.concurrent.TimeUnit.SECONDS) } catch (e: Exception) { "" }
             mapOf("result" to "success", "output" to output.take(2000))
-        } catch (e: Exception) { mapOf("result" to "error", "message" to e.message.toString()) }
+        } catch (e: Exception) { 
+            mapOf("result" to "error", "message" to e.message.toString()) 
+        } finally {
+            com.ghost.api.GemmaService.instance?.hideWorkSignal()
+        }
     }
 }

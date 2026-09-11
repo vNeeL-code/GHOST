@@ -40,17 +40,21 @@ class NetworkToolSet(private val context: Context) : ToolSet {
         @ToolParam(description = "Max results to return") maxResults: Int = 5
     ): Map<String, String> = runBlocking(Dispatchers.IO) {
         Timber.i("Performing silent search for: $query")
+        com.ghost.api.GemmaService.instance?.showWorkSignal("SEARCHING")
+        try {
+            val ddgResult = try { fetchDuckDuckGoLite(query, maxResults) } catch (e: Exception) { 
+                Timber.w("DuckDuckGo search failed: ${e.message}")
+                null 
+            }
+            
+            if (ddgResult != null) {
+                return@runBlocking mapOf("result" to "success", "content" to ddgResult)
+            }
 
-        val ddgResult = try { fetchDuckDuckGoLite(query, maxResults) } catch (e: Exception) { 
-            Timber.w("DuckDuckGo search failed: ${e.message}")
-            null 
+            mapOf("result" to "error", "message" to "Search failed for '$query'.")
+        } finally {
+            com.ghost.api.GemmaService.instance?.hideWorkSignal()
         }
-        
-        if (ddgResult != null) {
-            return@runBlocking mapOf("result" to "success", "content" to ddgResult)
-        }
-
-        mapOf("result" to "error", "message" to "Search failed for '$query'.")
     }
 
     private fun fetchDuckDuckGoLite(query: String, maxResults: Int): String? {
@@ -86,6 +90,7 @@ class NetworkToolSet(private val context: Context) : ToolSet {
         @ToolParam(description = "The URL string") urlString: String, 
         @ToolParam(description = "Maximum characters to return") maxChars: Int = 10000
     ): Map<String, String> = runBlocking(Dispatchers.IO) {
+        com.ghost.api.GemmaService.instance?.showWorkSignal("FETCHING")
         try {
             val url = URL(urlString)
             val connection = url.openConnection() as HttpURLConnection
@@ -112,6 +117,8 @@ class NetworkToolSet(private val context: Context) : ToolSet {
             mapOf("result" to "success", "content" to text)
         } catch (e: Exception) {
             mapOf("result" to "error", "message" to (e.message ?: "failed"))
+        } finally {
+            com.ghost.api.GemmaService.instance?.hideWorkSignal()
         }
     }
 

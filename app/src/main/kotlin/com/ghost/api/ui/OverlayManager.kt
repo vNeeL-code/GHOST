@@ -33,7 +33,8 @@ class OverlayManager(private val context: Context) {
     private var overlayView: OverlayInputView? = null
     private var pillView: PillOverlayView? = null
     private var inputOverlay: InputOverlay? = null
-    private var browserBubble: BrowserBubbleOverlay? = null
+    private var ghostWorkIndicator: GhostWorkIndicatorOverlay? = null
+    private val activeWorkCounter = java.util.concurrent.atomic.AtomicInteger(0)
     private var currentStyle: OverlayStyle = OverlayStyle.SPARKLE
     private var isShowing = false
 
@@ -253,94 +254,52 @@ class OverlayManager(private val context: Context) {
     /**
      * Spawns or updates a floating Browser Bubble for supervised AI research
      */
-    fun showBrowserBubble(url: String, onContentScraped: (String) -> Unit) {
-        if (!canDrawOverlay()) {
-            Timber.w("No overlay permission for Browser Bubble")
-            return
-        }
-        
+    /**
+     * Shows the Destiny Ghost HUD work signal in the screen corner during background operations.
+     */
+    fun showWorkSignal(tag: String = "WORKING", durationMs: Long = 0) {
+        val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+        if (!prefs.getBoolean(Constants.PREF_WORK_SIGNAL_ENABLED, true)) return
+        if (!canDrawOverlay()) return
+
+        activeWorkCounter.incrementAndGet()
         android.os.Handler(android.os.Looper.getMainLooper()).post {
-            if (browserBubble == null) {
-                browserBubble = BrowserBubbleOverlay(context, windowManager!!) {
-                    hideBrowserBubble()
-                }
-                windowManager?.addView(browserBubble, browserBubble!!.windowParams)
+            val wm = windowManager ?: return@post
+            if (ghostWorkIndicator == null) {
+                ghostWorkIndicator = GhostWorkIndicatorOverlay(context, wm)
             }
-            
-            browserBubble?.loadUrl(url)
-            
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                browserBubble?.scrapeContent { scrapedText ->
-                    onContentScraped(scrapedText)
-                    hideBrowserBubble()
-                }
-            }, 5000)
+            ghostWorkIndicator?.show(tag, durationMs)
         }
     }
 
-    fun showPipContent(title: String, htmlContent: String, durationMs: Long = 5000) {
-        val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-        if (!prefs.getBoolean(Constants.PREF_PIP_VISIBILITY, true)) return
-
-        if (!canDrawOverlay()) return
-
-        android.os.Handler(android.os.Looper.getMainLooper()).post {
-            if (browserBubble == null) {
-                browserBubble = BrowserBubbleOverlay(context, windowManager!!) {
-                    hideBrowserBubble()
-                }
-                windowManager?.addView(browserBubble, browserBubble!!.windowParams)
-            }
-
-            val wrappedHtml = """
-                <html><head><style>
-                body { background-color: #1E1E1E; color: #FFFFFF; font-family: monospace; font-size: 14px; padding: 8px; }
-                </style></head><body>$htmlContent</body></html>
-            """.trimIndent()
-            
-            browserBubble?.loadContent(title, wrappedHtml)
-            
-            if (durationMs > 0) {
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                    hideBrowserBubble()
-                }, durationMs)
+    /**
+     * Hides the Destiny Ghost HUD work signal when background operations complete.
+     */
+    fun hideWorkSignal(force: Boolean = false) {
+        val count = if (force) 0 else activeWorkCounter.decrementAndGet()
+        if (count <= 0) {
+            activeWorkCounter.set(0)
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                ghostWorkIndicator?.hide()
             }
         }
+    }
+
+    // Deprecated forwarders for backward compatibility (all routed safely to zero-overhead work signal)
+    fun showPipContent(title: String, htmlContent: String, durationMs: Long = 5000) {
+        showWorkSignal(title, durationMs)
     }
 
     fun showPipUrl(title: String, url: String, durationMs: Long = 10000) {
-        val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-        if (!prefs.getBoolean(Constants.PREF_PIP_VISIBILITY, true)) return
-
-        if (!canDrawOverlay()) return
-
-        android.os.Handler(android.os.Looper.getMainLooper()).post {
-            if (browserBubble == null) {
-                browserBubble = BrowserBubbleOverlay(context, windowManager!!) {
-                    hideBrowserBubble()
-                }
-                windowManager?.addView(browserBubble, browserBubble!!.windowParams)
-            }
-
-            browserBubble?.loadUrl(title, url)
-            
-            if (durationMs > 0) {
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                    hideBrowserBubble()
-                }, durationMs)
-            }
-        }
+        showWorkSignal(title, durationMs)
     }
-    
+
     fun hideBrowserBubble() {
-        android.os.Handler(android.os.Looper.getMainLooper()).post {
-            browserBubble?.let {
-                if (it.windowToken != null) {
-                    windowManager?.removeView(it)
-                }
-            }
-            browserBubble = null
-        }
+        hideWorkSignal(force = true)
+    }
+
+    fun showBrowserBubble(url: String, onContentScraped: (String) -> Unit) {
+        showWorkSignal("SEARCHING", 3000)
     }
 
     private fun dpToPx(dp: Int): Int {

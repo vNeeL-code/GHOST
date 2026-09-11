@@ -1640,15 +1640,27 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         }
     }
 
+    fun showWorkSignal(tag: String = "WORKING", durationMs: Long = 0) {
+        if (::overlayManager.isInitialized) {
+            overlayManager.showWorkSignal(tag, durationMs)
+        }
+    }
+
+    fun hideWorkSignal() {
+        if (::overlayManager.isInitialized) {
+            overlayManager.hideWorkSignal()
+        }
+    }
+
     fun showPipContent(title: String, htmlContent: String, durationMs: Long = 5000) {
         if (::overlayManager.isInitialized) {
-            overlayManager.showPipContent(title, htmlContent, durationMs)
+            overlayManager.showWorkSignal(title, durationMs)
         }
     }
 
     fun showPipUrl(title: String, url: String, durationMs: Long = 10000) {
         if (::overlayManager.isInitialized) {
-            overlayManager.showPipUrl(title, url, durationMs)
+            overlayManager.showWorkSignal(title, durationMs)
         }
     }
 

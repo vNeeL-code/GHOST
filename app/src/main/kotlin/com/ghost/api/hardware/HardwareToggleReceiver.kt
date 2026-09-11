@@ -38,6 +38,10 @@ class HardwareToggleReceiver : BroadcastReceiver() {
                     Toast.makeText(context, "Error launching wallpaper chooser", Toast.LENGTH_SHORT).show()
                 }
             }
+            "com.ghost.api.ACTION_TEST_WORK_SIGNAL" -> {
+                Timber.i("Hardware Toggle: Test Work Signal requested")
+                com.ghost.api.GemmaService.instance?.showWorkSignal("TESTING", 5000)
+            }
         }
     }
 }
