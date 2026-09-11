@@ -99,7 +99,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
             
             val backendsToTry = when (forcedBackend?.uppercase()) {
                 "CPU" -> listOf("CPU" to Backend.CPU())
-                "GPU" -> listOf("GPU" to sharedGpuBackend)
+                "GPU" -> listOf("GPU" to sharedGpuBackend, "CPU" to Backend.CPU())
                 else -> listOf("GPU" to sharedGpuBackend, "CPU" to Backend.CPU())
             }
             

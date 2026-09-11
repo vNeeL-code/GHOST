@@ -505,12 +505,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
 
     // === PERMISSIONS LOGIC ===
-
     private fun checkPermissions() {
-        val hasSecureSettings = checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) == android.content.pm.PackageManager.PERMISSION_GRANTED
-        if (hasSecureSettings) {
-            reportStatus("All sensors are now operational.")
-        }
+        // Standard permissions managed through runtime flow
     }
 
     // === MEMORY MANAGEMENT ===
@@ -646,16 +642,23 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         try {
             updateNotification("Finding model...")
 
+            val protectedModelsDir = File(getExternalFilesDir(null), "models").apply { mkdirs() }
+            val appFilesDir = getExternalFilesDir(null)
             val downloadDir = android.os.Environment.getExternalStoragePublicDirectory(
                 android.os.Environment.DIRECTORY_DOWNLOADS
             )
-            // Search for any Gemma model variant (E2B preferred)
-            val searchDirs = listOf(
-                getExternalFilesDir(null),  // App storage (survives Downloads cleanup)
-                downloadDir                  // Downloads folder
+
+            // Search order:
+            // 1. App-specific protected models directory (survives app updates, immune to Downloads cleanup)
+            // 2. App-specific files directory root (for legacy app-internal storage)
+            // 3. Downloads directory (for manual user sideloading)
+            val searchDirs = listOfNotNull(
+                protectedModelsDir,
+                appFilesDir,
+                downloadDir
             )
-            val modelFile = searchDirs.flatMap { dir ->
-                dir?.listFiles { file ->
+            val candidateFile = searchDirs.flatMap { dir ->
+                dir.listFiles { file ->
                     val name = file.name
                     (name.endsWith(".litertlm", ignoreCase = true) ||
                      name.endsWith(".gguf", ignoreCase = true) ||
@@ -664,12 +667,50 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 }?.toList() ?: emptyList()
             }.sortedByDescending { file ->
                 val name = file.name.lowercase()
-                when {
-                    name.contains("e2b") -> 80
-                    name.endsWith(".litertlm") -> 50
-                    else -> 0
-                }
+                var score = 0
+                if (file.parentFile?.canonicalPath == protectedModelsDir.canonicalPath) score += 100 // Prefer protected models dir
+                if (name.contains("e2b")) score += 80
+                if (name.endsWith(".litertlm")) score += 50
+                score
             }.firstOrNull()
+
+            // AUTO-MIGRATION: If found outside protectedModelsDir, migrate to protected storage!
+            val modelFile: File? = if (candidateFile != null && candidateFile.parentFile?.canonicalPath != protectedModelsDir.canonicalPath) {
+                val targetFile = File(protectedModelsDir, candidateFile.name)
+                Timber.i("\uD83D\uDCE6 Auto-migrating model from ${candidateFile.parent} to protected storage: ${targetFile.absolutePath}")
+                updateNotification("Securing model weights...")
+                val moved = try {
+                    candidateFile.renameTo(targetFile)
+                } catch (e: Exception) {
+                    Timber.w(e, "renameTo failed during model migration")
+                    false
+                }
+
+                if (moved && targetFile.exists() && targetFile.length() > 0) {
+                    Timber.i("✅ Model migrated to ${targetFile.absolutePath}")
+                    // Also migrate companion cache files if they exist in source directory
+                    try {
+                        val sourceName = candidateFile.name
+                        candidateFile.parentFile?.listFiles { _, name ->
+                            name.startsWith(sourceName)
+                        }?.forEach { cacheFile ->
+                            val targetCache = File(protectedModelsDir, cacheFile.name)
+                            if (!targetCache.exists()) {
+                                try { cacheFile.renameTo(targetCache) } catch (_: Exception) {}
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Timber.w(e, "Failed to migrate some companion cache files")
+                    }
+                    targetFile
+                } else if (targetFile.exists() && targetFile.length() == candidateFile.length()) {
+                    targetFile
+                } else {
+                    candidateFile
+                }
+            } else {
+                candidateFile
+            }
 
             if (modelFile != null) {
                 uiCallback?.onDownloadProgress(null)
@@ -781,6 +822,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                     }
                     Timber.e("Model load failed: $error")
                     updateNotification("Load Error: ${error.take(80)}$hint")
+                    prefs.edit().putBoolean("is_initializing", false).apply()
                     return@initialize
                 }
                 engineInstance

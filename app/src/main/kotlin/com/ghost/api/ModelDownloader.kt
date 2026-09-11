@@ -47,6 +47,16 @@ class ModelDownloader(
 
         val url = "https://huggingface.co/$hfRepo/resolve/main/$fileName?download=true"
         
+        val modelsDir = context.getExternalFilesDir("models") ?: File(context.getExternalFilesDir(null), "models")
+        modelsDir.mkdirs()
+
+        val existingFile = File(modelsDir, fileName)
+        if (existingFile.exists() && existingFile.length() > 200 * 1024 * 1024L) {
+            Timber.i("Model $fileName already exists in protected storage (${existingFile.length()} bytes)")
+            _downloadStatus.value = DownloadState.Success(existingFile)
+            return
+        }
+
         // 2. Check DownloadManager for existing downloads of the same file
         val existingId = findExistingDownloadId(fileName)
         if (existingId != -1L) {
@@ -57,15 +67,16 @@ class ModelDownloader(
         }
 
         try {
-            // Save to stable public dir — survives APK reinstalls/patches.
-            // App-private external dirs (getExternalFilesDir) are wiped on reinstall.
-            Timber.i("Starting model download → Downloads/$fileName")
+            // Save to app-specific protected dir (Android/data/com.ghost.api/files/models/)
+            // Survives all app updates and APK patches without being wiped.
+            // Protected from accidental user Downloads purges and requires zero storage permissions.
+            Timber.i("Starting model download → models/$fileName")
             val uri = Uri.parse(url)
             val request = DownloadManager.Request(uri).apply {
                 setTitle("GHOST Model: $fileName")
-                setDescription("Downloading $fileName")
+                setDescription("Downloading $fileName to protected storage")
                 setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, fileName)
+                setDestinationInExternalFilesDir(context, "models", fileName)
                 setAllowedOverMetered(true)
                 setAllowedOverRoaming(false)
 
@@ -134,8 +145,8 @@ class ModelDownloader(
                             DownloadManager.STATUS_SUCCESSFUL -> {
                                 isDownloading = false
                                 activeDownloadId = -1L
-                                val destinationFile = java.io.File(
-                                    android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+                                val destinationFile = File(
+                                    context.getExternalFilesDir("models") ?: File(context.getExternalFilesDir(null), "models"),
                                     expectedFileName
                                 )
                                 _downloadStatus.value = DownloadState.Success(destinationFile)

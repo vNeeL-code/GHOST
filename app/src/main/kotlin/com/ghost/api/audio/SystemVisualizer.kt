@@ -199,19 +199,14 @@ object SystemVisualizer {
                lower == "com.google.android.googlequicksearchbox"
     }
 
-    fun ensureAccessibilityServiceEnabled(context: Context) {
-        try {
+    fun isAccessibilityServiceEnabled(context: Context): Boolean {
+        return try {
             val cr = context.contentResolver
             val enabledServices = Settings.Secure.getString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: ""
             val myService = ComponentName(context, GemmaAccessibilityService::class.java).flattenToString()
-            if (!enabledServices.contains(myService)) {
-                val newServices = if (enabledServices.isEmpty()) myService else "$enabledServices:$myService"
-                Settings.Secure.putString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, newServices)
-                Settings.Secure.putString(cr, Settings.Secure.ACCESSIBILITY_ENABLED, "1")
-                Timber.i("SystemVisualizer: Auto-enabled GemmaAccessibilityService")
-            }
+            enabledServices.contains(myService)
         } catch (e: Exception) {
-            Timber.d("SystemVisualizer: Accessibility auto-enable skipped (${e.message})")
+            false
         }
     }
 
@@ -363,7 +358,6 @@ object SystemVisualizer {
 
     fun init(context: Context) {
         appContext = context.applicationContext
-        ensureAccessibilityServiceEnabled(context)
 
         if (audioManager == null) {
             audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager

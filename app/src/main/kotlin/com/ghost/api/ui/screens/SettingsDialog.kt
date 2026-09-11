@@ -429,7 +429,7 @@ fun SettingsDialog(
                             item {
                                 SettingsActionCard(
                                     title = "Grant System Overlay Access",
-                                    subtitle = "Required for floating PiP tools & edge lights",
+                                    subtitle = "Required for edge lights & ambient HUD",
                                     isWarning = true,
                                     onClick = {
                                         context.startActivity(
