@@ -363,10 +363,14 @@ class KoogAgent(
                     _conversationHistory.clear()
                     _conversationHistory.addAll(recent)
                     toCompact
-                } else {
-                    val toCompact = _conversationHistory.toList()
+                } else if (_conversationHistory.size > 2) {
+                    val toCompact = _conversationHistory.dropLast(2)
+                    val recent = _conversationHistory.takeLast(2)
                     _conversationHistory.clear()
+                    _conversationHistory.addAll(recent)
                     toCompact
+                } else {
+                    emptyList()
                 }
             }
 
@@ -668,6 +672,17 @@ class KoogAgent(
             val images = queuedImages.map { it.bitmap }
             val turnImageUri = queuedImages.firstOrNull()?.uri
 
+            // 2.5 Proactive KV Headroom Guard (prevent mid-generation KV saturation crashes)
+            val historyChars = synchronized(_conversationHistory) { _conversationHistory.sumOf { it.content.length } }
+            val textTokens = (context.length + event.message.length + historyChars) / com.ghost.api.Constants.CHARS_PER_TOKEN
+            val imageTokens = images.size * 576
+            val totalEstimatedTokens = textTokens + imageTokens + 1500
+
+            if (totalEstimatedTokens > 3600 || turnsSinceKvFlush >= 8) {
+                Timber.i("🌀 Proactive KV headroom guard triggered: ~$totalEstimatedTokens tokens (turn $turnsSinceKvFlush). Compacting before inference...")
+                flushAndCompactSession()
+            }
+
             // 3. Add user message to history
             val currentDate = java.time.LocalDate.now().toString()
             val userMessageContent = "[Date: $currentDate] ${event.message}"
@@ -807,9 +822,10 @@ class KoogAgent(
 
             // 8. Dynamic KV Cache Flush based on token limit or turns
             turnsSinceKvFlush++
-            val currentTokenEstimate = (context.length + event.message.length + _conversationHistory.sumOf { it.content.length }) / com.ghost.api.Constants.CHARS_PER_TOKEN
-            if (currentTokenEstimate > 2400 || turnsSinceKvFlush >= 10) {
-                Timber.i("🌀 KV cache reaching capacity (~$currentTokenEstimate tokens, $turnsSinceKvFlush turns). Auto-flushing & Compacting...")
+            val postHistoryChars = synchronized(_conversationHistory) { _conversationHistory.sumOf { it.content.length } }
+            val postEstimatedTokens = (context.length + postHistoryChars) / com.ghost.api.Constants.CHARS_PER_TOKEN + (images.size * 576) + 1500
+            if (postEstimatedTokens > 3600 || turnsSinceKvFlush >= 8) {
+                Timber.i("🌀 KV cache reaching capacity (~$postEstimatedTokens tokens, $turnsSinceKvFlush turns). Auto-flushing & Compacting...")
                 flushAndCompactSession()
             }
 
@@ -1095,9 +1111,7 @@ class KoogAgent(
     ): String {
 
         // KV cache holds conversation history natively.
-        // We only inject context (body/sensors) here. 
-
-        _turnsSinceKvFlush.incrementAndGet()
+        // We only inject context (body/sensors) here.
 
         val contextBlock = contextManager.buildContext()
         val mediaCue = when {

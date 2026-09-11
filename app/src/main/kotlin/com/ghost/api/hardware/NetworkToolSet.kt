@@ -40,10 +40,7 @@ class NetworkToolSet(private val context: Context) : ToolSet {
         @ToolParam(description = "Max results to return") maxResults: Int = 5
     ): Map<String, String> = runBlocking(Dispatchers.IO) {
         Timber.i("Performing silent search for: $query")
-        val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
-        com.ghost.api.GemmaService.instance?.showPipUrl("Web Search", "https://duckduckgo.com/?q=$encodedQuery")
 
-        
         val ddgResult = try { fetchDuckDuckGoLite(query, maxResults) } catch (e: Exception) { 
             Timber.w("DuckDuckGo search failed: ${e.message}")
             null 

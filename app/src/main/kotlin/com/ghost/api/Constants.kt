@@ -53,6 +53,7 @@ object Constants {
     const val PREF_USER_BACKEND = "user_backend_override"  // "AUTO", "CPU", "GPU"
     const val PREF_VISUALIZER_PRESET = "visualizer_preset"  // "OPTION_A", "OPTION_B", "OPTION_C", "OPTION_D"
     const val PREF_OPERATOR_AVATAR = "operator_avatar_emoji"
+    const val PREF_EDGE_LIGHTS_ENABLED = "edge_lights_enabled"
 
     // Token estimation (chars per token, approximate)
     const val CHARS_PER_TOKEN = 4

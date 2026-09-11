@@ -43,7 +43,7 @@ fun SettingsDialog(
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE) }
 
-    var edgeLightsEnabled by remember { mutableStateOf(EdgeLightsManager.isShowing) }
+    var edgeLightsEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_EDGE_LIGHTS_ENABLED, EdgeLightsManager.isShowing)) }
     var passiveTtsEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_PASSIVE_TTS, true)) }
     var pipVisibilityEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_PIP_VISIBILITY, true)) }
     var diaryActive by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_AUTONOMOUS_DIARY, true)) }

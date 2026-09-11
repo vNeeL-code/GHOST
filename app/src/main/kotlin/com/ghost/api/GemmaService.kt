@@ -494,6 +494,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 // Start Life Processes
                 checkPermissions()
                 startAnimationLoop()  // Start notification screensavers (power-aware)
+                com.ghost.api.ui.EdgeLightsManager.restoreState(this@GemmaService)
             }
         } catch (e: Exception) {
             reportStatus("CRASH: ${e.message}")

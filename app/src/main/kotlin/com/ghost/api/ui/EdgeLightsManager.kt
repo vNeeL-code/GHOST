@@ -25,12 +25,22 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
     var isShowing = false
         private set
 
+    fun restoreState(context: Context) {
+        val prefs = context.getSharedPreferences(com.ghost.api.Constants.PREFS_NAME, Context.MODE_PRIVATE)
+        if (prefs.getBoolean(com.ghost.api.Constants.PREF_EDGE_LIGHTS_ENABLED, false)) {
+            show(context)
+        }
+    }
+
     fun toggle(context: Context) {
         if (isShowing) hide(context) else show(context)
     }
 
     fun show(context: Context) {
         if (isShowing) return
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M && !android.provider.Settings.canDrawOverlays(context)) {
+            return
+        }
 
         windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val density = context.resources.displayMetrics.density
@@ -83,6 +93,8 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
             SystemVisualizer.init(context)
             SystemVisualizer.addListener(this)
             isShowing = true
+            context.getSharedPreferences(com.ghost.api.Constants.PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().putBoolean(com.ghost.api.Constants.PREF_EDGE_LIGHTS_ENABLED, true).apply()
         } catch (e: Exception) {
             Timber.e(e, "Failed to show edge lights overlay strips")
             hide(context)
@@ -90,6 +102,8 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
     }
 
     fun hide(context: Context) {
+        context.getSharedPreferences(com.ghost.api.Constants.PREFS_NAME, Context.MODE_PRIVATE)
+            .edit().putBoolean(com.ghost.api.Constants.PREF_EDGE_LIGHTS_ENABLED, false).apply()
         if (!isShowing && topView == null && bottomView == null) return
         SystemVisualizer.removeListener(this)
         try {
