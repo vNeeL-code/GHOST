@@ -36,6 +36,7 @@ class SystemToolSet(private val context: Context) : ToolSet {
     fun app(
         @ToolParam(description = "The name of the app to launch") name: String
     ): Map<String, String> {
+        com.ghost.api.GemmaService.instance?.showWorkSignal("APP", 1500)
         val apps = getInstalledApps()
         val bestMatch = apps.find { it.label.contains(name, ignoreCase = true) }
 
@@ -90,6 +91,7 @@ class SystemToolSet(private val context: Context) : ToolSet {
         @ToolParam(description = "Minutes") minutes: Int, 
         @ToolParam(description = "Optional label") label: String = ""
     ): Map<String, String> {
+        com.ghost.api.GemmaService.instance?.showWorkSignal("ALARM", 1500)
         return try {
             // v4.1.7: Reverted to AlarmClock intent (system handles alarm lifecycle)
             // Old GhostAlarmReceiver approach was unreliable — model would confirm alarm but nothing fired
@@ -113,6 +115,7 @@ class SystemToolSet(private val context: Context) : ToolSet {
         @ToolParam(description = "Total duration in precise seconds (e.g. 5 minutes = 300)") seconds: Int, 
         @ToolParam(description = "Optional label") label: String = ""
     ): Map<String, String> {
+        com.ghost.api.GemmaService.instance?.showWorkSignal("TIMER", 1500)
         return try {
             val intent = Intent(android.provider.AlarmClock.ACTION_SET_TIMER).apply {
                 putExtra(android.provider.AlarmClock.EXTRA_LENGTH, seconds)
@@ -133,6 +136,7 @@ class SystemToolSet(private val context: Context) : ToolSet {
         @ToolParam(description = "Event description") description: String = "", 
         @ToolParam(description = "Duration in minutes") minutes: Int = 30
     ): Map<String, String> {
+        com.ghost.api.GemmaService.instance?.showWorkSignal("CALENDAR")
         return try {
             var calId: Long = 1
             val projection = arrayOf(android.provider.CalendarContract.Calendars._ID)
@@ -166,6 +170,8 @@ class SystemToolSet(private val context: Context) : ToolSet {
             mapOf("result" to "success", "message" to "Calendar event created silently on calendar $calId")
         } catch (e: Exception) {
             mapOf("result" to "error", "message" to "Failed to create event: ${e.message}")
+        } finally {
+            com.ghost.api.GemmaService.instance?.hideWorkSignal()
         }
     }
 
@@ -173,6 +179,7 @@ class SystemToolSet(private val context: Context) : ToolSet {
     fun read_calendar(
         @ToolParam(description = "Days ahead to read") days: Int = 7
     ): Map<String, String> {
+        com.ghost.api.GemmaService.instance?.showWorkSignal("CALENDAR")
         return try {
             val now = System.currentTimeMillis()
             val later = now + days * 24 * 60 * 60 * 1000L
@@ -200,6 +207,8 @@ class SystemToolSet(private val context: Context) : ToolSet {
             mapOf("result" to "success", "events" to if (events.isEmpty()) "No upcoming events" else events.joinToString("\n"))
         } catch (e: Exception) {
             mapOf("result" to "error", "message" to "Failed to read calendar: ${e.message}")
+        } finally {
+            com.ghost.api.GemmaService.instance?.hideWorkSignal()
         }
     }
 
@@ -207,6 +216,7 @@ class SystemToolSet(private val context: Context) : ToolSet {
     fun read_diary(
         @ToolParam(description = "Number of days in the past to look back (default: 7)") days: Int = 7
     ): Map<String, String> {
+        com.ghost.api.GemmaService.instance?.showWorkSignal("DIARY")
         return try {
             val now = System.currentTimeMillis()
             val past = now - (days * 24 * 60 * 60 * 1000L)
@@ -234,6 +244,8 @@ class SystemToolSet(private val context: Context) : ToolSet {
             )
         } catch (e: Exception) {
             mapOf("result" to "error", "message" to "Failed to read diary: ${e.message}")
+        } finally {
+            com.ghost.api.GemmaService.instance?.hideWorkSignal()
         }
     }
 
@@ -244,40 +256,51 @@ class SystemToolSet(private val context: Context) : ToolSet {
         @ToolParam(description = "Memory title/subject") title: String, 
         @ToolParam(description = "Memory content/fact") content: String
     ): Map<String, String> {
-        kotlinx.coroutines.runBlocking {
-            memoryManager.storeSemanticFact(title, content)
+        com.ghost.api.GemmaService.instance?.showWorkSignal("MEMORIES")
+        return try {
+            kotlinx.coroutines.runBlocking {
+                memoryManager.storeSemanticFact(title, content)
+            }
+            mapOf("result" to "success", "message" to "Factored into Semantic Memory: $title")
+        } finally {
+            com.ghost.api.GemmaService.instance?.hideWorkSignal()
         }
-        return mapOf("result" to "success", "message" to "Factored into Semantic Memory: $title")
     }
 
     @Tool(description = "Recalls memory from both Semantic DB and Calendar")
     fun recall(
         @ToolParam(description = "Search query keyword") query: String
     ): Map<String, String> {
-        // 1. Query Episodic Memory (Calendar)
-        val episodicMemories = diaryManager.searchMemories(query)
-        
-        // 2. Query Semantic Memory (FTS4 DB)
-        val semanticMemories = kotlinx.coroutines.runBlocking {
-            memoryManager.searchSemanticFacts(query)
-        }
-        
-        val merged = buildString {
-            if (episodicMemories.isNotEmpty()) {
-                append("[EPISODIC / CALENDAR]\n")
-                episodicMemories.forEach { append("- $it\n") }
-                append("\n")
+        com.ghost.api.GemmaService.instance?.showWorkSignal("MEMORIES")
+        return try {
+            // 1. Query Episodic Memory (Calendar)
+            val episodicMemories = diaryManager.searchMemories(query)
+            
+            // 2. Query Semantic Memory (FTS4 DB)
+            val semanticMemories = kotlinx.coroutines.runBlocking {
+                memoryManager.searchSemanticFacts(query)
             }
-            if (semanticMemories.isNotEmpty()) {
-                append("[SEMANTIC / FACTS]\n")
-                semanticMemories.forEach { append("- ${it.subject}: ${it.object_}\n") }
+            
+            val merged = buildString {
+                if (episodicMemories.isNotEmpty()) {
+                    append("[EPISODIC / CALENDAR]\n")
+                    episodicMemories.forEach { append("- $it\n") }
+                    append("\n")
+                }
+                if (semanticMemories.isNotEmpty()) {
+                    append("[SEMANTIC / FACTS]\n")
+                    semanticMemories.forEach { append("- ${it.subject}: ${it.object_}\n") }
+                }
+            }.trim()
+            
+            if (merged.isEmpty()) {
+                mapOf("result" to "success", "memories" to "No memories found for '$query'.")
+            } else {
+                mapOf("result" to "success", "memories" to merged)
             }
-        }.trim()
-        
-        if (merged.isEmpty()) {
-            return mapOf("result" to "success", "memories" to "No memories found for '$query'.")
+        } finally {
+            com.ghost.api.GemmaService.instance?.hideWorkSignal()
         }
-        return mapOf("result" to "success", "memories" to merged)
     }
 
     @Tool(description = "Searches device storage and MediaStore for files matching a keyword/extension (e.g. mp3, pdf, md, video)")
@@ -285,82 +308,87 @@ class SystemToolSet(private val context: Context) : ToolSet {
         @ToolParam(description = "Filename keyword, pattern, or title (e.g. 'breakbeat', 'invoice', '.md')") query: String,
         @ToolParam(description = "Optional filter: 'audio', 'video', 'image', 'doc', 'any'") type: String = "any"
     ): Map<String, String> {
-        val results = mutableListOf<String>()
-        val lowerQuery = query.lowercase(Locale.ROOT)
+        com.ghost.api.GemmaService.instance?.showWorkSignal("STORAGE")
+        return try {
+            val results = mutableListOf<String>()
+            val lowerQuery = query.lowercase(Locale.ROOT)
 
-        // 1. Search MediaStore for fast indexed media
-        try {
-            val contentUri = when (type.lowercase(Locale.ROOT)) {
-                "audio", "music" -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-                "video", "movie" -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-                "image", "photo" -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-                else -> MediaStore.Files.getContentUri("external")
-            }
-
-            val projection = arrayOf(
-                MediaStore.MediaColumns.DATA,
-                MediaStore.MediaColumns.DISPLAY_NAME,
-                MediaStore.MediaColumns.SIZE
-            )
-            val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"
-            val selectionArgs = arrayOf("%$query%")
-
-            context.contentResolver.query(
-                contentUri,
-                projection,
-                selection,
-                selectionArgs,
-                "${MediaStore.MediaColumns.DATE_MODIFIED} DESC"
-            )?.use { cursor ->
-                val dataCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATA)
-                val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
-                val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
-
-                while (cursor.moveToNext() && results.size < 15) {
-                    val path = cursor.getString(dataCol) ?: continue
-                    val name = cursor.getString(nameCol) ?: File(path).name
-                    val sizeMb = String.format(Locale.US, "%.1f MB", (cursor.getLong(sizeCol).toDouble() / (1024 * 1024)))
-                    results.add("- $name ($sizeMb)\n  Path: $path")
+            // 1. Search MediaStore for fast indexed media
+            try {
+                val contentUri = when (type.lowercase(Locale.ROOT)) {
+                    "audio", "music" -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+                    "video", "movie" -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                    "image", "photo" -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                    else -> MediaStore.Files.getContentUri("external")
                 }
+
+                val projection = arrayOf(
+                    MediaStore.MediaColumns.DATA,
+                    MediaStore.MediaColumns.DISPLAY_NAME,
+                    MediaStore.MediaColumns.SIZE
+                )
+                val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"
+                val selectionArgs = arrayOf("%$query%")
+
+                context.contentResolver.query(
+                    contentUri,
+                    projection,
+                    selection,
+                    selectionArgs,
+                    "${MediaStore.MediaColumns.DATE_MODIFIED} DESC"
+                )?.use { cursor ->
+                    val dataCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATA)
+                    val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+                    val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
+
+                    while (cursor.moveToNext() && results.size < 15) {
+                        val path = cursor.getString(dataCol) ?: continue
+                        val name = cursor.getString(nameCol) ?: File(path).name
+                        val sizeMb = String.format(Locale.US, "%.1f MB", (cursor.getLong(sizeCol).toDouble() / (1024 * 1024)))
+                        results.add("- $name ($sizeMb)\n  Path: $path")
+                    }
+                }
+            } catch (e: Exception) {
+                Timber.w(e, "MediaStore search failed")
             }
-        } catch (e: Exception) {
-            Timber.w(e, "MediaStore search failed")
-        }
 
-        // 2. Direct File System search across standard external dirs for docs/markdown/text
-        if (results.size < 10) {
-            val searchRoots = listOf(
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC),
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
-                Environment.getExternalStorageDirectory()
-            ).filterNotNull().filter { it.exists() && it.canRead() }
+            // 2. Direct File System search across standard external dirs for docs/markdown/text
+            if (results.size < 10) {
+                val searchRoots = listOf(
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC),
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
+                    Environment.getExternalStorageDirectory()
+                ).filterNotNull().filter { it.exists() && it.canRead() }
 
-            for (dir in searchRoots) {
-                if (results.size >= 15) break
-                try {
-                    dir.walkTopDown()
-                        .maxDepth(3)
-                        .filter { it.isFile && it.name.lowercase(Locale.ROOT).contains(lowerQuery) }
-                        .take(15 - results.size)
-                        .forEach { f ->
-                            val sizeMb = String.format(Locale.US, "%.1f MB", (f.length().toDouble() / (1024 * 1024)))
-                            val entry = "- ${f.name} ($sizeMb)\n  Path: ${f.absolutePath}"
-                            if (!results.contains(entry)) {
-                                results.add(entry)
+                for (dir in searchRoots) {
+                    if (results.size >= 15) break
+                    try {
+                        dir.walkTopDown()
+                            .maxDepth(3)
+                            .filter { it.isFile && it.name.lowercase(Locale.ROOT).contains(lowerQuery) }
+                            .take(15 - results.size)
+                            .forEach { f ->
+                                val sizeMb = String.format(Locale.US, "%.1f MB", (f.length().toDouble() / (1024 * 1024)))
+                                val entry = "- ${f.name} ($sizeMb)\n  Path: ${f.absolutePath}"
+                                if (!results.contains(entry)) {
+                                    results.add(entry)
+                                }
                             }
-                        }
-                } catch (e: Exception) {
-                    // Ignore inaccessible subdirectories
+                    } catch (e: Exception) {
+                        // Ignore inaccessible subdirectories
+                    }
                 }
             }
-        }
 
-        return if (results.isNotEmpty()) {
-            mapOf("result" to "success", "matches" to results.joinToString("\n"))
-        } else {
-            mapOf("result" to "success", "matches" to "No files found matching '$query'.")
+            if (results.isNotEmpty()) {
+                mapOf("result" to "success", "matches" to results.joinToString("\n"))
+            } else {
+                mapOf("result" to "success", "matches" to "No files found matching '$query'.")
+            }
+        } finally {
+            com.ghost.api.GemmaService.instance?.hideWorkSignal()
         }
     }
 
@@ -369,6 +397,7 @@ class SystemToolSet(private val context: Context) : ToolSet {
         @ToolParam(description = "Absolute path of the file to open (e.g. /sdcard/Download/song.mp3)") filePath: String,
         @ToolParam(description = "Optional app name to open with (e.g. 'VLC', 'Spotify', 'Chrome')") appName: String = ""
     ): Map<String, String> {
+        com.ghost.api.GemmaService.instance?.showWorkSignal("FILES", 1500)
         val file = File(filePath)
         if (!file.exists()) {
             return mapOf("result" to "error", "message" to "File not found at: $filePath")
@@ -444,15 +473,16 @@ class SystemToolSet(private val context: Context) : ToolSet {
         @ToolParam(description = "Absolute path of the text/markdown/json file to read") filePath: String,
         @ToolParam(description = "Maximum lines to read (default: 100)") maxLines: Int = 100
     ): Map<String, String> {
-        val file = File(filePath)
-        if (!file.exists()) {
-            return mapOf("result" to "error", "message" to "File not found at: $filePath")
-        }
-        if (file.length() > 2 * 1024 * 1024) {
-            return mapOf("result" to "error", "message" to "File is too large (>2MB) to read into memory.")
-        }
-
+        com.ghost.api.GemmaService.instance?.showWorkSignal("FILES")
         return try {
+            val file = File(filePath)
+            if (!file.exists()) {
+                return mapOf("result" to "error", "message" to "File not found at: $filePath")
+            }
+            if (file.length() > 2 * 1024 * 1024) {
+                return mapOf("result" to "error", "message" to "File is too large (>2MB) to read into memory.")
+            }
+
             val lines = file.bufferedReader().useLines { linesSequence ->
                 linesSequence.take(maxLines).toList()
             }
@@ -460,6 +490,8 @@ class SystemToolSet(private val context: Context) : ToolSet {
             mapOf("result" to "success", "content" to content, "linesRead" to lines.size.toString())
         } catch (e: Exception) {
             mapOf("result" to "error", "message" to "Failed to read file: ${e.message}")
+        } finally {
+            com.ghost.api.GemmaService.instance?.hideWorkSignal()
         }
     }
 

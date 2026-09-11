@@ -45,8 +45,57 @@ class GhostWorkIndicatorOverlay(
             "surfing the datastream...",
             "fishing for answers...",
             "reading the matrix...",
-            "crawling the web web...",
+            "crawling the web...",
             "asking the void..."
+        )
+
+        private val STORAGE_FLAVORS = listOf(
+            "rummaging through storage...",
+            "spelunking /sdcard/...",
+            "hunting down local mp3s...",
+            "indexing audio tracks...",
+            "digging through bytes...",
+            "scanning mediastore blocks...",
+            "unearthing digital relics...",
+            "shuffling disk sectors...",
+            "vacuuming directory trees...",
+            "grep -r /storage/..."
+        )
+
+        private val MEMORY_FLAVORS = listOf(
+            "consulting hippocampus...",
+            "digging up old lore...",
+            "diving into past sessions...",
+            "retrieving neuron memories...",
+            "remembering that one time...",
+            "querying episodic archives...",
+            "defrosting cold storage...",
+            "connecting synaptic dots...",
+            "spelunking the subconscious..."
+        )
+
+        private val CALENDAR_FLAVORS = listOf(
+            "checking the timeline...",
+            "consulting chronos...",
+            "inspecting calendar scrolls...",
+            "auditing future plans...",
+            "syncing space-time coords...",
+            "reading your agenda...",
+            "peeking at days ahead..."
+        )
+
+        private val DIARY_FLAVORS = listOf(
+            "flipping through diary...",
+            "reading private reflections...",
+            "deciphering midnight logs...",
+            "auditing subconscious dreams..."
+        )
+
+        private val SCREEN_FLAVORS = listOf(
+            "peeking at your screen...",
+            "reading accessibility tree...",
+            "analyzing widgets & pixels...",
+            "inspecting UI semantics..."
         )
 
         private val TERMINAL_FLAVORS = listOf(
@@ -80,10 +129,16 @@ class GhostWorkIndicatorOverlay(
         )
 
         fun pick(tag: String): String {
+            val upper = tag.uppercase()
             val list = when {
-                tag.contains("SEARCH") -> SEARCH_FLAVORS
-                tag.contains("TERMINAL") || tag.contains("BASH") || tag.contains("ADB") -> TERMINAL_FLAVORS
-                tag.contains("FETCH") -> FETCH_FLAVORS
+                upper.contains("STORAGE") || upper.contains("FILE") || upper.contains("MEDIA") || upper.contains("MP3") -> STORAGE_FLAVORS
+                upper.contains("MEMORY") || upper.contains("MEMORIES") || upper.contains("RECALL") || upper.contains("REMEMBER") -> MEMORY_FLAVORS
+                upper.contains("CALENDAR") || upper.contains("SCHEDULE") || upper.contains("EVENT") -> CALENDAR_FLAVORS
+                upper.contains("DIARY") || upper.contains("DREAM") || upper.contains("REFLECTION") -> DIARY_FLAVORS
+                upper.contains("SCREEN") || upper.contains("UI") || upper.contains("APP") -> SCREEN_FLAVORS
+                upper.contains("SEARCH") -> SEARCH_FLAVORS
+                upper.contains("TERMINAL") || upper.contains("BASH") || upper.contains("ADB") || upper.contains("SHELL") -> TERMINAL_FLAVORS
+                upper.contains("FETCH") -> FETCH_FLAVORS
                 else -> GENERAL_FLAVORS
             }
             return "> " + list.random()
@@ -236,7 +291,8 @@ class GhostWorkIndicatorOverlay(
 
         removeCallbacks(autoHideRunnable)
         if (durationMs > 0) {
-            postDelayed(autoHideRunnable, durationMs)
+            val safeDuration = durationMs.coerceAtLeast(minDisplayDurationMs)
+            postDelayed(autoHideRunnable, safeDuration)
         }
     }
 

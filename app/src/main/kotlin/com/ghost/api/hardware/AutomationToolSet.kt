@@ -25,6 +25,7 @@ class AutomationToolSet(private val context: Context) : ToolSet {
         @ToolParam(description = "Delay in minutes before the prompt is triggered") delayMinutes: Int,
         @ToolParam(description = "The exact prompt text to feed back into your own context. Start with [SYSTEM: Task Wakeup]") prompt: String
     ): Map<String, String> {
+        com.ghost.api.GemmaService.instance?.showWorkSignal("SCHEDULE", 1500)
         return try {
             val intent = Intent("com.ghost.api.ACTION_CRON_PROMPT").apply {
                 putExtra("prompt", prompt)

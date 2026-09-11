@@ -260,7 +260,9 @@ class OverlayManager(private val context: Context) {
     fun showWorkSignal(tag: String = "WORKING", durationMs: Long = 0) {
         if (!canDrawOverlay()) return
 
-        activeWorkCounter.incrementAndGet()
+        if (durationMs == 0L) {
+            activeWorkCounter.incrementAndGet()
+        }
         android.os.Handler(android.os.Looper.getMainLooper()).post {
             val wm = windowManager ?: return@post
             if (ghostWorkIndicator == null) {
