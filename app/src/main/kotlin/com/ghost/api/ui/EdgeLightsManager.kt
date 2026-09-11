@@ -10,6 +10,7 @@ import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
+import androidx.core.graphics.ColorUtils
 import com.ghost.api.audio.SystemVisualizer
 import timber.log.Timber
 import kotlin.math.max
@@ -142,6 +143,7 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
             Color.parseColor("#EA4335")
         )
         protected var targetColors: IntArray = defaultColors
+        protected var currentColors: IntArray = defaultColors.clone()
 
         fun updateAudioData(fft: ByteArray, intensity: Float, bass: Float) {
             smoothedBass = smoothedBass * 0.72f + bass * 0.28f
@@ -171,6 +173,12 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
                 return
             }
 
+            // Smoothly blend edge light colors towards target
+            val limit = minOf(currentColors.size, targetColors.size)
+            for (c in 0 until limit) {
+                currentColors[c] = ColorUtils.blendARGB(currentColors[c], targetColors[c], 0.08f)
+            }
+
             val numBars = 32
             val spacing = width.toFloat() / numBars
             val histFft = fftHistory.toList()
@@ -183,7 +191,7 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
                 val hScale = heightScales.getOrElse(layerIdx) { 0.3f }
                 val wScale = layerWidthScales.getOrElse(layerIdx) { 0.65f }
                 val palIdx = layerPaletteIdx.getOrElse(layerIdx) { 0 }
-                val color = targetColors[palIdx % targetColors.size]
+                val color = currentColors[palIdx % currentColors.size]
 
                 paint.color = color
                 paint.strokeWidth = spacing * wScale
@@ -222,6 +230,12 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
                 return
             }
 
+            // Smoothly blend edge light colors towards target
+            val limit = minOf(currentColors.size, targetColors.size)
+            for (c in 0 until limit) {
+                currentColors[c] = ColorUtils.blendARGB(currentColors[c], targetColors[c], 0.08f)
+            }
+
             val numBars = 32
             val spacing = width.toFloat() / numBars
             val histFft = fftHistory.toList()
@@ -235,7 +249,7 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
                 val hScale = heightScales.getOrElse(layerIdx) { 0.3f }
                 val wScale = layerWidthScales.getOrElse(layerIdx) { 0.65f }
                 val palIdx = layerPaletteIdx.getOrElse(layerIdx) { 0 }
-                val color = targetColors[palIdx % targetColors.size]
+                val color = currentColors[palIdx % currentColors.size]
 
                 paint.color = color
                 paint.strokeWidth = spacing * wScale

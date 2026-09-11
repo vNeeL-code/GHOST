@@ -5,10 +5,7 @@ import android.app.usage.UsageStatsManager
 import android.content.ComponentName
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.drawable.BitmapDrawable
-import android.graphics.drawable.Drawable
 import android.media.AudioAttributes
 import android.media.AudioPlaybackConfiguration
 import android.media.AudioManager
@@ -166,7 +163,8 @@ object SystemVisualizer {
         ), "Gemini")
     )
 
-    private fun findBrandPalette(packageName: String): IntArray? {
+    fun findBrandPalette(packageName: String?): IntArray? {
+        if (packageName.isNullOrBlank()) return null
         val lower = packageName.lowercase()
         return AI_BRAND_PALETTES.firstOrNull { (keys, _, _) ->
             keys.any { lower.contains(it) }
@@ -244,45 +242,52 @@ object SystemVisualizer {
                     }
                 }
 
-                val isActive = try {
-                    val method = config.javaClass.getMethod("isActive")
-                    method.invoke(config) as? Boolean ?: true
-                } catch (e: Exception) {
+                // 2. Verify player is genuinely playing (started)
+                val configStr = config.toString()
+                val isStarted = if (configStr.contains("state:")) {
+                    configStr.contains("state:started", ignoreCase = true)
+                } else {
                     try {
-                        val stateMethod = config.javaClass.getMethod("getPlayerState")
-                        val state = stateMethod.invoke(config) as? Int
-                        state == 2 // AudioPlaybackConfiguration.PLAYER_STATE_STARTED
-                    } catch (e2: Exception) {
-                        true
+                        val stateMethod = config.javaClass.getDeclaredMethod("getPlayerState").apply { isAccessible = true }
+                        (stateMethod.invoke(config) as? Int) == 2 // PLAYER_STATE_STARTED
+                    } catch (e: Exception) {
+                        try {
+                            val method = config.javaClass.getDeclaredMethod("isActive").apply { isAccessible = true }
+                            method.invoke(config) as? Boolean ?: false
+                        } catch (e2: Exception) {
+                            false
+                        }
                     }
                 }
-                if (!isActive) continue
+                if (!isStarted) continue
 
-                val clientUid = try {
-                    val method = config.javaClass.getMethod("getClientUid")
-                    method.invoke(config) as? Int
+                // 3. Extract Client UID
+                var clientUid: Int? = null
+                try {
+                    val method = config.javaClass.getDeclaredMethod("getClientUid").apply { isAccessible = true }
+                    clientUid = method.invoke(config) as? Int
                 } catch (e: Exception) {
                     try {
                         val field = config.javaClass.getDeclaredField("mClientUid").apply { isAccessible = true }
-                        field.getInt(config)
-                    } catch (e2: Exception) {
-                        null
-                    }
+                        clientUid = field.getInt(config)
+                    } catch (e2: Exception) {}
+                }
+
+                if (clientUid == null) {
+                    val match = Regex("""u(?:id)?/pid:(\d+)""").find(configStr)
+                        ?: Regex("""uid:(\d+)""").find(configStr)
+                    clientUid = match?.groupValues?.get(1)?.toIntOrNull()
                 }
 
                 if (clientUid != null && clientUid != myUid && clientUid > 10000) {
                     val packages = pm.getPackagesForUid(clientUid)
                     if (packages != null) {
                         for (pkg in packages) {
-                            if (!isIgnoredPackage(pkg)) {
-                                if (findBrandPalette(pkg) != null) {
-                                    lastActiveAiPackage = pkg
-                                    return pkg
-                                }
+                            if (!isIgnoredPackage(pkg) && findBrandPalette(pkg) != null) {
+                                lastActiveAiPackage = pkg
+                                return pkg
                             }
                         }
-                        val firstValid = packages.firstOrNull { !isIgnoredPackage(it) }
-                        if (firstValid != null) return firstValid
                     }
                 }
             } catch (e: Exception) {
@@ -305,13 +310,13 @@ object SystemVisualizer {
                 events.getNextEvent(event)
                 if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED && event.timeStamp > lastTime) {
                     val pkg = event.packageName
-                    if (!isIgnoredPackage(pkg)) {
+                    if (!isIgnoredPackage(pkg) && findBrandPalette(pkg) != null) {
                         lastPkg = pkg
                         lastTime = event.timeStamp
                     }
                 }
             }
-            if (lastPkg != null && findBrandPalette(lastPkg) != null) {
+            if (lastPkg != null) {
                 lastActiveAiPackage = lastPkg
             }
             lastPkg
@@ -340,6 +345,8 @@ object SystemVisualizer {
             if (state?.state == PlaybackState.STATE_PLAYING) {
                 if (activeMediaArtColors == null) {
                     extractColorsFromMetadata(activeMediaController?.metadata)
+                } else {
+                    applyMediaAlbumArt(activeMediaArtColors!!)
                 }
             } else if (state?.state == PlaybackState.STATE_STOPPED || state?.state == PlaybackState.STATE_PAUSED) {
                 activeMediaArtColors = null
@@ -415,39 +422,47 @@ object SystemVisualizer {
                                 isAudioActive = true
                             }
 
-                            // 5-Layer Multi-Stage Audio Attribution:
-                            // 1. Direct active audio playback configs (which app is physically feeding audio buffers)
-                            val hardwareAudioPkg = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            // Strict AI Brand & Media Isolation Hierarchy:
+                            // 1. Focused on-screen AI app (user is looking at Claude, Qwen, Kimi, etc.)
+                            val fgPkg = lastForegroundPackage
+                            val fgBrand = if (fgPkg != null && !isIgnoredPackage(fgPkg)) findBrandPalette(fgPkg) else null
+
+                            // 2. Direct active AI audio playback config (background voice stream / TTS)
+                            val hwPkg = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                                 resolveAudioPlayingApp(audioManager?.activePlaybackConfigurations)
                             } else null
+                            val hwBrand = if (hwPkg != null) findBrandPalette(hwPkg) else null
 
-                            // 2. Focused on-screen app
-                            val screenApp = if (!isIgnoredPackage(lastForegroundPackage)) lastForegroundPackage else null
-
-                            // 3. MediaSession if actively playing
+                            // 3. Active MediaSession (YouTube Music, Spotify, etc.)
                             val isMediaPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
-                            val mediaPkg = if (isMediaPlaying) activeMediaController?.packageName else null
 
-                            // 4. UsageStats fallback (most recently resumed non-system app)
-                            val usagePkg = if (hardwareAudioPkg == null && screenApp == null && mediaPkg == null) {
-                                getForegroundAppFromUsageStats()
-                            } else null
-
-                            val pkgToApply = hardwareAudioPkg 
-                                ?: screenApp 
-                                ?: mediaPkg 
-                                ?: usagePkg 
-                                ?: lastActiveAiPackage 
-                                ?: activeMediaController?.packageName
-
-                            if (pkgToApply != null && !isIgnoredPackage(pkgToApply) && pkgToApply != currentAppliedPackage) {
-                                applyPackageColor(pkgToApply)
+                            if (fgBrand != null) {
+                                lastActiveAiPackage = fgPkg
+                                applyAiBrandColor(fgPkg!!, fgBrand)
+                            } else if (hwBrand != null) {
+                                lastActiveAiPackage = hwPkg
+                                applyAiBrandColor(hwPkg!!, hwBrand)
+                            } else if (isMediaPlaying) {
+                                if (activeMediaArtColors != null) {
+                                    applyMediaAlbumArt(activeMediaArtColors!!)
+                                } else {
+                                    extractColorsFromMetadata(activeMediaController?.metadata)
+                                }
+                            } else if (lastActiveAiPackage != null && currentAppliedPackage == lastActiveAiPackage) {
+                                // Ongoing speech from recently active AI app holding audio past minimization
+                                val lastBrand = findBrandPalette(lastActiveAiPackage!!)
+                                if (lastBrand != null) {
+                                    applyAiBrandColor(lastActiveAiPackage!!, lastBrand)
+                                }
                             }
-                        } else if (isAudioActive && (System.currentTimeMillis() - lastAudioActivityTime > 3000)) {
+                            // Any unbranded system sound (clicks, shutter, lock, etc.) is ignored!
+                        } else if (isAudioActive && (System.currentTimeMillis() - lastAudioActivityTime > 2500)) {
                             isAudioActive = false
                             currentAppliedPackage = null
                             val isMediaPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
-                            if (!isMediaPlaying) {
+                            if (isMediaPlaying && activeMediaArtColors != null) {
+                                applyMediaAlbumArt(activeMediaArtColors!!)
+                            } else {
                                 activeMediaArtColors = null
                                 currentAlbumColors = null
                                 if (overrideEmotionColors == null) {
@@ -578,13 +593,14 @@ object SystemVisualizer {
         if (packageName == lastForegroundPackage) return
 
         lastForegroundPackage = packageName
-        if (findBrandPalette(packageName) != null) {
-            lastActiveAiPackage = packageName
-        }
 
-        // If audio is actively playing, immediately adopt this foreground app's palette
-        if (isAudioActive) {
-            applyPackageColor(packageName)
+        // Strict AI Isolation: Only track and react to curated AI apps
+        val brandPalette = findBrandPalette(packageName)
+        if (brandPalette != null) {
+            lastActiveAiPackage = packageName
+            if (isAudioActive) {
+                applyAiBrandColor(packageName, brandPalette)
+            }
         }
     }
 
@@ -592,71 +608,41 @@ object SystemVisualizer {
         // 1. If an AI brand palette is matched, apply it immediately!
         val brandPalette = findBrandPalette(packageName)
         if (brandPalette != null) {
-            currentAppliedPackage = packageName
-            currentAlbumColors = brandPalette
-            if (overrideEmotionColors == null) {
-                handler.post { listeners.forEach { it.onColorsChanged(brandPalette) } }
-            }
-            Timber.d("SystemVisualizer: Applied curated AI brand palette for $packageName")
+            applyAiBrandColor(packageName, brandPalette)
             return
         }
 
         // 2. If this package is the active MediaSession app (e.g. YouTube Music, Spotify)
         val isMediaPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
         val mediaPkg = activeMediaController?.packageName
-        if (isMediaPlaying && mediaPkg == packageName) {
-            currentAppliedPackage = packageName
-            // If we already have the album art palette, keep it! Never overwrite with the app icon!
-            if (activeMediaArtColors != null) {
-                if (currentAlbumColors != activeMediaArtColors) {
-                    currentAlbumColors = activeMediaArtColors
-                    if (overrideEmotionColors == null) {
-                        handler.post { listeners.forEach { it.onColorsChanged(activeMediaArtColors) } }
-                    }
-                }
-                return
-            }
-
-            // Try to extract album art from metadata (including URI)
-            extractColorsFromMetadata(activeMediaController?.metadata)
+        if (isMediaPlaying && mediaPkg == packageName && activeMediaArtColors != null) {
+            applyMediaAlbumArt(activeMediaArtColors!!)
             return
         }
 
-        // 3. For any other app (non-media app without MediaSession), extract app icon
+        // STRICT ISOLATION: Never extract app icons!
+        // System sounds and unbranded apps do not alter the wallpaper palette.
+    }
+
+    fun applyAiBrandColor(packageName: String, brandPalette: IntArray) {
+        if (currentAlbumColors == brandPalette) return
         currentAppliedPackage = packageName
-        extractPaletteFromAppIcon(packageName)
+        currentAlbumColors = brandPalette
+        if (overrideEmotionColors == null) {
+            handler.post { listeners.forEach { it.onColorsChanged(brandPalette) } }
+        }
+        Timber.d("SystemVisualizer: Applied curated AI brand palette for $packageName")
     }
 
-    private fun extractPaletteFromAppIcon(packageName: String) {
-        try {
-            val pm = appContext?.packageManager ?: return
-            val icon = pm.getApplicationIcon(packageName)
-            val bitmap = drawableToBitmap(icon)
-            if (bitmap != null) {
-                extractPaletteFromBitmap(bitmap, isAlbumArt = false)
-                Timber.d("SystemVisualizer: Extracted agnostic app icon palette for $packageName")
-            }
-        } catch (e: Exception) {
-            Timber.w("SystemVisualizer: Could not extract icon palette for $packageName: ${e.message}")
+    fun applyMediaAlbumArt(artColors: IntArray) {
+        if (currentAlbumColors == artColors) return
+        currentAlbumColors = artColors
+        if (overrideEmotionColors == null) {
+            handler.post { listeners.forEach { it.onColorsChanged(artColors) } }
         }
+        Timber.d("SystemVisualizer: Applied media album art colors")
     }
 
-    private fun drawableToBitmap(drawable: Drawable): Bitmap? {
-        if (drawable is BitmapDrawable && drawable.bitmap != null) {
-            return drawable.bitmap
-        }
-        return try {
-            val width = if (drawable.intrinsicWidth > 0) drawable.intrinsicWidth.coerceIn(48, 128) else 96
-            val height = if (drawable.intrinsicHeight > 0) drawable.intrinsicHeight.coerceIn(48, 128) else 96
-            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(bitmap)
-            drawable.setBounds(0, 0, canvas.width, canvas.height)
-            drawable.draw(canvas)
-            bitmap
-        } catch (e: Exception) {
-            null
-        }
-    }
 
     fun buildPaletteFromColor(baseColor: Int): IntArray {
         val hsv = FloatArray(3)
