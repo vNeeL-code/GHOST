@@ -367,15 +367,15 @@ class AvatarWallpaperService : WallpaperService() {
         }
 
         private fun interpolateColors() {
-            // Smoothly lerp palette weight at 0.04f per frame (~1.5s buttery fade)
-            customPaletteWeight += (targetPaletteWeight - customPaletteWeight) * 0.04f
+            // Smoothly lerp palette weight at 0.028f per frame (~2s buttery fade)
+            customPaletteWeight += (targetPaletteWeight - customPaletteWeight) * 0.028f
             if (customPaletteWeight < 0.001f) customPaletteWeight = 0f
             if (customPaletteWeight > 0.999f) customPaletteWeight = 1f
             isCustomPaletteActive = (customPaletteWeight > 0.001f)
 
             val limit = minOf(currentColors.size, targetColors.size)
             for (i in 0 until limit) {
-                currentColors[i] = ColorUtils.blendARGB(currentColors[i], targetColors[i], 0.04f)
+                currentColors[i] = ColorUtils.blendARGB(currentColors[i], targetColors[i], 0.028f)
             }
         }
 

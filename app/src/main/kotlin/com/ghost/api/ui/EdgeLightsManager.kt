@@ -348,10 +348,10 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
                 return
             }
 
-            // Smoothly blend edge light colors towards target
+            // Smoothly blend edge light colors towards target (~2s transition at 60fps)
             val limit = minOf(currentColors.size, targetColors.size)
             for (c in 0 until limit) {
-                currentColors[c] = ColorUtils.blendARGB(currentColors[c], targetColors[c], 0.08f)
+                currentColors[c] = ColorUtils.blendARGB(currentColors[c], targetColors[c], 0.035f)
             }
 
             val numBars = 32
@@ -408,10 +408,10 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
                 return
             }
 
-            // Smoothly blend edge light colors towards target
+            // Smoothly blend edge light colors towards target (~2s transition at 60fps)
             val limit = minOf(currentColors.size, targetColors.size)
             for (c in 0 until limit) {
-                currentColors[c] = ColorUtils.blendARGB(currentColors[c], targetColors[c], 0.08f)
+                currentColors[c] = ColorUtils.blendARGB(currentColors[c], targetColors[c], 0.035f)
             }
 
             val numBars = 32

@@ -442,6 +442,7 @@ object SystemVisualizer {
                         // Audio Activity & Speech Detection
                         if (intensity > 0.04f) {
                             lastAudioActivityTime = System.currentTimeMillis()
+                            cancelPendingRevert()
                             if (!isAudioActive) {
                                 isAudioActive = true
                             }
@@ -645,28 +646,56 @@ object SystemVisualizer {
         // Strict AI Isolation: Only track and react to curated AI apps
         val brandPalette = findBrandPalette(packageName)
         if (brandPalette != null) {
+            cancelPendingRevert()
             activeAgentPackage = packageName
             applyAiBrandColor(packageName, brandPalette)
         } else {
             // User switched to Home Screen (launcher) or a non-AI app (Chrome, Settings, Files, etc.)
             val isMediaPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
             if (isMediaPlaying && activeMediaArtColors != null) {
+                cancelPendingRevert()
+                activeAgentPackage = null
                 applyMediaAlbumArt(activeMediaArtColors!!)
             } else if (isAudioActive && activeAgentPackage != null) {
                 // The AI agent is currently talking in the background!
                 // Keep its signature colors active and dancing on the edge lights / visualizer!
+                cancelPendingRevert()
                 val agentBrand = findBrandPalette(activeAgentPackage!!)
                 if (agentBrand != null) {
                     applyAiBrandColor(activeAgentPackage!!, agentBrand)
                 }
+            } else if (activeAgentPackage != null) {
+                // User was in an AI agent and minimized (e.g. pressed Play before minimizing while TTS loads).
+                // Give a 2.5s grace offset before fading to default so TTS startup isn't cut off!
+                scheduleRevertToDefault(2500L)
             } else {
-                activeAgentPackage = null
                 revertToDefaultColors()
             }
         }
     }
 
+    private var pendingRevertRunnable: Runnable? = null
+
+    fun scheduleRevertToDefault(delayMs: Long = 2500L) {
+        cancelPendingRevert()
+        pendingRevertRunnable = Runnable {
+            activeAgentPackage = null
+            revertToDefaultColors()
+            pendingRevertRunnable = null
+        }.also { handler.postDelayed(it, delayMs) }
+        Timber.d("SystemVisualizer: Scheduled revert to default in ${delayMs}ms")
+    }
+
+    fun cancelPendingRevert() {
+        pendingRevertRunnable?.let {
+            handler.removeCallbacks(it)
+            pendingRevertRunnable = null
+            Timber.d("SystemVisualizer: Cancelled pending revert")
+        }
+    }
+
     fun revertToDefaultColors() {
+        cancelPendingRevert()
         if (currentAlbumColors == null && currentAppliedPackage == null) return
         currentAlbumColors = null
         currentAppliedPackage = null
