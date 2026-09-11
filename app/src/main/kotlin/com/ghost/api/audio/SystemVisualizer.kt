@@ -305,18 +305,36 @@ object SystemVisualizer {
                 events.getNextEvent(event)
                 if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED && event.timeStamp > lastTime) {
                     val pkg = event.packageName
-                    if (!isIgnoredPackage(pkg) && findBrandPalette(pkg) != null) {
+                    if (!isIgnoredPackage(pkg)) {
                         lastPkg = pkg
                         lastTime = event.timeStamp
                     }
                 }
             }
-            if (lastPkg != null) {
+            if (lastPkg != null && findBrandPalette(lastPkg) != null) {
                 lastActiveAiPackage = lastPkg
             }
             lastPkg
         } catch (e: Exception) {
             null
+        }
+    }
+
+    private val foregroundPollRunnable = object : Runnable {
+        override fun run() {
+            try {
+                pollForegroundApp()
+            } catch (e: Exception) {
+                Timber.d(e, "Foreground poll error")
+            }
+            handler.postDelayed(this, 1000L)
+        }
+    }
+
+    fun pollForegroundApp() {
+        val fgApp = getForegroundAppFromUsageStats() ?: return
+        if (fgApp != lastForegroundPackage) {
+            onForegroundAppChanged(fgApp)
         }
     }
 
@@ -333,23 +351,38 @@ object SystemVisualizer {
 
     private val mediaControllerCallback = object : MediaController.Callback() {
         override fun onMetadataChanged(metadata: MediaMetadata?) {
-            extractColorsFromMetadata(metadata)
+            val isPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
+            val fgBrand = lastForegroundPackage?.let { findBrandPalette(it) }
+            if (isPlaying && fgBrand == null) {
+                extractColorsFromMetadata(metadata)
+            }
         }
 
         override fun onPlaybackStateChanged(state: PlaybackState?) {
-            if (state?.state == PlaybackState.STATE_PLAYING) {
-                if (activeMediaArtColors == null) {
-                    extractColorsFromMetadata(activeMediaController?.metadata)
-                } else {
-                    applyMediaAlbumArt(activeMediaArtColors!!)
+            val isPlaying = state?.state == PlaybackState.STATE_PLAYING
+            val fgBrand = lastForegroundPackage?.let { findBrandPalette(it) }
+
+            if (isPlaying) {
+                if (fgBrand == null) {
+                    if (activeMediaArtColors != null) {
+                        applyMediaAlbumArt(activeMediaArtColors!!)
+                    } else {
+                        extractColorsFromMetadata(activeMediaController?.metadata)
+                    }
                 }
             } else if (state?.state == PlaybackState.STATE_STOPPED || state?.state == PlaybackState.STATE_PAUSED) {
                 activeMediaArtColors = null
                 if (!isAudioActive) {
-                    currentAlbumColors = null
                     currentAppliedPackage = null
-                    if (overrideEmotionColors == null) {
-                        handler.post { listeners.forEach { it.onColorsChanged(null) } }
+                    // If an AI agent was active, restore its signature colors!
+                    val lastBrand = lastActiveAiPackage?.let { findBrandPalette(it) }
+                    if (lastBrand != null) {
+                        applyAiBrandColor(lastActiveAiPackage!!, lastBrand)
+                    } else {
+                        currentAlbumColors = null
+                        if (overrideEmotionColors == null) {
+                            handler.post { listeners.forEach { it.onColorsChanged(null) } }
+                        }
                     }
                 }
             }
@@ -358,6 +391,10 @@ object SystemVisualizer {
 
     fun init(context: Context) {
         appContext = context.applicationContext
+
+        // Start periodic foreground app polling (UsageStats fallback)
+        handler.removeCallbacks(foregroundPollRunnable)
+        handler.post(foregroundPollRunnable)
 
         if (audioManager == null) {
             audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
@@ -418,7 +455,7 @@ object SystemVisualizer {
 
                             // Strict AI Brand & Media Isolation Hierarchy:
                             // 1. Focused on-screen AI app (user is looking at Claude, Qwen, Kimi, etc.)
-                            val fgPkg = lastForegroundPackage
+                            val fgPkg = lastForegroundPackage ?: getForegroundAppFromUsageStats()
                             val fgBrand = if (fgPkg != null && !isIgnoredPackage(fgPkg)) findBrandPalette(fgPkg) else null
 
                             // 2. Direct active AI audio playback config (background voice stream / TTS)
@@ -458,9 +495,14 @@ object SystemVisualizer {
                                 applyMediaAlbumArt(activeMediaArtColors!!)
                             } else {
                                 activeMediaArtColors = null
-                                currentAlbumColors = null
-                                if (overrideEmotionColors == null) {
-                                    handler.post { listeners.forEach { it.onColorsChanged(null) } }
+                                val lastBrand = lastActiveAiPackage?.let { findBrandPalette(it) }
+                                if (lastBrand != null) {
+                                    applyAiBrandColor(lastActiveAiPackage!!, lastBrand)
+                                } else {
+                                    currentAlbumColors = null
+                                    if (overrideEmotionColors == null) {
+                                        handler.post { listeners.forEach { it.onColorsChanged(null) } }
+                                    }
                                 }
                             }
                         }
@@ -494,7 +536,14 @@ object SystemVisualizer {
         } ?: controllers?.firstOrNull()
 
         activeMediaController?.registerCallback(mediaControllerCallback)
-        extractColorsFromMetadata(activeMediaController?.metadata)
+
+        // ONLY extract colors if media is ACTIVELY PLAYING! Never hijack from paused/idle sessions!
+        if (activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING) {
+            val fgBrand = lastForegroundPackage?.let { findBrandPalette(it) }
+            if (fgBrand == null) {
+                extractColorsFromMetadata(activeMediaController?.metadata)
+            }
+        }
     }
 
     private fun extractColorsFromMetadata(metadata: MediaMetadata?) {
@@ -538,9 +587,14 @@ object SystemVisualizer {
         // If this is an active media session (e.g. YouTube Music, Spotify) without art,
         // DO NOT overwrite with the app icon (which turns YouTube RED and Spotify GREEN).
         if (!isAudioActive && activeMediaArtColors == null) {
-            currentAlbumColors = null
-            currentAppliedPackage = null
-            listeners.forEach { it.onColorsChanged(null) }
+            val lastBrand = lastActiveAiPackage?.let { findBrandPalette(it) }
+            if (lastBrand != null) {
+                applyAiBrandColor(lastActiveAiPackage!!, lastBrand)
+            } else {
+                currentAlbumColors = null
+                currentAppliedPackage = null
+                listeners.forEach { it.onColorsChanged(null) }
+            }
         }
     }
 
@@ -574,9 +628,16 @@ object SystemVisualizer {
                 if (isAlbumArt) {
                     activeMediaArtColors = extracted
                 }
-                currentAlbumColors = extracted
-                if (overrideEmotionColors == null) {
-                    handler.post { listeners.forEach { it.onColorsChanged(extracted) } }
+
+                val isPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
+                val fgBrand = lastForegroundPackage?.let { findBrandPalette(it) }
+
+                // Only apply album art if media is actively playing AND user is not focused on an AI agent!
+                if (isPlaying && fgBrand == null) {
+                    currentAlbumColors = extracted
+                    if (overrideEmotionColors == null) {
+                        handler.post { listeners.forEach { it.onColorsChanged(extracted) } }
+                    }
                 }
             }
         }
@@ -592,8 +653,17 @@ object SystemVisualizer {
         val brandPalette = findBrandPalette(packageName)
         if (brandPalette != null) {
             lastActiveAiPackage = packageName
-            if (isAudioActive) {
-                applyAiBrandColor(packageName, brandPalette)
+            applyAiBrandColor(packageName, brandPalette)
+        } else {
+            // User switched to a non-AI, non-launcher app (e.g. Chrome, Files, Gallery)
+            // If media is NOT actively playing, clear to default
+            val isMediaPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
+            if (!isMediaPlaying && currentAlbumColors != null) {
+                currentAlbumColors = null
+                currentAppliedPackage = null
+                if (overrideEmotionColors == null) {
+                    handler.post { listeners.forEach { it.onColorsChanged(null) } }
+                }
             }
         }
     }
