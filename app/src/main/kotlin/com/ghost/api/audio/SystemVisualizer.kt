@@ -9,6 +9,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import android.media.AudioAttributes
 import android.media.AudioPlaybackConfiguration
 import android.media.AudioManager
 import android.media.MediaMetadata
@@ -53,6 +54,7 @@ object SystemVisualizer {
     // Extracted Colors (null means use defaults)
     var currentAlbumColors: IntArray? = null
         private set
+    private var activeMediaArtColors: IntArray? = null
 
     private var overrideEmotionColors: IntArray? = null
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -176,15 +178,27 @@ object SystemVisualizer {
         val lower = packageName.lowercase()
         return lower == "com.ghost.api" ||
                lower == "android" ||
-               lower == "com.android.systemui" ||
+               lower.startsWith("com.android.systemui") ||
                lower.contains("launcher") ||
+               lower.contains("lockscreen") ||
+               lower.contains("keyguard") ||
+               lower.contains("screenshot") ||
+               lower.contains("camera") ||
                lower.contains("inputmethod") ||
                lower.contains("keyboard") ||
+               lower.contains("powersave") ||
+               lower.contains("thermal") ||
+               lower.contains("settings") ||
+               lower.contains("overlay") ||
+               lower.contains("wallpaper") ||
                lower == "cn.zte.aigcinput" ||
                lower.startsWith("cn.nubia.game") ||
                lower.startsWith("cn.zte.game") ||
+               lower.startsWith("com.zte.game") ||
                lower == "com.zte.floatassist" ||
-               lower == "com.android.permissioncontroller"
+               lower == "com.android.permissioncontroller" ||
+               lower == "com.android.vending" ||
+               lower == "com.google.android.googlequicksearchbox"
     }
 
     fun ensureAccessibilityServiceEnabled(context: Context) {
@@ -210,6 +224,26 @@ object SystemVisualizer {
 
         for (config in configs) {
             try {
+                // 1. Strict Attribute Filtering: Filter out UI sonification, clicks, shutter, and notifications
+                val attrs = config.audioAttributes
+                if (attrs != null) {
+                    val usage = attrs.usage
+                    val contentType = attrs.contentType
+                    
+                    // Skip system UI clicks, lock sounds, camera shutter, screenshot clicks, touch sounds
+                    if (usage == AudioAttributes.USAGE_ASSISTANCE_SONIFICATION ||
+                        usage == AudioAttributes.USAGE_NOTIFICATION ||
+                        usage == AudioAttributes.USAGE_NOTIFICATION_RINGTONE ||
+                        usage == AudioAttributes.USAGE_NOTIFICATION_COMMUNICATION_REQUEST ||
+                        usage == AudioAttributes.USAGE_NOTIFICATION_COMMUNICATION_INSTANT ||
+                        usage == AudioAttributes.USAGE_NOTIFICATION_COMMUNICATION_DELAYED ||
+                        usage == AudioAttributes.USAGE_NOTIFICATION_EVENT ||
+                        usage == AudioAttributes.USAGE_ALARM ||
+                        contentType == AudioAttributes.CONTENT_TYPE_SONIFICATION) {
+                        continue
+                    }
+                }
+
                 val isActive = try {
                     val method = config.javaClass.getMethod("isActive")
                     method.invoke(config) as? Boolean ?: true
@@ -304,10 +338,11 @@ object SystemVisualizer {
 
         override fun onPlaybackStateChanged(state: PlaybackState?) {
             if (state?.state == PlaybackState.STATE_PLAYING) {
-                if (currentAlbumColors == null) {
+                if (activeMediaArtColors == null) {
                     extractColorsFromMetadata(activeMediaController?.metadata)
                 }
             } else if (state?.state == PlaybackState.STATE_STOPPED || state?.state == PlaybackState.STATE_PAUSED) {
+                activeMediaArtColors = null
                 if (!isAudioActive) {
                     currentAlbumColors = null
                     currentAppliedPackage = null
@@ -413,6 +448,7 @@ object SystemVisualizer {
                             currentAppliedPackage = null
                             val isMediaPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
                             if (!isMediaPlaying) {
+                                activeMediaArtColors = null
                                 currentAlbumColors = null
                                 if (overrideEmotionColors == null) {
                                     handler.post { listeners.forEach { it.onColorsChanged(null) } }
@@ -453,28 +489,53 @@ object SystemVisualizer {
     }
 
     private fun extractColorsFromMetadata(metadata: MediaMetadata?) {
-        val bitmap = metadata?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART) 
+        var bitmap = metadata?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART) 
             ?: metadata?.getBitmap(MediaMetadata.METADATA_KEY_ART)
-            
+            ?: metadata?.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)
+
         if (bitmap == null) {
-            val isPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
-            val pkg = activeMediaController?.packageName
-            if (isPlaying && pkg != null && pkg != "com.ghost.api") {
-                applyPackageColor(pkg)
-                return
+            val uriStr = metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI)
+                ?: metadata?.getString(MediaMetadata.METADATA_KEY_ART_URI)
+                ?: metadata?.getString(MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI)
+            if (uriStr != null) {
+                try {
+                    val uri = android.net.Uri.parse(uriStr)
+                    val cr = appContext?.contentResolver
+                    if (cr != null) {
+                        bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            android.graphics.ImageDecoder.decodeBitmap(
+                                android.graphics.ImageDecoder.createSource(cr, uri)
+                            ) { decoder, _, _ ->
+                                decoder.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+                                decoder.setTargetSize(128, 128)
+                            }
+                        } else {
+                            cr.openInputStream(uri)?.use { stream ->
+                                android.graphics.BitmapFactory.decodeStream(stream)
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Timber.d("Could not load album art from URI: $uriStr")
+                }
             }
-            if (!isAudioActive) {
-                currentAlbumColors = null
-                currentAppliedPackage = null
-                listeners.forEach { it.onColorsChanged(null) }
-            }
+        }
+            
+        if (bitmap != null) {
+            extractPaletteFromBitmap(bitmap, isAlbumArt = true)
             return
         }
 
-        extractPaletteFromBitmap(bitmap)
+        // If this is an active media session (e.g. YouTube Music, Spotify) without art,
+        // DO NOT overwrite with the app icon (which turns YouTube RED and Spotify GREEN).
+        if (!isAudioActive && activeMediaArtColors == null) {
+            currentAlbumColors = null
+            currentAppliedPackage = null
+            listeners.forEach { it.onColorsChanged(null) }
+        }
     }
 
-    private fun extractPaletteFromBitmap(bitmap: Bitmap) {
+    private fun extractPaletteFromBitmap(bitmap: Bitmap, isAlbumArt: Boolean = false) {
         Palette.from(bitmap).generate { palette ->
             if (palette != null) {
                 val dominant = palette.getDominantColor(0)
@@ -501,6 +562,9 @@ object SystemVisualizer {
                     if (darkVibrant != 0) darkVibrant else primary,
                     if (lightVibrant != 0) lightVibrant else primary
                 )
+                if (isAlbumArt) {
+                    activeMediaArtColors = extracted
+                }
                 currentAlbumColors = extracted
                 if (overrideEmotionColors == null) {
                     handler.post { listeners.forEach { it.onColorsChanged(extracted) } }
@@ -525,18 +589,42 @@ object SystemVisualizer {
     }
 
     fun applyPackageColor(packageName: String) {
-        currentAppliedPackage = packageName
+        // 1. If an AI brand palette is matched, apply it immediately!
         val brandPalette = findBrandPalette(packageName)
-
         if (brandPalette != null) {
+            currentAppliedPackage = packageName
             currentAlbumColors = brandPalette
             if (overrideEmotionColors == null) {
                 handler.post { listeners.forEach { it.onColorsChanged(brandPalette) } }
             }
             Timber.d("SystemVisualizer: Applied curated AI brand palette for $packageName")
-        } else {
-            extractPaletteFromAppIcon(packageName)
+            return
         }
+
+        // 2. If this package is the active MediaSession app (e.g. YouTube Music, Spotify)
+        val isMediaPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
+        val mediaPkg = activeMediaController?.packageName
+        if (isMediaPlaying && mediaPkg == packageName) {
+            currentAppliedPackage = packageName
+            // If we already have the album art palette, keep it! Never overwrite with the app icon!
+            if (activeMediaArtColors != null) {
+                if (currentAlbumColors != activeMediaArtColors) {
+                    currentAlbumColors = activeMediaArtColors
+                    if (overrideEmotionColors == null) {
+                        handler.post { listeners.forEach { it.onColorsChanged(activeMediaArtColors) } }
+                    }
+                }
+                return
+            }
+
+            // Try to extract album art from metadata (including URI)
+            extractColorsFromMetadata(activeMediaController?.metadata)
+            return
+        }
+
+        // 3. For any other app (non-media app without MediaSession), extract app icon
+        currentAppliedPackage = packageName
+        extractPaletteFromAppIcon(packageName)
     }
 
     private fun extractPaletteFromAppIcon(packageName: String) {
@@ -545,7 +633,7 @@ object SystemVisualizer {
             val icon = pm.getApplicationIcon(packageName)
             val bitmap = drawableToBitmap(icon)
             if (bitmap != null) {
-                extractPaletteFromBitmap(bitmap)
+                extractPaletteFromBitmap(bitmap, isAlbumArt = false)
                 Timber.d("SystemVisualizer: Extracted agnostic app icon palette for $packageName")
             }
         } catch (e: Exception) {
