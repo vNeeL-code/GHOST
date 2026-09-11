@@ -513,15 +513,6 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
     fun resetMemory() {
         synchronized(this) {
-            // Reset Koog agent if initialized
-            if (::koogAgent.isInitialized) {
-                try {
-                    koogAgent.shutdown() // Use shutdown to clear history and checkpoint
-                } catch (e: Exception) {
-                    Timber.w(e, "Failed to clear Koog agent history")
-                }
-            }
-
             // Delete all checkpoint files
             try {
                 val checkpointDir = getExternalFilesDir(null) ?: filesDir
@@ -535,10 +526,20 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                     if (file.exists()) file.delete()
                 }
 
-                Timber.i("\uD83E\uDDF9 Memory wiped: history cleared, checkpoints deleted")
+                Timber.i("🧹 Memory wiped: checkpoints deleted")
             } catch (e: Exception) {
                 Timber.e(e, "Failed to delete checkpoint files")
-                throw e
+            }
+
+            // Reset Koog agent if initialized
+            if (::koogAgent.isInitialized) {
+                try {
+                    scope.launch {
+                        koogAgent.softReset()
+                    }
+                } catch (e: Exception) {
+                    Timber.w(e, "Failed to soft reset Koog agent history")
+                }
             }
         }
     }

@@ -303,87 +303,241 @@ class SystemToolSet(private val context: Context) : ToolSet {
         }
     }
 
-    @Tool(description = "Searches device storage and MediaStore for files matching a keyword/extension (e.g. mp3, pdf, md, video)")
+    companion object {
+        private val AUDIO_EXTS = setOf("mp3", "wav", "ogg", "flac", "m4a", "aac", "opus", "wma")
+        private val VIDEO_EXTS = setOf("mp4", "mkv", "webm", "avi", "mov", "3gp")
+        private val IMAGE_EXTS = setOf("jpg", "jpeg", "png", "webp", "gif", "svg")
+        private val DOC_EXTS = setOf("pdf", "epub", "doc", "docx", "txt", "md", "json", "csv", "xml", "apk", "zip")
+        private val ALL_KNOWN_EXTS = AUDIO_EXTS + VIDEO_EXTS + IMAGE_EXTS + DOC_EXTS
+    }
+
+    private data class ScoredFile(
+        val name: String,
+        val path: String,
+        val sizeBytes: Long,
+        val lastModified: Long,
+        val score: Int
+    )
+
+    private fun formatBytes(bytes: Long): String {
+        return when {
+            bytes >= 1024 * 1024 * 1024 -> String.format(Locale.US, "%.2f GB", bytes.toDouble() / (1024 * 1024 * 1024))
+            bytes >= 1024 * 1024 -> String.format(Locale.US, "%.1f MB", bytes.toDouble() / (1024 * 1024))
+            bytes >= 1024 -> String.format(Locale.US, "%.1f KB", bytes.toDouble() / 1024)
+            else -> "$bytes B"
+        }
+    }
+
+    private fun extractExtensionFilter(query: String): String? {
+        val trimmed = query.trim().lowercase(Locale.ROOT)
+        if (trimmed.startsWith(".") && trimmed.length > 1) {
+            val ext = trimmed.drop(1)
+            if (ALL_KNOWN_EXTS.contains(ext)) return ext
+        }
+        if (ALL_KNOWN_EXTS.contains(trimmed)) return trimmed
+        if (trimmed.contains(".")) {
+            val lastPart = trimmed.substringAfterLast(".")
+            if (ALL_KNOWN_EXTS.contains(lastPart)) return lastPart
+        }
+        return null
+    }
+
+    private fun scoreCandidate(fileName: String, queryClean: String, tokens: List<String>, extFilter: String?): Int {
+        val nameLower = fileName.lowercase(Locale.ROOT)
+        val fileExt = nameLower.substringAfterLast(".", "")
+        val nameWithoutExt = nameLower.substringBeforeLast(".")
+
+        if (!extFilter.isNullOrBlank() && extFilter != "all") {
+            if (!fileExt.equals(extFilter, ignoreCase = true)) return 0
+        }
+
+        // Extension-only query (e.g. user asked for "mp3" or "pdf")
+        if (tokens.isEmpty()) {
+            return if (!extFilter.isNullOrBlank() && fileExt.equals(extFilter, ignoreCase = true)) 90 else 0
+        }
+
+        // Exact match
+        if (nameWithoutExt == queryClean) return 100
+        if (nameWithoutExt.contains(queryClean)) return 95
+
+        // Collapsed match: ignore spaces, underscores, hyphens, dots
+        val nameCollapsed = nameWithoutExt.replace(Regex("[^a-z0-9]"), "")
+        val queryCollapsed = queryClean.replace(Regex("[^a-z0-9]"), "")
+        if (queryCollapsed.isNotEmpty() && nameCollapsed.contains(queryCollapsed)) return 92
+
+        // Token & Syllable match
+        val nameWords = nameWithoutExt.split(Regex("[^a-z0-9]+")).filter { it.isNotBlank() }
+        var fullMatches = 0
+        var prefixMatches = 0
+
+        for (token in tokens) {
+            if (nameWithoutExt.contains(token)) {
+                fullMatches++
+            } else if (nameWords.any { word -> word.startsWith(token) || token.startsWith(word) }) {
+                prefixMatches++
+            }
+        }
+
+        val totalMatches = fullMatches + prefixMatches
+        if (fullMatches == tokens.size) {
+            val inOrder = tokens.size > 1 && nameWithoutExt.indexOf(tokens.first()) <= nameWithoutExt.indexOf(tokens.last())
+            return if (inOrder) 88 else 82
+        }
+
+        if (totalMatches == tokens.size) {
+            return 76
+        }
+
+        if (totalMatches > 0) {
+            return 35 + ((totalMatches * 40) / tokens.size)
+        }
+
+        return 0
+    }
+
+    @JvmOverloads
+    @Tool(description = "Searches device storage and MediaStore for files matching keywords, partial syllables, or extensions (e.g. 'snake eyes', 'invoice', '.mp3', 'pdf')")
     fun search_files(
-        @ToolParam(description = "Filename keyword, pattern, or title (e.g. 'breakbeat', 'invoice', '.md')") query: String,
+        @ToolParam(description = "Search term, partial syllables, filename words, or extension (e.g. 'snake eyes', 'invoice', 'mp3')") query: String,
         @ToolParam(description = "Optional filter: 'audio', 'video', 'image', 'doc', 'any'") type: String = "any"
     ): Map<String, String> {
         com.ghost.api.GemmaService.instance?.showWorkSignal("STORAGE")
+        Timber.i("search_files called: query='$query', type='$type'")
         return try {
-            val results = mutableListOf<String>()
-            val lowerQuery = query.lowercase(Locale.ROOT)
+            val rawQuery = query.trim()
+            val extFilter = extractExtensionFilter(rawQuery)
+            val cleanForTokens = if (extFilter != null && rawQuery.endsWith(".$extFilter", ignoreCase = true)) {
+                rawQuery.dropLast(extFilter.length + 1).trim()
+            } else if (extFilter != null && rawQuery.equals(extFilter, ignoreCase = true)) {
+                ""
+            } else {
+                rawQuery
+            }
+            val tokens = cleanForTokens.lowercase(Locale.ROOT).split(Regex("[^a-z0-9]+")).filter { it.isNotBlank() }
+            val queryClean = cleanForTokens.lowercase(Locale.ROOT)
 
-            // 1. Search MediaStore for fast indexed media
-            try {
-                val contentUri = when (type.lowercase(Locale.ROOT)) {
-                    "audio", "music" -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-                    "video", "movie" -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-                    "image", "photo" -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-                    else -> MediaStore.Files.getContentUri("external")
-                }
+            val scoredResults = mutableMapOf<String, ScoredFile>()
 
-                val projection = arrayOf(
-                    MediaStore.MediaColumns.DATA,
-                    MediaStore.MediaColumns.DISPLAY_NAME,
-                    MediaStore.MediaColumns.SIZE
+            // 1. MediaStore query (Fast indexed audio/video/images/downloads/files)
+            val contentUris = when {
+                type.equals("audio", ignoreCase = true) || type.equals("music", ignoreCase = true) || (extFilter != null && AUDIO_EXTS.contains(extFilter)) ->
+                    listOf(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI)
+                type.equals("video", ignoreCase = true) || type.equals("movie", ignoreCase = true) || (extFilter != null && VIDEO_EXTS.contains(extFilter)) ->
+                    listOf(MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
+                type.equals("image", ignoreCase = true) || type.equals("photo", ignoreCase = true) || (extFilter != null && IMAGE_EXTS.contains(extFilter)) ->
+                    listOf(MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
+                else -> listOfNotNull(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) MediaStore.Downloads.EXTERNAL_CONTENT_URI else null,
+                    MediaStore.Files.getContentUri("external")
                 )
-                val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"
-                val selectionArgs = arrayOf("%$query%")
-
-                context.contentResolver.query(
-                    contentUri,
-                    projection,
-                    selection,
-                    selectionArgs,
-                    "${MediaStore.MediaColumns.DATE_MODIFIED} DESC"
-                )?.use { cursor ->
-                    val dataCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATA)
-                    val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
-                    val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
-
-                    while (cursor.moveToNext() && results.size < 15) {
-                        val path = cursor.getString(dataCol) ?: continue
-                        val name = cursor.getString(nameCol) ?: File(path).name
-                        val sizeMb = String.format(Locale.US, "%.1f MB", (cursor.getLong(sizeCol).toDouble() / (1024 * 1024)))
-                        results.add("- $name ($sizeMb)\n  Path: $path")
-                    }
-                }
-            } catch (e: Exception) {
-                Timber.w(e, "MediaStore search failed")
             }
 
-            // 2. Direct File System search across standard external dirs for docs/markdown/text
-            if (results.size < 10) {
-                val searchRoots = listOf(
-                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
-                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC),
-                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
-                    Environment.getExternalStorageDirectory()
-                ).filterNotNull().filter { it.exists() && it.canRead() }
+            for (contentUri in contentUris) {
+                try {
+                    val projection = arrayOf(
+                        MediaStore.MediaColumns.DATA,
+                        MediaStore.MediaColumns.DISPLAY_NAME,
+                        MediaStore.MediaColumns.SIZE,
+                        MediaStore.MediaColumns.DATE_MODIFIED
+                    )
 
-                for (dir in searchRoots) {
-                    if (results.size >= 15) break
-                    try {
-                        dir.walkTopDown()
-                            .maxDepth(3)
-                            .filter { it.isFile && it.name.lowercase(Locale.ROOT).contains(lowerQuery) }
-                            .take(15 - results.size)
-                            .forEach { f ->
-                                val sizeMb = String.format(Locale.US, "%.1f MB", (f.length().toDouble() / (1024 * 1024)))
-                                val entry = "- ${f.name} ($sizeMb)\n  Path: ${f.absolutePath}"
-                                if (!results.contains(entry)) {
-                                    results.add(entry)
-                                }
+                    val selectionParts = mutableListOf<String>()
+                    val selectionArgs = mutableListOf<String>()
+
+                    if (tokens.isNotEmpty()) {
+                        if (tokens.size == 1) {
+                            selectionParts.add("${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?")
+                            selectionArgs.add("%${tokens[0]}%")
+                        } else {
+                            val tokenClauses = tokens.map { "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?" }
+                            selectionParts.add("(${tokenClauses.joinToString(" OR ")})")
+                            selectionArgs.addAll(tokens.map { "%$it%" })
+                        }
+                    }
+
+                    if (!extFilter.isNullOrBlank() && extFilter != "all") {
+                        selectionParts.add("${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?")
+                        selectionArgs.add("%.${extFilter}")
+                    }
+
+                    val selection = if (selectionParts.isNotEmpty()) selectionParts.joinToString(" AND ") else null
+                    val selArgsArray = if (selectionArgs.isNotEmpty()) selectionArgs.toTypedArray() else null
+
+                    context.contentResolver.query(
+                        contentUri,
+                        projection,
+                        selection,
+                        selArgsArray,
+                        "${MediaStore.MediaColumns.DATE_MODIFIED} DESC"
+                    )?.use { cursor ->
+                        val dataCol = cursor.getColumnIndex(MediaStore.MediaColumns.DATA)
+                        val nameCol = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
+                        val sizeCol = cursor.getColumnIndex(MediaStore.MediaColumns.SIZE)
+                        val dateCol = cursor.getColumnIndex(MediaStore.MediaColumns.DATE_MODIFIED)
+
+                        while (cursor.moveToNext()) {
+                            val path = if (dataCol != -1) cursor.getString(dataCol) else null
+                            if (path == null) continue
+                            val name = if (nameCol != -1) cursor.getString(nameCol) else File(path).name
+                            val size = if (sizeCol != -1) cursor.getLong(sizeCol) else 0L
+                            val date = if (dateCol != -1) cursor.getLong(dateCol) * 1000L else 0L
+
+                            val score = scoreCandidate(name, queryClean, tokens, extFilter)
+                            if (score >= 35) {
+                                scoredResults[path] = ScoredFile(name, path, size, date, score)
                             }
-                    } catch (e: Exception) {
-                        // Ignore inaccessible subdirectories
+                        }
                     }
+                } catch (e: Exception) {
+                    Timber.w(e, "MediaStore search failed for $contentUri")
                 }
             }
 
-            if (results.isNotEmpty()) {
-                mapOf("result" to "success", "matches" to results.joinToString("\n"))
+            // 2. Direct File System search across standard readable dirs
+            val searchRoots = listOfNotNull(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC),
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
+                context.getExternalFilesDir(null)
+            ).filter { it.exists() && it.canRead() }
+
+            for (dir in searchRoots) {
+                try {
+                    dir.walkTopDown()
+                        .maxDepth(3)
+                        .filter { it.isFile && it.canRead() }
+                        .forEach { f ->
+                            val score = scoreCandidate(f.name, queryClean, tokens, extFilter)
+                            if (score >= 35 && !scoredResults.containsKey(f.absolutePath)) {
+                                scoredResults[f.absolutePath] = ScoredFile(
+                                    name = f.name,
+                                    path = f.absolutePath,
+                                    sizeBytes = f.length(),
+                                    lastModified = f.lastModified(),
+                                    score = score
+                                )
+                            }
+                        }
+                } catch (e: Exception) {
+                    // Ignore inaccessible subdirectories
+                }
+            }
+
+            val sorted = scoredResults.values.sortedWith(
+                compareByDescending<ScoredFile> { it.score }
+                    .thenByDescending { it.lastModified }
+            ).take(20)
+
+            if (sorted.isNotEmpty()) {
+                val matches = sorted.joinToString("\n") { file ->
+                    val sizeStr = formatBytes(file.sizeBytes)
+                    "- ${file.name} ($sizeStr)\n  Path: ${file.path}"
+                }
+                mapOf("result" to "success", "count" to sorted.size.toString(), "matches" to matches)
             } else {
                 mapOf("result" to "success", "matches" to "No files found matching '$query'.")
             }
@@ -392,6 +546,287 @@ class SystemToolSet(private val context: Context) : ToolSet {
         }
     }
 
+    @JvmOverloads
+    @Tool(description = "Lists files in a specific folder or category (e.g. 'downloads', 'documents', 'music', 'audio', 'movies', 'pictures', or an absolute directory path)")
+    fun list_files(
+        @ToolParam(description = "Target category ('downloads', 'documents', 'music', 'audio', 'movies', 'pictures') or an absolute directory path like '/sdcard/Download'") target: String = "downloads",
+        @ToolParam(description = "Optional extension filter (e.g. 'mp3', 'pdf', 'apk', 'all')") extension: String = "all",
+        @ToolParam(description = "Maximum files to return (default: 25)") limit: Int = 25
+    ): Map<String, String> {
+        com.ghost.api.GemmaService.instance?.showWorkSignal("STORAGE", 1500)
+        Timber.i("list_files called: target='$target', extension='$extension', limit=$limit")
+        return try {
+            val extClean = extension.trim().removePrefix(".").lowercase(Locale.ROOT)
+            val lowerTarget = target.trim().lowercase(Locale.ROOT)
+
+            // Check if user requested MediaStore media category
+            if (lowerTarget in listOf("music", "audio", "movies", "video", "videos", "pictures", "photos", "images", "downloads", "download")) {
+                val contentUri = when (lowerTarget) {
+                    "music", "audio" -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+                    "movies", "video", "videos" -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                    "pictures", "photos", "images" -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                    else -> if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) MediaStore.Downloads.EXTERNAL_CONTENT_URI else null
+                }
+
+                if (contentUri != null) {
+
+                val projection = arrayOf(
+                    MediaStore.MediaColumns.DATA,
+                    MediaStore.MediaColumns.DISPLAY_NAME,
+                    MediaStore.MediaColumns.SIZE,
+                    MediaStore.MediaColumns.DATE_MODIFIED
+                )
+
+                val selection = if (extClean.isNotBlank() && extClean != "all") {
+                    "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"
+                } else null
+                val selArgs = if (selection != null) arrayOf("%.${extClean}") else null
+
+                val filesList = mutableListOf<String>()
+                context.contentResolver.query(
+                    contentUri,
+                    projection,
+                    selection,
+                    selArgs,
+                    "${MediaStore.MediaColumns.DATE_MODIFIED} DESC"
+                )?.use { cursor ->
+                    val dataCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATA)
+                    val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+                    val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
+                    val dateCol = cursor.getColumnIndex(MediaStore.MediaColumns.DATE_MODIFIED)
+                    val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US)
+
+                    while (cursor.moveToNext() && filesList.size < limit) {
+                        val path = cursor.getString(dataCol) ?: continue
+                        val name = cursor.getString(nameCol) ?: File(path).name
+                        val size = formatBytes(cursor.getLong(sizeCol))
+                        val date = if (dateCol != -1) {
+                            dateFormat.format(java.util.Date(cursor.getLong(dateCol) * 1000L))
+                        } else ""
+                        val dateStr = if (date.isNotEmpty()) ", $date" else ""
+                        filesList.add("- $name ($size$dateStr)\n  Path: $path")
+                    }
+                }
+
+                if (filesList.isNotEmpty()) {
+                    return mapOf(
+                        "result" to "success",
+                        "count" to filesList.size.toString(),
+                        "target" to target,
+                        "files" to "Files in $target:\n" + filesList.joinToString("\n")
+                    )
+                }
+                }
+            }
+
+            // Target directory resolution
+            val targetDir = when (lowerTarget) {
+                "downloads", "download" -> Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                "documents", "document", "docs" -> Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+                "music", "audio" -> Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
+                "movies", "video", "videos" -> Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+                "pictures", "photos", "images" -> Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+                else -> File(target)
+            }
+
+            if (!targetDir.exists() || !targetDir.isDirectory) {
+                return mapOf("result" to "error", "message" to "Directory not found or inaccessible: ${targetDir.absolutePath}")
+            }
+
+            val files = targetDir.listFiles { f ->
+                f.isFile && (extClean == "all" || f.extension.equals(extClean, ignoreCase = true))
+            }?.sortedByDescending { it.lastModified() }?.take(limit) ?: emptyList()
+
+            if (files.isEmpty()) {
+                val filterMsg = if (extClean != "all") " with extension '.$extClean'" else ""
+                return mapOf("result" to "success", "files" to "No files found in ${targetDir.name}$filterMsg.")
+            }
+
+            val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US)
+            val formatted = files.joinToString("\n") { f ->
+                val dateStr = dateFormat.format(java.util.Date(f.lastModified()))
+                "- ${f.name} (${formatBytes(f.length())}, $dateStr)\n  Path: ${f.absolutePath}"
+            }
+
+            mapOf(
+                "result" to "success",
+                "count" to files.size.toString(),
+                "target" to targetDir.absolutePath,
+                "files" to "Files in ${targetDir.name} (${files.size} items):\n$formatted"
+            )
+        } catch (e: Exception) {
+            mapOf("result" to "error", "message" to "Failed to list files: ${e.message}")
+        } finally {
+            com.ghost.api.GemmaService.instance?.hideWorkSignal()
+        }
+    }
+
+    @Tool(description = "Moves or renames a file from sourcePath to destinationPath (can specify destination directory or new filename)")
+    fun move_file(
+        @ToolParam(description = "Absolute path of the source file to move") sourcePath: String,
+        @ToolParam(description = "Absolute path of the destination file or directory") destinationPath: String
+    ): Map<String, String> {
+        com.ghost.api.GemmaService.instance?.showWorkSignal("FILES", 1500)
+        return try {
+            val sourceFile = File(sourcePath)
+            if (!sourceFile.exists() || !sourceFile.isFile) {
+                return mapOf("result" to "error", "message" to "Source file does not exist or is not a file: $sourcePath")
+            }
+
+            var destFile = File(destinationPath)
+            if (destFile.exists() && destFile.isDirectory) {
+                destFile = File(destFile, sourceFile.name)
+            } else if (!destFile.exists() && destinationPath.endsWith("/")) {
+                destFile.mkdirs()
+                destFile = File(destFile, sourceFile.name)
+            } else {
+                destFile.parentFile?.mkdirs()
+            }
+
+            val moved = try {
+                sourceFile.renameTo(destFile)
+            } catch (e: Exception) {
+                false
+            }
+
+            val success = if (moved && destFile.exists()) {
+                true
+            } else {
+                // Fallback copy + delete across mount boundaries
+                sourceFile.copyTo(destFile, overwrite = true)
+                if (destFile.exists() && destFile.length() == sourceFile.length()) {
+                    sourceFile.delete()
+                    true
+                } else false
+            }
+
+            if (success) {
+                try {
+                    android.media.MediaScannerConnection.scanFile(
+                        context,
+                        arrayOf(sourcePath, destFile.absolutePath),
+                        null,
+                        null
+                    )
+                } catch (_: Exception) {}
+                mapOf(
+                    "result" to "success",
+                    "message" to "Successfully moved '${sourceFile.name}' to '${destFile.absolutePath}'",
+                    "newPath" to destFile.absolutePath
+                )
+            } else {
+                mapOf("result" to "error", "message" to "Failed to move '$sourcePath' to '$destinationPath'")
+            }
+        } catch (e: Exception) {
+            mapOf("result" to "error", "message" to "Move error: ${e.message}")
+        } finally {
+            com.ghost.api.GemmaService.instance?.hideWorkSignal()
+        }
+    }
+
+    @Tool(description = "Copies a file from sourcePath to destinationPath or destination directory")
+    fun copy_file(
+        @ToolParam(description = "Absolute path of the source file to copy") sourcePath: String,
+        @ToolParam(description = "Absolute path of the destination file or directory") destinationPath: String
+    ): Map<String, String> {
+        com.ghost.api.GemmaService.instance?.showWorkSignal("FILES", 1500)
+        return try {
+            val sourceFile = File(sourcePath)
+            if (!sourceFile.exists() || !sourceFile.isFile) {
+                return mapOf("result" to "error", "message" to "Source file does not exist: $sourcePath")
+            }
+
+            var destFile = File(destinationPath)
+            if (destFile.exists() && destFile.isDirectory) {
+                destFile = File(destFile, sourceFile.name)
+            } else {
+                destFile.parentFile?.mkdirs()
+            }
+
+            sourceFile.copyTo(destFile, overwrite = true)
+            try {
+                android.media.MediaScannerConnection.scanFile(context, arrayOf(destFile.absolutePath), null, null)
+            } catch (_: Exception) {}
+
+            mapOf(
+                "result" to "success",
+                "message" to "Copied '${sourceFile.name}' to '${destFile.absolutePath}' (${formatBytes(destFile.length())})",
+                "copiedPath" to destFile.absolutePath
+            )
+        } catch (e: Exception) {
+            mapOf("result" to "error", "message" to "Copy error: ${e.message}")
+        } finally {
+            com.ghost.api.GemmaService.instance?.hideWorkSignal()
+        }
+    }
+
+    @Tool(description = "Safely deletes a specified file (requires confirmation for safety, cannot delete directories)")
+    fun delete_file(
+        @ToolParam(description = "Absolute path of the file to delete") filePath: String
+    ): Map<String, String> {
+        com.ghost.api.GemmaService.instance?.showWorkSignal("FILES", 1500)
+        return try {
+            val file = File(filePath)
+            if (!file.exists()) {
+                return mapOf("result" to "error", "message" to "File does not exist: $filePath")
+            }
+            if (file.isDirectory) {
+                return mapOf("result" to "error", "message" to "Cannot delete directories with delete_file for safety.")
+            }
+            // Protect critical model and system files
+            if (file.name.endsWith(".litertlm", ignoreCase = true) && file.parent?.contains("models") == true) {
+                return mapOf("result" to "error", "message" to "Protected file: cannot delete active model weights.")
+            }
+
+            val deleted = file.delete()
+            if (deleted) {
+                try {
+                    android.media.MediaScannerConnection.scanFile(context, arrayOf(filePath), null, null)
+                } catch (_: Exception) {}
+                mapOf("result" to "success", "message" to "Deleted file: ${file.name}")
+            } else {
+                mapOf("result" to "error", "message" to "Failed to delete file: $filePath")
+            }
+        } catch (e: Exception) {
+            mapOf("result" to "error", "message" to "Delete error: ${e.message}")
+        } finally {
+            com.ghost.api.GemmaService.instance?.hideWorkSignal()
+        }
+    }
+
+    @Tool(description = "Gets detailed metadata for a file (size, modified date, MIME type, existence)")
+    fun get_file_info(
+        @ToolParam(description = "Absolute path of the file to inspect") filePath: String
+    ): Map<String, String> {
+        return try {
+            val file = File(filePath)
+            if (!file.exists()) {
+                return mapOf("result" to "error", "message" to "File does not exist: $filePath")
+            }
+
+            val ext = file.extension.lowercase(Locale.ROOT)
+            val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
+            val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+            val modifiedDate = dateFormat.format(java.util.Date(file.lastModified()))
+
+            mapOf(
+                "result" to "success",
+                "name" to file.name,
+                "path" to file.absolutePath,
+                "size" to formatBytes(file.length()),
+                "sizeBytes" to file.length().toString(),
+                "modified" to modifiedDate,
+                "mimeType" to mimeType,
+                "isDirectory" to file.isDirectory.toString(),
+                "canRead" to file.canRead().toString(),
+                "canWrite" to file.canWrite().toString()
+            )
+        } catch (e: Exception) {
+            mapOf("result" to "error", "message" to "Info error: ${e.message}")
+        }
+    }
+
+    @JvmOverloads
     @Tool(description = "Opens a local file with its default system handler or a specific app (e.g. VLC, Gallery, Acrobat)")
     fun open_file(
         @ToolParam(description = "Absolute path of the file to open (e.g. /sdcard/Download/song.mp3)") filePath: String,
@@ -468,6 +903,7 @@ class SystemToolSet(private val context: Context) : ToolSet {
         }
     }
 
+    @JvmOverloads
     @Tool(description = "Reads and returns the text content of a local text/markdown/code/json/log file")
     fun read_file_text(
         @ToolParam(description = "Absolute path of the text/markdown/json file to read") filePath: String,

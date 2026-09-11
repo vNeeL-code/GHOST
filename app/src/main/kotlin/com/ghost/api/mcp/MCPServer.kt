@@ -72,9 +72,44 @@ class MCPServer(
         "bash"            to ToolDefinition("bash", "Run a shell command (Termux pipe)", mapOf("command" to ParameterSpec("string", "Shell command"))),
         "execute_background_search" to ToolDefinition("execute_background_search", "DEFAULT SEARCH TOOL. Use naturally to silently scrape the web for info or unknown topics.", mapOf("query" to ParameterSpec("string", "Search query"))),
         "open_system_browser_bar" to ToolDefinition("open_system_browser_bar", "Open URL or search in system browser", mapOf("queryOrUrl" to ParameterSpec("string", "Search query or URL"))),
+        // File Management & Search
+        "search_files"    to ToolDefinition("search_files", "Search device files with fuzzy keywords, syllables, or extensions", mapOf(
+            "query" to ParameterSpec("string", "Keyword, syllable, or extension"),
+            "type"  to ParameterSpec("string", "Filter ('audio', 'video', 'image', 'doc', 'any')", required = false)
+        )),
+        "list_files"      to ToolDefinition("list_files", "List files in a folder or category (downloads, music, documents, etc.)", mapOf(
+            "target"    to ParameterSpec("string", "Category or directory path", required = false),
+            "extension" to ParameterSpec("string", "Extension filter (e.g. mp3, pdf, all)", required = false),
+            "limit"     to ParameterSpec("integer", "Max items to return", required = false)
+        )),
+        "move_file"       to ToolDefinition("move_file", "Move or rename a file to a new path or directory", mapOf(
+            "sourcePath"      to ParameterSpec("string", "Source file absolute path"),
+            "destinationPath" to ParameterSpec("string", "Destination file or directory path")
+        )),
+        "copy_file"       to ToolDefinition("copy_file", "Copy a file to a destination path or directory", mapOf(
+            "sourcePath"      to ParameterSpec("string", "Source file absolute path"),
+            "destinationPath" to ParameterSpec("string", "Destination file or directory path")
+        )),
+        "delete_file"     to ToolDefinition("delete_file", "Delete a file at the specified path", mapOf(
+            "filePath" to ParameterSpec("string", "Absolute path of file to delete")
+        )),
+        "get_file_info"   to ToolDefinition("get_file_info", "Get detailed metadata for a file (size, modified date, MIME)", mapOf(
+            "filePath" to ParameterSpec("string", "Absolute path of file")
+        )),
+        "open_file"       to ToolDefinition("open_file", "Open a file with system handler or specific app", mapOf(
+            "filePath" to ParameterSpec("string", "Absolute path of file to open"),
+            "appName"  to ParameterSpec("string", "Optional app name (e.g. VLC)", required = false)
+        )),
+        "read_file_text"  to ToolDefinition("read_file_text", "Read text content of a file", mapOf(
+            "filePath" to ParameterSpec("string", "Absolute path of text file"),
+            "maxLines" to ParameterSpec("integer", "Max lines to read", required = false)
+        )),
+
         // Skills
         "loadSkill"       to ToolDefinition("loadSkill", "Load skill instructions by name", mapOf("name" to ParameterSpec("string", "Skill name")))
     )
+
+    fun getTools(): Map<String, ToolDefinition> = toolRegistry
 
     suspend fun executeTool(name: String, params: Map<String, Any>): ToolResult {
         return try {
@@ -165,6 +200,54 @@ class MCPServer(
                     val queryOrUrl = params["queryOrUrl"]?.toString() ?: ""
                     val res = networkTools.open_system_browser_bar(queryOrUrl)
                     ToolResult(res["result"] == "success", res["message"] ?: "")
+                }
+                // File Management & Search
+                "search_files" -> {
+                    val query = params["query"]?.toString() ?: ""
+                    val type = params["type"]?.toString() ?: "any"
+                    val res = systemTools.search_files(query, type)
+                    ToolResult(res["result"] == "success", res["matches"] ?: res["message"] ?: "")
+                }
+                "list_files" -> {
+                    val target = params["target"]?.toString() ?: "downloads"
+                    val extension = params["extension"]?.toString() ?: "all"
+                    val limit = params["limit"]?.toString()?.toIntOrNull() ?: 25
+                    val res = systemTools.list_files(target, extension, limit)
+                    ToolResult(res["result"] == "success", res["files"] ?: res["message"] ?: "")
+                }
+                "move_file" -> {
+                    val src = params["sourcePath"]?.toString() ?: ""
+                    val dst = params["destinationPath"]?.toString() ?: ""
+                    val res = systemTools.move_file(src, dst)
+                    ToolResult(res["result"] == "success", res["message"] ?: "")
+                }
+                "copy_file" -> {
+                    val src = params["sourcePath"]?.toString() ?: ""
+                    val dst = params["destinationPath"]?.toString() ?: ""
+                    val res = systemTools.copy_file(src, dst)
+                    ToolResult(res["result"] == "success", res["message"] ?: "")
+                }
+                "delete_file" -> {
+                    val path = params["filePath"]?.toString() ?: ""
+                    val res = systemTools.delete_file(path)
+                    ToolResult(res["result"] == "success", res["message"] ?: "")
+                }
+                "get_file_info" -> {
+                    val path = params["filePath"]?.toString() ?: ""
+                    val res = systemTools.get_file_info(path)
+                    ToolResult(res["result"] == "success", res.toString())
+                }
+                "open_file" -> {
+                    val path = params["filePath"]?.toString() ?: ""
+                    val app = params["appName"]?.toString() ?: ""
+                    val res = systemTools.open_file(path, app)
+                    ToolResult(res["result"] == "success", res["message"] ?: "")
+                }
+                "read_file_text" -> {
+                    val path = params["filePath"]?.toString() ?: ""
+                    val lines = params["maxLines"]?.toString()?.toIntOrNull() ?: 100
+                    val res = systemTools.read_file_text(path, lines)
+                    ToolResult(res["result"] == "success", res["content"] ?: res["message"] ?: "")
                 }
                 // Skills
                 "loadSkill" -> {

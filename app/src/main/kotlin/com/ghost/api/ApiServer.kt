@@ -135,6 +135,32 @@ class ApiServer(
                     call.respondText(gson.toJson(status), ContentType.Application.Json)
                 }
 
+                get("/api/tools") {
+                    if (!call.isAuthorized()) {
+                        call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Invalid or missing X-Ghost-Token"))
+                        return@get
+                    }
+                    call.respondText(gson.toJson(gemmaService.mcpServer.getTools()), ContentType.Application.Json)
+                }
+
+                post("/api/tools/execute") {
+                    if (!call.isAuthorized()) {
+                        call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Invalid or missing X-Ghost-Token"))
+                        return@post
+                    }
+                    try {
+                        val request = call.receiveText()
+                        val parsed = gson.fromJson(request, Map::class.java)
+                        val name = parsed["name"] as? String ?: ""
+                        @Suppress("UNCHECKED_CAST")
+                        val params = (parsed["params"] as? Map<String, Any>) ?: emptyMap()
+                        val result = gemmaService.mcpServer.executeTool(name, params)
+                        call.respondText(gson.toJson(result), ContentType.Application.Json)
+                    } catch (e: Exception) {
+                        call.respondText(gson.toJson(mapOf("error" to e.message)), ContentType.Application.Json, HttpStatusCode.InternalServerError)
+                    }
+                }
+
                 post("/api/reset_memory") {
                     if (!call.isAuthorized()) {
                         call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Invalid or missing X-Ghost-Token"))

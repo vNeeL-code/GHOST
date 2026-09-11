@@ -630,6 +630,19 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
             if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
                 permissionsToRequest.add(android.Manifest.permission.POST_NOTIFICATIONS)
             }
+            if (checkSelfPermission(android.Manifest.permission.READ_MEDIA_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(android.Manifest.permission.READ_MEDIA_AUDIO)
+            }
+            if (checkSelfPermission(android.Manifest.permission.READ_MEDIA_IMAGES) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(android.Manifest.permission.READ_MEDIA_IMAGES)
+            }
+            if (checkSelfPermission(android.Manifest.permission.READ_MEDIA_VIDEO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(android.Manifest.permission.READ_MEDIA_VIDEO)
+            }
+        } else {
+            if (checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+            }
         }
 
         if (permissionsToRequest.isNotEmpty()) {
