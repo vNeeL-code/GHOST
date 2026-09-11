@@ -252,9 +252,6 @@ class OverlayManager(private val context: Context) {
     }
 
     /**
-     * Spawns or updates a floating Browser Bubble for supervised AI research
-     */
-    /**
      * Shows the Destiny Ghost HUD work signal in the screen corner during background operations.
      */
     fun showWorkSignal(tag: String = "WORKING", durationMs: Long = 0) {
@@ -285,22 +282,6 @@ class OverlayManager(private val context: Context) {
         }
     }
 
-    // Deprecated forwarders for backward compatibility (all routed safely to zero-overhead work signal)
-    fun showPipContent(title: String, htmlContent: String, durationMs: Long = 5000) {
-        showWorkSignal(title, durationMs)
-    }
-
-    fun showPipUrl(title: String, url: String, durationMs: Long = 10000) {
-        showWorkSignal(title, durationMs)
-    }
-
-    fun hideBrowserBubble() {
-        hideWorkSignal(force = true)
-    }
-
-    fun showBrowserBubble(url: String, onContentScraped: (String) -> Unit) {
-        showWorkSignal("SEARCHING", 3000)
-    }
 
     private fun dpToPx(dp: Int): Int {
         return (dp * context.resources.displayMetrics.density).toInt()
