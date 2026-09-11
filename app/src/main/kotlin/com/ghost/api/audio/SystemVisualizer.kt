@@ -38,9 +38,10 @@ object SystemVisualizer {
     private var audioManager: AudioManager? = null
     private var playbackCallback: AudioManager.AudioPlaybackCallback? = null
 
-    // Track last active foreground package
+    // Track last active foreground package and active speaking agent
     var lastForegroundPackage: String? = null
         private set
+    private var activeAgentPackage: String? = null
     private var currentAppliedPackage: String? = null
 
     // Audio activity state & silence decay
@@ -359,6 +360,7 @@ object SystemVisualizer {
             val fgBrand = currentFg?.let { findBrandPalette(it) }
 
             if (isPlaying) {
+                activeAgentPackage = null
                 if (fgBrand == null) {
                     if (activeMediaArtColors != null) {
                         applyMediaAlbumArt(activeMediaArtColors!!)
@@ -372,6 +374,7 @@ object SystemVisualizer {
                     if (fgBrand != null) {
                         applyAiBrandColor(currentFg!!, fgBrand)
                     } else {
+                        activeAgentPackage = null
                         revertToDefaultColors()
                     }
                 }
@@ -458,14 +461,23 @@ object SystemVisualizer {
                             val isMediaPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
 
                             if (fgBrand != null) {
+                                activeAgentPackage = fgPkg
                                 applyAiBrandColor(fgPkg!!, fgBrand)
                             } else if (hwBrand != null) {
+                                activeAgentPackage = hwPkg
                                 applyAiBrandColor(hwPkg!!, hwBrand)
                             } else if (isMediaPlaying) {
+                                activeAgentPackage = null
                                 if (activeMediaArtColors != null) {
                                     applyMediaAlbumArt(activeMediaArtColors!!)
                                 } else {
                                     extractColorsFromMetadata(activeMediaController?.metadata)
+                                }
+                            } else if (activeAgentPackage != null) {
+                                // Agent voice active while app is minimized to home screen / background!
+                                val agentBrand = findBrandPalette(activeAgentPackage!!)
+                                if (agentBrand != null) {
+                                    applyAiBrandColor(activeAgentPackage!!, agentBrand)
                                 }
                             }
                             // Any unbranded system sound (clicks, shutter, lock, etc.) is ignored!
@@ -481,6 +493,7 @@ object SystemVisualizer {
                                 if (fgBrand != null) {
                                     applyAiBrandColor(fgPkg, fgBrand)
                                 } else {
+                                    activeAgentPackage = null
                                     revertToDefaultColors()
                                 }
                             }
@@ -632,13 +645,22 @@ object SystemVisualizer {
         // Strict AI Isolation: Only track and react to curated AI apps
         val brandPalette = findBrandPalette(packageName)
         if (brandPalette != null) {
+            activeAgentPackage = packageName
             applyAiBrandColor(packageName, brandPalette)
         } else {
             // User switched to Home Screen (launcher) or a non-AI app (Chrome, Settings, Files, etc.)
             val isMediaPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
             if (isMediaPlaying && activeMediaArtColors != null) {
                 applyMediaAlbumArt(activeMediaArtColors!!)
+            } else if (isAudioActive && activeAgentPackage != null) {
+                // The AI agent is currently talking in the background!
+                // Keep its signature colors active and dancing on the edge lights / visualizer!
+                val agentBrand = findBrandPalette(activeAgentPackage!!)
+                if (agentBrand != null) {
+                    applyAiBrandColor(activeAgentPackage!!, agentBrand)
+                }
             } else {
+                activeAgentPackage = null
                 revertToDefaultColors()
             }
         }
