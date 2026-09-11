@@ -35,6 +35,7 @@ object SystemVisualizer {
     private var appContext: Context? = null
     private var mediaSessionManager: MediaSessionManager? = null
     private var activeMediaController: MediaController? = null
+    private var activeAiController: MediaController? = null
     private var audioManager: AudioManager? = null
     private var playbackCallback: AudioManager.AudioPlaybackCallback? = null
 
@@ -99,13 +100,13 @@ object SystemVisualizer {
             Color.parseColor("#FF5722")  // 4: Deep Fire Orange
         ), "Mistral"),
 
-        // Grok (xAI): Gunmetal Slate, Platinum Silver Spark, Titanium Gray, Deep Obsidian, Dark Carbon
+        // Grok (xAI): Crisp White Spark, Platinum Silver, Titanium Gray, Deep Obsidian Slate, Dark Carbon
         Triple(listOf("grok", "xai"), intArrayOf(
-            Color.parseColor("#4A5568"), // 0: Gunmetal Slate
-            Color.parseColor("#F3F4F6"), // 1: Platinum Silver / White Spark
+            Color.parseColor("#FFFFFF"), // 0: Crisp White Spark (high-luminance signature)
+            Color.parseColor("#D1D5DB"), // 1: Platinum Silver
             Color.parseColor("#9CA3AF"), // 2: Titanium Gray
-            Color.parseColor("#111827"), // 3: Deep Obsidian
-            Color.parseColor("#374151")  // 4: Dark Carbon
+            Color.parseColor("#1E293B"), // 3: Deep Obsidian Slate
+            Color.parseColor("#4B5563")  // 4: Dark Carbon Accent
         ), "Grok"),
 
         // ChatGPT (OpenAI): Signature Mint, Crisp Off-White Slate, Emerald Glow, Charcoal Slate, Pine Forest
@@ -349,7 +350,7 @@ object SystemVisualizer {
             val isPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
             val currentFg = lastForegroundPackage ?: getForegroundAppFromUsageStats()
             val fgBrand = currentFg?.let { findBrandPalette(it) }
-            if (isPlaying && fgBrand == null) {
+            if (isPlaying && fgBrand == null && activeAgentPackage == null) {
                 extractColorsFromMetadata(metadata)
             }
         }
@@ -361,6 +362,7 @@ object SystemVisualizer {
 
             if (isPlaying) {
                 activeAgentPackage = null
+                cancelPendingRevert()
                 if (fgBrand == null) {
                     if (activeMediaArtColors != null) {
                         applyMediaAlbumArt(activeMediaArtColors!!)
@@ -373,10 +375,32 @@ object SystemVisualizer {
                 if (!isAudioActive) {
                     if (fgBrand != null) {
                         applyAiBrandColor(currentFg!!, fgBrand)
+                    } else if (activeAgentPackage != null) {
+                        scheduleRevertToDefault(2500L)
                     } else {
-                        activeAgentPackage = null
                         revertToDefaultColors()
                     }
+                }
+            }
+        }
+    }
+
+    private val aiMediaControllerCallback = object : MediaController.Callback() {
+        override fun onPlaybackStateChanged(state: PlaybackState?) {
+            val pkg = activeAiController?.packageName ?: return
+            val brand = findBrandPalette(pkg) ?: return
+
+            if (state?.state == PlaybackState.STATE_PLAYING) {
+                cancelPendingRevert()
+                activeAgentPackage = pkg
+                applyAiBrandColor(pkg, brand)
+            } else if (state?.state == PlaybackState.STATE_STOPPED || state?.state == PlaybackState.STATE_PAUSED) {
+                val currentFg = lastForegroundPackage ?: getForegroundAppFromUsageStats()
+                val fgBrand = currentFg?.let { findBrandPalette(it) }
+                if (fgBrand != null) {
+                    applyAiBrandColor(currentFg!!, fgBrand)
+                } else if (!isAudioActive) {
+                    scheduleRevertToDefault(2500L)
                 }
             }
         }
@@ -458,7 +482,12 @@ object SystemVisualizer {
                             } else null
                             val hwBrand = if (hwPkg != null) findBrandPalette(hwPkg) else null
 
-                            // 3. Active MediaSession (YouTube Music, Spotify, etc.)
+                            // 3. Direct active AI MediaSession (e.g. Grok Media3 Session)
+                            val isAiMediaPlaying = activeAiController?.playbackState?.state == PlaybackState.STATE_PLAYING
+                            val aiMediaPkg = activeAiController?.packageName
+                            val aiMediaBrand = if (isAiMediaPlaying && aiMediaPkg != null) findBrandPalette(aiMediaPkg) else null
+
+                            // 4. Active Music MediaSession (YouTube Music, Spotify, etc.)
                             val isMediaPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
 
                             if (fgBrand != null) {
@@ -467,18 +496,21 @@ object SystemVisualizer {
                             } else if (hwBrand != null) {
                                 activeAgentPackage = hwPkg
                                 applyAiBrandColor(hwPkg!!, hwBrand)
+                            } else if (aiMediaBrand != null) {
+                                activeAgentPackage = aiMediaPkg
+                                applyAiBrandColor(aiMediaPkg!!, aiMediaBrand)
+                            } else if (activeAgentPackage != null) {
+                                // Agent voice active while app is minimized to home screen / background!
+                                val agentBrand = findBrandPalette(activeAgentPackage!!)
+                                if (agentBrand != null) {
+                                    applyAiBrandColor(activeAgentPackage!!, agentBrand)
+                                }
                             } else if (isMediaPlaying) {
                                 activeAgentPackage = null
                                 if (activeMediaArtColors != null) {
                                     applyMediaAlbumArt(activeMediaArtColors!!)
                                 } else {
                                     extractColorsFromMetadata(activeMediaController?.metadata)
-                                }
-                            } else if (activeAgentPackage != null) {
-                                // Agent voice active while app is minimized to home screen / background!
-                                val agentBrand = findBrandPalette(activeAgentPackage!!)
-                                if (agentBrand != null) {
-                                    applyAiBrandColor(activeAgentPackage!!, agentBrand)
                                 }
                             }
                             // Any unbranded system sound (clicks, shutter, lock, etc.) is ignored!
@@ -522,19 +554,39 @@ object SystemVisualizer {
     }
 
     private fun updateActiveMediaController(controllers: List<MediaController>?) {
-        activeMediaController?.unregisterCallback(mediaControllerCallback)
-        
-        activeMediaController = controllers?.firstOrNull { 
-            it.playbackState?.state == PlaybackState.STATE_PLAYING 
-        } ?: controllers?.firstOrNull()
+        // 1. Separate real media/music players from AI agents (Grok, etc.)
+        val nonAiControllers = controllers?.filter { findBrandPalette(it.packageName) == null }
+        val aiControllers = controllers?.filter { findBrandPalette(it.packageName) != null }
 
+        // Manage AI Media Session (e.g. Grok using androidx.media3.session)
+        activeAiController?.unregisterCallback(aiMediaControllerCallback)
+        activeAiController = aiControllers?.firstOrNull {
+            it.playbackState?.state == PlaybackState.STATE_PLAYING
+        } ?: aiControllers?.firstOrNull()
+        activeAiController?.registerCallback(aiMediaControllerCallback)
+
+        if (activeAiController?.playbackState?.state == PlaybackState.STATE_PLAYING) {
+            val aiPkg = activeAiController?.packageName
+            val aiBrand = findBrandPalette(aiPkg)
+            if (aiPkg != null && aiBrand != null) {
+                cancelPendingRevert()
+                activeAgentPackage = aiPkg
+                applyAiBrandColor(aiPkg, aiBrand)
+            }
+        }
+
+        // Manage Music Media Session (Spotify, YouTube Music, etc.)
+        activeMediaController?.unregisterCallback(mediaControllerCallback)
+        activeMediaController = nonAiControllers?.firstOrNull { 
+            it.playbackState?.state == PlaybackState.STATE_PLAYING 
+        } ?: nonAiControllers?.firstOrNull()
         activeMediaController?.registerCallback(mediaControllerCallback)
 
-        // ONLY extract colors if media is ACTIVELY PLAYING! Never hijack from paused/idle sessions!
+        // ONLY extract colors if media is ACTIVELY PLAYING and user is not focused on an AI agent!
         if (activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING) {
             val currentFg = lastForegroundPackage ?: getForegroundAppFromUsageStats()
             val fgBrand = currentFg?.let { findBrandPalette(it) }
-            if (fgBrand == null) {
+            if (fgBrand == null && activeAgentPackage == null) {
                 extractColorsFromMetadata(activeMediaController?.metadata)
             }
         }
@@ -652,6 +704,8 @@ object SystemVisualizer {
         } else {
             // User switched to Home Screen (launcher) or a non-AI app (Chrome, Settings, Files, etc.)
             val isMediaPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
+            val isAiMediaPlaying = activeAiController?.playbackState?.state == PlaybackState.STATE_PLAYING
+
             if (isMediaPlaying && activeMediaArtColors != null) {
                 cancelPendingRevert()
                 activeAgentPackage = null
@@ -663,6 +717,14 @@ object SystemVisualizer {
                 val agentBrand = findBrandPalette(activeAgentPackage!!)
                 if (agentBrand != null) {
                     applyAiBrandColor(activeAgentPackage!!, agentBrand)
+                }
+            } else if (isAiMediaPlaying && activeAiController?.packageName != null) {
+                val aiPkg = activeAiController!!.packageName
+                val agentBrand = findBrandPalette(aiPkg)
+                if (agentBrand != null) {
+                    cancelPendingRevert()
+                    activeAgentPackage = aiPkg
+                    applyAiBrandColor(aiPkg, agentBrand)
                 }
             } else if (activeAgentPackage != null) {
                 // User was in an AI agent and minimized (e.g. pressed Play before minimizing while TTS loads).
