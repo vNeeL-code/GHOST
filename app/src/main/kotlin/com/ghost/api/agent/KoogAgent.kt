@@ -1258,7 +1258,7 @@ class KoogAgent(
 
     private suspend fun buildSystemPrompt(): String {
         val basePrompt = contextManager.buildSystemPrompt(this@KoogAgent.context, rollingMemoryJson, skillManager)
-        val oldMemory = memoryManager.getCompactedSessionMemory()
+        val oldMemory = memoryManager.getCompactedSessionMemory().take(1500).trim()
         val longTermMemoryPatch = if (oldMemory.isNotBlank()) "\n\n[LONG TERM SESSION MEMORY]\n$oldMemory\n[/LONG TERM SESSION MEMORY]\n" else ""
         return longTermMemoryPatch + basePrompt
     }
