@@ -7,45 +7,48 @@ import timber.log.Timber
 
 object SessionMemoryCompactor {
 
+    /**
+     * Compacts older dialogue turns into dense, long-term session memory.
+     * Uses zero-latency deterministic extraction so it never contends for
+     * or locks the on-device LiteRT-LM inference engine.
+     */
     suspend fun compactOldMessages(
         messagesToCompact: List<KoogAgent.Message>,
         currentMemory: String,
-        llmEngine: LlmBackend
-    ): String = withContext(Dispatchers.IO) {
+        llmEngine: LlmBackend? = null
+    ): String = withContext(Dispatchers.Default) {
         if (messagesToCompact.isEmpty()) return@withContext currentMemory
 
-        Timber.i("Starting synchronous memory compaction of ${messagesToCompact.size} messages...")
-        
-        val transcript = buildString {
-            messagesToCompact.forEach { msg ->
-                val roleName = if (msg.role == "user") "User" else "Assistant"
-                append("$roleName: ${msg.content.take(1000)}\n")
+        Timber.i("Starting instant deterministic memory compaction of ${messagesToCompact.size} messages...")
+
+        val newEntries = mutableListOf<String>()
+        messagesToCompact.forEach { msg ->
+            val clean = msg.content
+                .replace(Regex("""\[SYSTEM TELEMETRY\][\s\S]*?\[/SYSTEM TELEMETRY\]"""), "")
+                .replace(Regex("""<think>[\s\S]*?</think>"""), "")
+                .replace(Regex("""<\|channel>thought[\s\S]*?<channel\|>"""), "")
+                .replace(Regex("""<\|channel>thought[\s\S]*"""), "")
+                .replace(Regex("""\[Date:\s*[\d-]+\]\s*"""), "")
+                .trim()
+
+            if (clean.isNotBlank() && clean.length > 2) {
+                val roleName = if (msg.role == "user") "User" else "GHOST"
+                val singleLine = clean.replace(Regex("""\s+"""), " ")
+                val snippet = if (singleLine.length > 180) singleLine.take(177) + "..." else singleLine
+                newEntries.add("• $roleName: $snippet")
             }
-        }.take(3500)
-
-        val systemPrompt = """
-            You are a backend memory summarizer for an AI system.
-            Your task is to compress the provided dialogue into a dense, long-term memory representation.
-            Preserve any established facts, user preferences, tool states, or critical narrative context.
-            Do not include pleasantries. Keep the summary dense, focused, and concise (strictly under 1,200 characters / ~250 words).
-            
-            Current Existing Memory:
-            ${if (currentMemory.isBlank()) "None." else currentMemory.take(1200)}
-            
-            Dialogue to append/merge:
-            $transcript
-            
-            Output ONLY the updated, comprehensive Session Memory block.
-        """.trimIndent()
-
-        try {
-            // Generate summary without streaming
-            val newMemory = llmEngine.generateOneShot(systemPrompt)
-            Timber.i("Memory compaction complete. Compressed length: ${newMemory.length}")
-            newMemory.take(1500).trim()
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to compact session memory")
-            currentMemory.take(1500) // Fallback to old memory on failure
         }
+
+        if (newEntries.isEmpty()) return@withContext currentMemory
+
+        val existingLines = currentMemory.lines()
+            .map { it.trim() }
+            .filter { it.isNotBlank() && (it.startsWith("•") || it.startsWith("-")) }
+
+        val combined = (existingLines + newEntries).distinct().takeLast(14)
+        val result = combined.joinToString("\n").take(1200).trim()
+
+        Timber.i("Memory compaction complete (${result.length} chars, ${combined.size} entries)")
+        result
     }
 }

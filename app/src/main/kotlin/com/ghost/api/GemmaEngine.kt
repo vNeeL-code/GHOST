@@ -297,61 +297,63 @@ class GemmaEngine(private val context: Context) : LlmBackend {
     }
 
     override suspend fun generateOneShot(prompt: String, systemPrompt: String?, temperature: Double?): String {
-        return sessionMutex.withLock {
-            // Guard: wait briefly if a streaming inference is in flight
-            var retries = 0
-            while (isBusy.get() && retries < 15) {
-                kotlinx.coroutines.delay(200)
-                retries++
-            }
-            if (isBusy.getAndSet(true)) {
-                return@withLock "Error: Engine busy with active stream"
-            }
+        return kotlinx.coroutines.withTimeoutOrNull(8000L) {
+            sessionMutex.withLock {
+                // Guard: wait briefly if a streaming inference is in flight
+                var retries = 0
+                while (isBusy.get() && retries < 15) {
+                    kotlinx.coroutines.delay(200)
+                    retries++
+                }
+                if (isBusy.getAndSet(true)) {
+                    return@withLock "Error: Engine busy with active stream"
+                }
 
-            try {
-                val eng = engine ?: return@withLock "Error: Engine not initialized"
-
-                // LiteRT-LM C++ JNI restriction: ONLY ONE session/conversation can exist at a time on Engine!
-                // Close active conversation before creating temporary one-shot session to prevent FAILED_PRECONDITION
                 try {
-                    conversation?.close()
-                } catch (e: Exception) {
-                    Timber.w(e, "Error closing active conversation for generateOneShot")
-                }
-                conversation = null
+                    val eng = engine ?: return@withLock "Error: Engine not initialized"
 
-                suspendCancellableCoroutine { continuation ->
+                    // LiteRT-LM C++ JNI restriction: ONLY ONE session/conversation can exist at a time on Engine!
+                    // Close active conversation before creating temporary one-shot session to prevent FAILED_PRECONDITION
                     try {
-                        val temp = temperature ?: 0.1
-                        val config = ConversationConfig(
-                            samplerConfig = SamplerConfig(topK = if (temp < 0.3) 1 else 40, topP = if (temp < 0.3) 0.1 else 0.95, temperature = temp),
-                            systemInstruction = Contents.of(systemPrompt ?: "You are a concise observer.")
-                        )
-                        val tempConv = eng.createConversation(config)
-                        val responseBuilder = StringBuilder()
-                        tempConv.sendMessageAsync(
-                            Contents.of(listOf(Content.Text(prompt))),
-                            object : MessageCallback {
-                                override fun onMessage(message: Message) { responseBuilder.append(message.toString()) }
-                                override fun onDone() {
-                                    val resp = responseBuilder.toString()
-                                    tempConv.close()
-                                    continuation.resume(resp)
-                                }
-                                override fun onError(throwable: Throwable) {
-                                    tempConv.close()
-                                    continuation.resumeWithException(throwable)
-                                }
-                            }
-                        )
+                        conversation?.close()
                     } catch (e: Exception) {
-                        continuation.resumeWithException(e)
+                        Timber.w(e, "Error closing active conversation for generateOneShot")
                     }
+                    conversation = null
+
+                    suspendCancellableCoroutine { continuation ->
+                        try {
+                            val temp = temperature ?: 0.1
+                            val config = ConversationConfig(
+                                samplerConfig = SamplerConfig(topK = if (temp < 0.3) 1 else 40, topP = if (temp < 0.3) 0.1 else 0.95, temperature = temp),
+                                systemInstruction = Contents.of(systemPrompt ?: "You are a concise observer.")
+                            )
+                            val tempConv = eng.createConversation(config)
+                            val responseBuilder = StringBuilder()
+                            tempConv.sendMessageAsync(
+                                Contents.of(listOf(Content.Text(prompt))),
+                                object : MessageCallback {
+                                    override fun onMessage(message: Message) { responseBuilder.append(message.toString()) }
+                                    override fun onDone() {
+                                        val resp = responseBuilder.toString()
+                                        try { tempConv.close() } catch (e: Exception) {}
+                                        if (continuation.isActive) continuation.resume(resp)
+                                    }
+                                    override fun onError(throwable: Throwable) {
+                                        try { tempConv.close() } catch (e: Exception) {}
+                                        if (continuation.isActive) continuation.resumeWithException(throwable)
+                                    }
+                                }
+                            )
+                        } catch (e: Exception) {
+                            if (continuation.isActive) continuation.resumeWithException(e)
+                        }
+                    }
+                } finally {
+                    isBusy.set(false)
                 }
-            } finally {
-                isBusy.set(false)
             }
-        }
+        } ?: "Error: generateOneShot timed out"
     }
 
     private fun truncateRepetition(response: String): String {

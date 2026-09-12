@@ -342,6 +342,10 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         instance = this
         super.onCreate()
         
+        // Immediate foreground service start to satisfy Android 14 strict 5s ANR timeout
+        setupNotificationChannel()
+        startForegroundService()
+        
         cleanupLegacyAlarms()
         setupDiaryWorker()
 
@@ -455,10 +459,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
             Timber.i("MCPServer initialized")
 
-            reportStatus("Init: NotificationChannel...")
-            setupNotificationChannel()
-            reportStatus("Init: ForegroundService...")
-            startForegroundService()
+            reportStatus("Init: Complete")
+            updateNotification("Ready")
 
             // Start Sensor Fusion polling now that we are in foreground
             if (::sensorFusionManager.isInitialized) {
