@@ -582,6 +582,7 @@ class KoogAgent(
         sessionId: String,
         onToken: (String) -> Unit
     ) {
+        val normalizedMessage = com.ghost.api.logic.NumberToWords.convertNumbersInText(message)
         val context = contextManager.buildContext()
         val (queuedImages, audio) = drainMedia()
         val images = queuedImages.map { it.bitmap }
@@ -589,12 +590,12 @@ class KoogAgent(
         try {
             // Build the full prompt the same way handleUserMessage does
             val fullPrompt = buildString {
-            if (context.isNotBlank()) {
-                append(context)
-                append("\n\n")
+                if (context.isNotBlank()) {
+                    append(context)
+                    append("\n\n")
+                }
+                append(normalizedMessage)
             }
-            append(message)
-        }
 
         // Stream tokens, filtering out think-channel content
         var inThinkBlock = false
@@ -753,8 +754,9 @@ class KoogAgent(
             sessionImageTokens += incomingImageTokens
 
             // 3. Add user message to history
+            val normalizedMessage = com.ghost.api.logic.NumberToWords.convertNumbersInText(event.message)
             val currentDate = java.time.LocalDate.now().toString()
-            val userMessageContent = "[Date: $currentDate] ${event.message}"
+            val userMessageContent = "[Date: $currentDate] $normalizedMessage"
 
             val userMessage = Message(
                 role = "user",
@@ -777,7 +779,7 @@ class KoogAgent(
 
             val response = think(
                 context = context,
-                userMessage = event.message,
+                userMessage = normalizedMessage,
                 images = images.takeIf { it.isNotEmpty() },
                 audio = audio,
                 onToken = { token ->
