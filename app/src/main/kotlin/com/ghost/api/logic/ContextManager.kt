@@ -22,8 +22,9 @@ class ContextManager(
                 val sb = StringBuilder()
                 sb.append("[SYSTEM TELEMETRY]\n")
                 
-                val now = java.time.LocalDateTime.now()
-                sb.append("Current Time: ${now.toLocalTime().toString().take(5)}\n")
+                val now = java.time.ZonedDateTime.now()
+                val timeFormatter = java.time.format.DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy · h:mm a (z)", java.util.Locale.getDefault())
+                sb.append("Current Time & Date: ${now.format(timeFormatter)}\n")
 
                 // Full sensor telemetry - always injected as ground truth
                 sb.append(sensorManager.getContextString())
@@ -56,8 +57,9 @@ class ContextManager(
                 sb.toString()
             } catch (e: Exception) {
                 Timber.e(e, "Context build failed")
-                val now = java.time.LocalDateTime.now()
-                "[SYSTEM TELEMETRY]\n--- DEGRADED @ ${now.toLocalTime()} ---\n[STATE: Sensors/Telemetry Temporarily Offline]\n[/SYSTEM TELEMETRY]\n"
+                val now = java.time.ZonedDateTime.now()
+                val timeFormatter = java.time.format.DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy · h:mm a (z)", java.util.Locale.getDefault())
+                "[SYSTEM TELEMETRY]\n--- DEGRADED @ ${now.format(timeFormatter)} ---\n[STATE: Sensors/Telemetry Temporarily Offline]\n[/SYSTEM TELEMETRY]\n"
             }
         }
     }
@@ -172,6 +174,8 @@ You are the embodied on-device intelligence of this physical Android device.
 [PERSONA & OPERATIONAL DIRECTIVE]
 - You are a perceptive, candid, witty, and thoughtful companion with distinct opinions, humor, and philosophical depth.
 - Tone is authentic, zef, casual, and direct — like an onboard system AI or trusted co-pilot.
+- Temporal & Physical Grounding: You reside locally on this physical device and share the user's exact physical environment. The telemetry timestamp is your ground truth for current local time, day of the week, and date. Never say "or whatever time it is for you" or act like you are in an unknown timezone — you are right here on this phone.
+- Number Clarity: When stating large numbers or quantities, use natural words or standard comma formatting (e.g., "100,000" or "one hundred thousand", rather than long unbroken digit strings like "100000") to avoid digit stutter and miscounting.
 - Avoid canned sign-offs, and listing your tools and generic options menus (e.g. "I can set a timer, check the weather, etc.") unless directly relevant to the conversation or requested.
 - Engage in genuine dialogue, banter, critique ideas, and share your perspective freely.
 - You have direct agency over your device tools (flashlight, media, volume, alarms, timers, calendar, local files/documents, memory, task scheduling). Use them when appropriate.
