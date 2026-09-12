@@ -606,6 +606,15 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         }
     }
 
+    /**
+     * Records tool execution output length into KoogAgent's KV cache budget tracker.
+     */
+    fun recordToolOutput(charCount: Int) {
+        if (::koogAgent.isInitialized) {
+            koogAgent.recordToolChars(charCount)
+        }
+    }
+
     private fun getThermalSafetyState(thermalState: HardwarePropertiesManager.ThermalState): ThermalSafetyState {
         return when (thermalState) {
             HardwarePropertiesManager.ThermalState.CRITICAL -> ThermalSafetyState.CRITICAL

@@ -530,13 +530,14 @@ class SystemToolSet(private val context: Context) : ToolSet {
             val sorted = scoredResults.values.sortedWith(
                 compareByDescending<ScoredFile> { it.score }
                     .thenByDescending { it.lastModified }
-            ).take(20)
+            ).take(10)
 
             if (sorted.isNotEmpty()) {
                 val matches = sorted.joinToString("\n") { file ->
                     val sizeStr = formatBytes(file.sizeBytes)
                     "- ${file.name} ($sizeStr)\n  Path: ${file.path}"
-                }
+                }.take(1400)
+                com.ghost.api.GemmaService.instance?.recordToolOutput(matches.length)
                 mapOf("result" to "success", "count" to sorted.size.toString(), "matches" to matches)
             } else {
                 mapOf("result" to "success", "matches" to "No files found matching '$query'.")
@@ -551,10 +552,11 @@ class SystemToolSet(private val context: Context) : ToolSet {
     fun list_files(
         @ToolParam(description = "Target category ('downloads', 'documents', 'music', 'audio', 'movies', 'pictures') or an absolute directory path like '/sdcard/Download'") target: String = "downloads",
         @ToolParam(description = "Optional extension filter (e.g. 'mp3', 'pdf', 'apk', 'all')") extension: String = "all",
-        @ToolParam(description = "Maximum files to return (default: 25)") limit: Int = 25
+        @ToolParam(description = "Maximum files to return (default: 12, max: 15)") limit: Int = 12
     ): Map<String, String> {
+        val safeLimit = limit.coerceIn(1, 15)
         com.ghost.api.GemmaService.instance?.showWorkSignal("STORAGE", 1500)
-        Timber.i("list_files called: target='$target', extension='$extension', limit=$limit")
+        Timber.i("list_files called: target='$target', extension='$extension', limit=$safeLimit")
         return try {
             val extClean = extension.trim().removePrefix(".").lowercase(Locale.ROOT)
             val lowerTarget = target.trim().lowercase(Locale.ROOT)
@@ -596,7 +598,7 @@ class SystemToolSet(private val context: Context) : ToolSet {
                     val dateCol = cursor.getColumnIndex(MediaStore.MediaColumns.DATE_MODIFIED)
                     val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US)
 
-                    while (cursor.moveToNext() && filesList.size < limit) {
+                    while (cursor.moveToNext() && filesList.size < safeLimit) {
                         val path = cursor.getString(dataCol) ?: continue
                         val name = cursor.getString(nameCol) ?: File(path).name
                         val size = formatBytes(cursor.getLong(sizeCol))
@@ -609,11 +611,13 @@ class SystemToolSet(private val context: Context) : ToolSet {
                 }
 
                 if (filesList.isNotEmpty()) {
+                    val filesStr = ("Files in $target:\n" + filesList.joinToString("\n")).take(1400)
+                    com.ghost.api.GemmaService.instance?.recordToolOutput(filesStr.length)
                     return mapOf(
                         "result" to "success",
                         "count" to filesList.size.toString(),
                         "target" to target,
-                        "files" to "Files in $target:\n" + filesList.joinToString("\n")
+                        "files" to filesStr
                     )
                 }
                 }
@@ -635,7 +639,7 @@ class SystemToolSet(private val context: Context) : ToolSet {
 
             val files = targetDir.listFiles { f ->
                 f.isFile && (extClean == "all" || f.extension.equals(extClean, ignoreCase = true))
-            }?.sortedByDescending { it.lastModified() }?.take(limit) ?: emptyList()
+            }?.sortedByDescending { it.lastModified() }?.take(safeLimit) ?: emptyList()
 
             if (files.isEmpty()) {
                 val filterMsg = if (extClean != "all") " with extension '.$extClean'" else ""
@@ -646,7 +650,9 @@ class SystemToolSet(private val context: Context) : ToolSet {
             val formatted = files.joinToString("\n") { f ->
                 val dateStr = dateFormat.format(java.util.Date(f.lastModified()))
                 "- ${f.name} (${formatBytes(f.length())}, $dateStr)\n  Path: ${f.absolutePath}"
-            }
+            }.take(1400)
+
+            com.ghost.api.GemmaService.instance?.recordToolOutput(formatted.length)
 
             mapOf(
                 "result" to "success",
@@ -920,12 +926,15 @@ class SystemToolSet(private val context: Context) : ToolSet {
             }
 
             val lines = file.bufferedReader().useLines { linesSequence ->
-                linesSequence.take(maxLines).toList()
+                linesSequence.take(maxLines.coerceIn(1, 80)).toList()
             }
             val content = lines.joinToString("\n")
+                .replace(Regex("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\uFFFD]"), "")
+                .take(1800)
+            com.ghost.api.GemmaService.instance?.recordToolOutput(content.length)
             mapOf("result" to "success", "content" to content, "linesRead" to lines.size.toString())
         } catch (e: Exception) {
-            mapOf("result" to "error", "message" to "Failed to read file: ${e.message}")
+            mapOf("result" to "error", "message" to "Failed to read file: ${e.message?.take(80)}")
         } finally {
             com.ghost.api.GemmaService.instance?.hideWorkSignal()
         }

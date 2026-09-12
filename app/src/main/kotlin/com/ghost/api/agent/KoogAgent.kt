@@ -194,12 +194,21 @@ class KoogAgent(
     private val _turnsSinceKvFlush = java.util.concurrent.atomic.AtomicInteger(0)
     private var turnsSinceKvFlush: Int get() = _turnsSinceKvFlush.get(); set(value) { _turnsSinceKvFlush.set(value) }
 
-    // Tracks multimodal tokens currently residing in the C++ KV cache since last flush
+    // Tracks multimodal and tool tokens currently residing in the C++ KV cache since last flush
     private val _sessionAudioTokens = java.util.concurrent.atomic.AtomicInteger(0)
     private var sessionAudioTokens: Int get() = _sessionAudioTokens.get(); set(value) { _sessionAudioTokens.set(value) }
 
     private val _sessionImageTokens = java.util.concurrent.atomic.AtomicInteger(0)
     private var sessionImageTokens: Int get() = _sessionImageTokens.get(); set(value) { _sessionImageTokens.set(value) }
+
+    private val _sessionToolTokens = java.util.concurrent.atomic.AtomicInteger(0)
+    var sessionToolTokens: Int get() = _sessionToolTokens.get(); set(value) { _sessionToolTokens.set(value) }
+
+    fun recordToolChars(charCount: Int) {
+        val estimatedTokens = (charCount / Constants.CHARS_PER_TOKEN) + 50
+        _sessionToolTokens.addAndGet(estimatedTokens)
+        Timber.d("Recorded tool tokens: +$estimatedTokens (session total: ${_sessionToolTokens.get()})")
+    }
 
 
 
@@ -374,20 +383,14 @@ class KoogAgent(
                     )
                 }
 
-                if (_conversationHistory.size > 4) {
-                    val toCompact = _conversationHistory.dropLast(4)
-                    val recent = _conversationHistory.takeLast(4)
-                    _conversationHistory.clear()
-                    _conversationHistory.addAll(recent)
-                    toCompact
-                } else if (_conversationHistory.size > 2) {
+                if (_conversationHistory.size > 2) {
                     val toCompact = _conversationHistory.dropLast(2)
                     val recent = _conversationHistory.takeLast(2)
                     _conversationHistory.clear()
                     _conversationHistory.addAll(recent)
                     toCompact
                 } else {
-                    emptyList()
+                    _conversationHistory.toList()
                 }
             }
 
@@ -400,8 +403,13 @@ class KoogAgent(
                 }
             }
 
+            // Keep at most 2 recent messages (1 turn) in RAM so immediate continuity is preserved
+            // while all older messages are completely purged from the LiteRT native KV cache!
             val initialMessages = synchronized(_conversationHistory) {
-                _conversationHistory.map {
+                val recent = _conversationHistory.takeLast(2)
+                _conversationHistory.clear()
+                _conversationHistory.addAll(recent)
+                recent.map {
                     when (it.role) {
                         "user" -> com.google.ai.edge.litertlm.Message.user(it.content)
                         "assistant" -> com.google.ai.edge.litertlm.Message.model(it.content)
@@ -416,9 +424,10 @@ class KoogAgent(
             turnsSinceKvFlush = 0
             sessionAudioTokens = 0
             sessionImageTokens = 0
+            sessionToolTokens = 0
             _lastResponseHash.set(0)
             lastResponseText = ""
-            Timber.i("✅ Session compaction & KV cache soft reset complete")
+            Timber.i("✅ Session compaction & KV cache soft reset complete (purged old history, kept ${initialMessages.size} recent msgs)")
         } catch (e: Exception) {
             Timber.e(e, "Session compaction failed")
         }
@@ -434,6 +443,7 @@ class KoogAgent(
         turnsSinceKvFlush = 0
         sessionAudioTokens = 0
         sessionImageTokens = 0
+        sessionToolTokens = 0
         _lastResponseHash.set(0)
         lastResponseText = ""
         Timber.i("KoogAgent: Soft reset complete")
@@ -445,6 +455,7 @@ class KoogAgent(
             turnCount = 0
             sessionAudioTokens = 0
             sessionImageTokens = 0
+            sessionToolTokens = 0
             _lastResponseHash.set(0)
             lastResponseText = ""
             Timber.i("KoogAgent: History cleared")
@@ -454,10 +465,11 @@ class KoogAgent(
     /**
      * Accurately estimate current tokens in the native C++ KV cache.
      * - System instructions + active MCP tool schemas (~2200 tokens)
-     * - Cumulative telemetry context injected on each turn (~375 tokens/turn)
+     * - Cumulative telemetry context injected on each turn (~150 tokens/turn)
      * - Message history characters / 4
      * - Accumulated and incoming Image tokens (576 tokens/image)
      * - Accumulated and incoming Audio tokens (25 tokens/sec, e.g. 30s = 750 tokens)
+     * - Accumulated tool execution output tokens (e.g. web search / file reads)
      */
     fun estimateCurrentKvTokens(
         contextLength: Int,
@@ -470,7 +482,8 @@ class KoogAgent(
         val textTokens = (historyChars + incomingChars + contextLength) / Constants.CHARS_PER_TOKEN
         val imageTokens = sessionImageTokens + (incomingImageCount * Constants.TOKENS_PER_IMAGE)
         val audioTokens = sessionAudioTokens + calculateAudioTokens(incomingAudioBytes)
-        return 2200 + telemetryTokens + textTokens + imageTokens + audioTokens
+        val toolTokens = sessionToolTokens
+        return 2200 + telemetryTokens + textTokens + imageTokens + audioTokens + toolTokens
     }
 
     fun calculateAudioTokens(byteCount: Int): Int {
@@ -730,8 +743,8 @@ class KoogAgent(
 
             // 2.5 Proactive KV Headroom Guard (prevent mid-generation KV saturation chokes)
             val totalEstimatedTokens = estimateCurrentKvTokens(context.length, event.message.length, images.size, audioBytes)
-            if (totalEstimatedTokens > 3800 || turnsSinceKvFlush >= 6) {
-                Timber.i("🌀 Proactive KV headroom guard triggered: ~$totalEstimatedTokens tokens (turn $turnsSinceKvFlush, audio: ${incomingAudioTokens}t, img: ${incomingImageTokens}t). Compacting before inference...")
+            if (totalEstimatedTokens > 3000 || turnsSinceKvFlush >= 4) {
+                Timber.i("🌀 Proactive KV headroom guard triggered: ~$totalEstimatedTokens tokens (turn $turnsSinceKvFlush, audio: ${incomingAudioTokens}t, img: ${incomingImageTokens}t, tools: ${sessionToolTokens}t). Compacting before inference...")
                 flushAndCompactSession()
             }
 
@@ -875,8 +888,8 @@ class KoogAgent(
             // 8. Dynamic KV Cache Flush based on token limit or turns
             turnsSinceKvFlush++
             val postEstimatedTokens = estimateCurrentKvTokens(context.length, 0, 0, 0)
-            if (postEstimatedTokens > 3800 || turnsSinceKvFlush >= 6) {
-                Timber.i("🌀 KV cache reaching capacity (~$postEstimatedTokens tokens, $turnsSinceKvFlush turns, audio: ${sessionAudioTokens}t, img: ${sessionImageTokens}t). Auto-flushing & Compacting...")
+            if (postEstimatedTokens > 3000 || turnsSinceKvFlush >= 4) {
+                Timber.i("🌀 KV cache reaching capacity (~$postEstimatedTokens tokens, $turnsSinceKvFlush turns, audio: ${sessionAudioTokens}t, img: ${sessionImageTokens}t, tools: ${sessionToolTokens}t). Auto-flushing & Compacting...")
                 flushAndCompactSession()
             }
 
@@ -960,7 +973,7 @@ class KoogAgent(
 
             // Pre-reflection KV headroom check: if context + huge observation approaches limit, compact first
             val preEstimatedTokens = estimateCurrentKvTokens(event.context.length, observation.length, 0)
-            if (preEstimatedTokens > 3800 || turnsSinceKvFlush >= 6) {
+            if (preEstimatedTokens > 3000 || turnsSinceKvFlush >= 4) {
                 Timber.i("🌀 Pre-reflection KV headroom guard triggered: ~$preEstimatedTokens tokens (turn $turnsSinceKvFlush). Compacting before tool reflection...")
                 flushAndCompactSession()
             }
@@ -1008,7 +1021,7 @@ class KoogAgent(
             // Post-reflection: increment turnsSinceKvFlush and guard KV headroom
             turnsSinceKvFlush++
             val postEstimatedTokens = estimateCurrentKvTokens(event.context.length, 0, 0)
-            if (isEmojiChoke || postEstimatedTokens > 3800 || turnsSinceKvFlush >= 6) {
+            if (isEmojiChoke || postEstimatedTokens > 3000 || turnsSinceKvFlush >= 4) {
                 Timber.i("🌀 Post-reflection KV headroom guard: ~$postEstimatedTokens tokens (turn $turnsSinceKvFlush). Compacting...")
                 flushAndCompactSession()
             }
@@ -1252,6 +1265,7 @@ class KoogAgent(
                     llmEngine.softReset(systemPrompt)
                     
                     turnsSinceKvFlush = 0
+                    sessionToolTokens = 0
                     return think(context, userMessage, images, audio, retryCount = 1)
                 } else {
                     Timber.e("❌ Auto-retry failed, returning fallback")
@@ -1276,6 +1290,7 @@ class KoogAgent(
                     llmEngine.softReset(systemPrompt)
                     
                     turnsSinceKvFlush = 0
+                    sessionToolTokens = 0
                     return think(context, userMessage, images, audio, retryCount = 1)
                 } catch (e2: Exception) {
                     Timber.e(e2, "Failed to apply reset during auto-retry")

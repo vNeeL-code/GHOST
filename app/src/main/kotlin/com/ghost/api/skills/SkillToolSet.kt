@@ -11,9 +11,11 @@ class SkillToolSet(private val skillManager: SkillManager) : ToolSet {
     fun loadSkill(
         @ToolParam(description = "The unique name of the skill to load (e.g., 'weather', 'calculator').") name: String
     ): Map<String, String> {
-        val instructions = skillManager.getSkillInstructions(name)
-        return if (instructions != null) {
-            Timber.i("Skill loaded: $name")
+        val rawInstructions = skillManager.getSkillInstructions(name)
+        return if (rawInstructions != null) {
+            val instructions = rawInstructions.take(1400)
+            com.ghost.api.GemmaService.instance?.recordToolOutput(instructions.length)
+            Timber.i("Skill loaded: $name (${instructions.length} chars)")
             mapOf("result" to "success", "instructions" to instructions)
         } else {
             Timber.w("Skill not found: $name")
