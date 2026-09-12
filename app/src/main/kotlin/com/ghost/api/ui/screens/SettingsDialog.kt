@@ -127,27 +127,6 @@ fun SettingsDialog(
                         }
                         item {
                             SettingsActionCard(
-                                title = "Compress Session / Flush Memory",
-                                subtitle = "Force long-term semantic memory synthesis",
-                                onClick = {
-                                    val svc = gemmaService ?: GemmaService.instance
-                                    svc?.flushSessionMemory()
-                                    Toast.makeText(context, "Flushing memory and compressing session...", Toast.LENGTH_SHORT).show()
-                                }
-                            )
-                        }
-                        item {
-                            SettingsActionCard(
-                                title = "Clear Safe Mode",
-                                subtitle = "Restore full GPU inference after crash recovery",
-                                onClick = {
-                                    GemmaService.instance?.resetRecoveryState()
-                                    Toast.makeText(context, "Safe mode cleared — GPU restored", Toast.LENGTH_SHORT).show()
-                                }
-                            )
-                        }
-                        item {
-                            SettingsActionCard(
                                 title = "Trigger Diary Log Now",
                                 subtitle = "Generate an episodic reflection immediately",
                                 onClick = {

@@ -417,9 +417,17 @@ class AvatarWallpaperService : WallpaperService() {
                     // Small base so rings start tight to center and explode outward on beats
                     val dynamicBaseRadius = min(width, height) * 0.08f
                     
-                    // Baseline geometric center coordinates
-                    val baseCx = width / 2f - 15f
-                    val baseCy = height / 2f - 75f
+                    val density = resources.displayMetrics.density
+                    val isLandscape = width > height
+                    val overlayCenterOffsetY = (if (isLandscape) 38f else 15f) * density
+
+                    // Baseline geometric center coordinates: locked to true screen midline & InputOverlay
+                    val baseCx = width / 2f
+                    val baseCy = height / 2f - overlayCenterOffsetY
+
+                    // Legacy Option A baseline for 1250px star aperture offset
+                    val optABaseCx = width / 2f - 15f
+                    val optABaseCy = height / 2f - 75f
 
                     canvas.drawColor(COLOR_BACKGROUND)
                     
@@ -440,7 +448,7 @@ class AvatarWallpaperService : WallpaperService() {
                             drawOptionDCubeLattice(canvas, baseCx, baseCy, dynamicBaseRadius, width, height)
                         }
                         else -> {
-                            drawOptionAOrbitalStar(canvas, baseCx, baseCy, dynamicBaseRadius, width, height, isNoisy)
+                            drawOptionAOrbitalStar(canvas, optABaseCx, optABaseCy, dynamicBaseRadius, width, height, isNoisy)
                         }
                     }
                 }
@@ -1156,7 +1164,7 @@ class AvatarWallpaperService : WallpaperService() {
             val off = (logoPaint.descent() + logoPaint.ascent()) / 2f
             val shiftX = tiltX * 0.06f
             val shiftY = tiltY * 0.06f
-            canvas.drawText("✧", shiftX, -off - (focalRadius * 0.12f) + shiftY, logoPaint)
+            canvas.drawText("✧", shiftX, -off + shiftY, logoPaint)
 
             canvas.restore()
         }
