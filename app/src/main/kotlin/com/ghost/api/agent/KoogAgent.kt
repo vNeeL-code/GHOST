@@ -3,6 +3,7 @@ package com.ghost.api.agent
 import android.content.Context
 import android.graphics.Bitmap
 import com.ghost.api.LlmBackend
+import com.ghost.api.Constants
 import com.ghost.api.logic.IntentHandler
 import org.json.JSONObject
 import kotlinx.coroutines.CoroutineScope
@@ -357,6 +358,15 @@ class KoogAgent(
             val oldMemory = memoryManager.getCompactedSessionMemory()
 
             val messagesToCompact = synchronized(_conversationHistory) {
+                // Purge any corrupted or emoji-choke assistant messages so they don't corrupt long-term memory
+                _conversationHistory.removeAll { msg ->
+                    msg.role == "assistant" && (
+                        msg.content.isBlank() ||
+                        msg.content.startsWith("Error:") ||
+                        (msg.content.trim().length <= 4 && !msg.content.trim().any { it.isLetterOrDigit() })
+                    )
+                }
+
                 if (_conversationHistory.size > 4) {
                     val toCompact = _conversationHistory.dropLast(4)
                     val recent = _conversationHistory.takeLast(4)
@@ -393,7 +403,8 @@ class KoogAgent(
                 }
             }
 
-            val systemPrompt = buildSystemPrompt() + getRollingMemoryString()
+            // Only append rolling memory string as plaintext fallback if initialMessages is empty
+            val systemPrompt = buildSystemPrompt() + (if (initialMessages.isEmpty()) getRollingMemoryString() else "")
             llmEngine.softReset(systemPrompt, currentTools, initialMessages)
             turnsSinceKvFlush = 0
             _lastResponseHash.set(0)
@@ -425,6 +436,21 @@ class KoogAgent(
             lastResponseText = ""
             Timber.i("KoogAgent: History cleared")
         }
+    }
+
+    /**
+     * Accurately estimate current tokens in the native C++ KV cache.
+     * System instructions + active MCP tool schemas (~2200 tokens)
+     * Cumulative telemetry context injected on each turn (~375 tokens/turn)
+     * Message history characters / 4
+     * Image tokens (576/image)
+     */
+    fun estimateCurrentKvTokens(contextLength: Int, incomingChars: Int = 0, imageCount: Int = 0): Int {
+        val historyChars = synchronized(_conversationHistory) { _conversationHistory.sumOf { it.content.length } }
+        val telemetryTokens = (turnsSinceKvFlush + 1) * 375
+        val textTokens = (historyChars + incomingChars + contextLength) / Constants.CHARS_PER_TOKEN
+        val imageTokens = imageCount * 576
+        return 2200 + telemetryTokens + textTokens + imageTokens
     }
     
     fun shutdown() {
@@ -672,13 +698,9 @@ class KoogAgent(
             val images = queuedImages.map { it.bitmap }
             val turnImageUri = queuedImages.firstOrNull()?.uri
 
-            // 2.5 Proactive KV Headroom Guard (prevent mid-generation KV saturation crashes)
-            val historyChars = synchronized(_conversationHistory) { _conversationHistory.sumOf { it.content.length } }
-            val textTokens = (context.length + event.message.length + historyChars) / com.ghost.api.Constants.CHARS_PER_TOKEN
-            val imageTokens = images.size * 576
-            val totalEstimatedTokens = textTokens + imageTokens + 1500
-
-            if (totalEstimatedTokens > 3600 || turnsSinceKvFlush >= 8) {
+            // 2.5 Proactive KV Headroom Guard (prevent mid-generation KV saturation chokes)
+            val totalEstimatedTokens = estimateCurrentKvTokens(context.length, event.message.length, images.size)
+            if (totalEstimatedTokens > 3200 || turnsSinceKvFlush >= 4) {
                 Timber.i("🌀 Proactive KV headroom guard triggered: ~$totalEstimatedTokens tokens (turn $turnsSinceKvFlush). Compacting before inference...")
                 flushAndCompactSession()
             }
@@ -796,22 +818,18 @@ class KoogAgent(
             // Stuck loop detection: repetitive tokens (e.g. 🎵, ..., or identical response hash) = KV corruption
             val cleanTrimmed = response.trim().lowercase()
             val responseHash = cleanTrimmed.hashCode()
+            val isEmojiChoke = cleanTrimmed.length <= 4 && !cleanTrimmed.any { it.isLetterOrDigit() }
             val isDuplicate = (responseHash == lastResponseHash && lastResponseHash != 0) ||
-                              (cleanTrimmed.length <= 6 && cleanTrimmed == lastResponseText && cleanTrimmed.isNotEmpty())
+                              (cleanTrimmed.length <= 6 && cleanTrimmed == lastResponseText && cleanTrimmed.isNotEmpty()) ||
+                              isEmojiChoke
             
             _lastResponseHash.set(responseHash)
             lastResponseText = cleanTrimmed
 
             if (isDuplicate) {
-                Timber.w("🚨 Stuck loop detected (duplicate hash or repetitive token: '$cleanTrimmed') — triggering auto-flush")
-                sendSystemEvent(SystemEventType.KV_CACHE_FLUSH)
-            }
-
-            // The native C++ engine handles tools (run_intent/run_js) internally.
-            // When generateResponse returns, any tool invocations and reflections have already
-            // occurred seamlessly within the same inference turn.
-            
-            if (!event.isDream) {
+                Timber.w("🚨 Stuck loop / emoji choke detected ('$cleanTrimmed') — triggering immediate recovery flush")
+                flushAndCompactSession()
+            } else if (!event.isDream) {
                 synchronized(_conversationHistory) {
                     _conversationHistory.add(Message(role = "assistant", content = response))
                     while (_conversationHistory.size > 10) {
@@ -822,9 +840,8 @@ class KoogAgent(
 
             // 8. Dynamic KV Cache Flush based on token limit or turns
             turnsSinceKvFlush++
-            val postHistoryChars = synchronized(_conversationHistory) { _conversationHistory.sumOf { it.content.length } }
-            val postEstimatedTokens = (context.length + postHistoryChars) / com.ghost.api.Constants.CHARS_PER_TOKEN + (images.size * 576) + 1500
-            if (postEstimatedTokens > 3600 || turnsSinceKvFlush >= 8) {
+            val postEstimatedTokens = estimateCurrentKvTokens(context.length, 0, images.size)
+            if (postEstimatedTokens > 3200 || turnsSinceKvFlush >= 4) {
                 Timber.i("🌀 KV cache reaching capacity (~$postEstimatedTokens tokens, $turnsSinceKvFlush turns). Auto-flushing & Compacting...")
                 flushAndCompactSession()
             }
@@ -841,9 +858,9 @@ class KoogAgent(
             }
 
             // 10. Platform callbacks: UI, TTS, persistence
-            // Guard: blank response with no tools = model produced nothing — use fallback
-            val safeCleanResponse = if (response.isBlank()) {
-                Timber.w("⚠️ Blank response — using fallback")
+            // Guard: blank or emoji choke response = model failed generation — use fallback
+            val safeCleanResponse = if (response.isBlank() || isEmojiChoke) {
+                Timber.w("⚠️ Blank or emoji choke response — using recovery fallback")
                 "..."
             } else response
 
@@ -899,8 +916,20 @@ class KoogAgent(
         Timber.i("🔧 Processing tool results...")
 
         try {
-            val observation = "Tool results:\n${event.toolResults.joinToString("\n")}"
+            val rawObservation = "Tool results:\n${event.toolResults.joinToString("\n")}"
+            // Cap single tool output to 3500 chars so massive web searches or page fetches don't exhaust the KV budget
+            val observation = if (rawObservation.length > 3500) {
+                rawObservation.take(3500) + "\n...[Output truncated for token headroom]"
+            } else rawObservation
+
             Timber.d("KoogAgent: Tool execution complete, reflecting...")
+
+            // Pre-reflection KV headroom check: if context + huge observation approaches limit, compact first
+            val preEstimatedTokens = estimateCurrentKvTokens(event.context.length, observation.length, 0)
+            if (preEstimatedTokens > 3200 || turnsSinceKvFlush >= 4) {
+                Timber.i("🌀 Pre-reflection KV headroom guard triggered: ~$preEstimatedTokens tokens (turn $turnsSinceKvFlush). Compacting before tool reflection...")
+                flushAndCompactSession()
+            }
 
             // Phase 9: Incremental History (Observation)
             // Inject the observation strictly as a 'user' message so the model sees it as external reality,
@@ -923,20 +952,31 @@ class KoogAgent(
 
             // Final Answer
             val finalContent = reflection.trim()
-            val safeCleanResponse = if (finalContent.isBlank()) {
-                Timber.w("⚠️ Blank reflection, using fallback")
-                "Done." 
+            val isEmojiChoke = finalContent.length <= 4 && !finalContent.any { it.isLetterOrDigit() }
+            val safeCleanResponse = if (finalContent.isBlank() || isEmojiChoke) {
+                Timber.w("⚠️ Blank or emoji choke reflection, using fallback")
+                "I finished checking that for you." 
             } else finalContent
 
             Timber.i("✅ Tool reflection complete (Chain End)")
 
             // Phase 9: Incremental History (Final Reflection)
-            val assistantMessage = Message(
-                role = "assistant",
-                content = reflection
-            )
-            synchronized(_conversationHistory) {
-                _conversationHistory.add(assistantMessage)
+            if (!isEmojiChoke) {
+                val assistantMessage = Message(
+                    role = "assistant",
+                    content = reflection
+                )
+                synchronized(_conversationHistory) {
+                    _conversationHistory.add(assistantMessage)
+                }
+            }
+
+            // Post-reflection: increment turnsSinceKvFlush and guard KV headroom
+            turnsSinceKvFlush++
+            val postEstimatedTokens = estimateCurrentKvTokens(event.context.length, 0, 0)
+            if (isEmojiChoke || postEstimatedTokens > 3200 || turnsSinceKvFlush >= 4) {
+                Timber.i("🌀 Post-reflection KV headroom guard: ~$postEstimatedTokens tokens (turn $turnsSinceKvFlush). Compacting...")
+                flushAndCompactSession()
             }
 
             callbacks?.let { cb ->

@@ -310,6 +310,16 @@ class GemmaEngine(private val context: Context) : LlmBackend {
 
             try {
                 val eng = engine ?: return@withLock "Error: Engine not initialized"
+
+                // LiteRT-LM C++ JNI restriction: ONLY ONE session/conversation can exist at a time on Engine!
+                // Close active conversation before creating temporary one-shot session to prevent FAILED_PRECONDITION
+                try {
+                    conversation?.close()
+                } catch (e: Exception) {
+                    Timber.w(e, "Error closing active conversation for generateOneShot")
+                }
+                conversation = null
+
                 suspendCancellableCoroutine { continuation ->
                     try {
                         val temp = temperature ?: 0.1
