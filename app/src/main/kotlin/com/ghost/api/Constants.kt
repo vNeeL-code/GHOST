@@ -54,8 +54,13 @@ object Constants {
     const val PREF_OPERATOR_AVATAR = "operator_avatar_emoji"
     const val PREF_EDGE_LIGHTS_ENABLED = "edge_lights_enabled"
 
-    // Token estimation (chars per token, approximate)
+    // Token estimation (multimodal tuned for Gemma 4 / LiteRT-LM)
     const val CHARS_PER_TOKEN = 4
+    const val TOKENS_PER_IMAGE = 576
+    const val AUDIO_TOKENS_PER_SECOND = 25
+    const val AUDIO_SAMPLE_RATE = 16000
+    const val AUDIO_BYTES_PER_SECOND = 32000 // 16kHz * 2 bytes (16-bit PCM mono)
+    const val AUDIO_WAV_HEADER_BYTES = 44
 
     // API Server
     const val API_PORT = 8080

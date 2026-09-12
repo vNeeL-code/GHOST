@@ -194,6 +194,13 @@ class KoogAgent(
     private val _turnsSinceKvFlush = java.util.concurrent.atomic.AtomicInteger(0)
     private var turnsSinceKvFlush: Int get() = _turnsSinceKvFlush.get(); set(value) { _turnsSinceKvFlush.set(value) }
 
+    // Tracks multimodal tokens currently residing in the C++ KV cache since last flush
+    private val _sessionAudioTokens = java.util.concurrent.atomic.AtomicInteger(0)
+    private var sessionAudioTokens: Int get() = _sessionAudioTokens.get(); set(value) { _sessionAudioTokens.set(value) }
+
+    private val _sessionImageTokens = java.util.concurrent.atomic.AtomicInteger(0)
+    private var sessionImageTokens: Int get() = _sessionImageTokens.get(); set(value) { _sessionImageTokens.set(value) }
+
 
 
     // Skip recap injection turn after stuck-loop flush
@@ -407,6 +414,8 @@ class KoogAgent(
             val systemPrompt = buildSystemPrompt() + (if (initialMessages.isEmpty()) getRollingMemoryString() else "")
             llmEngine.softReset(systemPrompt, currentTools, initialMessages)
             turnsSinceKvFlush = 0
+            sessionAudioTokens = 0
+            sessionImageTokens = 0
             _lastResponseHash.set(0)
             lastResponseText = ""
             Timber.i("✅ Session compaction & KV cache soft reset complete")
@@ -423,6 +432,8 @@ class KoogAgent(
         val systemPrompt = buildSystemPrompt()
         llmEngine.softReset(systemPrompt, currentTools)
         turnsSinceKvFlush = 0
+        sessionAudioTokens = 0
+        sessionImageTokens = 0
         _lastResponseHash.set(0)
         lastResponseText = ""
         Timber.i("KoogAgent: Soft reset complete")
@@ -432,6 +443,8 @@ class KoogAgent(
         synchronized(_conversationHistory) {
             _conversationHistory.clear()
             turnCount = 0
+            sessionAudioTokens = 0
+            sessionImageTokens = 0
             _lastResponseHash.set(0)
             lastResponseText = ""
             Timber.i("KoogAgent: History cleared")
@@ -440,17 +453,31 @@ class KoogAgent(
 
     /**
      * Accurately estimate current tokens in the native C++ KV cache.
-     * System instructions + active MCP tool schemas (~2200 tokens)
-     * Cumulative telemetry context injected on each turn (~375 tokens/turn)
-     * Message history characters / 4
-     * Image tokens (576/image)
+     * - System instructions + active MCP tool schemas (~2200 tokens)
+     * - Cumulative telemetry context injected on each turn (~375 tokens/turn)
+     * - Message history characters / 4
+     * - Accumulated and incoming Image tokens (576 tokens/image)
+     * - Accumulated and incoming Audio tokens (25 tokens/sec, e.g. 30s = 750 tokens)
      */
-    fun estimateCurrentKvTokens(contextLength: Int, incomingChars: Int = 0, imageCount: Int = 0): Int {
+    fun estimateCurrentKvTokens(
+        contextLength: Int,
+        incomingChars: Int = 0,
+        incomingImageCount: Int = 0,
+        incomingAudioBytes: Int = 0
+    ): Int {
         val historyChars = synchronized(_conversationHistory) { _conversationHistory.sumOf { it.content.length } }
         val telemetryTokens = (turnsSinceKvFlush + 1) * 375
         val textTokens = (historyChars + incomingChars + contextLength) / Constants.CHARS_PER_TOKEN
-        val imageTokens = imageCount * 576
-        return 2200 + telemetryTokens + textTokens + imageTokens
+        val imageTokens = sessionImageTokens + (incomingImageCount * Constants.TOKENS_PER_IMAGE)
+        val audioTokens = sessionAudioTokens + calculateAudioTokens(incomingAudioBytes)
+        return 2200 + telemetryTokens + textTokens + imageTokens + audioTokens
+    }
+
+    fun calculateAudioTokens(byteCount: Int): Int {
+        if (byteCount <= Constants.AUDIO_WAV_HEADER_BYTES) return 0
+        val pcmBytes = byteCount - Constants.AUDIO_WAV_HEADER_BYTES
+        val seconds = pcmBytes.toFloat() / Constants.AUDIO_BYTES_PER_SECOND
+        return (seconds * Constants.AUDIO_TOKENS_PER_SECOND + 0.5f).toInt()
     }
     
     fun shutdown() {
@@ -697,13 +724,20 @@ class KoogAgent(
             val (queuedImages, audio) = drainMedia()
             val images = queuedImages.map { it.bitmap }
             val turnImageUri = queuedImages.firstOrNull()?.uri
+            val audioBytes = audio?.size ?: 0
+            val incomingAudioTokens = calculateAudioTokens(audioBytes)
+            val incomingImageTokens = images.size * Constants.TOKENS_PER_IMAGE
 
             // 2.5 Proactive KV Headroom Guard (prevent mid-generation KV saturation chokes)
-            val totalEstimatedTokens = estimateCurrentKvTokens(context.length, event.message.length, images.size)
+            val totalEstimatedTokens = estimateCurrentKvTokens(context.length, event.message.length, images.size, audioBytes)
             if (totalEstimatedTokens > 3200 || turnsSinceKvFlush >= 4) {
-                Timber.i("🌀 Proactive KV headroom guard triggered: ~$totalEstimatedTokens tokens (turn $turnsSinceKvFlush). Compacting before inference...")
+                Timber.i("🌀 Proactive KV headroom guard triggered: ~$totalEstimatedTokens tokens (turn $turnsSinceKvFlush, audio: ${incomingAudioTokens}t, img: ${incomingImageTokens}t). Compacting before inference...")
                 flushAndCompactSession()
             }
+
+            // Register incoming media tokens into active session KV cache budget
+            sessionAudioTokens += incomingAudioTokens
+            sessionImageTokens += incomingImageTokens
 
             // 3. Add user message to history
             val currentDate = java.time.LocalDate.now().toString()
@@ -840,9 +874,9 @@ class KoogAgent(
 
             // 8. Dynamic KV Cache Flush based on token limit or turns
             turnsSinceKvFlush++
-            val postEstimatedTokens = estimateCurrentKvTokens(context.length, 0, images.size)
+            val postEstimatedTokens = estimateCurrentKvTokens(context.length, 0, 0, 0)
             if (postEstimatedTokens > 3200 || turnsSinceKvFlush >= 4) {
-                Timber.i("🌀 KV cache reaching capacity (~$postEstimatedTokens tokens, $turnsSinceKvFlush turns). Auto-flushing & Compacting...")
+                Timber.i("🌀 KV cache reaching capacity (~$postEstimatedTokens tokens, $turnsSinceKvFlush turns, audio: ${sessionAudioTokens}t, img: ${sessionImageTokens}t). Auto-flushing & Compacting...")
                 flushAndCompactSession()
             }
 
