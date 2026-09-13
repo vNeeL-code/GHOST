@@ -50,33 +50,15 @@ class WebSessionManager(private val context: Context) {
     fun getSession(peerName: String): String? {
         val key = peerName.trim().lowercase()
         val stored = prefs.getString(PREFIX_COOKIE + key, null)
-        if (!stored.isNullOrBlank()) {
-            return stored
-        }
-
-        // Check if Android CookieManager holds cookies for this peer's domain
-        val contact = AiPhonebook.resolvePeer(peerName)
-        if (contact != null && contact.cookieDomain.isNotBlank()) {
-            try {
-                val liveCookie = CookieManager.getInstance().getCookie(contact.cookieDomain)
-                    ?: CookieManager.getInstance().getCookie(contact.loginUrl)
-                if (!liveCookie.isNullOrBlank()) {
-                    saveSession(peerName, liveCookie)
-                    return liveCookie
-                }
-            } catch (e: Exception) {
-                Timber.w(e, "Failed to read CookieManager for ${contact.cookieDomain}")
-            }
-        }
-
-        return null
+        return if (!stored.isNullOrBlank()) stored else null
     }
 
     /**
      * Check if an active session is held for the given peer.
      */
     fun hasSession(peerName: String): Boolean {
-        return !getSession(peerName).isNullOrBlank()
+        val key = peerName.trim().lowercase()
+        return !prefs.getString(PREFIX_COOKIE + key, null).isNullOrBlank()
     }
 
     /**
@@ -92,10 +74,19 @@ class WebSessionManager(private val context: Context) {
         val contact = AiPhonebook.resolvePeer(peerName)
         if (contact != null && contact.cookieDomain.isNotBlank()) {
             try {
-                // Expire cookies in system CookieManager for this domain
                 val cm = CookieManager.getInstance()
-                cm.setCookie(contact.cookieDomain, "; Expires=Thu, 01 Jan 1970 00:00:00 GMT")
-                cm.flush()
+                val domainUrl = if (contact.cookieDomain.startsWith("http")) contact.cookieDomain else "https://${contact.cookieDomain}"
+                val existingCookies = cm.getCookie(domainUrl) ?: cm.getCookie(contact.loginUrl)
+                if (!existingCookies.isNullOrBlank()) {
+                    existingCookies.split(";").forEach { cookie ->
+                        val cookieName = cookie.split("=").firstOrNull()?.trim()
+                        if (!cookieName.isNullOrBlank()) {
+                            cm.setCookie(domainUrl, "$cookieName=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/")
+                            cm.setCookie(contact.cookieDomain, "$cookieName=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/")
+                        }
+                    }
+                    cm.flush()
+                }
             } catch (e: Exception) {
                 Timber.w(e, "Failed to clear CookieManager for ${contact.cookieDomain}")
             }

@@ -669,36 +669,54 @@ fun SettingsDialog(
                                                 }
 
                                                 Row(
-                                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                                                     verticalAlignment = Alignment.CenterVertically
                                                 ) {
                                                     if (isConnected) {
-                                                        Text(
-                                                            text = "Disconnect",
-                                                            fontSize = 11.sp,
-                                                            color = Color(0xFFFF6666),
-                                                            modifier = Modifier
-                                                                .clip(RoundedCornerShape(6.dp))
-                                                                .background(Color(0x26FF4444))
-                                                                .clickable {
-                                                                    webSessionManager.clearSession(contact.name)
-                                                                    connectedPeers = webSessionManager.getConnectedPeers()
-                                                                    Toast.makeText(context, "${contact.callsign} disconnected", Toast.LENGTH_SHORT).show()
-                                                                }
-                                                                .padding(horizontal = 8.dp, vertical = 5.dp)
-                                                        )
+                                                        Surface(
+                                                            shape = RoundedCornerShape(6.dp),
+                                                            color = Color(0x1A8BB4F6),
+                                                            modifier = Modifier.clickable { selectedLoginContact = contact }
+                                                        ) {
+                                                            Text(
+                                                                text = "Re-login",
+                                                                fontSize = 11.sp,
+                                                                color = accentColor,
+                                                                fontWeight = FontWeight.SemiBold,
+                                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                                                            )
+                                                        }
+                                                        Surface(
+                                                            shape = RoundedCornerShape(6.dp),
+                                                            color = Color(0x26FF4444),
+                                                            modifier = Modifier.clickable {
+                                                                webSessionManager.clearSession(contact.name)
+                                                                connectedPeers = webSessionManager.getConnectedPeers()
+                                                                Toast.makeText(context, "${contact.callsign} disconnected", Toast.LENGTH_SHORT).show()
+                                                            }
+                                                        ) {
+                                                            Text(
+                                                                text = "Disconnect",
+                                                                fontSize = 11.sp,
+                                                                color = Color(0xFFFF6666),
+                                                                fontWeight = FontWeight.SemiBold,
+                                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                                                            )
+                                                        }
                                                     } else {
-                                                        Text(
-                                                            text = "Log In",
-                                                            fontSize = 11.sp,
-                                                            fontWeight = FontWeight.Bold,
-                                                            color = Color.Black,
-                                                            modifier = Modifier
-                                                                .clip(RoundedCornerShape(6.dp))
-                                                                .background(accentColor)
-                                                                .clickable { selectedLoginContact = contact }
-                                                                .padding(horizontal = 10.dp, vertical = 5.dp)
-                                                        )
+                                                        Surface(
+                                                            shape = RoundedCornerShape(6.dp),
+                                                            color = accentColor,
+                                                            modifier = Modifier.clickable { selectedLoginContact = contact }
+                                                        ) {
+                                                            Text(
+                                                                text = "Log In",
+                                                                fontSize = 11.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = Color.Black,
+                                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                                            )
+                                                        }
                                                     }
                                                 }
                                             }
