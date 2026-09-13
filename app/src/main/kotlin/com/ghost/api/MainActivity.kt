@@ -534,9 +534,11 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
         }
         root.addView(container)
 
-        // Filter for human-readable diary/dream reflections (skipping legacy JSON dumps)
+        // Filter for human-readable diary/dream reflections (skipping legacy JSON dumps and short degenerate tokens)
         val validEntries = entries.filter {
-            !it.observation.trim().startsWith("{") && !it.observation.trim().startsWith("Session distilled:")
+            it.observation.trim().length >= 20 &&
+            !it.observation.trim().startsWith("{") && 
+            !it.observation.trim().startsWith("Session distilled:")
         }
 
         container.addView(TextView(this).apply {

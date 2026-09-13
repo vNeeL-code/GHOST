@@ -738,9 +738,9 @@ class KoogAgent(
             // -----------------------------------------------------------------------
 
             val isAutonomous = event.isDream || event.message.startsWith("Δ 👾 ∇")
-            // 1. PERCEIVE: Gather context (Tiered)
+            // 1. PERCEIVE: Gather context (Tiered). Skip duplicate context for dream diary
             Timber.i("👁️ Perceiving device state...")
-            val context = perceive(isAutonomous = isAutonomous)
+            val context = if (event.isDream) "" else perceive(isAutonomous = isAutonomous)
             Timber.d("Context gathered: ${context.length} chars")
 
             // 2. Drain media queues
@@ -974,12 +974,23 @@ class KoogAgent(
                 } else {
                     // Diary: use clean response directly without redundant book prefix
                     try {
-                        val cleanText = cleanForTTS(safeCleanResponse)
+                        val cleanText = cleanForTTS(safeCleanResponse).trim()
                         val thermal = cb.getCurrentThermalState()
-                        cb.writeDiaryEntry("DREAM", cleanText, thermal)
-                        Timber.i("Dream diary logged: ${cleanText.take(50)}")
+                        if (cleanText.length >= 25 && !cleanText.startsWith("Error:")) {
+                            cb.writeDiaryEntry("DREAM", cleanText, thermal)
+                            Timber.i("Dream diary logged: ${cleanText.take(50)}")
+                        } else {
+                            Timber.w("Dream diary discarded degenerate/short response: '$cleanText'")
+                        }
                     } catch (e: Exception) {
                         Timber.e(e, "Failed to log dream diary")
+                    }
+                    try {
+                        // Immediately purge ephemeral diary prompt & response from C++ KV cache
+                        // so active user chat session remains clean and unpolluted
+                        flushAndCompactSession()
+                    } catch (e: Exception) {
+                        Timber.w(e, "Failed to flush KV cache after dream diary")
                     }
                 }
             }

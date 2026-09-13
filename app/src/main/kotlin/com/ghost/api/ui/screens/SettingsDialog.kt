@@ -337,9 +337,11 @@ fun SettingsDialog(
                                     diaryActive = checked
                                     prefs.edit().putBoolean(Constants.PREF_AUTONOMOUS_DIARY, checked).apply()
                                     if (checked) {
+                                        com.ghost.api.GemmaService.instance?.scheduleNextDiaryAlarm(forceReschedule = true)
                                         DiaryWorker.schedule(context)
                                         Toast.makeText(context, "Autonomous diary enabled", Toast.LENGTH_SHORT).show()
                                     } else {
+                                        com.ghost.api.GemmaService.instance?.cancelDiaryAlarm()
                                         DiaryWorker.cancel(context)
                                         Toast.makeText(context, "Autonomous diary paused", Toast.LENGTH_SHORT).show()
                                     }
@@ -370,7 +372,10 @@ fun SettingsDialog(
                                                     .clickable {
                                                         diaryCadence = value
                                                         prefs.edit().putString(Constants.PREF_DIARY_CADENCE, value).apply()
-                                                        if (diaryActive) DiaryWorker.schedule(context)
+                                                        if (diaryActive) {
+                                                            com.ghost.api.GemmaService.instance?.scheduleNextDiaryAlarm(forceReschedule = true)
+                                                            DiaryWorker.schedule(context)
+                                                        }
                                                         Toast.makeText(context, "Cadence set to $label", Toast.LENGTH_SHORT).show()
                                                     }
                                                     .padding(vertical = 8.dp),

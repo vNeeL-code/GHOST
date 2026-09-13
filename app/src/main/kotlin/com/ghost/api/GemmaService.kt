@@ -1717,7 +1717,6 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         try {
             val am = getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager ?: return
             val legacyActions = listOf(
-                "com.ghost.api.ACTION_DIARY_CYCLE",
                 "com.ghost.api.ACTION_CRON_PROMPT"
             )
             for (action in legacyActions) {
@@ -1737,7 +1736,106 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         }
     }
 
+    /**
+     * Schedules the next autonomous diary reflection using AlarmManager.setExactAndAllowWhileIdle (RTC_WAKEUP).
+     * Anchors to exact Noon & Midnight (or configured cadence) and pierces Doze mode.
+     * If forceReschedule is false and an alarm is already pending, preserves the existing schedule without resetting the clock.
+     */
+    fun scheduleNextDiaryAlarm(forceReschedule: Boolean = false) {
+        val prefs = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+        if (!prefs.getBoolean(Constants.PREF_AUTONOMOUS_DIARY, true)) {
+            cancelDiaryAlarm()
+            return
+        }
+        val cadence = prefs.getString(Constants.PREF_DIARY_CADENCE, "12") ?: "12"
+        if (cadence == "OFF") {
+            cancelDiaryAlarm()
+            return
+        }
+
+        val am = getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager ?: return
+        val intent = Intent(this, com.ghost.api.hardware.DiaryAlarmReceiver::class.java).apply {
+            action = "com.ghost.api.ACTION_DIARY_CYCLE"
+            setPackage(packageName)
+        }
+
+        if (!forceReschedule) {
+            val existing = android.app.PendingIntent.getBroadcast(
+                this, 200, intent,
+                android.app.PendingIntent.FLAG_NO_CREATE or android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+            if (existing != null) {
+                Timber.i("📔 Diary Alarm already armed and pending; preserving existing schedule.")
+                return
+            }
+        }
+
+        val pendingIntent = android.app.PendingIntent.getBroadcast(
+            this, 200, intent,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val now = java.time.ZonedDateTime.now()
+        val targetEpochMs: Long = when (cadence) {
+            "1" -> now.plusHours(1).toInstant().toEpochMilli()
+            "3" -> now.plusHours(3).toInstant().toEpochMilli()
+            "6" -> now.plusHours(6).toInstant().toEpochMilli()
+            "24" -> {
+                val nextMidnight = (if (now.hour >= 0) now.plusDays(1) else now)
+                    .withHour(0).withMinute(0).withSecond(0).withNano(0)
+                nextMidnight.toInstant().toEpochMilli()
+            }
+            else -> { // "12" Default (Noon and Midnight)
+                val nextNoon = now.withHour(12).withMinute(0).withSecond(0).withNano(0)
+                val nextMidnight = (if (now.hour >= 12) now.plusDays(1) else now)
+                    .withHour(0).withMinute(0).withSecond(0).withNano(0)
+                val target = when {
+                    now.isBefore(nextNoon) -> nextNoon
+                    now.isBefore(nextMidnight) -> nextMidnight
+                    else -> nextNoon.plusDays(1)
+                }
+                target.toInstant().toEpochMilli()
+            }
+        }
+
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                am.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, targetEpochMs, pendingIntent)
+            } else {
+                am.setExact(android.app.AlarmManager.RTC_WAKEUP, targetEpochMs, pendingIntent)
+            }
+            Timber.i("🟢 Autonomous diary exact alarm scheduled for: ${java.util.Date(targetEpochMs)} ($cadence-hour cadence)")
+        } catch (e: SecurityException) {
+            Timber.w(e, "setExactAndAllowWhileIdle failed; falling back to setAndAllowWhileIdle")
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                am.setAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, targetEpochMs, pendingIntent)
+            }
+        }
+    }
+
+    fun cancelDiaryAlarm() {
+        try {
+            val am = getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager ?: return
+            val intent = Intent(this, com.ghost.api.hardware.DiaryAlarmReceiver::class.java).apply {
+                action = "com.ghost.api.ACTION_DIARY_CYCLE"
+                setPackage(packageName)
+            }
+            val pi = android.app.PendingIntent.getBroadcast(
+                this, 200, intent,
+                android.app.PendingIntent.FLAG_NO_CREATE or android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+            if (pi != null) {
+                am.cancel(pi)
+                pi.cancel()
+                Timber.i("📔 Diary Alarm cancelled")
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to cancel diary alarm")
+        }
+    }
+
     private fun setupDiaryWorker() {
+        scheduleNextDiaryAlarm(forceReschedule = false)
         val prefs = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
         if (prefs.getBoolean(Constants.PREF_AUTONOMOUS_DIARY, true)) {
             com.ghost.api.workers.DiaryWorker.schedule(this)
@@ -1762,8 +1860,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             }
         }
 
-        val compactedMemory = try { memoryManager.getCompactedSessionMemory() } catch (e: Exception) { "" }
-        val recentTurns = try { memoryManager.getSessionHistory(10) } catch (e: Exception) { emptyList() }
+        val compactedMemory = try { memoryManager.getCompactedSessionMemory().take(300) } catch (e: Exception) { "" }
+        val recentTurns = try { memoryManager.getSessionHistory(5) } catch (e: Exception) { emptyList() }
         val lastTurn = recentTurns.firstOrNull()
 
         // Compute interaction recency delta
@@ -1784,8 +1882,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         }
 
         val historyText = if (recentTurns.isNotEmpty()) {
-            recentTurns.reversed().takeLast(6).joinToString("\n") {
-                "User: ${it.userMessage.take(120)}\nGemma: ${it.assistantResponse.take(120)}"
+            recentTurns.reversed().takeLast(3).joinToString("\n") {
+                "User: ${it.userMessage.take(80)}\nGemma: ${it.assistantResponse.take(80)}"
             }
         } else {
             "No active conversation turns in this period."
@@ -1847,7 +1945,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         return try {
             val diaryResponse = processQuery(prompt, isDream = true)
 
-            if (diaryResponse != null && diaryResponse.isNotBlank() && !diaryResponse.startsWith("Error:")) {
+            if (diaryResponse != null && diaryResponse.trim().length >= 25 && !diaryResponse.startsWith("Error:")) {
                 val cleanContent = diaryResponse.trim()
                 val intent = Intent("com.ghost.api.ACTION_DIARY_ENTRY_POSTED").apply {
                     putExtra("content", cleanContent)
@@ -1859,13 +1957,16 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 prefs.edit().putLong("last_diary_execution_time", System.currentTimeMillis()).apply()
 
                 Timber.i("📔 Diary entry persisted: ${diaryResponse.take(80)}...")
+                scheduleNextDiaryAlarm(forceReschedule = true)
                 true
             } else {
-                Timber.w("📔 Diary generation returned empty/error: $diaryResponse")
+                Timber.w("📔 Diary generation returned degenerate/short/error: $diaryResponse")
+                scheduleNextDiaryAlarm(forceReschedule = true)
                 false
             }
         } catch (e: Exception) {
             Timber.e(e, "📔 Diary cycle failed")
+            scheduleNextDiaryAlarm(forceReschedule = true)
             false
         }
     }
