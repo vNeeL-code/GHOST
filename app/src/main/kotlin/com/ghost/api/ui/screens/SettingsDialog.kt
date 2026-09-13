@@ -52,6 +52,11 @@ fun SettingsDialog(
     var backend by remember { mutableStateOf(prefs.getString(Constants.PREF_USER_BACKEND, "AUTO") ?: "AUTO") }
     var visualizerPreset by remember { mutableStateOf(prefs.getString(Constants.PREF_VISUALIZER_PRESET, "OPTION_A") ?: "OPTION_A") }
 
+    val tokenManager = remember { com.ghost.api.logic.HFTokenManager(context) }
+    var openRouterKey by remember { mutableStateOf(tokenManager.getOpenRouterKey() ?: "") }
+    var showKey by remember { mutableStateOf(false) }
+    var phonebookExpanded by remember { mutableStateOf(false) }
+
     val accentColor = Color(0xFF8BB4F6)
     val cardBg = Color(0xFF141418)
     val surfaceBg = Color(0xFF0E0E12)
@@ -394,7 +399,143 @@ fun SettingsDialog(
                             }
                         }
 
-                        // 5. === Inference Engine === (Category 5: Last setting, fire and forget)
+                        // 5. === Extend Your Mind === (AI Phonebook)
+                        item {
+                            SettingsSectionHeader(title = "Extend Your Mind (AI Phonebook)")
+                        }
+                        item {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 4.dp, vertical = 6.dp)
+                                    .background(cardBg, RoundedCornerShape(12.dp))
+                                    .border(1.dp, Color(0x1AFFFFFF), RoundedCornerShape(12.dp))
+                                    .padding(12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Frontier Peer Roster",
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = Color.White
+                                        )
+                                        Text(
+                                            text = "Consult Claude, DeepSeek, Gemini, Grok, Perplexity",
+                                            fontSize = 12.sp,
+                                            color = textDim
+                                        )
+                                    }
+                                    Text(
+                                        text = if (phonebookExpanded) "▲ Hide" else "▼ View",
+                                        fontSize = 12.sp,
+                                        color = accentColor,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(Color(0x1A8BB4F6))
+                                            .clickable { phonebookExpanded = !phonebookExpanded }
+                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+
+                                AnimatedVisibility(visible = phonebookExpanded) {
+                                    Column(modifier = Modifier.padding(top = 10.dp)) {
+                                        com.ghost.api.logic.AiPhonebook.CONTACTS.forEach { contact ->
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(vertical = 4.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = contact.callsign,
+                                                    fontSize = 13.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color.White,
+                                                    modifier = Modifier.width(115.dp)
+                                                )
+                                                Text(
+                                                    text = contact.specialty,
+                                                    fontSize = 11.sp,
+                                                    color = textDim,
+                                                    lineHeight = 14.sp
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(dividerColor))
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                Text(
+                                    text = "OpenRouter API Key",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.White,
+                                    modifier = Modifier.padding(bottom = 2.dp)
+                                )
+                                Text(
+                                    text = "Single key to connect Gemma to all 9 peer models",
+                                    fontSize = 11.sp,
+                                    color = textDim,
+                                    modifier = Modifier.padding(bottom = 8.dp)
+                                )
+
+                                OutlinedTextField(
+                                    value = openRouterKey,
+                                    onValueChange = { openRouterKey = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    placeholder = { Text("sk-or-v1-...", fontSize = 12.sp, color = Color(0x66FFFFFF)) },
+                                    singleLine = true,
+                                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp, color = Color.White),
+                                    visualTransformation = if (showKey) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                                    trailingIcon = {
+                                        Text(
+                                            text = if (showKey) "Hide" else "Show",
+                                            fontSize = 11.sp,
+                                            color = accentColor,
+                                            fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier
+                                                .clickable { showKey = !showKey }
+                                                .padding(horizontal = 8.dp)
+                                        )
+                                    },
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = accentColor,
+                                        unfocusedBorderColor = Color(0x33FFFFFF),
+                                        cursorColor = accentColor
+                                    ),
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End
+                                ) {
+                                    Button(
+                                        onClick = {
+                                            tokenManager.setOpenRouterKey(openRouterKey)
+                                            Toast.makeText(context, if (openRouterKey.isNotBlank()) "OpenRouter Key Saved!" else "Key Cleared", Toast.LENGTH_SHORT).show()
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = accentColor),
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
+                                    ) {
+                                        Text("Save Key", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+
+                        // 6. === Inference Engine === (Category 6: Last setting, fire and forget)
                         item {
                             SettingsSectionHeader(title = "Inference Engine")
                         }

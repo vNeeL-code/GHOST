@@ -138,6 +138,38 @@ class NetworkToolSet(private val context: Context) : ToolSet {
         }
     }
 
+    @Tool(description = "Consults a peer AI from Gemma's phonebook (Claude, DeepSeek, Gemini, Grok, Perplexity, Kimi, Qwen, Mistral, Copilot) for frontier reasoning, coding, math, or expert analysis")
+    fun consult_peer(
+        @ToolParam(description = "Peer name or callsign: Claude, DeepSeek, Gemini, Grok, Perplexity, Kimi, Qwen, Mistral, Copilot") peer: String,
+        @ToolParam(description = "The prompt or question to ask the peer") prompt: String
+    ): Map<String, String> = runBlocking(Dispatchers.IO) {
+        com.ghost.api.GemmaService.instance?.showWorkSignal("PHONEBOOK", 2500)
+        try {
+            val contact = com.ghost.api.logic.AiPhonebook.resolvePeer(peer)
+                ?: return@runBlocking mapOf(
+                    "result" to "error",
+                    "message" to "Peer '$peer' not found in AI Phonebook. Available: Gemini, Claude, DeepSeek, Grok, Perplexity, Kimi, Qwen, Mistral, Copilot."
+                )
+
+            val tokenManager = com.ghost.api.logic.HFTokenManager(context)
+            val apiKey = tokenManager.getOpenRouterKey() ?: ""
+
+            val (success, reply) = com.ghost.api.logic.AiPhonebook.queryPeer(contact, prompt, apiKey)
+            val cleanReply = sanitizeToolString(reply, 1800)
+            if (success) {
+                com.ghost.api.GemmaService.instance?.recordToolOutput(cleanReply.length)
+                mapOf("result" to "success", "peer" to contact.callsign, "content" to cleanReply)
+            } else {
+                mapOf("result" to "error", "peer" to contact.callsign, "message" to cleanReply)
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "consult_peer failed")
+            mapOf("result" to "error", "message" to "Failed to consult peer '$peer': ${e.message}")
+        } finally {
+            com.ghost.api.GemmaService.instance?.hideWorkSignal()
+        }
+    }
+
     /**
      * Defensive sanitizer for all tool return strings passed into LiteRT-LM C++ JNI bridge.
      * Prevents SIGSEGV SEGV_ACCERR buffer overruns, unescaped HTML entities, and control token poisoning.

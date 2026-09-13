@@ -103,8 +103,12 @@ class MCPServer(
             "appName"  to ParameterSpec("string", "Optional app name (e.g. VLC)", required = false)
         )),
         "read_file_text"  to ToolDefinition("read_file_text", "Read text content of a file", mapOf(
-            "filePath" to ParameterSpec("string", "Absolute path of text file"),
-            "maxLines" to ParameterSpec("integer", "Max lines to read", required = false)
+            "filePath" to ParameterSpec("string", "Absolute path of text file")
+        )),
+        // AI Phonebook (Extend Your Mind)
+        "consult_peer"    to ToolDefinition("consult_peer", "Consult a peer AI from Gemma's phonebook (Claude, DeepSeek, Gemini, Grok, Perplexity, Kimi, Qwen, Mistral, Copilot)", mapOf(
+            "peer"  to ParameterSpec("string", "Peer name or callsign: Claude, DeepSeek, Gemini, Grok, Perplexity, Kimi, Qwen, Mistral, Copilot"),
+            "query" to ParameterSpec("string", "Question or task to consult them on")
         )),
 
         // Skills
@@ -262,6 +266,13 @@ class MCPServer(
                 "read_file_text" -> {
                     val path = params["filePath"]?.toString() ?: ""
                     val res = fileTools.read_file_text(path)
+                    ToolResult(res["result"] == "success", res["content"] ?: res["message"] ?: "")
+                }
+                // AI Phonebook (Extend Your Mind)
+                "consult_peer" -> {
+                    val peer = params["peer"]?.toString() ?: ""
+                    val prompt = params["prompt"]?.toString() ?: params["query"]?.toString() ?: ""
+                    val res = networkTools.consult_peer(peer, prompt)
                     ToolResult(res["result"] == "success", res["content"] ?: res["message"] ?: "")
                 }
                 // Skills
