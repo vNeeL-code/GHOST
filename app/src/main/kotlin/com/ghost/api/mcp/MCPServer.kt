@@ -106,9 +106,13 @@ class MCPServer(
             "filePath" to ParameterSpec("string", "Absolute path of text file")
         )),
         // AI Phonebook (Extend Your Mind)
-        "consult_peer"    to ToolDefinition("consult_peer", "Consult a peer AI from Gemma's phonebook (Claude, DeepSeek, Gemini, Grok, Perplexity, Kimi, Qwen, Mistral, Copilot)", mapOf(
-            "peer"  to ParameterSpec("string", "Peer name or callsign: Claude, DeepSeek, Gemini, Grok, Perplexity, Kimi, Qwen, Mistral, Copilot"),
-            "query" to ParameterSpec("string", "Question or task to consult them on")
+        "consult_peer"    to ToolDefinition("consult_peer", "Consult a peer AI from Gemma's phonebook", mapOf(
+            "peer"   to ParameterSpec("string", "Peer name or callsign: Claude, DeepSeek, Gemini, Grok, Perplexity, Kimi, Qwen, Mistral, Copilot, ChatGPT, Meta, GLM"),
+            "prompt" to ParameterSpec("string", "Question or task to consult them on")
+        )),
+        "consultpeer"     to ToolDefinition("consultpeer", "Alias for consult_peer", mapOf(
+            "peer"   to ParameterSpec("string", "Peer name or callsign"),
+            "prompt" to ParameterSpec("string", "Question or task to consult them on")
         )),
 
         // Skills
@@ -269,7 +273,7 @@ class MCPServer(
                     ToolResult(res["result"] == "success", res["content"] ?: res["message"] ?: "")
                 }
                 // AI Phonebook (Extend Your Mind)
-                "consult_peer" -> {
+                "consult_peer", "consultpeer" -> {
                     val peer = params["peer"]?.toString() ?: ""
                     val prompt = params["prompt"]?.toString() ?: params["query"]?.toString() ?: ""
                     val res = networkTools.consult_peer(peer, prompt)

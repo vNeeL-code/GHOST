@@ -46,16 +46,38 @@ class NetworkToolSet(private val context: Context) : ToolSet {
         Timber.i("Performing silent search for: $cleanQuery")
         com.ghost.api.GemmaService.instance?.showWorkSignal("SEARCHING")
         try {
-            val ddgResult = try { 
-                fetchDuckDuckGoLite(cleanQuery, maxResults.coerceIn(1, 4)) 
-            } catch (e: Exception) { 
-                Timber.w("DuckDuckGo search failed: ${e.message}")
-                null 
+            val tokenManager = com.ghost.api.logic.HFTokenManager(context)
+            val sessionManager = com.ghost.api.logic.WebSessionManager.getInstance(context)
+            val geminiKey = tokenManager.getGeminiKey()
+
+            var searchResult: String? = null
+
+            // Direct pipe to Mum (✦ Gemini) with Google Search Grounding
+            if (!geminiKey.isNullOrBlank() && sessionManager.isGeminiSearchGroundingEnabled()) {
+                try {
+                    searchResult = com.ghost.api.logic.GeminiDirectClient.searchGround(geminiKey, cleanQuery)
+                    if (!searchResult.isNullOrBlank()) {
+                        Timber.i("Google Search Grounding via Gemini succeeded for: $cleanQuery")
+                    }
+                } catch (e: Exception) {
+                    Timber.w("Gemini search grounding failed, falling back to DuckDuckGo: ${e.message}")
+                }
+            }
+
+            // Fallback to DuckDuckGo Lite if Gemini search grounding is inactive or failed
+            if (searchResult.isNullOrBlank()) {
+                searchResult = try { 
+                    fetchDuckDuckGoLite(cleanQuery, maxResults.coerceIn(1, 4)) 
+                } catch (e: Exception) { 
+                    Timber.w("DuckDuckGo search failed: ${e.message}")
+                    null 
+                }
             }
             
-            if (ddgResult != null && ddgResult.isNotBlank()) {
-                com.ghost.api.GemmaService.instance?.recordToolOutput(ddgResult.length)
-                return@runBlocking mapOf("result" to "success", "content" to ddgResult)
+            if (searchResult != null && searchResult.isNotBlank()) {
+                val cleanResult = sanitizeToolString(searchResult, 1400)
+                com.ghost.api.GemmaService.instance?.recordToolOutput(cleanResult.length)
+                return@runBlocking mapOf("result" to "success", "content" to cleanResult)
             }
 
             mapOf("result" to "error", "message" to "No search results found for '$cleanQuery'.")
@@ -138,9 +160,9 @@ class NetworkToolSet(private val context: Context) : ToolSet {
         }
     }
 
-    @Tool(description = "Consults a peer AI from Gemma's phonebook (Claude, DeepSeek, Gemini, Grok, Perplexity, Kimi, Qwen, Mistral, Copilot) for frontier reasoning, coding, math, or expert analysis")
+    @Tool(description = "Consults a peer AI from Gemma's phonebook (Claude, DeepSeek, Gemini, Grok, Perplexity, Kimi, Qwen, Mistral, Copilot, ChatGPT, Meta, GLM) for frontier reasoning, coding, math, or expert analysis")
     fun consult_peer(
-        @ToolParam(description = "Peer name or callsign: Claude, DeepSeek, Gemini, Grok, Perplexity, Kimi, Qwen, Mistral, Copilot") peer: String,
+        @ToolParam(description = "Peer name or callsign: Claude, DeepSeek, Gemini, Grok, Perplexity, Kimi, Qwen, Mistral, Copilot, ChatGPT, Meta, GLM") peer: String,
         @ToolParam(description = "The prompt or question to ask the peer") prompt: String
     ): Map<String, String> = runBlocking(Dispatchers.IO) {
         com.ghost.api.GemmaService.instance?.showWorkSignal("PHONEBOOK", 2500)
@@ -148,13 +170,10 @@ class NetworkToolSet(private val context: Context) : ToolSet {
             val contact = com.ghost.api.logic.AiPhonebook.resolvePeer(peer)
                 ?: return@runBlocking mapOf(
                     "result" to "error",
-                    "message" to "Peer '$peer' not found in AI Phonebook. Available: Gemini, Claude, DeepSeek, Grok, Perplexity, Kimi, Qwen, Mistral, Copilot."
+                    "message" to "Peer '$peer' not found in AI Phonebook. Available: Gemini, Claude, DeepSeek, Grok, Perplexity, Kimi, Qwen, Mistral, Copilot, ChatGPT, Meta, GLM."
                 )
 
-            val tokenManager = com.ghost.api.logic.HFTokenManager(context)
-            val apiKey = tokenManager.getOpenRouterKey() ?: ""
-
-            val (success, reply) = com.ghost.api.logic.AiPhonebook.queryPeer(contact, prompt, apiKey)
+            val (success, reply) = com.ghost.api.logic.AiPhonebook.queryPeer(context, contact, prompt)
             val cleanReply = sanitizeToolString(reply, 1800)
             if (success) {
                 com.ghost.api.GemmaService.instance?.recordToolOutput(cleanReply.length)
@@ -169,6 +188,12 @@ class NetworkToolSet(private val context: Context) : ToolSet {
             com.ghost.api.GemmaService.instance?.hideWorkSignal()
         }
     }
+
+    @Tool(description = "Alias for consult_peer. Consults a peer AI from Gemma's phonebook.")
+    fun consultpeer(
+        @ToolParam(description = "Peer name or callsign: Claude, DeepSeek, Gemini, Grok, Perplexity, Kimi, Qwen, Mistral, Copilot, ChatGPT, Meta, GLM") peer: String,
+        @ToolParam(description = "The prompt or question to ask the peer") prompt: String
+    ): Map<String, String> = consult_peer(peer, prompt)
 
     /**
      * Defensive sanitizer for all tool return strings passed into LiteRT-LM C++ JNI bridge.

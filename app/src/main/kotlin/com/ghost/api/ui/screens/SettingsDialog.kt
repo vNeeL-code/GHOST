@@ -53,9 +53,15 @@ fun SettingsDialog(
     var visualizerPreset by remember { mutableStateOf(prefs.getString(Constants.PREF_VISUALIZER_PRESET, "OPTION_A") ?: "OPTION_A") }
 
     val tokenManager = remember { com.ghost.api.logic.HFTokenManager(context) }
+    val webSessionManager = remember { com.ghost.api.logic.WebSessionManager.getInstance(context) }
+    var geminiKey by remember { mutableStateOf(tokenManager.getGeminiKey() ?: "") }
+    var showGeminiKey by remember { mutableStateOf(false) }
+    var geminiSearchGrounding by remember { mutableStateOf(webSessionManager.isGeminiSearchGroundingEnabled()) }
     var openRouterKey by remember { mutableStateOf(tokenManager.getOpenRouterKey() ?: "") }
-    var showKey by remember { mutableStateOf(false) }
-    var phonebookExpanded by remember { mutableStateOf(false) }
+    var showOpenRouterKey by remember { mutableStateOf(false) }
+    var phonebookExpanded by remember { mutableStateOf(true) }
+    var connectedPeers by remember { mutableStateOf(webSessionManager.getConnectedPeers()) }
+    var selectedLoginContact by remember { mutableStateOf<com.ghost.api.logic.PeerContact?>(null) }
 
     val accentColor = Color(0xFF8BB4F6)
     val cardBg = Color(0xFF141418)
@@ -67,6 +73,19 @@ fun SettingsDialog(
     val flat = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
     val isNotifGranted = flat != null && flat.contains(cn.flattenToString())
     val isOverlayGranted = Settings.canDrawOverlays(context)
+
+    // In-App WebView Login Sheet for AI Phonebook Contacts ("Holding Cookie")
+    selectedLoginContact?.let { contact ->
+        PeerLoginSheet(
+            contact = contact,
+            onDismiss = { selectedLoginContact = null },
+            onSessionSaved = { cookies ->
+                webSessionManager.saveSession(contact.name, cookies)
+                connectedPeers = webSessionManager.getConnectedPeers()
+                selectedLoginContact = null
+            }
+        )
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -401,13 +420,174 @@ fun SettingsDialog(
 
                         // 5. === Extend Your Mind === (AI Phonebook)
                         item {
-                            SettingsSectionHeader(title = "Extend Your Mind (AI Phonebook)")
+                            val activeCount = connectedPeers.size + (if (geminiKey.isNotBlank()) 1 else 0)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                SettingsSectionHeader(title = "Extend Your Mind (AI Phonebook)")
+                                Text(
+                                    text = "$activeCount / ${com.ghost.api.logic.AiPhonebook.CONTACTS.size} Active",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (activeCount > 0) Color(0xFF4CAF50) else textDim,
+                                    modifier = Modifier.padding(end = 4.dp)
+                                )
+                            }
                         }
+
+                        // 5A. Direct Pipe: ✦ Gemini ("Mum")
                         item {
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 4.dp, vertical = 6.dp)
+                                    .padding(horizontal = 4.dp, vertical = 4.dp)
+                                    .background(cardBg, RoundedCornerShape(12.dp))
+                                    .border(1.dp, if (geminiKey.isNotBlank()) Color(0x664CAF50) else Color(0x338BB4F6), RoundedCornerShape(12.dp))
+                                    .padding(12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "✦ Gemini (Google)",
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White
+                                        )
+                                        Text(
+                                            text = "Gemma's anchor ('Mum') • Android orchestrator • 1M context",
+                                            fontSize = 11.sp,
+                                            color = textDim
+                                        )
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(if (geminiKey.isNotBlank()) Color(0x334CAF50) else Color(0x1AFFFFFF))
+                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Text(
+                                            text = if (geminiKey.isNotBlank()) "● Direct Pipe" else "○ Key Needed",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = if (geminiKey.isNotBlank()) Color(0xFF4CAF50) else Color(0x88FFFFFF)
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                OutlinedTextField(
+                                    value = geminiKey,
+                                    onValueChange = { geminiKey = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    placeholder = { Text("AI Studio Key (AIzaSy...)", fontSize = 12.sp, color = Color(0x66FFFFFF)) },
+                                    singleLine = true,
+                                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp, color = Color.White),
+                                    visualTransformation = if (showGeminiKey) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                                    trailingIcon = {
+                                        Text(
+                                            text = if (showGeminiKey) "Hide" else "Show",
+                                            fontSize = 11.sp,
+                                            color = accentColor,
+                                            fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier
+                                                .clickable { showGeminiKey = !showGeminiKey }
+                                                .padding(horizontal = 8.dp)
+                                        )
+                                    },
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = accentColor,
+                                        unfocusedBorderColor = Color(0x33FFFFFF),
+                                        cursorColor = accentColor
+                                    ),
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Get Free Key ↗",
+                                        fontSize = 11.sp,
+                                        color = accentColor,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier
+                                            .clickable {
+                                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/apikey"))
+                                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                context.startActivity(intent)
+                                            }
+                                            .padding(vertical = 4.dp)
+                                    )
+                                    Button(
+                                        onClick = {
+                                            tokenManager.setGeminiKey(geminiKey)
+                                            Toast.makeText(context, if (geminiKey.isNotBlank()) "Gemini API Key Saved!" else "Key Cleared", Toast.LENGTH_SHORT).show()
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = accentColor),
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                                    ) {
+                                        Text("Save Key", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                // Google Search Grounding toggle
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(0x1A8BB4F6))
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Live Google Search Grounding",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = Color.White
+                                        )
+                                        Text(
+                                            text = "Direct web search via Mum (replaces DuckDuckGo)",
+                                            fontSize = 10.sp,
+                                            color = textDim
+                                        )
+                                    }
+                                    Switch(
+                                        checked = geminiSearchGrounding,
+                                        onCheckedChange = { checked ->
+                                            geminiSearchGrounding = checked
+                                            webSessionManager.setGeminiSearchGroundingEnabled(checked)
+                                        },
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = Color.Black,
+                                            checkedTrackColor = accentColor
+                                        )
+                                    )
+                                }
+                            }
+                        }
+
+                        // 5B. Frontier Peer Checklist ("Holding Cookie")
+                        item {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 4.dp, vertical = 4.dp)
                                     .background(cardBg, RoundedCornerShape(12.dp))
                                     .border(1.dp, Color(0x1AFFFFFF), RoundedCornerShape(12.dp))
                                     .padding(12.dp)
@@ -419,14 +599,14 @@ fun SettingsDialog(
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
-                                            text = "Frontier Peer Roster",
+                                            text = "Frontier Web Logins ('Holding Cookie')",
                                             fontSize = 14.sp,
                                             fontWeight = FontWeight.SemiBold,
                                             color = Color.White
                                         )
                                         Text(
-                                            text = "Consult Claude, DeepSeek, Gemini, Grok, Perplexity",
-                                            fontSize = 12.sp,
+                                            text = "Log into your existing accounts to add them to Phonebook",
+                                            fontSize = 11.sp,
                                             color = textDim
                                         )
                                     }
@@ -444,92 +624,148 @@ fun SettingsDialog(
                                 }
 
                                 AnimatedVisibility(visible = phonebookExpanded) {
-                                    Column(modifier = Modifier.padding(top = 10.dp)) {
-                                        com.ghost.api.logic.AiPhonebook.CONTACTS.forEach { contact ->
+                                    Column(
+                                        modifier = Modifier.padding(top = 10.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        com.ghost.api.logic.AiPhonebook.CONTACTS.filter { it.name != "Gemini" }.forEach { contact ->
+                                            val isConnected = connectedPeers.contains(contact.name)
                                             Row(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
-                                                    .padding(vertical = 4.dp),
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(if (isConnected) Color(0x1A4CAF50) else Color(0x0DFFFFFF))
+                                                    .border(
+                                                        1.dp,
+                                                        if (isConnected) Color(0x334CAF50) else Color(0x1AFFFFFF),
+                                                        RoundedCornerShape(8.dp)
+                                                    )
+                                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Text(
-                                                    text = contact.callsign,
-                                                    fontSize = 13.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = Color.White,
-                                                    modifier = Modifier.width(115.dp)
-                                                )
-                                                Text(
-                                                    text = contact.specialty,
-                                                    fontSize = 11.sp,
-                                                    color = textDim,
-                                                    lineHeight = 14.sp
-                                                )
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        Text(
+                                                            text = contact.callsign,
+                                                            fontSize = 13.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = Color.White
+                                                        )
+                                                        Spacer(modifier = Modifier.width(6.dp))
+                                                        Text(
+                                                            text = if (isConnected) "● Holding Cookie" else "○ Offline",
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            color = if (isConnected) Color(0xFF4CAF50) else Color(0x66FFFFFF)
+                                                        )
+                                                    }
+                                                    Text(
+                                                        text = "${contact.organization} • ${contact.specialty}",
+                                                        fontSize = 10.sp,
+                                                        color = textDim,
+                                                        maxLines = 1
+                                                    )
+                                                }
+
+                                                Row(
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    if (isConnected) {
+                                                        Text(
+                                                            text = "Disconnect",
+                                                            fontSize = 11.sp,
+                                                            color = Color(0xFFFF6666),
+                                                            modifier = Modifier
+                                                                .clip(RoundedCornerShape(6.dp))
+                                                                .background(Color(0x26FF4444))
+                                                                .clickable {
+                                                                    webSessionManager.clearSession(contact.name)
+                                                                    connectedPeers = webSessionManager.getConnectedPeers()
+                                                                    Toast.makeText(context, "${contact.callsign} disconnected", Toast.LENGTH_SHORT).show()
+                                                                }
+                                                                .padding(horizontal = 8.dp, vertical = 5.dp)
+                                                        )
+                                                    } else {
+                                                        Text(
+                                                            text = "Log In",
+                                                            fontSize = 11.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = Color.Black,
+                                                            modifier = Modifier
+                                                                .clip(RoundedCornerShape(6.dp))
+                                                                .background(accentColor)
+                                                                .clickable { selectedLoginContact = contact }
+                                                                .padding(horizontal = 10.dp, vertical = 5.dp)
+                                                        )
+                                                    }
+                                                }
                                             }
                                         }
                                     }
                                 }
 
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(dividerColor))
                                 Spacer(modifier = Modifier.height(10.dp))
-
-                                Text(
-                                    text = "OpenRouter API Key",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color.White,
-                                    modifier = Modifier.padding(bottom = 2.dp)
-                                )
-                                Text(
-                                    text = "Single key to connect Gemma to all 9 peer models",
-                                    fontSize = 11.sp,
-                                    color = textDim,
-                                    modifier = Modifier.padding(bottom = 8.dp)
-                                )
-
-                                OutlinedTextField(
-                                    value = openRouterKey,
-                                    onValueChange = { openRouterKey = it },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    placeholder = { Text("sk-or-v1-...", fontSize = 12.sp, color = Color(0x66FFFFFF)) },
-                                    singleLine = true,
-                                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp, color = Color.White),
-                                    visualTransformation = if (showKey) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                                    trailingIcon = {
-                                        Text(
-                                            text = if (showKey) "Hide" else "Show",
-                                            fontSize = 11.sp,
-                                            color = accentColor,
-                                            fontWeight = FontWeight.SemiBold,
-                                            modifier = Modifier
-                                                .clickable { showKey = !showKey }
-                                                .padding(horizontal = 8.dp)
-                                        )
-                                    },
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = accentColor,
-                                        unfocusedBorderColor = Color(0x33FFFFFF),
-                                        cursorColor = accentColor
-                                    ),
-                                    shape = RoundedCornerShape(8.dp)
-                                )
-
+                                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(dividerColor))
                                 Spacer(modifier = Modifier.height(8.dp))
+
+                                // Developer API Fallback (OpenRouter)
+                                var devApiExpanded by remember { mutableStateOf(false) }
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.End
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { devApiExpanded = !devApiExpanded },
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Button(
-                                        onClick = {
-                                            tokenManager.setOpenRouterKey(openRouterKey)
-                                            Toast.makeText(context, if (openRouterKey.isNotBlank()) "OpenRouter Key Saved!" else "Key Cleared", Toast.LENGTH_SHORT).show()
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = accentColor),
-                                        shape = RoundedCornerShape(8.dp),
-                                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
-                                    ) {
-                                        Text("Save Key", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = "Developer API Fallback (OpenRouter)",
+                                        fontSize = 11.sp,
+                                        color = textDim
+                                    )
+                                    Text(
+                                        text = if (devApiExpanded) "▲" else "▼",
+                                        fontSize = 11.sp,
+                                        color = textDim
+                                    )
+                                }
+
+                                AnimatedVisibility(visible = devApiExpanded) {
+                                    Column(modifier = Modifier.padding(top = 8.dp)) {
+                                        OutlinedTextField(
+                                            value = openRouterKey,
+                                            onValueChange = { openRouterKey = it },
+                                            modifier = Modifier.fillMaxWidth(),
+                                            placeholder = { Text("sk-or-v1-...", fontSize = 11.sp, color = Color(0x66FFFFFF)) },
+                                            singleLine = true,
+                                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp, color = Color.White),
+                                            visualTransformation = if (showOpenRouterKey) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                                            trailingIcon = {
+                                                Text(
+                                                    text = if (showOpenRouterKey) "Hide" else "Show",
+                                                    fontSize = 10.sp,
+                                                    color = accentColor,
+                                                    modifier = Modifier
+                                                        .clickable { showOpenRouterKey = !showOpenRouterKey }
+                                                        .padding(horizontal = 8.dp)
+                                                )
+                                            },
+                                            shape = RoundedCornerShape(8.dp)
+                                        )
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Button(
+                                            onClick = {
+                                                tokenManager.setOpenRouterKey(openRouterKey)
+                                                Toast.makeText(context, if (openRouterKey.isNotBlank()) "OpenRouter Key Saved!" else "Key Cleared", Toast.LENGTH_SHORT).show()
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = accentColor),
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier.align(Alignment.End),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                                        ) {
+                                            Text("Save Key", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
                                     }
                                 }
                             }

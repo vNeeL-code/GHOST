@@ -13,6 +13,7 @@ class HFTokenManager(context: Context) {
     companion object {
         private const val KEY_HF_TOKEN = "hf_access_token"
         private const val KEY_OPENROUTER_KEY = "openrouter_api_key"
+        private const val KEY_GEMINI_API_KEY = "gemini_api_key"
     }
 
     fun setToken(token: String) {
@@ -24,6 +25,16 @@ class HFTokenManager(context: Context) {
     }
 
     fun hasToken(): Boolean = !getToken().isNullOrBlank()
+
+    fun setGeminiKey(key: String) {
+        prefs.edit().putString(KEY_GEMINI_API_KEY, key.trim()).apply()
+    }
+
+    fun getGeminiKey(): String? {
+        return prefs.getString(KEY_GEMINI_API_KEY, null)
+    }
+
+    fun hasGeminiKey(): Boolean = !getGeminiKey().isNullOrBlank()
 
     fun setOpenRouterKey(key: String) {
         prefs.edit().putString(KEY_OPENROUTER_KEY, key.trim()).apply()

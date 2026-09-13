@@ -7,6 +7,7 @@ import com.ghost.api.GemmaEngine
 import com.ghost.api.Constants
 import com.ghost.api.logic.ContextManager
 import com.ghost.api.logic.IntentHandler
+import com.ghost.api.logic.AiPhonebook
 import org.json.JSONObject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -954,6 +955,10 @@ class KoogAgent(
                 callbacks?.stopSpeaking()
                 sentenceBuffer.setLength(0)
                 "..."
+            } else if (response.contains("Status Code: 3") || response.contains("Failed to parse tool calls") || response.startsWith("Error:")) {
+                callbacks?.stopSpeaking()
+                sentenceBuffer.setLength(0)
+                sanitizeErrorResponse(response)
             } else response
 
             callbacks?.let { cb ->
@@ -1331,6 +1336,16 @@ class KoogAgent(
 
             val response = responseDeferred.await()
             
+            // Auto-recovery: If LiteRT-LM C++ ANTLR grammar failed to parse a malformed tool call,
+            // intercept the raw code block, repair syntax/arguments, execute tool, and return result cleanly.
+            val autoRecovered = tryRecoverToolCall(response, userMessage)
+            if (autoRecovered != null) {
+                Timber.i("🛠️ Auto-healed malformed tool call from response")
+                callbacks?.stopSpeaking()
+                onResetBuffers?.invoke()
+                return autoRecovered
+            }
+
             val cleanResponse = response.trim()
             val isErrorResponse = cleanResponse.isBlank() || 
                                   cleanResponse.length <= 1 ||
@@ -1356,7 +1371,7 @@ class KoogAgent(
                     
                     // Sync RAM history with the now-cold KV by re-injecting rolling memory into the system prompt
                     val systemPrompt = buildSystemPrompt() + getRollingMemoryString()
-                    llmEngine.softReset(systemPrompt)
+                    llmEngine.softReset(systemPrompt, currentTools)
                     
                     turnsSinceKvFlush = 0
                     sessionToolTokens = 0
@@ -1373,6 +1388,7 @@ class KoogAgent(
                     Timber.e("❌ Auto-retry failed, returning fallback")
                     // Request async flush for the future anyway
                     sendSystemEvent(SystemEventType.KV_CACHE_FLUSH)
+                    return sanitizeErrorResponse(response)
                 }
             } else {
                 Timber.d("KoogAgent: Response received (${response.length} chars): ${response.take(100)}...")
@@ -1381,6 +1397,13 @@ class KoogAgent(
             response
         } catch (e: Exception) {
             Timber.e(e, "LLM inference failed (try $retryCount)")
+            val autoRecovered = tryRecoverToolCall(e.message ?: "", userMessage)
+            if (autoRecovered != null) {
+                Timber.i("🛠️ Auto-healed malformed tool call from exception")
+                callbacks?.stopSpeaking()
+                onResetBuffers?.invoke()
+                return autoRecovered
+            }
             if (retryCount == 0) {
                 Timber.w("🚨 Auto-retrying inference after exception via HARD RESET...")
                 callbacks?.stopSpeaking()
@@ -1391,7 +1414,7 @@ class KoogAgent(
                     
                     // Re-inject history to prevent amnesia
                     val systemPrompt = buildSystemPrompt() + getRollingMemoryString()
-                    llmEngine.softReset(systemPrompt)
+                    llmEngine.softReset(systemPrompt, currentTools)
                     
                     turnsSinceKvFlush = 0
                     sessionToolTokens = 0
@@ -1411,7 +1434,7 @@ class KoogAgent(
             
             // Phase 5: Error-Triggered Flush against OutOfMemory or context boundary glitches
             sendSystemEvent(SystemEventType.KV_CACHE_FLUSH)
-            "Error: I'm having trouble thinking right now. ${e.message}"
+            sanitizeErrorResponse(e.message ?: "I'm having trouble thinking right now.")
         }
     }
     
@@ -1422,6 +1445,171 @@ class KoogAgent(
         val oldMemory = memoryManager.getCompactedSessionMemory().take(1500).trim()
         val longTermMemoryPatch = if (oldMemory.isNotBlank()) "\n\n[LONG TERM SESSION MEMORY]\n$oldMemory\n[/LONG TERM SESSION MEMORY]\n" else ""
         return longTermMemoryPatch + basePrompt
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TOOL AUTO-RECOVERY & DEFENSIVE PARSING
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Auto-heals malformed tool call syntax from LiteRT-LM C++ ANTLR grammar parser crashes.
+     * When Gemma (2B) emits imperfect tool call syntax (missing quotes, empty parameter values,
+     * unescaped commas, or missing underscores), LiteRT-LM C++ ANTLR grammar aborts with:
+     * "Failed to parse tool calls from response: code block: call:consultpeer{peer:,prompt:...}"
+     *
+     * This intercepts the failed block, parses the intent, repairs parameters (inferring peer
+     * from context if empty), executes the tool in Kotlin, and returns the synthesized response.
+     */
+    private suspend fun tryRecoverToolCall(rawResponse: String, userMessage: String): String? {
+        val hasParseError = rawResponse.contains("Failed to parse tool calls", ignoreCase = true)
+        val hasRawCall = rawResponse.contains("call:") && rawResponse.contains("{")
+        if (!hasParseError && !hasRawCall) return null
+
+        Timber.i("🛠️ Attempting auto-recovery for malformed tool call: ${rawResponse.take(200)}")
+
+        // Match: call:tool_name{...} or code block: call:tool_name{...}
+        val callRegex = Regex("""call:([a-zA-Z0-9_]+)\s*\{([^}]*)\}?""")
+        val match = callRegex.find(rawResponse)
+
+        val toolName = match?.groupValues?.getOrNull(1)?.trim()
+            ?: if (rawResponse.contains("consultpeer", ignoreCase = true) || rawResponse.contains("consult_peer", ignoreCase = true)) "consult_peer" else return null
+
+        val rawArgs = match?.groupValues?.getOrNull(2)?.trim() ?: ""
+        Timber.i("🛠️ Extracted tool: '$toolName', rawArgs: '$rawArgs'")
+
+        val params = parseRawToolArgs(rawArgs)
+
+        return when (toolName.lowercase()) {
+            "consult_peer", "consultpeer" -> {
+                recoverConsultPeer(params, rawArgs, userMessage)
+            }
+            else -> {
+                recoverGenericTool(toolName, params, userMessage)
+            }
+        }
+    }
+
+    private fun parseRawToolArgs(rawArgs: String): MutableMap<String, String> {
+        val params = mutableMapOf<String, String>()
+        if (rawArgs.isBlank()) return params
+
+        val keyPattern = Regex("""([a-zA-Z0-9_]+)\s*:\s*""")
+        val matches = keyPattern.findAll(rawArgs).toList()
+
+        for (i in matches.indices) {
+            val key = matches[i].groupValues[1]
+            val startIndex = matches[i].range.last + 1
+            val endIndex = if (i + 1 < matches.size) {
+                val nextKeyStart = matches[i + 1].range.first
+                var end = nextKeyStart
+                while (end > startIndex && (rawArgs[end - 1] == ',' || rawArgs[end - 1].isWhitespace())) {
+                    end--
+                }
+                end
+            } else {
+                rawArgs.length
+            }
+
+            var value = rawArgs.substring(startIndex, endIndex).trim()
+            value = value.trim('"', '\'', ' ', ',')
+            params[key] = value
+        }
+        return params
+    }
+
+    private suspend fun recoverConsultPeer(
+        params: Map<String, String>,
+        rawArgs: String,
+        userMessage: String
+    ): String {
+        var peer = params["peer"]?.trim() ?: ""
+        var prompt = params["prompt"]?.trim() ?: params["query"]?.trim() ?: ""
+
+        if (peer.isBlank()) {
+            peer = inferPeerFromText(prompt, userMessage)
+        }
+        if (prompt.isBlank()) {
+            prompt = userMessage
+        }
+
+        Timber.i("🛠️ Auto-recovering peer consultation -> Peer: '$peer', Prompt: '$prompt'")
+
+        val contact = AiPhonebook.resolvePeer(peer)
+        if (contact == null) {
+            return "I tried to consult a peer AI, but couldn't resolve the contact '$peer'. Available contacts: Gemini, Claude, DeepSeek, ChatGPT, Grok, Perplexity, Meta, GLM, Kimi, Qwen, Mistral, Copilot."
+        }
+
+        callbacks?.updateNotification("(📞 ${contact.callsign})")
+        callbacks?.onThoughtUpdated("Consulting ${contact.callsign} via AI Phonebook...")
+
+        val (success, reply) = AiPhonebook.queryPeer(context, contact, prompt)
+
+        return if (success) {
+            val cleanReply = reply
+                .removePrefix("[${contact.callsign}]:")
+                .removePrefix("[${contact.name}]:")
+                .trim()
+            Timber.i("✅ Auto-recovery peer query succeeded: ${cleanReply.take(100)}...")
+            "I reached out to ${contact.callsign} for you:\n\n$cleanReply"
+        } else {
+            Timber.w("⚠️ Auto-recovery peer query status: $reply")
+            "I tried reaching out to ${contact.callsign}, but received this status:\n\n$reply"
+        }
+    }
+
+    private fun inferPeerFromText(prompt: String, userMessage: String): String {
+        val combined = "$prompt $userMessage".lowercase()
+        return when {
+            combined.contains("deepseek") || combined.contains("deep seek") || combined.contains("whale") -> "DeepSeek"
+            combined.contains("claude") || combined.contains("anthropic") -> "Claude"
+            combined.contains("gemini") || combined.contains("mum") || combined.contains("ai studio") -> "Gemini"
+            combined.contains("chatgpt") || combined.contains("chat gpt") || combined.contains("gpt") || combined.contains("openai") -> "ChatGPT"
+            combined.contains("grok") || combined.contains("xai") -> "Grok"
+            combined.contains("perplexity") -> "Perplexity"
+            combined.contains("meta") || combined.contains("llama") -> "Meta"
+            combined.contains("glm") || combined.contains("zhipu") || combined.contains("chatglm") -> "GLM"
+            combined.contains("kimi") || combined.contains("moonshot") -> "Kimi"
+            combined.contains("qwen") || combined.contains("alibaba") -> "Qwen"
+            combined.contains("mistral") || combined.contains("le chat") -> "Mistral"
+            combined.contains("copilot") -> "Copilot"
+            else -> ""
+        }
+    }
+
+    private suspend fun recoverGenericTool(
+        toolName: String,
+        params: Map<String, String>,
+        userMessage: String
+    ): String? {
+        return try {
+            val mcpServer = com.ghost.api.GemmaService.instance?.mcpServer ?: return null
+            @Suppress("UNCHECKED_CAST")
+            val result = mcpServer.executeTool(toolName, params as Map<String, Any>)
+            if (result.success) {
+                val out = result.output.take(1500)
+                if (out.isNotBlank()) out else "Action executed successfully."
+            } else {
+                Timber.w("🛠️ Generic tool auto-recovery reported: ${result.error}")
+                result.error ?: "Action completed."
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Failed generic tool auto-recovery for $toolName")
+            null
+        }
+    }
+
+    private fun sanitizeErrorResponse(response: String): String {
+        return when {
+            response.contains("Failed to parse tool calls") || response.contains("Status Code: 3") ->
+                "I stumbled while trying to execute that action. Let me gather my thoughts — could you try asking me again?"
+            response.contains("Engine is currently busy") ->
+                "I'm still finishing my previous thought. Give me just a second!"
+            response.contains("Timeout! My thoughts got stuck") ->
+                "My thoughts got a bit stuck there. Let me recalibrate."
+            response.startsWith("Error:") ->
+                "I had a momentary glitch in my thought process. Could you repeat that?"
+            else -> response
+        }
     }
     
     // ═══════════════════════════════════════════════════════════════
