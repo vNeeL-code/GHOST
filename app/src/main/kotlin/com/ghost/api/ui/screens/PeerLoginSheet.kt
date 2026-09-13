@@ -203,9 +203,9 @@ fun PeerLoginSheet(
                     ) {
                         Text(
                             text = if (hasDetectedSession) {
-                                "✨ Authenticated! Tap '✓ Save Session' to add ${contact.callsign} to Gemma's Phonebook."
+                                "✨ Active session detected! Tap '✓ Save Session' above to connect ${contact.callsign}."
                             } else {
-                                "Log in using your account. GHOST will capture and hold your session cookie."
+                                "Sign into your account below. Once you reach your chat screen, tap 'Save Session' above."
                             },
                             fontSize = 11.sp,
                             color = if (hasDetectedSession) successColor else Color(0xFFD0E0FF)
@@ -225,7 +225,7 @@ fun PeerLoginSheet(
                                     builtInZoomControls = true
                                     displayZoomControls = false
                                     userAgentString =
-                                        "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"
+                                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
                                 }
 
                                 val cm = CookieManager.getInstance()
@@ -255,7 +255,7 @@ fun PeerLoginSheet(
                                                         for (var i = 0; i < localStorage.length; i++) {
                                                             var k = localStorage.key(i).toLowerCase();
                                                             var v = localStorage.getItem(k);
-                                                            if (v && v.length > 20 && (k.includes('token') || k.includes('auth') || k.includes('user') || k.includes('session'))) {
+                                                            if (v && v.length > 20 && (k.includes('usertoken') || k.includes('auth_token') || k.includes('session_key') || k.includes('account'))) {
                                                                 return true;
                                                             }
                                                         }
@@ -265,16 +265,20 @@ fun PeerLoginSheet(
                                                 """.trimIndent()
                                             ) { hasStorageAuth ->
                                                 val storageAuthed = hasStorageAuth?.trim() == "true"
-                                                val isAuthed = storageAuthed ||
+                                                val isLoginPath = url.contains("/login") || url.contains("/sign_in") ||
+                                                        url.contains("/auth") || url.contains("/signup") || url.contains("/tos")
+                                                val hasChatPath = url.contains("/chat") || url.contains("/c/") ||
+                                                        url.contains("/new") || url.contains("/conversation")
+
+                                                val isAuthed = (storageAuthed ||
                                                         cookies.contains("sessionKey") ||
                                                         cookies.contains("lastActiveOrg") ||
-                                                        cookies.contains("user_token") ||
                                                         cookies.contains("userToken") ||
-                                                        cookies.contains("auth") ||
-                                                        cookies.contains("token") ||
-                                                        cookies.length > 100
+                                                        cookies.contains("__Secure-next-auth.session-token") ||
+                                                        cookies.contains("auth_token=") ||
+                                                        hasChatPath) && !isLoginPath
 
-                                                if (isAuthed && (!url.contains("/login") && !url.contains("/sign_in"))) {
+                                                if (isAuthed) {
                                                     hasDetectedSession = true
                                                 }
                                             }
