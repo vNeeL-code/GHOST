@@ -669,32 +669,12 @@ fun SettingsDialog(
                                                         horizontalArrangement = Arrangement.SpaceBetween,
                                                         verticalAlignment = Alignment.CenterVertically
                                                     ) {
-                                                        Row(
-                                                            verticalAlignment = Alignment.CenterVertically,
-                                                            modifier = Modifier.weight(1f, fill = false)
-                                                        ) {
-                                                            Text(
-                                                                text = contact.callsign,
-                                                                fontSize = 13.sp,
-                                                                fontWeight = FontWeight.Bold,
-                                                                color = Color.White
-                                                            )
-                                                            Spacer(modifier = Modifier.width(6.dp))
-                                                            Surface(
-                                                                shape = RoundedCornerShape(10.dp),
-                                                                color = if (isConnected) Color(0x334CAF50) else Color(0x14FFFFFF)
-                                                            ) {
-                                                                Text(
-                                                                    text = if (isConnected) "● Connected" else "○ Offline",
-                                                                    fontSize = 10.sp,
-                                                                    fontWeight = FontWeight.SemiBold,
-                                                                    color = if (isConnected) Color(0xFF81C784) else Color(0x80FFFFFF),
-                                                                    maxLines = 1,
-                                                                    softWrap = false,
-                                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                                                )
-                                                            }
-                                                        }
+                                                        Text(
+                                                            text = contact.callsign,
+                                                            fontSize = 14.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = Color.White
+                                                        )
 
                                                         Row(
                                                             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -711,7 +691,7 @@ fun SettingsDialog(
                                                                         fontSize = 11.sp,
                                                                         color = accentColor,
                                                                         fontWeight = FontWeight.SemiBold,
-                                                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                                                     )
                                                                 }
                                                                 Surface(
@@ -728,7 +708,7 @@ fun SettingsDialog(
                                                                         fontSize = 11.sp,
                                                                         color = Color(0xFFFF6666),
                                                                         fontWeight = FontWeight.SemiBold,
-                                                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                                                     )
                                                                 }
                                                             } else {
@@ -742,20 +722,27 @@ fun SettingsDialog(
                                                                         fontSize = 11.sp,
                                                                         fontWeight = FontWeight.Bold,
                                                                         color = Color.Black,
-                                                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
                                                                     )
                                                                 }
                                                             }
                                                         }
                                                     }
 
-                                                    Text(
-                                                        text = "${contact.organization} • ${contact.specialty}",
-                                                        fontSize = 10.sp,
-                                                        color = textDim,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
+                                                    Surface(
+                                                        shape = RoundedCornerShape(6.dp),
+                                                        color = if (isConnected) Color(0x334CAF50) else Color(0x14FFFFFF)
+                                                    ) {
+                                                        Text(
+                                                            text = if (isConnected) "● Connected (Holding Cookie)" else "○ Disconnected",
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            color = if (isConnected) Color(0xFF81C784) else Color(0x80FFFFFF),
+                                                            maxLines = 1,
+                                                            softWrap = false,
+                                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                                        )
+                                                    }
                                                 }
                                             }
                                     }
