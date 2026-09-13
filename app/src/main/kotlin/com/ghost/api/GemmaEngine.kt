@@ -42,11 +42,11 @@ class GemmaEngine(private val context: Context) : LlmBackend {
     private var toolSets: List<ToolSet> = emptyList()
     private val isBusy = java.util.concurrent.atomic.AtomicBoolean(false)
     
-    // Sampler config for inference
+    // Sampler config for inference - tuned for Gemma 4 E2B conversational stability
     private var samplerConfig: SamplerConfig = SamplerConfig(
         topK = 40,
-        topP = 0.95,
-        temperature = 0.8
+        topP = 0.90,
+        temperature = 0.65
     )
 
     override var activeBackend: String? = null
@@ -215,19 +215,36 @@ class GemmaEngine(private val context: Context) : LlmBackend {
             }
 
             var fullResponse = ""
+            var isLoopDetected = false
             conversation?.sendMessageAsync(
                 Contents.of(contents),
                 object : MessageCallback {
                     override fun onMessage(message: Message) {
+                        if (isLoopDetected) return
                         val token = message.toString()
                         
                         if (fullResponse.isEmpty()) {
                             Timber.i("⏱️ First token received after ${System.currentTimeMillis() - startTime}ms")
                         }
                         fullResponse += token
+
+                        // Live runaway loop guard: immediately halt if token/phrase repeats 6+ times
+                        val tail = fullResponse.takeLast(60)
+                        val loopMatch = findDegenerateLoopMatch(tail, minRepeats = 6)
+                        if (loopMatch != null) {
+                            Timber.w("🚨 Live runaway token loop detected in stream ('${loopMatch.value}'). Terminating generation early.")
+                            isLoopDetected = true
+                            val truncated = truncateRepetition(fullResponse)
+                            onComplete(truncated)
+                            isBusy.set(false)
+                            deferred.complete(Unit)
+                            return
+                        }
+
                         onToken(token)
                     }
                     override fun onDone() {
+                        if (isLoopDetected) return
                         try {
                             onComplete(truncateRepetition(fullResponse))
                         } finally {
@@ -236,6 +253,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                         }
                     }
                     override fun onError(throwable: Throwable) {
+                        if (isLoopDetected) return
                         try {
                             onError(throwable.message ?: "Stream error")
                         } finally {
@@ -357,25 +375,24 @@ class GemmaEngine(private val context: Context) : LlmBackend {
     }
 
     private fun truncateRepetition(response: String): String {
-        if (response.length < 100) return response
+        if (response.length < 20) return response
         
         // 1. Sentence-level repetition
         val sentences = response.split(Regex("""(?<=[.!?])\s+""")).filter { it.length >= 15 }
-        if (sentences.size >= 10) {
+        if (sentences.size >= 8) {
             val seen = java.util.HashSet<String>()
             for ((i, sentence) in sentences.withIndex()) {
                 val normalized = sentence.trim().lowercase()
-                if (!seen.add(normalized) && i > 5) {
+                if (!seen.add(normalized) && i > 4) {
                     return sentences.take(i).joinToString(" ") + "\n\n(...loop detected)"
                 }
             }
         }
         
-        // 2. Word-level repetition ("beambeambeambeam")
-        val wordPattern = Regex("""(.{3,15}?)\1{10,}""") // A 3-15 char string repeated 10+ times
-        val match = wordPattern.find(response)
+        // 2. Token / word / phrase repetition: e.g. "a,a,a,a,a", "s's's's's'", "word word word"
+        val match = findDegenerateLoopMatch(response, minRepeats = 6)
         if (match != null) {
-            return response.substring(0, match.range.first) + "\n\n(...loop detected)"
+            return response.substring(0, match.range.first).trimEnd() + "\n\n(...loop detected)"
         }
         
         return response
@@ -418,5 +435,31 @@ class GemmaEngine(private val context: Context) : LlmBackend {
         scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 70, stream)
         if (scaledBitmap != this) scaledBitmap.recycle()
         return stream.toByteArray()
+    }
+
+    companion object {
+        /**
+         * Detects runaway degenerative token/phrase loops (e.g. "s's's's's'", "a,a,a,a,a,a", "word word word").
+         * Crucially enforces that the repeating sequence MUST contain alphabetic letters.
+         * This strictly prevents false positives on numbers (e.g. "666666", "1000000"), markdown rules ("---"),
+         * code block indentation, or punctuation sequences.
+         */
+        fun findDegenerateLoopMatch(text: String, minRepeats: Int = 6): MatchResult? {
+            // 1. Single-letter runaway loop (must be a letter, 10+ consecutive repeats, e.g. "aaaaaaaaaa")
+            val singleLetterMatch = Regex("""([a-zA-Z])\1{9,}""").find(text)
+            if (singleLetterMatch != null) return singleLetterMatch
+
+            // 2. Multi-character repeating sequence (length 2..25, repeated minRepeats+ times)
+            // E.g. "a,a,a,a,a,a" or "s's's's's's's'"
+            val pattern = Regex("""(.{2,25}?)\1{${minRepeats - 1},}""")
+            for (m in pattern.findAll(text)) {
+                val unit = m.groupValues[1]
+                // Must contain at least one letter so we don't trip on digits (6666), markdown dividers (---), or whitespace
+                if (unit.any { it.isLetter() }) {
+                    return m
+                }
+            }
+            return null
+        }
     }
 }

@@ -273,6 +273,16 @@ fun ChatMessageRow(
     val cleanDeviceName = remember(context) { com.ghost.api.logic.ContextManager.resolveDeviceCallSign(context) }
     val aiHeaderTag = remember(cleanDeviceName) { "✧ $cleanDeviceName" }
 
+    // Strip redundant leading callsign prefix from AI messages so it never renders twice
+    val cleanContent = if (!isUser) {
+        displayContent
+            .replace(Regex("""^✧\s*.*?:?\s*"""), "")
+            .replace(Regex("""^$cleanDeviceName:\s*"""), "")
+            .trim()
+    } else {
+        displayContent
+    }
+
     // Pulsing terminal cursor for streaming assistant tokens
     val infiniteTransition = rememberInfiniteTransition(label = "cursor")
     val cursorAlpha by infiniteTransition.animateFloat(
@@ -286,10 +296,10 @@ fun ChatMessageRow(
     )
 
     val finalDisplayContent = if (isUser) {
-        "$displayContent\n\n[$timeStr]"
+        "$cleanContent\n\n[$timeStr]"
     } else {
         val cursorSuffix = if (!message.isComplete) " ▋" else ""
-        "$aiHeaderTag:\n$displayContent$cursorSuffix\n\n[$timeStr]"
+        "$aiHeaderTag:\n$cleanContent$cursorSuffix\n\n[$timeStr]"
     }
     
     val alignment = if (isUser) Alignment.End else Alignment.Start
@@ -334,9 +344,9 @@ fun ChatMessageRow(
     }
 
     val ucfFormattedContent = if (isUser) {
-        "Δ $operatorAvatar ∇:\n$displayContent\n\n[$timeStr]"
+        "Δ $operatorAvatar ∇:\n$cleanContent\n\n[$timeStr]"
     } else {
-        "$aiHeaderTag:\n$displayContent\n\n[$timeStr]"
+        "$aiHeaderTag:\n$cleanContent\n\n[$timeStr]"
     }
 
     var showThinking by remember { mutableStateOf(false) }

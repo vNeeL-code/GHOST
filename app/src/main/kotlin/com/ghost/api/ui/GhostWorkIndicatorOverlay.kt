@@ -117,6 +117,36 @@ class GhostWorkIndicatorOverlay(
             "ingesting payload..."
         )
 
+        private val COMPACTION_FLAVORS = listOf(
+            "compacting neural memory...",
+            "defragmenting thoughts...",
+            "archiving episodic lore...",
+            "rolling up context pad...",
+            "tidying the hippocampus...",
+            "compressing session cache...",
+            "clearing kv headroom..."
+        )
+
+        private val THINKING_FLAVORS = listOf(
+            "pondering the orb...",
+            "brewing thoughts...",
+            "crunching tensors...",
+            "spinning up synapses...",
+            "aligning attention heads...",
+            "consulting neural core...",
+            "summoning words...",
+            "herding electric sheep..."
+        )
+
+        private val SYNTHESIS_FLAVORS = listOf(
+            "synthesizing findings...",
+            "connecting the dots...",
+            "digesting web packets...",
+            "distilling search results...",
+            "assembling final answer...",
+            "weaving context threads..."
+        )
+
         private val GENERAL_FLAVORS = listOf(
             "pondering the orb...",
             "brewing thoughts...",
@@ -131,6 +161,9 @@ class GhostWorkIndicatorOverlay(
         fun pick(tag: String): String {
             val upper = tag.uppercase()
             val list = when {
+                upper.contains("COMPACT") || upper.contains("FLUSH") -> COMPACTION_FLAVORS
+                upper.contains("SYNTHES") || upper.contains("REFLECT") -> SYNTHESIS_FLAVORS
+                upper.contains("THINK") || upper.contains("INFERENCE") || upper.contains("PROCESS") -> THINKING_FLAVORS
                 upper.contains("STORAGE") || upper.contains("FILE") || upper.contains("MEDIA") || upper.contains("MP3") -> STORAGE_FLAVORS
                 upper.contains("MEMORY") || upper.contains("MEMORIES") || upper.contains("RECALL") || upper.contains("REMEMBER") -> MEMORY_FLAVORS
                 upper.contains("CALENDAR") || upper.contains("SCHEDULE") || upper.contains("EVENT") -> CALENDAR_FLAVORS

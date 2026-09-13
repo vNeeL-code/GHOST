@@ -1521,10 +1521,12 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
     override fun showThinking() {
         responseNotificationManager.showThinking()
+        showWorkSignal("THINKING")
     }
 
     override fun cancelThinking() {
         responseNotificationManager.cancelThinking()
+        hideWorkSignal(force = true)
     }
 
     override fun showResponse(text: String, enableBubble: Boolean) {
@@ -1566,6 +1568,10 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
     override fun speak(text: String) {
         if (::ttsManager.isInitialized) ttsManager.speak(text)
+    }
+
+    override fun stopSpeaking() {
+        if (::ttsManager.isInitialized) ttsManager.stop()
     }
 
     override fun storeConversationTurn(userMessage: String, response: String, sessionId: String, imageUri: String?) {
@@ -1700,9 +1706,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         }
     }
 
-    fun hideWorkSignal() {
+    fun hideWorkSignal(force: Boolean = false) {
         if (::overlayManager.isInitialized) {
-            overlayManager.hideWorkSignal()
+            overlayManager.hideWorkSignal(force)
         }
     }
 

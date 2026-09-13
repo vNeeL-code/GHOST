@@ -60,7 +60,7 @@ class NetworkToolSet(private val context: Context) : ToolSet {
 
             mapOf("result" to "error", "message" to "No search results found for '$cleanQuery'.")
         } finally {
-            com.ghost.api.GemmaService.instance?.hideWorkSignal()
+            com.ghost.api.GemmaService.instance?.showWorkSignal("SYNTHESIZING")
         }
     }
 

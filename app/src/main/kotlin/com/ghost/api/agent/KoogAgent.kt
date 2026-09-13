@@ -3,7 +3,9 @@ package com.ghost.api.agent
 import android.content.Context
 import android.graphics.Bitmap
 import com.ghost.api.LlmBackend
+import com.ghost.api.GemmaEngine
 import com.ghost.api.Constants
+import com.ghost.api.logic.ContextManager
 import com.ghost.api.logic.IntentHandler
 import org.json.JSONObject
 import kotlinx.coroutines.CoroutineScope
@@ -205,7 +207,9 @@ class KoogAgent(
     var sessionToolTokens: Int get() = _sessionToolTokens.get(); set(value) { _sessionToolTokens.set(value) }
 
     fun recordToolChars(charCount: Int) {
-        val estimatedTokens = (charCount / Constants.CHARS_PER_TOKEN) + 50
+        // Accurately account for tool execution turn overhead in LiteRT-LM:
+        // payload tokens (charCount / 4) + pre-tool thought block (~400t) + tool_call syntax (~50t) + post-tool synthesis thoughts (~550t)
+        val estimatedTokens = (charCount / Constants.CHARS_PER_TOKEN) + 1000
         _sessionToolTokens.addAndGet(estimatedTokens)
         Timber.d("Recorded tool tokens: +$estimatedTokens (session total: ${_sessionToolTokens.get()})")
     }
@@ -370,6 +374,7 @@ class KoogAgent(
      */
     suspend fun flushAndCompactSession() {
         Timber.i("🌀 Explicit Session Compaction & KV Cache Flush requested")
+        com.ghost.api.GemmaService.instance?.showWorkSignal("COMPACTING", 1600)
         try {
             val oldMemory = memoryManager.getCompactedSessionMemory()
 
@@ -395,7 +400,8 @@ class KoogAgent(
             }
 
             if (messagesToCompact.isNotEmpty()) {
-                val newMemory = SessionMemoryCompactor.compactOldMessages(messagesToCompact, oldMemory, llmEngine)
+                val assistantCallSign = getAssistantCallSign()
+                val newMemory = SessionMemoryCompactor.compactOldMessages(messagesToCompact, oldMemory, llmEngine, assistantCallSign)
                 if (!newMemory.startsWith("Error:") && newMemory.isNotBlank()) {
                     memoryManager.updateCompactedSessionMemory(newMemory)
                 } else {
@@ -478,12 +484,13 @@ class KoogAgent(
         incomingAudioBytes: Int = 0
     ): Int {
         val historyChars = synchronized(_conversationHistory) { _conversationHistory.sumOf { it.content.length } }
-        val telemetryTokens = (turnsSinceKvFlush + 1) * 150
+        val telemetryTokens = (turnsSinceKvFlush + 1) * 80
         val textTokens = (historyChars + incomingChars + contextLength) / Constants.CHARS_PER_TOKEN
         val imageTokens = sessionImageTokens + (incomingImageCount * Constants.TOKENS_PER_IMAGE)
         val audioTokens = sessionAudioTokens + calculateAudioTokens(incomingAudioBytes)
         val toolTokens = sessionToolTokens
-        return 2200 + telemetryTokens + textTokens + imageTokens + audioTokens + toolTokens
+        // Base overhead: system prompt (~400t) + 35 tool schemas & declarations (~1300t) = 1700t
+        return 1700 + telemetryTokens + textTokens + imageTokens + audioTokens + toolTokens
     }
 
     fun calculateAudioTokens(byteCount: Int): Int {
@@ -582,8 +589,7 @@ class KoogAgent(
         sessionId: String,
         onToken: (String) -> Unit
     ) {
-        val normalizedMessage = com.ghost.api.logic.NumberToWords.convertNumbersInText(message)
-        val context = contextManager.buildContext()
+        val context = perceive()
         val (queuedImages, audio) = drainMedia()
         val images = queuedImages.map { it.bitmap }
 
@@ -594,7 +600,7 @@ class KoogAgent(
                     append(context)
                     append("\n\n")
                 }
-                append(normalizedMessage)
+                append(message)
             }
 
         // Stream tokens, filtering out think-channel content
@@ -648,13 +654,15 @@ class KoogAgent(
                 }
             },
             onComplete = { fullResponse ->
-                // Record to conversation history for continuity
+                // Record to conversation history with 3-Actor tagging
                 synchronized(_conversationHistory) {
-                    _conversationHistory.add(Message("user", message))
-                    // Strip think blocks from persisted assistant message
-                    val clean = fullResponse
-                        .replace(Regex("<think>[\\s\\S]*?</think>"), "")
-                        .trim()
+                    val operatorAvatar = getOperatorAvatar()
+                    val assistantCallSign = getAssistantCallSign()
+                    val timeFormatter = java.time.format.DateTimeFormatter.ofPattern("h:mm a", java.util.Locale.getDefault())
+                    val timeStr = java.time.LocalTime.now().format(timeFormatter)
+                    _conversationHistory.add(Message("user", "Δ $operatorAvatar ∇ [$timeStr]: $message"))
+                    // Strip think blocks and protocol tokens from persisted assistant message
+                    val clean = cleanAssistantHistory(fullResponse)
                     _conversationHistory.add(Message("assistant", clean))
                 }
                 Timber.i("✧ SSE stream complete (${fullResponse.length} chars)")
@@ -729,9 +737,10 @@ class KoogAgent(
             }
             // -----------------------------------------------------------------------
 
+            val isAutonomous = event.isDream || event.message.startsWith("Δ 👾 ∇")
             // 1. PERCEIVE: Gather context (Tiered)
             Timber.i("👁️ Perceiving device state...")
-            val context = perceive()
+            val context = perceive(isAutonomous = isAutonomous)
             Timber.d("Context gathered: ${context.length} chars")
 
             // 2. Drain media queues
@@ -744,7 +753,7 @@ class KoogAgent(
 
             // 2.5 Proactive KV Headroom Guard (prevent mid-generation KV saturation chokes)
             val totalEstimatedTokens = estimateCurrentKvTokens(context.length, event.message.length, images.size, audioBytes)
-            if (totalEstimatedTokens > 3000 || turnsSinceKvFlush >= 4) {
+            if (totalEstimatedTokens > 3500 || turnsSinceKvFlush >= 8 || sessionToolTokens >= 1200) {
                 Timber.i("🌀 Proactive KV headroom guard triggered: ~$totalEstimatedTokens tokens (turn $turnsSinceKvFlush, audio: ${incomingAudioTokens}t, img: ${incomingImageTokens}t, tools: ${sessionToolTokens}t). Compacting before inference...")
                 flushAndCompactSession()
             }
@@ -754,13 +763,20 @@ class KoogAgent(
             sessionImageTokens += incomingImageTokens
 
             // 3. Add user message to history
-            val normalizedMessage = com.ghost.api.logic.NumberToWords.convertNumbersInText(event.message)
-            val currentDate = java.time.LocalDate.now().toString()
-            val userMessageContent = "[Date: $currentDate] $normalizedMessage"
+            val rawMessage = event.message
+            val operatorAvatar = getOperatorAvatar()
+            val timeFormatter = java.time.format.DateTimeFormatter.ofPattern("h:mm a", java.util.Locale.getDefault())
+            val timeStr = java.time.LocalTime.now().format(timeFormatter)
+
+            val taggedHistoryContent = if (isAutonomous) {
+                if (rawMessage.startsWith("Δ 👾 ∇ GHOST:")) rawMessage else "Δ 👾 ∇ GHOST: $rawMessage"
+            } else {
+                "Δ $operatorAvatar ∇ [$timeStr]: $rawMessage"
+            }
 
             val userMessage = Message(
-                role = "user",
-                content = userMessageContent,
+                role = if (isAutonomous) "system" else "user",
+                content = taggedHistoryContent,
                 hadImage = images.isNotEmpty(),
                 hadAudio = audio != null
             )
@@ -777,9 +793,15 @@ class KoogAgent(
             val sentenceBuffer = StringBuilder()
             var isThinking = false
 
+            val promptForModel = if (isAutonomous) {
+                if (rawMessage.startsWith("Δ 👾 ∇ GHOST:")) rawMessage else "Δ 👾 ∇ GHOST: $rawMessage"
+            } else {
+                rawMessage
+            }
+
             val response = think(
                 context = context,
-                userMessage = normalizedMessage,
+                userMessage = promptForModel,
                 images = images.takeIf { it.isNotEmpty() },
                 audio = audio,
                 onToken = { token ->
@@ -787,17 +809,17 @@ class KoogAgent(
                     
                     // Thought Markers (Divert to Thought Fold)
                     if (cleanToken.contains("<think>") || cleanToken.contains("<|channel>thought") || 
-                        cleanToken.contains("<|tool_call|>")) {
+                        cleanToken.contains("<|tool_call>")) {
                         
                         isThinking = true
                         
-                        if (cleanToken.contains("<|tool_call|>")) {
+                        if (cleanToken.contains("<|tool_call>")) {
                             callbacks?.onThoughtUpdated("Planning Action...")
                         }
                         
                         cleanToken = cleanToken
                             .replace("<think>", "").replace("<|channel>thought", "")
-                            .replace("<|tool_call|>", "")
+                            .replace("<|tool_call>", "")
                     }
                     
                     // End Markers (Return to Chat)
@@ -833,6 +855,12 @@ class KoogAgent(
                         // Strip leading whitespace/artifacts from the very first token
                         if (responseBuffer.isEmpty()) {
                             cleanToken = cleanToken.trimStart { it == ' ' || it == 'Δ' || it == '∇' || it == '\n' || it == '\r' }
+                            val assistantCallSign = getAssistantCallSign()
+                            if (cleanToken.startsWith("✧") || cleanToken.startsWith(assistantCallSign)) {
+                                cleanToken = cleanToken
+                                    .replace(Regex("""^✧\s*.*?:?\s*"""), "")
+                                    .replace(Regex("""^$assistantCallSign:\s*"""), "")
+                            }
                         }
                         
                         // Extract ANY emoji that appears naturally in the stream to trigger the emotion visualizer
@@ -854,33 +882,46 @@ class KoogAgent(
                             } 
 
                             if (!event.isDream) {
-                                callbacks?.onMessageAdded(responseBuffer.toString(), isUser = false, isComplete = false)
+                                callbacks?.onMessageAdded(wrapResponse(responseBuffer.toString()), isUser = false, isComplete = false)
                             }
                         }
                     }
+                },
+                onResetBuffers = {
+                    responseBuffer.setLength(0)
+                    thoughtBuffer.setLength(0)
+                    sentenceBuffer.setLength(0)
+                    isThinking = false
+                    callbacks?.onMessageAdded("", isUser = false, isComplete = false)
                 }
             )
             val inferenceMs = System.currentTimeMillis() - inferenceStartMs
             lastInferenceTime = System.currentTimeMillis()
             Timber.i("💭 Process complete (${inferenceMs}ms): ${response.take(50)}...")
+            callbacks?.cancelThinking()
 
             // Stuck loop detection: repetitive tokens (e.g. 🎵, ..., or identical response hash) = KV corruption
             val cleanTrimmed = response.trim().lowercase()
             val responseHash = cleanTrimmed.hashCode()
             val isEmojiChoke = cleanTrimmed.length <= 4 && !cleanTrimmed.any { it.isLetterOrDigit() }
+            val hasRepetitiveLoop = GemmaEngine.findDegenerateLoopMatch(cleanTrimmed, minRepeats = 6) != null || cleanTrimmed.contains("loop detected")
             val isDuplicate = (responseHash == lastResponseHash && lastResponseHash != 0) ||
                               (cleanTrimmed.length <= 6 && cleanTrimmed == lastResponseText && cleanTrimmed.isNotEmpty()) ||
-                              isEmojiChoke
+                              isEmojiChoke ||
+                              hasRepetitiveLoop
             
             _lastResponseHash.set(responseHash)
             lastResponseText = cleanTrimmed
 
             if (isDuplicate) {
                 Timber.w("🚨 Stuck loop / emoji choke detected ('$cleanTrimmed') — triggering immediate recovery flush")
+                callbacks?.stopSpeaking()
+                sentenceBuffer.setLength(0)
                 flushAndCompactSession()
             } else if (!event.isDream) {
+                val cleanAssistantMsg = cleanAssistantHistory(response)
                 synchronized(_conversationHistory) {
-                    _conversationHistory.add(Message(role = "assistant", content = response))
+                    _conversationHistory.add(Message(role = "assistant", content = cleanAssistantMsg))
                     while (_conversationHistory.size > 10) {
                         _conversationHistory.removeAt(0)
                     }
@@ -890,7 +931,7 @@ class KoogAgent(
             // 8. Dynamic KV Cache Flush based on token limit or turns
             turnsSinceKvFlush++
             val postEstimatedTokens = estimateCurrentKvTokens(context.length, 0, 0, 0)
-            if (postEstimatedTokens > 3000 || turnsSinceKvFlush >= 4) {
+            if (postEstimatedTokens > 3500 || turnsSinceKvFlush >= 8 || sessionToolTokens >= 1200) {
                 Timber.i("🌀 KV cache reaching capacity (~$postEstimatedTokens tokens, $turnsSinceKvFlush turns, audio: ${sessionAudioTokens}t, img: ${sessionImageTokens}t, tools: ${sessionToolTokens}t). Auto-flushing & Compacting...")
                 flushAndCompactSession()
             }
@@ -907,9 +948,11 @@ class KoogAgent(
             }
 
             // 10. Platform callbacks: UI, TTS, persistence
-            // Guard: blank or emoji choke response = model failed generation — use fallback
-            val safeCleanResponse = if (response.isBlank() || isEmojiChoke) {
+            // Guard: blank, truncated single-character, or emoji choke response = model failed generation — use fallback
+            val safeCleanResponse = if (response.isBlank() || response.trim().length <= 1 || isEmojiChoke) {
                 Timber.w("⚠️ Blank or emoji choke response — using recovery fallback")
+                callbacks?.stopSpeaking()
+                sentenceBuffer.setLength(0)
                 "..."
             } else response
 
@@ -975,7 +1018,7 @@ class KoogAgent(
 
             // Pre-reflection KV headroom check: if context + huge observation approaches limit, compact first
             val preEstimatedTokens = estimateCurrentKvTokens(event.context.length, observation.length, 0)
-            if (preEstimatedTokens > 3000 || turnsSinceKvFlush >= 4) {
+            if (preEstimatedTokens > 3500 || turnsSinceKvFlush >= 6 || sessionToolTokens >= 1200) {
                 Timber.i("🌀 Pre-reflection KV headroom guard triggered: ~$preEstimatedTokens tokens (turn $turnsSinceKvFlush). Compacting before tool reflection...")
                 flushAndCompactSession()
             }
@@ -992,12 +1035,15 @@ class KoogAgent(
             }
 
             // Single think() call - no recursion possible
+            callbacks?.showThinking()
+            com.ghost.api.GemmaService.instance?.showWorkSignal("SYNTHESIZING")
             val reflection = think(
                 event.context,
                 "Observation: $observation\n\nProvide the final answer to the user.",
                 null, 
                 null
             )
+            callbacks?.cancelThinking()
 
             // Final Answer
             val finalContent = reflection.trim()
@@ -1023,7 +1069,7 @@ class KoogAgent(
             // Post-reflection: increment turnsSinceKvFlush and guard KV headroom
             turnsSinceKvFlush++
             val postEstimatedTokens = estimateCurrentKvTokens(event.context.length, 0, 0)
-            if (isEmojiChoke || postEstimatedTokens > 3000 || turnsSinceKvFlush >= 4) {
+            if (isEmojiChoke || postEstimatedTokens > 3500 || turnsSinceKvFlush >= 6 || sessionToolTokens >= 1200) {
                 Timber.i("🌀 Post-reflection KV headroom guard: ~$postEstimatedTokens tokens (turn $turnsSinceKvFlush). Compacting...")
                 flushAndCompactSession()
             }
@@ -1066,9 +1112,10 @@ class KoogAgent(
      * v4.1.7: Added comprehensive native token cleanup.
      */
     private fun wrapResponse(content: String): String {
+        val assistantCallSign = getAssistantCallSign()
         return content
             // Gemma 4 string delimiter tokens
-            .replace("<|\"|\u003e", "")
+            .replace("<|\"|>", "")
             // Turn markers
             .replace(Regex("<\\|turn>|<turn\\|>"), "")
             // Tool declaration blocks (shouldn't appear in response but safety net)
@@ -1079,25 +1126,55 @@ class KoogAgent(
             .replace(Regex("<\\|tool_response>.*?<tool_response\\|>", RegexOption.DOT_MATCHES_ALL), "")
             // Legacy <call> blocks (old prompt format, should no longer appear)
             .replace(Regex("<call>.*?</call>", RegexOption.DOT_MATCHES_ALL), "")
-            // Channel markers
+            // Gemma 4 Channel markers & thought blocks
+            .replace(Regex("<\\|channel>thought[\\s\\S]*?<channel\\|>"), "")
+            .replace(Regex("<\\|channel>thought[\\s\\S]*"), "")
             .replace(Regex("<\\|channel>.*?<channel\\|>", RegexOption.DOT_MATCHES_ALL), "")
             // Think blocks
-            .replace(Regex("<think>.*?</think>", RegexOption.DOT_MATCHES_ALL), "")
+            .replace(Regex("<think>[\\s\\S]*?</think>"), "")
             // Stray protocol fragments
             .replace(Regex("<\\|[a-z_]+\\|?>"), "")
             .replace(Regex("<[a-z_]+\\|>"), "")
+            // Strip any self-prepended callsign/avatar headers so the UI stays clean
+            .replace(Regex("""^✧\s*.*?:\s*"""), "")
+            .replace(Regex("""^$assistantCallSign:\s*"""), "")
+            // Clean on-device contraction stutters
+            .replace(Regex("""\byou're're\b""", RegexOption.IGNORE_CASE), "you're")
+            .replace(Regex("""\byou's you're\b""", RegexOption.IGNORE_CASE), "you're")
+            .replace(Regex("""\bI's\b"""), "I'm")
+            .replace(Regex("""\byou's\b""", RegexOption.IGNORE_CASE), "you")
+            .trim()
+    }
+
+    fun getOperatorAvatar(): String {
+        return try {
+            this@KoogAgent.context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+                .getString(Constants.PREF_OPERATOR_AVATAR, "🦑") ?: "🦑"
+        } catch (e: Exception) {
+            "🦑"
+        }
+    }
+
+    fun getAssistantCallSign(): String {
+        return ContextManager.resolveDeviceCallSign(this@KoogAgent.context)
+    }
+
+    private fun cleanAssistantHistory(raw: String): String {
+        val assistantCallSign = getAssistantCallSign()
+        return wrapResponse(raw)
+            .replace(Regex("""^✧\s*.*?:"""), "")
+            .replace(Regex("""^$assistantCallSign:\s*"""), "")
             .trim()
     }
     
     // ═══════════════════════════════════════════════════════════════
-
-    // ═══════════════════════════════════════════════════════════════
     // PERCEIVE: Gather context from MCP resources
     // ═══════════════════════════════════════════════════════════════
     
-    
-    private suspend fun perceive(): String {
-        return contextManager.buildContext()
+    private suspend fun perceive(isAutonomous: Boolean = false): String {
+        val isFullBaseline = (turnsSinceKvFlush == 0) || isCriticalBattery() || 
+            (try { sensorManager.getContextSnapshot().battery.temperature >= 55f } catch (e: Exception) { false })
+        return contextManager.buildContext(isFullBaseline = isFullBaseline, isAutonomous = isAutonomous)
     }
     
     // ═══════════════════════════════════════════════════════════════
@@ -1196,13 +1273,13 @@ class KoogAgent(
         images: List<android.graphics.Bitmap>?,
         audio: ByteArray?,
         retryCount: Int = 0,
-        onToken: ((String) -> Unit)? = null
+        onToken: ((String) -> Unit)? = null,
+        onResetBuffers: (() -> Unit)? = null
     ): String {
 
         // KV cache holds conversation history natively.
         // We only inject context (body/sensors) here.
-
-        val contextBlock = contextManager.buildContext()
+        val contextBlock = if (context.isNotBlank()) context else perceive()
         val mediaCue = when {
             images != null && images.isNotEmpty() && audio != null -> "[Multimodal Input: User attached image and voice audio recording. Inspect image and listen to audio.]"
             images != null && images.isNotEmpty() -> "[Multimodal Input: User attached image. Inspect image directly.]"
@@ -1243,11 +1320,13 @@ class KoogAgent(
 
             val response = responseDeferred.await()
             
-            val isErrorResponse = response.isBlank() || 
-                                  response.contains("Timeout! My thoughts got stuck") || 
-                                  response.startsWith("Error:") ||
-                                  response.contains("I... have no words") ||
-                                  response.contains("loop detected")
+            val cleanResponse = response.trim()
+            val isErrorResponse = cleanResponse.isBlank() || 
+                                  cleanResponse.length <= 1 ||
+                                  cleanResponse.contains("Timeout! My thoughts got stuck") || 
+                                  cleanResponse.startsWith("Error:") ||
+                                  cleanResponse.contains("I... have no words") ||
+                                  cleanResponse.contains("loop detected")
 
             if (isErrorResponse) {
                 Timber.e("⚠️ KoogAgent: LLM returned Error/Empty response! (try $retryCount)")
@@ -1259,6 +1338,8 @@ class KoogAgent(
                 // Blank response often means the mathematical KV sequence has gone psychotic/corrupted.
                 if (retryCount == 0) {
                     Timber.w("🚨 Auto-retrying inference after HARD RESET (Purging NPU state)...")
+                    callbacks?.stopSpeaking()
+                    onResetBuffers?.invoke()
                     // Phase 12: Use hardReset to clear Hexagon DSP hardware hangs
                     llmEngine.hardReset()
                     
@@ -1268,7 +1349,15 @@ class KoogAgent(
                     
                     turnsSinceKvFlush = 0
                     sessionToolTokens = 0
-                    return think(context, userMessage, images, audio, retryCount = 1)
+                    return think(
+                        context = context,
+                        userMessage = userMessage,
+                        images = images,
+                        audio = audio,
+                        retryCount = 1,
+                        onToken = onToken,
+                        onResetBuffers = onResetBuffers
+                    )
                 } else {
                     Timber.e("❌ Auto-retry failed, returning fallback")
                     // Request async flush for the future anyway
@@ -1283,6 +1372,8 @@ class KoogAgent(
             Timber.e(e, "LLM inference failed (try $retryCount)")
             if (retryCount == 0) {
                 Timber.w("🚨 Auto-retrying inference after exception via HARD RESET...")
+                callbacks?.stopSpeaking()
+                onResetBuffers?.invoke()
                 try {
                     // Phase 12: Ensure absolute native teardown on exceptions
                     llmEngine.hardReset()
@@ -1293,7 +1384,15 @@ class KoogAgent(
                     
                     turnsSinceKvFlush = 0
                     sessionToolTokens = 0
-                    return think(context, userMessage, images, audio, retryCount = 1)
+                    return think(
+                        context = context,
+                        userMessage = userMessage,
+                        images = images,
+                        audio = audio,
+                        retryCount = 1,
+                        onToken = onToken,
+                        onResetBuffers = onResetBuffers
+                    )
                 } catch (e2: Exception) {
                     Timber.e(e2, "Failed to apply reset during auto-retry")
                 }
@@ -1332,9 +1431,20 @@ class KoogAgent(
             buildString {
                 append("\n\n## Recent Conversation History\n")
                 append("These are your most recent interactions. Continue seamlessly from here:\n\n")
+                val operatorAvatar = getOperatorAvatar()
+                val assistantCallSign = getAssistantCallSign()
                 for (msg in recentMessages) {
-                    val role = if (msg.role == "user") "User" else "Assistant"
-                    append("$role: ${msg.content}\n")
+                    val actor = when {
+                        msg.role == "system" || msg.content.startsWith("Δ 👾 ∇") -> "Δ 👾 ∇ GHOST"
+                        msg.role == "user" -> "Δ $operatorAvatar ∇"
+                        else -> "✧ $assistantCallSign"
+                    }
+                    val cleanContent = msg.content
+                        .removePrefix("Δ 👾 ∇ GHOST:")
+                        .replace(Regex("""^Δ\s*.*?\s*∇(\s*\[.*?\])?:\s*"""), "")
+                        .replace(Regex("""^✧\s*.*?:"""), "")
+                        .trim()
+                    append("$actor: $cleanContent\n")
                 }
             }
         }

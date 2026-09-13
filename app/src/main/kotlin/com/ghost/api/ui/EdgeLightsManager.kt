@@ -248,6 +248,13 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
         isShowing = false
     }
 
+    fun invalidate() {
+        mainHandler.post {
+            topView?.invalidate()
+            bottomView?.invalidate()
+        }
+    }
+
     override fun onAudioData(waveform: ByteArray, fft: ByteArray, intensity: Float, bass: Float) {
         if (!isShowing || isLandscape()) return
         topView?.updateAudioData(fft, intensity, bass)
@@ -270,6 +277,7 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
             style = Paint.Style.STROKE
         }
 
+        protected val cachedPath = android.graphics.Path()
         protected val mainHandler = Handler(Looper.getMainLooper())
         protected var smoothedBass = 0f
 
@@ -282,15 +290,24 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
         protected val layerWidthScales = floatArrayOf(0.65f, 0.85f, 1.05f)
         protected val layerPaletteIdx = intArrayOf(0, 1, 2)
 
+        // Palette order: Layer 0 (top/front) is Pale Teal/Cyan matching the avatar's outer bloom.
+        // Iris spectrum follows in subsequent layers (purple, blue, green, gold, red).
         protected val defaultColors = intArrayOf(
-            Color.parseColor("#A78BFA"),
-            Color.parseColor("#4285F4"),
-            Color.parseColor("#34A853"),
-            Color.parseColor("#FBBC05"),
-            Color.parseColor("#EA4335")
+            Color.parseColor("#38BDF8"), // Pale Teal / Cyan (matches avatar outer bloom)
+            Color.parseColor("#A78BFA"), // Purple
+            Color.parseColor("#4285F4"), // Blue
+            Color.parseColor("#34A853"), // Green
+            Color.parseColor("#FBBC05"), // Gold
+            Color.parseColor("#EA4335")  // Red
         )
         protected var targetColors: IntArray = defaultColors
         protected var currentColors: IntArray = defaultColors.clone()
+
+        protected fun getActiveStyle(): String {
+            return context.getSharedPreferences(com.ghost.api.Constants.PREFS_NAME, Context.MODE_PRIVATE)
+                .getString(com.ghost.api.Constants.PREF_EDGE_LIGHT_STYLE, com.ghost.api.Constants.EDGE_STYLE_BARS)
+                ?: com.ghost.api.Constants.EDGE_STYLE_BARS
+        }
 
         override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
             super.onConfigurationChanged(newConfig)
@@ -332,92 +349,29 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
                 mainHandler.post { invalidate() }
             }
         }
-    }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Top Edge View (Bars grow downward from top)
-    // ─────────────────────────────────────────────────────────────────────────
-
-    private class TopEdgeView(context: Context) : BaseEdgeView(context) {
-        override fun onDraw(canvas: Canvas) {
-            super.onDraw(canvas)
-            if (isLandscape(context)) {
-                if (visibility != GONE) {
-                    visibility = GONE
-                }
-                return
-            }
-
-            // Smoothly blend edge light colors towards target (~2s transition at 60fps)
+        protected fun renderVisualizer(canvas: Canvas, isTop: Boolean) {
             val limit = minOf(currentColors.size, targetColors.size)
             for (c in 0 until limit) {
                 currentColors[c] = ColorUtils.blendARGB(currentColors[c], targetColors[c], 0.035f)
             }
 
-            val numBars = 32
-            val spacing = width.toFloat() / numBars
             val histFft = fftHistory.toList()
             val histBass = bassHistory.toList()
+            if (histFft.isEmpty()) return
 
-            for (layerIdx in (histFft.indices).reversed()) {
-                val fft = histFft[layerIdx]
-                val layBass = histBass.getOrElse(layerIdx) { smoothedBass }
-                val baseAlpha = layerAlphas.getOrElse(layerIdx) { 30 }
-                val hScale = heightScales.getOrElse(layerIdx) { 0.3f }
-                val wScale = layerWidthScales.getOrElse(layerIdx) { 0.65f }
-                val palIdx = layerPaletteIdx.getOrElse(layerIdx) { 0 }
-                val color = currentColors[palIdx % currentColors.size]
-
-                paint.color = color
-                paint.strokeWidth = spacing * wScale
-                paint.clearShadowLayer()
-                val maxBarHeight = (height.toFloat() - (paint.strokeWidth / 2f) - 2f).coerceAtLeast(4f)
-
-                for (i in 0 until numBars) {
-                    val binBase = ((i * 2) % max(1, fft.size / 2)) * 2
-                    val mag = if (fft.size > binBase + 1) {
-                        val re = fft[binBase].toInt()
-                        val im = fft[binBase + 1].toInt()
-                        Math.hypot(re.toDouble(), im.toDouble()).toFloat()
-                    } else 0f
-
-                    val glow = (mag * 1.2f) + (layBass / 5f)
-                    val rawBarHeight = (6f + glow * 0.8f) * hScale
-                    val barHeight = rawBarHeight.coerceIn(4f, maxBarHeight)
-                    val heightBoost = min(25, (glow * 0.8f).toInt())
-                    paint.alpha = (baseAlpha + heightBoost).coerceIn(0, 255)
-
-                    val x = (i * spacing) + (spacing / 2f)
-                    canvas.drawLine(x, 0f, x, barHeight, paint)
-                }
+            when (getActiveStyle()) {
+                com.ghost.api.Constants.EDGE_STYLE_BOOM -> drawBoom(canvas, isTop, histFft, histBass)
+                com.ghost.api.Constants.EDGE_STYLE_WIREFRAME -> drawWireframe(canvas, isTop, histFft, histBass)
+                com.ghost.api.Constants.EDGE_STYLE_HEX -> drawHex(canvas, isTop, histFft, histBass)
+                else -> drawBars(canvas, isTop, histFft, histBass)
             }
         }
-    }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Bottom Edge View (Bars grow upward from bottom)
-    // ─────────────────────────────────────────────────────────────────────────
-
-    private class BottomEdgeView(context: Context) : BaseEdgeView(context) {
-        override fun onDraw(canvas: Canvas) {
-            super.onDraw(canvas)
-            if (isLandscape(context)) {
-                if (visibility != GONE) {
-                    visibility = GONE
-                }
-                return
-            }
-
-            // Smoothly blend edge light colors towards target (~2s transition at 60fps)
-            val limit = minOf(currentColors.size, targetColors.size)
-            for (c in 0 until limit) {
-                currentColors[c] = ColorUtils.blendARGB(currentColors[c], targetColors[c], 0.035f)
-            }
-
+        // 1. STYLE_BARS: Multi-layer rounded equalizer bars
+        private fun drawBars(canvas: Canvas, isTop: Boolean, histFft: List<ByteArray>, histBass: List<Float>) {
             val numBars = 32
             val spacing = width.toFloat() / numBars
-            val histFft = fftHistory.toList()
-            val histBass = bassHistory.toList()
             val bottomY = height.toFloat()
 
             for (layerIdx in (histFft.indices).reversed()) {
@@ -429,6 +383,7 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
                 val palIdx = layerPaletteIdx.getOrElse(layerIdx) { 0 }
                 val color = currentColors[palIdx % currentColors.size]
 
+                paint.style = Paint.Style.STROKE
                 paint.color = color
                 paint.strokeWidth = spacing * wScale
                 paint.clearShadowLayer()
@@ -449,10 +404,341 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
                     paint.alpha = (baseAlpha + heightBoost).coerceIn(0, 255)
 
                     val x = (i * spacing) + (spacing / 2f)
-                    val bx = width.toFloat() - x
-                    canvas.drawLine(bx, bottomY, bx, bottomY - barHeight, paint)
+                    if (isTop) {
+                        canvas.drawLine(x, 0f, x, barHeight, paint)
+                    } else {
+                        val bx = width.toFloat() - x
+                        canvas.drawLine(bx, bottomY, bx, bottomY - barHeight, paint)
+                    }
                 }
             }
+        }
+
+        // 2. STYLE_BOOM (Waveworms): Symmetrically mirrored serpentine ribbons hugging side walls
+        // Surges high up the corner flanks per user sketch while staying calm in the center
+        private fun drawBoom(canvas: Canvas, isTop: Boolean, histFft: List<ByteArray>, histBass: List<Float>) {
+            val fft = histFft[0]
+            val layBass = histBass.getOrElse(0) { smoothedBass }
+            val bassPower = (layBass / 5f).coerceIn(0f, 25f)
+            val maxH = (height.toFloat() - 3f).coerceAtLeast(10f)
+            val edgeY = if (isTop) 0f else height.toFloat()
+            val segments = 40
+            val segW = width.toFloat() / segments
+
+            // Layer 1: Ambient wash / deep background harmonic swell
+            cachedPath.reset()
+            cachedPath.moveTo(0f, edgeY)
+            for (col in 0..segments) {
+                val screenX = col * segW
+                val distFromCenter = kotlin.math.abs((col.toFloat() / segments) - 0.5f) * 2f
+                val edgeCurve = distFromCenter * distFromCenter
+                val bin = (((1.0f - distFromCenter) * (fft.size / 4f)).toInt() * 2).coerceIn(0, max(1, fft.size / 2 - 2))
+                val mag = if (fft.size > bin + 1) Math.hypot(fft[bin].toDouble(), fft[bin + 1].toDouble()).toFloat() else 0f
+                val peakSurge = 0.06f + (edgeCurve * 0.94f)
+                val waveH1 = (4f + (mag * 0.75f + bassPower * 3.8f) * peakSurge).coerceIn(3f, maxH * 0.85f)
+                val y = if (isTop) waveH1 else height.toFloat() - waveH1
+                cachedPath.lineTo(screenX, y)
+            }
+            cachedPath.lineTo(width.toFloat(), edgeY)
+            cachedPath.close()
+
+            paint.style = Paint.Style.FILL
+            paint.color = currentColors[1 % currentColors.size]
+            paint.alpha = (40 + (bassPower * 5f).toInt()).coerceIn(25, 140)
+            canvas.drawPath(cachedPath, paint)
+
+            // Layer 2: Main dynamic serpentine wave ribbon (Waveworm)
+            cachedPath.reset()
+            cachedPath.moveTo(0f, edgeY)
+            for (col in 0..segments) {
+                val screenX = col * segW
+                val distFromCenter = kotlin.math.abs((col.toFloat() / segments) - 0.5f) * 2f
+                val edgeCurve = distFromCenter * distFromCenter
+                val bin = (((1.0f - distFromCenter) * (fft.size / 3.5f)).toInt() * 2).coerceIn(0, max(1, fft.size / 2 - 2))
+                val mag = if (fft.size > bin + 1) Math.hypot(fft[bin].toDouble(), fft[bin + 1].toDouble()).toFloat() else 0f
+                val peakSurge = 0.08f + (edgeCurve * 0.92f)
+                val waveH2 = (6f + (mag * 1.35f + bassPower * 5.2f) * peakSurge).coerceIn(5f, maxH * 0.98f)
+                val y = if (isTop) waveH2 else height.toFloat() - waveH2
+                cachedPath.lineTo(screenX, y)
+            }
+            cachedPath.lineTo(width.toFloat(), edgeY)
+            cachedPath.close()
+
+            paint.style = Paint.Style.FILL
+            paint.color = currentColors[0]
+            paint.alpha = (75 + (bassPower * 6f).toInt()).coerceIn(50, 185)
+            canvas.drawPath(cachedPath, paint)
+
+            // Layer 3: Neon razor crest highlight stroke
+            cachedPath.reset()
+            for (col in 0..segments) {
+                val screenX = col * segW
+                val distFromCenter = kotlin.math.abs((col.toFloat() / segments) - 0.5f) * 2f
+                val edgeCurve = distFromCenter * distFromCenter
+                val bin = (((1.0f - distFromCenter) * (fft.size / 3.5f)).toInt() * 2).coerceIn(0, max(1, fft.size / 2 - 2))
+                val mag = if (fft.size > bin + 1) Math.hypot(fft[bin].toDouble(), fft[bin + 1].toDouble()).toFloat() else 0f
+                val peakSurge = 0.08f + (edgeCurve * 0.92f)
+                val waveH2 = (6f + (mag * 1.35f + bassPower * 5.2f) * peakSurge).coerceIn(5f, maxH * 0.98f)
+                val y = if (isTop) waveH2 else height.toFloat() - waveH2
+                if (col == 0) cachedPath.moveTo(screenX, y) else cachedPath.lineTo(screenX, y)
+            }
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 3.5f
+            paint.color = if (bassPower > 8f) Color.WHITE else currentColors[0]
+            paint.alpha = (180 + (bassPower * 4f).toInt()).coerceIn(160, 255)
+            canvas.drawPath(cachedPath, paint)
+
+            // Layer 4: Razor bezel rim glow
+            paint.strokeWidth = 3.2f
+            paint.color = currentColors[0]
+            paint.alpha = (170 + (bassPower * 4f).toInt()).coerceIn(150, 255)
+            val rimY = if (isTop) 1.6f else height.toFloat() - 1.6f
+            canvas.drawLine(0f, rimY, width.toFloat(), rimY, paint)
+        }
+
+        // 3. STYLE_WIREFRAME (Glowing Diamonds & Shooting Fading Chevrons):
+        // Prominent "Christmas lights" diamonds hugging both sides with fading checkmarks / diamond clones
+        // shooting upward/downward into the screen. Zero baseline rail underline.
+        private fun drawWireframe(canvas: Canvas, isTop: Boolean, histFft: List<ByteArray>, histBass: List<Float>) {
+            val fft = histFft[0]
+            val layBass = histBass.getOrElse(0) { smoothedBass }
+            val bassPower = (layBass / 5f).coerceIn(0f, 25f)
+            val totalH = height.toFloat()
+            val density = resources.displayMetrics.density
+
+            // 1. Glowing Diamonds with Shooting Fading Chevrons (No baseline underline stroke)
+            val count = 16
+            val stepX = width.toFloat() / count
+            val diamondRadius = 12.0f * density
+            val dy = if (isTop) (diamondRadius + 3f) else (totalH - diamondRadius - 3f)
+
+            for (i in 0 until count) {
+                val dx = i * stepX + (stepX / 2f)
+                val distFromCenter = kotlin.math.abs((dx / width.toFloat()) - 0.5f) * 2f
+                val bin = (((1.0f - distFromCenter) * (fft.size / 4f)).toInt() * 2).coerceIn(0, max(1, fft.size / 2 - 2))
+                val mag = if (fft.size > bin + 1) Math.hypot(fft[bin].toDouble(), fft[bin + 1].toDouble()).toFloat() else 0f
+                val edgeBias = 0.25f + (distFromCenter * 0.75f)
+                val nodeColor = currentColors[i % currentColors.size]
+
+                // --- SHOOTING FADING CHECKMARKS / CHEVRONS (^) ---
+                // Fading holographic corner projections shooting outward from glass cubes.
+                // Outer flanks project up to 3 tiers high, mid-flanks project 1-2, center remains calm.
+                val maxClones = when {
+                    distFromCenter > 0.50f -> 3
+                    distFromCenter > 0.35f -> 2
+                    distFromCenter > 0.20f -> 1
+                    else -> 0
+                }
+
+                val activeClones = if (maxClones > 0) {
+                    val energy = (mag / 5.0f + bassPower * 0.38f).coerceIn(0f, 1.5f)
+                    val count = (energy * maxClones).toInt()
+                    val minFlank = if (distFromCenter > 0.50f && (mag > 5f || bassPower > 3.5f)) 1 else 0
+                    count.coerceIn(minFlank, maxClones)
+                } else 0
+
+                paint.strokeCap = Paint.Cap.ROUND
+                paint.strokeJoin = Paint.Join.ROUND
+
+                val wingSpread = diamondRadius * 0.85f
+                val wingH = diamondRadius * 0.75f
+
+                for (k in 1..activeClones) {
+                    // Exact corner clone projection: 3 evenly spaced tiers outside the diamond body
+                    val offset = diamondRadius * (1.30f + (k - 1) * 0.55f)
+                    val alphaRatio = 1f - ((k - 1f) / 3.2f)
+
+                    cachedPath.reset()
+                    if (isTop) {
+                        // Top view: chevron points DOWN into screen (v)
+                        val apexY = dy + offset
+                        val wingY = apexY - wingH
+                        cachedPath.moveTo(dx - wingSpread, wingY)
+                        cachedPath.lineTo(dx, apexY)
+                        cachedPath.lineTo(dx + wingSpread, wingY)
+                    } else {
+                        // Bottom view: chevron points UP into screen (^)
+                        val apexY = dy - offset
+                        val wingY = apexY + wingH
+                        cachedPath.moveTo(dx - wingSpread, wingY)
+                        cachedPath.lineTo(dx, apexY)
+                        cachedPath.lineTo(dx + wingSpread, wingY)
+                    }
+
+                    // Outer neon aura for lead chevron
+                    if (k == 1) {
+                        paint.style = Paint.Style.STROKE
+                        paint.strokeWidth = 4.5f
+                        paint.color = nodeColor
+                        paint.alpha = (50 * alphaRatio).toInt().coerceIn(20, 120)
+                        canvas.drawPath(cachedPath, paint)
+                    }
+
+                    // Razor chevron stroke
+                    paint.style = Paint.Style.STROKE
+                    paint.strokeWidth = 2.2f
+                    paint.color = nodeColor
+                    paint.alpha = (215 * alphaRatio + mag * 1.8f).toInt().coerceIn(45, 255)
+                    canvas.drawPath(cachedPath, paint)
+                }
+
+                // --- GLOWING CHRISTMAS LIGHTS DIAMOND ---
+                cachedPath.reset()
+                cachedPath.moveTo(dx, dy - diamondRadius)
+                cachedPath.lineTo(dx + diamondRadius, dy)
+                cachedPath.lineTo(dx, dy + diamondRadius)
+                cachedPath.lineTo(dx - diamondRadius, dy)
+                cachedPath.close()
+
+                // Translucent neon aura fill
+                paint.style = Paint.Style.FILL
+                paint.color = nodeColor
+                paint.alpha = (40 + (mag * 3.0f * edgeBias).toInt()).coerceIn(25, 200)
+                canvas.drawPath(cachedPath, paint)
+
+                // Razor diamond stroke
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = 2.4f
+                paint.color = nodeColor
+                paint.alpha = (160 + (mag * 2f).toInt()).coerceIn(120, 255)
+                canvas.drawPath(cachedPath, paint)
+            }
+        }
+
+        // 4. STYLE_HEX (True Honeycomb Lattice):
+        // Mathematically exact interlocking hexagonal honeycomb ("3 rows occupy 2 row space").
+        // Half-hexagon teeth along the bezel edge, with a 5-tier stepped staircase climbing up into the corners
+        // and an open, uncluttered center so honeycomb architecture hugs both sides of the screen.
+        private fun drawHex(canvas: Canvas, isTop: Boolean, histFft: List<ByteArray>, histBass: List<Float>) {
+            val fft = histFft[0]
+            val layBass = histBass.getOrElse(0) { smoothedBass }
+            val bassPower = (layBass / 6f).coerceIn(0f, 18f)
+            val density = resources.displayMetrics.density
+
+            // Hexagon geometry: flat-topped hexagons
+            // Radius R: distance from center to vertices
+            val hexR = 13.5f * density
+            val deltaX = 1.5f * hexR
+            val deltaY = (kotlin.math.sqrt(3.0) / 2.0 * hexR).toFloat()
+            val totalH = height.toFloat()
+
+            val cols = (width.toFloat() / deltaX).toInt() + 2
+
+            for (c in 0 until cols) {
+                val cx = c * deltaX
+                val distFromCenter = kotlin.math.abs((cx / width.toFloat()) - 0.5f) * 2f
+                val bin = (((1.0f - distFromCenter) * (fft.size / 4f)).toInt() * 2).coerceIn(0, max(1, fft.size / 2 - 2))
+                val mag = if (fft.size > bin + 1) Math.hypot(fft[bin].toDouble(), fft[bin + 1].toDouble()).toFloat() else 0f
+                val edgeBias = 0.35f + (distFromCenter * 0.65f)
+
+                val color0 = currentColors[c % currentColors.size]
+                val color1 = currentColors[(c + 1) % currentColors.size]
+                val color2 = currentColors[(c + 2) % currentColors.size]
+                val color3 = currentColors[(c + 3) % currentColors.size]
+
+                val isEven = (c % 2 == 0)
+
+                if (isEven) {
+                    // --- ROW 0 (Even columns, cy = 0 / totalH): Half-hexagons along bezel ---
+                    val cy0 = if (isTop) 0f else totalH
+                    drawHexCell(canvas, cx, cy0, hexR, color0, mag, edgeBias, bassPower, popThreshold = 5f)
+
+                    // --- ROW 2 (Even columns, cy = 2 * deltaY): Appears on flanks (dist >= 0.38f) ---
+                    if (distFromCenter >= 0.38f) {
+                        val cy2 = if (isTop) 2f * deltaY else totalH - (2f * deltaY)
+                        drawHexCell(canvas, cx, cy2, hexR, color2, mag, edgeBias, bassPower, popThreshold = 10f)
+                    }
+                } else {
+                    // --- ROW 1 (Odd columns, cy = deltaY): Touches bezel with bottom flat edge ---
+                    // Center gap: in the middle 28% of the screen, suppressed unless energy pops
+                    if (distFromCenter >= 0.28f || mag > 12f) {
+                        val cy1 = if (isTop) deltaY else totalH - deltaY
+                        drawHexCell(canvas, cx, cy1, hexR, color1, mag, edgeBias, bassPower, popThreshold = 7f)
+                    }
+
+                    // --- ROW 3 (Odd columns, cy = 3 * deltaY): Flank step-up (dist >= 0.55f) ---
+                    if (distFromCenter >= 0.55f) {
+                        val cy3 = if (isTop) 3f * deltaY else totalH - (3f * deltaY)
+                        drawHexCell(canvas, cx, cy3, hexR, color3, mag, edgeBias, bassPower, popThreshold = 11f)
+                    }
+                }
+            }
+        }
+
+        private fun drawHexCell(
+            canvas: Canvas,
+            cx: Float,
+            cy: Float,
+            radius: Float,
+            color: Int,
+            mag: Float,
+            edgeBias: Float,
+            bassPower: Float,
+            popThreshold: Float
+        ) {
+            val effMag = mag * edgeBias
+            val pops = effMag > popThreshold || bassPower > (popThreshold / 2.5f)
+
+            if (pops) {
+                paint.style = Paint.Style.FILL
+                paint.color = color
+                paint.alpha = (25 + (effMag * 2.2f + bassPower * 3f).toInt()).coerceIn(20, 175)
+                drawHexagon(canvas, cx, cy, radius * 0.88f, paint)
+
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = 1.6f
+                paint.color = if (effMag > 24f || bassPower > 7f) Color.WHITE else color
+                paint.alpha = (75 + (effMag * 2.0f).toInt()).coerceIn(50, 240)
+                drawHexagon(canvas, cx, cy, radius, paint)
+            } else {
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = 1.0f
+                paint.color = color
+                paint.alpha = 24
+                drawHexagon(canvas, cx, cy, radius, paint)
+            }
+        }
+
+        private fun drawHexagon(canvas: Canvas, cx: Float, cy: Float, radius: Float, paint: Paint) {
+            cachedPath.reset()
+            for (i in 0 until 6) {
+                val angle = (i * Math.PI / 3.0).toFloat()
+                val px = cx + (radius * kotlin.math.cos(angle))
+                val py = cy + (radius * kotlin.math.sin(angle))
+                if (i == 0) cachedPath.moveTo(px, py) else cachedPath.lineTo(px, py)
+            }
+            cachedPath.close()
+            canvas.drawPath(cachedPath, paint)
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Top Edge View
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private class TopEdgeView(context: Context) : BaseEdgeView(context) {
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            if (isLandscape(context)) {
+                if (visibility != GONE) visibility = GONE
+                return
+            }
+            renderVisualizer(canvas, isTop = true)
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Bottom Edge View
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private class BottomEdgeView(context: Context) : BaseEdgeView(context) {
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            if (isLandscape(context)) {
+                if (visibility != GONE) visibility = GONE
+                return
+            }
+            renderVisualizer(canvas, isTop = false)
         }
     }
 }

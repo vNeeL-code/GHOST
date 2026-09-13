@@ -15,7 +15,8 @@ object SessionMemoryCompactor {
     suspend fun compactOldMessages(
         messagesToCompact: List<KoogAgent.Message>,
         currentMemory: String,
-        llmEngine: LlmBackend? = null
+        llmEngine: LlmBackend? = null,
+        assistantCallSign: String = "Assistant"
     ): String = withContext(Dispatchers.Default) {
         if (messagesToCompact.isEmpty()) return@withContext currentMemory
 
@@ -24,16 +25,30 @@ object SessionMemoryCompactor {
         val newEntries = mutableListOf<String>()
         messagesToCompact.forEach { msg ->
             val clean = msg.content
-                .replace(Regex("""\[SYSTEM TELEMETRY\][\s\S]*?\[/SYSTEM TELEMETRY\]"""), "")
+                .replace(Regex("""\[SYSTEM TELEMETRY.*?\][\s\S]*?\[/SYSTEM TELEMETRY\]"""), "")
+                .replace(Regex("""Δ 👾 ∇ GHOST TELEMETRY.*?\[/Δ 👾 ∇ GHOST TELEMETRY\]"""), "")
                 .replace(Regex("""<think>[\s\S]*?</think>"""), "")
                 .replace(Regex("""<\|channel>thought[\s\S]*?<channel\|>"""), "")
                 .replace(Regex("""<\|channel>thought[\s\S]*"""), "")
+                .replace(Regex("""<\|tool_call>[\s\S]*?<tool_call\|>"""), "")
+                .replace(Regex("""<\|tool_response>[\s\S]*?<tool_response\|>"""), "")
+                .replace(Regex("""<\|tool>[\s\S]*?<tool\|>"""), "")
+                .replace("<|\"|>", "")
                 .replace(Regex("""\[Date:\s*[\d-]+\]\s*"""), "")
                 .trim()
 
             if (clean.isNotBlank() && clean.length > 2) {
-                val roleName = if (msg.role == "user") "User" else "GHOST"
-                val singleLine = clean.replace(Regex("""\s+"""), " ")
+                val roleName = when {
+                    msg.role == "system" || clean.startsWith("Δ 👾 ∇") -> "GHOST System"
+                    msg.role == "user" -> "Operator"
+                    else -> assistantCallSign
+                }
+                val contentWithoutPrefix = clean
+                    .removePrefix("Δ 👾 ∇ GHOST:")
+                    .replace(Regex("""^Δ\s*.*?\s*∇(\s*\[.*?\])?:\s*"""), "")
+                    .replace(Regex("""^✧\s*.*?:"""), "")
+                    .trim()
+                val singleLine = contentWithoutPrefix.replace(Regex("""\s+"""), " ")
                 val snippet = if (singleLine.length > 180) singleLine.take(177) + "..." else singleLine
                 newEntries.add("• $roleName: $snippet")
             }

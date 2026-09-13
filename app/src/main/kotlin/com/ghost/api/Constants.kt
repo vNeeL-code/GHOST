@@ -53,6 +53,11 @@ object Constants {
     const val PREF_VISUALIZER_PRESET = "visualizer_preset"  // "OPTION_A", "OPTION_B", "OPTION_C", "OPTION_D"
     const val PREF_OPERATOR_AVATAR = "operator_avatar_emoji"
     const val PREF_EDGE_LIGHTS_ENABLED = "edge_lights_enabled"
+    const val PREF_EDGE_LIGHT_STYLE = "edge_light_style"
+    const val EDGE_STYLE_BARS = "STYLE_BARS"
+    const val EDGE_STYLE_BOOM = "STYLE_BOOM"
+    const val EDGE_STYLE_WIREFRAME = "STYLE_WIREFRAME"
+    const val EDGE_STYLE_HEX = "STYLE_HEX"
 
     // Token estimation (multimodal tuned for Gemma 4 / LiteRT-LM)
     const val CHARS_PER_TOKEN = 4

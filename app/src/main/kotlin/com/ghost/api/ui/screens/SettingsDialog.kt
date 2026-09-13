@@ -44,6 +44,7 @@ fun SettingsDialog(
     val prefs = remember { context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE) }
 
     var edgeLightsEnabled by remember { mutableStateOf(EdgeLightsManager.isShowing) }
+    var edgeLightsStyle by remember { mutableStateOf(prefs.getString(Constants.PREF_EDGE_LIGHT_STYLE, Constants.EDGE_STYLE_BARS) ?: Constants.EDGE_STYLE_BARS) }
     var passiveTtsEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_PASSIVE_TTS, true)) }
     var diaryActive by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_AUTONOMOUS_DIARY, true)) }
     var diaryCadence by remember { mutableStateOf(prefs.getString(Constants.PREF_DIARY_CADENCE, "12") ?: "12") }
@@ -235,6 +236,60 @@ fun SettingsDialog(
                                     Toast.makeText(context, "Edge Lights $status", Toast.LENGTH_SHORT).show()
                                 }
                             )
+                        }
+                        if (edgeLightsEnabled) {
+                            item {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 4.dp, vertical = 6.dp)
+                                        .background(cardBg, RoundedCornerShape(12.dp))
+                                        .border(1.dp, Color(0x1AFFFFFF), RoundedCornerShape(12.dp))
+                                        .padding(12.dp)
+                                ) {
+                                    Text(
+                                        text = "Edge Light Style",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color.White,
+                                        modifier = Modifier.padding(bottom = 8.dp)
+                                    )
+                                    val styles = listOf(
+                                        Constants.EDGE_STYLE_BARS to "I",
+                                        Constants.EDGE_STYLE_BOOM to "II",
+                                        Constants.EDGE_STYLE_HEX to "III",
+                                        Constants.EDGE_STYLE_WIREFRAME to "IV"
+                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        for ((key, label) in styles) {
+                                            val isSelected = edgeLightsStyle == key
+                                            Box(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(if (isSelected) accentColor else Color(0x1AFFFFFF))
+                                                    .clickable {
+                                                        edgeLightsStyle = key
+                                                        prefs.edit().putString(Constants.PREF_EDGE_LIGHT_STYLE, key).apply()
+                                                        EdgeLightsManager.invalidate()
+                                                    }
+                                                    .padding(vertical = 8.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = label,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                    color = if (isSelected) Color.Black else Color.White
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
 
                         // 3. === Voice & Speech === (Category 3: TTS + Passive Notification TTS)

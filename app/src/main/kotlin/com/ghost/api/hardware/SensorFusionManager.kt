@@ -161,6 +161,7 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
     private val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
     private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
     private val hardwarePropertiesManager = context.getSystemService(Context.HARDWARE_PROPERTIES_SERVICE) as? HardwarePropertiesManager
+    @Volatile private var canUseHardwareProperties: Boolean = true
     
     // Coroutine scope for background polling
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
@@ -621,34 +622,41 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
     // === ENVIRONMENT (AMBIENT + THERMAL ZONES) ===
 
     private fun getEnvironmentState(): EnvironmentState {
-        return try {
-            // Use HardwarePropertiesManager for portable thermal reads (Audit 2.0 Hardening)
-            val cpuTemps = hardwarePropertiesManager?.getDeviceTemperatures(
-                HardwarePropertiesManager.DEVICE_TEMPERATURE_CPU,
-                HardwarePropertiesManager.TEMPERATURE_CURRENT
-            )
-            val gpuTemps = hardwarePropertiesManager?.getDeviceTemperatures(
-                HardwarePropertiesManager.DEVICE_TEMPERATURE_GPU,
-                HardwarePropertiesManager.TEMPERATURE_CURRENT
-            )
-            val skinTemps = hardwarePropertiesManager?.getDeviceTemperatures(
-                HardwarePropertiesManager.DEVICE_TEMPERATURE_SKIN,
-                HardwarePropertiesManager.TEMPERATURE_CURRENT
-            )
+        var cpuTemps: FloatArray? = null
+        var gpuTemps: FloatArray? = null
+        var skinTemps: FloatArray? = null
 
-            EnvironmentState(
-                ambientTemp = cachedAmbientTemp,
-                cpuTemp = cpuTemps?.firstOrNull() ?: readThermalZone("thermal_zone0"), // Fallback to sysfs if API returns empty
-                gpuTemp = gpuTemps?.firstOrNull() ?: readThermalZone("thermal_zone1"),
-                skinTemp = skinTemps?.firstOrNull() ?: readThermalZone("thermal_zone3"),
-                pressure = cachedPressure,
-                humidity = cachedHumidity,
-                light = cachedLight
-            )
-        } catch (e: Exception) {
-            Timber.e(e, "Environment state read failed")
-            EnvironmentState(null, null, null, null, null, null, null)
+        if (canUseHardwareProperties && hardwarePropertiesManager != null) {
+            try {
+                cpuTemps = hardwarePropertiesManager.getDeviceTemperatures(
+                    HardwarePropertiesManager.DEVICE_TEMPERATURE_CPU,
+                    HardwarePropertiesManager.TEMPERATURE_CURRENT
+                )
+                gpuTemps = hardwarePropertiesManager.getDeviceTemperatures(
+                    HardwarePropertiesManager.DEVICE_TEMPERATURE_GPU,
+                    HardwarePropertiesManager.TEMPERATURE_CURRENT
+                )
+                skinTemps = hardwarePropertiesManager.getDeviceTemperatures(
+                    HardwarePropertiesManager.DEVICE_TEMPERATURE_SKIN,
+                    HardwarePropertiesManager.TEMPERATURE_CURRENT
+                )
+            } catch (e: SecurityException) {
+                canUseHardwareProperties = false
+                Timber.d("HardwarePropertiesManager not accessible without system privileges — using sysfs thermal zones.")
+            } catch (e: Exception) {
+                Timber.d("HardwarePropertiesManager read skipped: ${e.message}")
+            }
         }
+
+        return EnvironmentState(
+            ambientTemp = cachedAmbientTemp,
+            cpuTemp = cpuTemps?.firstOrNull() ?: readThermalZone("thermal_zone0"),
+            gpuTemp = gpuTemps?.firstOrNull() ?: readThermalZone("thermal_zone1"),
+            skinTemp = skinTemps?.firstOrNull() ?: readThermalZone("thermal_zone3"),
+            pressure = cachedPressure,
+            humidity = cachedHumidity,
+            light = cachedLight
+        )
     }
 
     /**
@@ -900,7 +908,7 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
         if (ctx.battery.isCharging) sb.append("⚡")
         if (ctx.battery.currentNow < 0) sb.append(" (${ctx.battery.currentNow}mA drain)")
 
-        sb.append(" | 🌡️ ${String.format(java.util.Locale.US, "%.1f", ctx.battery.temperature)}°C")
+        sb.append(" | 🌡️ ${Math.round(ctx.battery.temperature)}°C")
         sb.append(" | 🧠 ${ctx.system.ramUsedPercent}%")
         sb.append(" | 💿 ${String.format(java.util.Locale.US, "%.1f", ctx.system.storageFreeGB)}GB free")
         sb.append("\n")
@@ -1000,7 +1008,7 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
         sb.append("$battIcon $battLevel%")
         if (ctx.battery.isCharging) sb.append("⚡")
 
-        sb.append(" | 🌡️ ${String.format(java.util.Locale.US, "%.1f", ctx.battery.temperature)}°C")
+        sb.append(" | 🌡️ ${Math.round(ctx.battery.temperature)}°C")
         sb.append(" | 🧠 ${ctx.system.ramUsedPercent}%")
         sb.append(" | 💿 ${String.format(java.util.Locale.US, "%.1f", ctx.system.storageFreeGB)}GB free")
 

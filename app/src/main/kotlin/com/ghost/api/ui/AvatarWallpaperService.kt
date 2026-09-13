@@ -1099,9 +1099,16 @@ class AvatarWallpaperService : WallpaperService() {
 
             // 3. Vanishing Point Focal Core & Central Triangle Housing
             // Strong foreground parallax (1.25x depth vs 0.08x background): dramatic 3D float!
-            val focalRadius = (baseSize * 1.25f + melodyExpansion * 0.65f).coerceIn(40f, 180f)
+            val density = resources.displayMetrics.density
+            // Mathematical vertical centering:
+            // For an equilateral triangle with circumradius R, apex is at -R and baseline is at +0.5R.
+            // Shifting by +0.25R perfectly centers the triangle bounding box (apex at -0.75R, base at +0.75R).
+            // Resting height is 44dp (inside 48dp input bar), free to grow and bloom on music beats!
+            val idleFocalRadius = (44f * density) / 1.5f
+            val focalRadius = (idleFocalRadius + melodyExpansion * 0.70f + bassKick * 0.45f).coerceIn(idleFocalRadius * 0.85f, 180f)
             val focalCx = baseCx + tiltX * 1.25f
             val focalCy = baseCy + tiltY * 1.25f
+            val triangleNudgeY = 0.25f * focalRadius
 
             canvas.save()
             canvas.translate(focalCx, focalCy)
@@ -1120,20 +1127,20 @@ class AvatarWallpaperService : WallpaperService() {
                 paint.style = Paint.Style.FILL
                 paint.color = bloomColor
                 paint.alpha = (TRI_BLOOM_ALPHAS[tb] * 0.45f).toInt().coerceIn(15, 95)
-                drawEquilateralTriangle(canvas, 0f, 0f, radius, 0f, paint)
+                drawEquilateralTriangle(canvas, 0f, triangleNudgeY, radius, 0f, paint)
 
                 paint.style = Paint.Style.STROKE
                 paint.strokeWidth = TRI_BLOOM_WIDTHS[tb]
                 paint.color = bloomColor
                 paint.alpha = TRI_BLOOM_ALPHAS[tb]
-                drawEquilateralTriangle(canvas, 0f, 0f, radius, 0f, paint)
+                drawEquilateralTriangle(canvas, 0f, triangleNudgeY, radius, 0f, paint)
             }
 
             // Solid Obsidian Cyber Chamber for Central Triangle
             paint.style = Paint.Style.FILL
             paint.color = COLOR_VOID
             paint.alpha = 240
-            drawEquilateralTriangle(canvas, 0f, 0f, focalRadius, 0f, paint)
+            drawEquilateralTriangle(canvas, 0f, triangleNudgeY, focalRadius, 0f, paint)
 
             val innerColor = resolveColor(COLOR_CYAN_ACCENT, currentColors[0])
             val baseInnerAlpha = (25 + (melodyExpansion * 1.8f).toInt()).coerceIn(20, 90)
@@ -1141,18 +1148,18 @@ class AvatarWallpaperService : WallpaperService() {
             paint.style = Paint.Style.FILL
             paint.color = innerColor
             paint.alpha = (baseInnerAlpha + kickInnerAlpha).coerceIn(20, 160)
-            drawEquilateralTriangle(canvas, 0f, 0f, focalRadius * 0.85f, 0f, paint)
+            drawEquilateralTriangle(canvas, 0f, triangleNudgeY, focalRadius * 0.85f, 0f, paint)
 
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 3.8f + (strobeFlash * 2.5f)
             paint.color = if (strobeFlash > 0.05f) Color.WHITE else COLOR_STAR_CORE
             paint.alpha = 255
-            drawEquilateralTriangle(canvas, 0f, 0f, focalRadius, 0f, paint)
+            drawEquilateralTriangle(canvas, 0f, triangleNudgeY, focalRadius, 0f, paint)
 
             paint.strokeWidth = 2.2f
             paint.color = innerColor
             paint.alpha = 200
-            drawEquilateralTriangle(canvas, 0f, 0f, focalRadius * 0.80f, 0f, paint)
+            drawEquilateralTriangle(canvas, 0f, triangleNudgeY, focalRadius * 0.80f, 0f, paint)
 
             // 4. Center Model Unicode Glyph (✧): Clean, Crisp, Centered White Core
             // Jewel depth 0.96f (subtle float, cannot breach container)
@@ -1164,7 +1171,7 @@ class AvatarWallpaperService : WallpaperService() {
             val off = (logoPaint.descent() + logoPaint.ascent()) / 2f
             val shiftX = tiltX * 0.06f
             val shiftY = tiltY * 0.06f
-            canvas.drawText("✧", shiftX, -off + shiftY, logoPaint)
+            canvas.drawText("✧", shiftX, -off + shiftY + triangleNudgeY, logoPaint)
 
             canvas.restore()
         }

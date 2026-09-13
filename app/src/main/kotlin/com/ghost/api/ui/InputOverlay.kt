@@ -2,6 +2,8 @@ package com.ghost.api.ui
 
 import android.content.Context
 import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
@@ -11,6 +13,10 @@ import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.*
 import com.ghost.api.Constants
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 
 /**
@@ -45,8 +51,17 @@ class InputOverlay(
     private val colorThinking = Color.parseColor("#F59E0B") // Amber
     private val colorRecording = Color.parseColor("#EF4444")  // Red-Pulse
 
-    // Google
+    private data class BubbleSlot(
+        val view: View,
+        val direction: String,
+        val targetDx: Float,
+        val targetDy: Float,
+        val boundPkg: String?
+    )
+
+    // Active deployed bubbles and slots
     private val activeSlots = mutableListOf<View>()
+    private val activeBubbleSlots = mutableListOf<BubbleSlot>()
 
     private val colorGBlue = Color.parseColor("#4285F4")
     private val colorGRed = Color.parseColor("#EA4335")
@@ -94,7 +109,7 @@ class InputOverlay(
             setPadding(dpToPx(8), dpToPx(4), dpToPx(12), dpToPx(4))
         }
 
-        // ✧ Sparkle button — Tap to open app, HOLD for slots
+        // ✧ Sparkle button — Tap to open app, HOLD/SLIDE for shortcuts
         sparkleButton = TextView(context).apply {
             text = "\u2727"
             textSize = 28f
@@ -102,62 +117,127 @@ class InputOverlay(
             gravity = Gravity.CENTER
             layoutParams = LinearLayout.LayoutParams(dpToPx(44), dpToPx(44))
             background = createCircleBackground(Color.TRANSPARENT)
-            
-            var isSwiping = false
+
             var startX = 0f
             var startY = 0f
-            var wasLongClicked = false
-            
-            setOnClickListener {
-                val intent = android.content.Intent(context, com.ghost.api.MainActivity::class.java).apply {
-                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                }
-                context.startActivity(intent)
-                onDismiss()
+            var isSubmenuOpen = false
+            var hoveredDir: String? = null
+            val holdHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+            val deployRunnable = Runnable {
+                isSubmenuOpen = true
+                hapticPulse()
+                deploySparkleSubMenu(this)
             }
-            
-            setOnLongClickListener {
-                if (!isSwiping) {
-                    wasLongClicked = true
-                    hapticPulse()
-                    expandSparkleSubMenu(this)
-                }
-                true
+
+            val rebindRunnable = Runnable {
+                val dir = hoveredDir ?: return@Runnable
+                vibrateLongPress()
+                dismissSubMenus()
+                isSubmenuOpen = false
+                hoveredDir = null
+                showAppPicker("Sparkle", dir)
             }
-            
+
             setOnTouchListener { v, event ->
-                val threshold = 50f
+                if (appPickerLayout != null) {
+                    if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
+                        holdHandler.removeCallbacks(deployRunnable)
+                        holdHandler.removeCallbacks(rebindRunnable)
+                        v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(100).start()
+                        isSubmenuOpen = false
+                        hoveredDir = null
+                    }
+                    return@setOnTouchListener true
+                }
+
+                val threshold = dpToPx(16).toFloat()
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
                         startX = event.rawX
                         startY = event.rawY
-                        isSwiping = false
-                        wasLongClicked = false
+                        isSubmenuOpen = false
+                        hoveredDir = null
                         v.animate().scaleX(1.2f).scaleY(1.2f).setDuration(100).start()
+                        holdHandler.postDelayed(deployRunnable, 200)
+                        true
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        if (Math.abs(event.rawX - startX) > threshold || Math.abs(event.rawY - startY) > threshold) {
-                            isSwiping = true
+                        val dy = event.rawY - startY
+                        val totalDist = Math.abs(dy)
+                        if (!isSubmenuOpen && totalDist >= threshold) {
+                            holdHandler.removeCallbacks(deployRunnable)
+                            isSubmenuOpen = true
+                            hapticPulse()
+                            deploySparkleSubMenu(v)
                         }
+
+                        if (isSubmenuOpen) {
+                            if (totalDist >= threshold) {
+                                val dir = if (dy > 0) "DOWN" else "UP"
+                                if (dir != hoveredDir) {
+                                    hoveredDir = dir
+                                    v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                    highlightBubble(dir, colorAccent)
+                                    holdHandler.removeCallbacks(rebindRunnable)
+                                    holdHandler.postDelayed(rebindRunnable, 550)
+                                }
+                            } else {
+                                if (hoveredDir != null) {
+                                    hoveredDir = null
+                                    holdHandler.removeCallbacks(rebindRunnable)
+                                    resetBubblesHighlight(colorAccent)
+                                }
+                            }
+                        }
+                        true
                     }
                     MotionEvent.ACTION_UP -> {
+                        holdHandler.removeCallbacks(deployRunnable)
+                        holdHandler.removeCallbacks(rebindRunnable)
                         v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(100).start()
-                        if (wasLongClicked) {
-                            wasLongClicked = false // consume the up event
-                        } else if (isSwiping) {
-                            val dy = event.rawY - startY
-                            val direction = if (dy > 0) "DOWN" else "UP"
-                            launchBoundApp("Sparkle", direction)
-                        } else {
-                            v.performClick()
+
+                        if (appPickerLayout != null) {
+                            isSubmenuOpen = false
+                            hoveredDir = null
+                            return@setOnTouchListener true
                         }
+
+                        if (isSubmenuOpen) {
+                            val targetDir = hoveredDir
+                            if (targetDir != null) {
+                                handleBubbleSelected("Sparkle", targetDir, colorAccent)
+                            } else {
+                                retractSparkleSubMenu(this)
+                            }
+                            isSubmenuOpen = false
+                        } else {
+                            val dy = event.rawY - startY
+                            if (Math.abs(dy) >= threshold) {
+                                val dir = if (dy > 0) "DOWN" else "UP"
+                                launchBoundApp("Sparkle", dir)
+                            } else {
+                                val intent = android.content.Intent(context, com.ghost.api.MainActivity::class.java).apply {
+                                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                                }
+                                context.startActivity(intent)
+                                onDismiss()
+                            }
+                        }
+                        true
                     }
                     MotionEvent.ACTION_CANCEL -> {
+                        holdHandler.removeCallbacks(deployRunnable)
+                        holdHandler.removeCallbacks(rebindRunnable)
                         v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(100).start()
-                        wasLongClicked = false
+                        if (isSubmenuOpen) {
+                            retractSparkleSubMenu(this)
+                            isSubmenuOpen = false
+                        }
+                        true
                     }
+                    else -> false
                 }
-                false // Let long click fire if hold
             }
         }
 
@@ -352,6 +432,7 @@ class InputOverlay(
             var isInDeadzone = true
 
             setOnTouchListener { v, event ->
+                if (appPickerLayout != null) return@setOnTouchListener true
                 val threshold = dpToPx(18).toFloat()
                 val overlayMgr = com.ghost.api.GemmaService.instance?.overlayManager
                 when (event.action) {
@@ -466,6 +547,7 @@ class InputOverlay(
             var isInDeadzone = true
 
             setOnTouchListener { v, event ->
+                if (appPickerLayout != null) return@setOnTouchListener true
                 val threshold = dpToPx(18).toFloat()
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
@@ -561,77 +643,152 @@ class InputOverlay(
             layoutParams = LayoutParams(btnSize, btnSize).apply {
                 gravity = Gravity.CENTER
             }
-            
+
             var startX = 0f
             var startY = 0f
-            var isSwiping = false
-            var wasLongClicked = false
+            var isSubmenuOpen = false
+            var hoveredDir: String? = null
             var isInDeadzone = true
 
-            // Interaction: Pullable logic (Hold to expand)
-            setOnLongClickListener {
-                if (!isSwiping) {
-                    wasLongClicked = true
-                    hapticPulse()
-                    expandSubMenu(this, tx, ty, label)
-                }
-                true
+            val holdHandler = android.os.Handler(android.os.Looper.getMainLooper())
+            val deployRunnable = Runnable {
+                isSubmenuOpen = true
+                hapticPulse()
+                deployPuckSubMenu(this, tx, ty, label, color)
+            }
+
+            val rebindRunnable = Runnable {
+                val dir = hoveredDir ?: return@Runnable
+                vibrateLongPress()
+                dismissSubMenus()
+                isSubmenuOpen = false
+                hoveredDir = null
+                showAppPicker(label, dir)
             }
 
             setOnTouchListener { v, event ->
+                if (appPickerLayout != null) {
+                    if (event.action == MotionEvent.ACTION_UP || event.action == MotionEvent.ACTION_CANCEL) {
+                        holdHandler.removeCallbacks(deployRunnable)
+                        holdHandler.removeCallbacks(rebindRunnable)
+                        resetPuckSpring(v, tx, ty)
+                        isSubmenuOpen = false
+                        hoveredDir = null
+                    }
+                    return@setOnTouchListener true
+                }
+
                 val deadzoneThreshold = dpToPx(18).toFloat()
                 when (event.action) {
-                    android.view.MotionEvent.ACTION_DOWN -> {
+                    MotionEvent.ACTION_DOWN -> {
                         startX = event.rawX
                         startY = event.rawY
-                        isSwiping = false
-                        wasLongClicked = false
+                        isSubmenuOpen = false
+                        hoveredDir = null
                         isInDeadzone = true
-                        v.animate().scaleX(1.2f).scaleY(1.2f).setDuration(100).start()
+                        v.animate().scaleX(1.15f).scaleY(1.15f).setDuration(100).start()
+                        holdHandler.postDelayed(deployRunnable, 180)
+                        true
                     }
-                    android.view.MotionEvent.ACTION_MOVE -> {
+                    MotionEvent.ACTION_MOVE -> {
                         applyPuckWiggle(v, tx, ty, startX, startY, event.rawX, event.rawY)
-                        val totalDist = Math.hypot((event.rawX - startX).toDouble(), (event.rawY - startY).toDouble()).toFloat()
-
-                        if (isInDeadzone && totalDist >= deadzoneThreshold) {
-                            isInDeadzone = false
-                            isSwiping = true
-                            v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                        } else if (!isInDeadzone && totalDist < deadzoneThreshold) {
-                            isInDeadzone = true
-                            v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                            triggerSocketMagneticSparkle(socket)
-                        }
-                    }
-                    android.view.MotionEvent.ACTION_UP -> {
-                        resetPuckSpring(v, tx, ty)
                         val dx = event.rawX - startX
                         val dy = event.rawY - startY
                         val totalDist = Math.hypot(dx.toDouble(), dy.toDouble()).toFloat()
 
-                        if (wasLongClicked) {
-                            wasLongClicked = false
-                        } else if (totalDist >= deadzoneThreshold) {
-                            // Intentional directional flick outside deadzone -> launch vector gate
-                            val direction = if (Math.abs(dx) > Math.abs(dy)) {
-                                if (dx > 0) "RIGHT" else "LEFT"
-                            } else {
-                                if (dy > 0) "DOWN" else "UP"
-                            }
-                            launchBoundApp(label, direction)
-                        } else {
-                            // Released in center deadzone / neutral -> Zero action + Magnetic snap spark!
-                            triggerSocketMagneticSparkle(socket)
-                            v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                            Timber.d("Puck $label released in deadzone ($totalDist < $deadzoneThreshold) - neutral cancel")
+                        if (!isSubmenuOpen && totalDist >= deadzoneThreshold) {
+                            holdHandler.removeCallbacks(deployRunnable)
+                            isSubmenuOpen = true
+                            hapticPulse()
+                            deployPuckSubMenu(v, tx, ty, label, color)
                         }
+
+                        if (isSubmenuOpen) {
+                            if (totalDist >= deadzoneThreshold) {
+                                val dir = if (Math.abs(dx) > Math.abs(dy)) {
+                                    if (dx > 0) "RIGHT" else "LEFT"
+                                } else {
+                                    if (dy > 0) "DOWN" else "UP"
+                                }
+
+                                if (dir != hoveredDir) {
+                                    hoveredDir = dir
+                                    v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                    highlightBubble(dir, color)
+                                    holdHandler.removeCallbacks(rebindRunnable)
+                                    holdHandler.postDelayed(rebindRunnable, 550)
+                                }
+                            } else {
+                                if (hoveredDir != null) {
+                                    hoveredDir = null
+                                    holdHandler.removeCallbacks(rebindRunnable)
+                                    v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    resetBubblesHighlight(color)
+                                }
+                            }
+                        } else {
+                            if (isInDeadzone && totalDist >= deadzoneThreshold) {
+                                isInDeadzone = false
+                                v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                            } else if (!isInDeadzone && totalDist < deadzoneThreshold) {
+                                isInDeadzone = true
+                                v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                triggerSocketMagneticSparkle(socket)
+                            }
+                        }
+                        true
                     }
-                    android.view.MotionEvent.ACTION_CANCEL -> {
+                    MotionEvent.ACTION_UP -> {
+                        holdHandler.removeCallbacks(deployRunnable)
+                        holdHandler.removeCallbacks(rebindRunnable)
                         resetPuckSpring(v, tx, ty)
-                        wasLongClicked = false
+
+                        if (appPickerLayout != null) {
+                            isSubmenuOpen = false
+                            hoveredDir = null
+                            return@setOnTouchListener true
+                        }
+
+                        if (isSubmenuOpen) {
+                            val targetDir = hoveredDir
+                            if (targetDir != null) {
+                                handleBubbleSelected(label, targetDir, color)
+                            } else {
+                                triggerSocketMagneticSparkle(socket)
+                                v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                retractSubMenu(tx, ty)
+                            }
+                            isSubmenuOpen = false
+                        } else {
+                            val dx = event.rawX - startX
+                            val dy = event.rawY - startY
+                            val totalDist = Math.hypot(dx.toDouble(), dy.toDouble()).toFloat()
+                            if (totalDist >= deadzoneThreshold) {
+                                val flickDir = if (Math.abs(dx) > Math.abs(dy)) {
+                                    if (dx > 0) "RIGHT" else "LEFT"
+                                } else {
+                                    if (dy > 0) "DOWN" else "UP"
+                                }
+                                launchBoundApp(label, flickDir)
+                            } else {
+                                triggerSocketMagneticSparkle(socket)
+                                v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            }
+                        }
+                        true
                     }
+                    MotionEvent.ACTION_CANCEL -> {
+                        holdHandler.removeCallbacks(deployRunnable)
+                        holdHandler.removeCallbacks(rebindRunnable)
+                        resetPuckSpring(v, tx, ty)
+                        if (isSubmenuOpen) {
+                            retractSubMenu(tx, ty)
+                            isSubmenuOpen = false
+                        }
+                        true
+                    }
+                    else -> false
                 }
-                false // Let long click fire if hold
             }
         }
         addView(btn)
@@ -669,7 +826,7 @@ class InputOverlay(
                     }
                     context.startActivity(intent)
                     onDismiss()
-                } catch (e: Exception) {
+                } catch (e: Exception) { 
                     Timber.e(e, "Failed to open Settings")
                 }
                 return
@@ -699,194 +856,534 @@ class InputOverlay(
         }
     }
 
-    private fun expandSubMenu(parent: View, px: Float, py: Float, parentLabel: String) {
-        Timber.i("Radial: Expanding submenu for $parentLabel")
-        // Visual feedback: Scale up parent even more
-        parent.animate().scaleX(1.4f).scaleY(1.4f).setDuration(250).start()
-        
-        // Add 4 mini-slots around the button (North, South, East, West)
-        val parentGroup = this@InputOverlay
-        val slotSize = dpToPx(32)
-        val distance = dpToPx(60)
+    private fun deployPuckSubMenu(parent: View, tx: Float, ty: Float, label: String, color: Int) {
+        dismissSubMenus()
+        Timber.i("Radial: Deploying joystick bubbles for $label")
+        parent.animate().scaleX(1.3f).scaleY(1.3f).setDuration(180).start()
 
-        // Calculate center of parent relative to this overlay
-        val parentLoc = IntArray(2)
-        parent.getLocationInWindow(parentLoc)
-        val overlayLoc = IntArray(2)
-        this@InputOverlay.getLocationInWindow(overlayLoc)
-        
-        val centerX = (parentLoc[0] - overlayLoc[0]) + parent.width / 2f
-        val centerY = (parentLoc[1] - overlayLoc[1]) + parent.height / 2f
+        val overlayW = if (width > 0) width.toFloat() else context.resources.displayMetrics.widthPixels.toFloat()
+        val overlayH = if (height > 0) height.toFloat() else dpToPx(520).toFloat()
+        val baseCenterX = overlayW / 2f + tx
+        val baseCenterY = overlayH / 2f + ty
 
-        val slots = listOf(
-            Pair(0f, -distance.toFloat()), // North
-            Pair(0f, distance.toFloat()),  // South
-            Pair(-distance.toFloat(), 0f), // West
-            Pair(distance.toFloat(), 0f)   // East
-        )
+        val bubbleSize = dpToPx(38)
+        val distance = dpToPx(56).toFloat()
 
         val directions = listOf("UP", "DOWN", "LEFT", "RIGHT")
+        val offsets = listOf(
+            Pair(0f, -distance), // UP
+            Pair(0f, distance),  // DOWN
+            Pair(-distance, 0f), // LEFT
+            Pair(distance, 0f)   // RIGHT
+        )
 
-        slots.forEachIndexed { index, pos ->
-            val isOrangeDown = parentLabel.contains("Orange") && directions[index] == "DOWN"
-            val boundPkg = prefs.getString("BIND_${parentLabel}_${directions[index]}", null)
+        val pm = context.packageManager
 
-            val slot = TextView(context).apply {
-                text = when {
-                    isOrangeDown -> "📱"
-                    boundPkg != null -> boundPkg.split('.').lastOrNull()?.take(2)?.uppercase() ?: "+"
-                    parentLabel.contains("Orange") && directions[index] == "UP" -> "🔦"
-                    else -> "+"
+        directions.forEachIndexed { index, dir ->
+            val offset = offsets[index]
+            val boundPkg = prefs.getString("BIND_${label}_${dir}", null)
+
+            val bubble = FrameLayout(context).apply {
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(Color.parseColor("#E6181822"))
+                    setStroke(dpToPx(1.5f.toInt()), Color.argb(180, Color.red(color), Color.green(color), Color.blue(color)))
                 }
-                textSize = if (isOrangeDown || text.length > 1) 11f else 14f
-                setTextColor(if (isOrangeDown) colorOrange else if (boundPkg != null) Color.WHITE else Color.GRAY)
-                gravity = Gravity.CENTER
-                background = createCircleBackground(if (isOrangeDown) Color.parseColor("#4D1C1C22") else Color.parseColor("#3D3D3D"))
-                
-                layoutParams = LayoutParams(slotSize, slotSize).apply {
+                elevation = dpToPx(8).toFloat()
+
+                if (boundPkg != null && !boundPkg.startsWith("/")) {
+                    val appIcon = try { pm.getApplicationIcon(boundPkg) } catch (e: Exception) { null }
+                    if (appIcon != null) {
+                        val iv = ImageView(context).apply {
+                            setImageDrawable(appIcon)
+                            scaleType = ImageView.ScaleType.FIT_CENTER
+                            val iconSize = dpToPx(24)
+                            layoutParams = FrameLayout.LayoutParams(iconSize, iconSize).apply {
+                                gravity = Gravity.CENTER
+                            }
+                        }
+                        addView(iv)
+                    } else {
+                        val tv = TextView(context).apply {
+                            text = boundPkg.split('.').lastOrNull()?.take(2)?.uppercase() ?: "?"
+                            textSize = 12f
+                            setTextColor(Color.WHITE)
+                            gravity = Gravity.CENTER
+                        }
+                        addView(tv)
+                    }
+                } else if (boundPkg?.startsWith("/") == true) {
+                    val iconText = when (boundPkg) {
+                        "/scan" -> "📷"
+                        "/search" -> "🔍"
+                        "/diary" -> "📔"
+                        "/tools" -> "🛠️"
+                        else -> "⚡"
+                    }
+                    val tv = TextView(context).apply {
+                        text = iconText
+                        textSize = 16f
+                        gravity = Gravity.CENTER
+                    }
+                    addView(tv)
+                } else {
+                    val tv = TextView(context).apply {
+                        text = "+"
+                        textSize = 18f
+                        setTextColor(Color.parseColor("#99FFFFFF"))
+                        gravity = Gravity.CENTER
+                    }
+                    addView(tv)
+                }
+
+                layoutParams = LayoutParams(bubbleSize, bubbleSize).apply {
                     gravity = Gravity.TOP or Gravity.START
                 }
-                
-                x = centerX - slotSize / 2f + pos.first
-                y = centerY - slotSize / 2f + pos.second
-                
-                alpha = 0f
+
+                x = baseCenterX - bubbleSize / 2f
+                y = baseCenterY - bubbleSize / 2f
                 scaleX = 0f
                 scaleY = 0f
-                
-                setOnClickListener {
-                    hapticPulse()
-                    if (isOrangeDown) {
-                        Toast.makeText(context, "Slot dedicated to App Drawer Reel", Toast.LENGTH_SHORT).show()
-                    } else {
-                        showAppPicker(parentLabel, directions[index])
-                    }
-                }
+                alpha = 0f
             }
-            parentGroup.addView(slot)
-            activeSlots.add(slot)
-            slot.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(300).setStartDelay((index * 50).toLong()).start()
+
+            addView(bubble)
+            activeSlots.add(bubble)
+            activeBubbleSlots.add(BubbleSlot(bubble, dir, offset.first, offset.second, boundPkg))
+
+            bubble.animate()
+                .translationX(baseCenterX - bubbleSize / 2f + offset.first)
+                .translationY(baseCenterY - bubbleSize / 2f + offset.second)
+                .scaleX(1f)
+                .scaleY(1f)
+                .alpha(1f)
+                .setInterpolator(android.view.animation.OvershootInterpolator(1.4f))
+                .setDuration(220)
+                .setStartDelay((index * 20).toLong())
+                .start()
         }
     }
 
-    private fun expandSparkleSubMenu(parent: View) {
-        Timber.i("Radial: Expanding submenu for Sparkle")
-        parent.animate().scaleX(1.4f).scaleY(1.4f).setDuration(250).start()
-        
-        val parentGroup = this@InputOverlay
-        val slotSize = dpToPx(32)
-        val distance = dpToPx(60)
-
-        // Only UP and DOWN for sparkle
-        val slots = listOf(
-            Pair(0f, -distance.toFloat()), // UP
-            Pair(0f, distance.toFloat())   // DOWN
-        )
-        val directions = listOf("UP", "DOWN")
+    private fun deploySparkleSubMenu(parent: View) {
+        dismissSubMenus()
+        Timber.i("Radial: Deploying Sparkle bubbles")
+        parent.animate().scaleX(1.3f).scaleY(1.3f).setDuration(180).start()
 
         val parentLoc = IntArray(2)
         parent.getLocationInWindow(parentLoc)
         val overlayLoc = IntArray(2)
         this@InputOverlay.getLocationInWindow(overlayLoc)
-        
+
         val centerX = (parentLoc[0] - overlayLoc[0]) + parent.width / 2f
         val centerY = (parentLoc[1] - overlayLoc[1]) + parent.height / 2f
 
-        slots.forEachIndexed { index, pos ->
-            val slot = TextView(context).apply {
-                text = "+"
-                textSize = 14f
-                setTextColor(Color.GRAY)
-                gravity = Gravity.CENTER
-                background = createCircleBackground(Color.parseColor("#3D3D3D"))
-                
-                layoutParams = LayoutParams(slotSize, slotSize).apply {
+        val bubbleSize = dpToPx(38)
+        val distance = dpToPx(56).toFloat()
+
+        val directions = listOf("UP", "DOWN")
+        val offsets = listOf(
+            Pair(0f, -distance), // UP
+            Pair(0f, distance)   // DOWN
+        )
+
+        val pm = context.packageManager
+
+        directions.forEachIndexed { index, dir ->
+            val offset = offsets[index]
+            val boundPkg = prefs.getString("BIND_Sparkle_${dir}", null)
+
+            val bubble = FrameLayout(context).apply {
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(Color.parseColor("#E6181822"))
+                    setStroke(dpToPx(1.5f.toInt()), Color.argb(180, Color.red(colorAccent), Color.green(colorAccent), Color.blue(colorAccent)))
+                }
+                elevation = dpToPx(8).toFloat()
+
+                if (boundPkg != null && !boundPkg.startsWith("/")) {
+                    val appIcon = try { pm.getApplicationIcon(boundPkg) } catch (e: Exception) { null }
+                    if (appIcon != null) {
+                        val iv = ImageView(context).apply {
+                            setImageDrawable(appIcon)
+                            scaleType = ImageView.ScaleType.FIT_CENTER
+                            val iconSize = dpToPx(24)
+                            layoutParams = FrameLayout.LayoutParams(iconSize, iconSize).apply {
+                                gravity = Gravity.CENTER
+                            }
+                        }
+                        addView(iv)
+                    } else {
+                        val tv = TextView(context).apply {
+                            text = boundPkg.split('.').lastOrNull()?.take(2)?.uppercase() ?: "?"
+                            textSize = 12f
+                            setTextColor(Color.WHITE)
+                            gravity = Gravity.CENTER
+                        }
+                        addView(tv)
+                    }
+                } else {
+                    val tv = TextView(context).apply {
+                        text = "+"
+                        textSize = 18f
+                        setTextColor(Color.parseColor("#99FFFFFF"))
+                        gravity = Gravity.CENTER
+                    }
+                    addView(tv)
+                }
+
+                layoutParams = LayoutParams(bubbleSize, bubbleSize).apply {
                     gravity = Gravity.TOP or Gravity.START
                 }
-                
-                x = centerX - slotSize / 2f + pos.first
-                y = centerY - slotSize / 2f + pos.second
-                
-                alpha = 0f
+
+                x = centerX - bubbleSize / 2f
+                y = centerY - bubbleSize / 2f
                 scaleX = 0f
                 scaleY = 0f
-                
-                setOnClickListener {
-                    hapticPulse()
-                    showAppPicker("Sparkle", directions[index])
-                }
+                alpha = 0f
             }
-            parentGroup.addView(slot)
-            activeSlots.add(slot)
-            slot.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(300).setStartDelay((index * 50).toLong()).start()
+
+            addView(bubble)
+            activeSlots.add(bubble)
+            activeBubbleSlots.add(BubbleSlot(bubble, dir, offset.first, offset.second, boundPkg))
+
+            bubble.animate()
+                .translationX(centerX - bubbleSize / 2f + offset.first)
+                .translationY(centerY - bubbleSize / 2f + offset.second)
+                .scaleX(1f)
+                .scaleY(1f)
+                .alpha(1f)
+                .setInterpolator(android.view.animation.OvershootInterpolator(1.4f))
+                .setDuration(220)
+                .setStartDelay((index * 20).toLong())
+                .start()
+        }
+    }
+
+    private fun retractSubMenu(tx: Float, ty: Float) {
+        val overlayW = if (width > 0) width.toFloat() else context.resources.displayMetrics.widthPixels.toFloat()
+        val overlayH = if (height > 0) height.toFloat() else dpToPx(520).toFloat()
+        val baseCenterX = overlayW / 2f + tx
+        val baseCenterY = overlayH / 2f + ty
+        val bubbleSize = dpToPx(38)
+
+        activeBubbleSlots.forEach { slot ->
+            slot.view.animate()
+                .translationX(baseCenterX - bubbleSize / 2f)
+                .translationY(baseCenterY - bubbleSize / 2f)
+                .scaleX(0f)
+                .scaleY(0f)
+                .alpha(0f)
+                .setDuration(160)
+                .withEndAction { removeView(slot.view) }
+                .start()
+        }
+        activeSlots.clear()
+        activeBubbleSlots.clear()
+    }
+
+    private fun retractSparkleSubMenu(sparkleView: View) {
+        val parentLoc = IntArray(2)
+        sparkleView.getLocationInWindow(parentLoc)
+        val overlayLoc = IntArray(2)
+        this@InputOverlay.getLocationInWindow(overlayLoc)
+        val centerX = (parentLoc[0] - overlayLoc[0]) + sparkleView.width / 2f
+        val centerY = (parentLoc[1] - overlayLoc[1]) + sparkleView.height / 2f
+        val bubbleSize = dpToPx(38)
+
+        activeBubbleSlots.forEach { slot ->
+            slot.view.animate()
+                .translationX(centerX - bubbleSize / 2f)
+                .translationY(centerY - bubbleSize / 2f)
+                .scaleX(0f)
+                .scaleY(0f)
+                .alpha(0f)
+                .setDuration(160)
+                .withEndAction { removeView(slot.view) }
+                .start()
+        }
+        activeSlots.clear()
+        activeBubbleSlots.clear()
+    }
+
+    private fun highlightBubble(dir: String, themeColor: Int) {
+        activeBubbleSlots.forEach { slot ->
+            if (slot.direction == dir) {
+                slot.view.animate()
+                    .scaleX(1.32f)
+                    .scaleY(1.32f)
+                    .alpha(1.0f)
+                    .setDuration(120)
+                    .start()
+                (slot.view.background as? GradientDrawable)?.setStroke(
+                    dpToPx(2),
+                    Color.WHITE
+                )
+            } else {
+                slot.view.animate()
+                    .scaleX(0.85f)
+                    .scaleY(0.85f)
+                    .alpha(0.45f)
+                    .setDuration(120)
+                    .start()
+                (slot.view.background as? GradientDrawable)?.setStroke(
+                    dpToPx(1),
+                    Color.argb(90, Color.red(themeColor), Color.green(themeColor), Color.blue(themeColor))
+                )
+            }
+        }
+    }
+
+    private fun resetBubblesHighlight(themeColor: Int) {
+        activeBubbleSlots.forEach { slot ->
+            slot.view.animate()
+                .scaleX(1.0f)
+                .scaleY(1.0f)
+                .alpha(1.0f)
+                .setDuration(120)
+                .start()
+            (slot.view.background as? GradientDrawable)?.setStroke(
+                dpToPx(1.5f.toInt()),
+                Color.argb(180, Color.red(themeColor), Color.green(themeColor), Color.blue(themeColor))
+            )
+        }
+    }
+
+    private fun handleBubbleSelected(label: String, direction: String, color: Int) {
+        val selectedSlot = activeBubbleSlots.find { it.direction == direction }
+        selectedSlot?.view?.animate()
+            ?.scaleX(1.4f)
+            ?.scaleY(1.4f)
+            ?.alpha(0f)
+            ?.setDuration(150)
+            ?.start()
+
+        val boundPkg = prefs.getString("BIND_${label}_${direction}", null)
+        if (boundPkg == null) {
+            if (label.contains("Orange") && direction == "DOWN") {
+                hapticPulse()
+                dismissSubMenus()
+                com.ghost.api.GemmaService.instance?.overlayManager?.showAppReel()
+                return
+            }
+            if (label.contains("Orange") && direction == "UP") {
+                hapticPulse()
+                dismissSubMenus()
+                com.ghost.api.hardware.HardwareToolSet(context).flashlight("TOGGLE")
+                return
+            }
+            hapticPulse()
+            dismissSubMenus()
+            showAppPicker(label, direction)
+        } else {
+            hapticPulse()
+            dismissSubMenus()
+            launchBoundApp(label, direction)
         }
     }
 
     private fun dismissSubMenus() {
         com.ghost.api.GemmaService.instance?.overlayManager?.hideAppReel()
-        activeSlots.forEach { it.animate().alpha(0f).scaleX(0f).scaleY(0f).setDuration(200).withEndAction { removeView(it) }.start() }
+        activeSlots.forEach { slot ->
+            slot.animate()
+                .scaleX(0f)
+                .scaleY(0f)
+                .alpha(0f)
+                .setDuration(150)
+                .withEndAction { removeView(slot) }
+                .start()
+        }
         activeSlots.clear()
-        
+        activeBubbleSlots.clear()
+
         appPickerLayout?.let { removeView(it); appPickerLayout = null }
-        
+
         // Also reset main buttons scale
         for (i in 0 until childCount) {
             val v = getChildAt(i)
             if (v is TextView && v.text == "✧") {
-                v.animate().scaleX(1f).scaleY(1f).setDuration(200).start()
+                v.animate().scaleX(1f).scaleY(1f).setDuration(150).start()
             }
         }
     }
 
+    data class AppPickerItem(val name: String, val pkgName: String, val icon: Drawable)
+
+    companion object {
+        @Volatile
+        private var cachedAppList: List<AppPickerItem>? = null
+    }
+
     private fun showAppPicker(parentLabel: String, direction: String) {
         if (appPickerLayout != null) removeView(appPickerLayout)
-        
-        val pm = context.packageManager
-        val intent = android.content.Intent(android.content.Intent.ACTION_MAIN, null).apply { addCategory(android.content.Intent.CATEGORY_LAUNCHER) }
-        val resolveInfos = pm.queryIntentActivities(intent, 0).sortedBy { it.loadLabel(pm).toString() }
-        
+
         val container = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#E61E1E1E"))
-            layoutParams = LayoutParams(dpToPx(240), dpToPx(300)).apply {
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#F0181822"))
+                cornerRadius = dpToPx(16).toFloat()
+                setStroke(dpToPx(1), Color.parseColor("#44FFFFFF"))
+            }
+            layoutParams = LayoutParams(dpToPx(290), dpToPx(390)).apply {
                 gravity = Gravity.CENTER
             }
-            elevation = dpToPx(16).toFloat()
+            elevation = dpToPx(20).toFloat()
+            clipToOutline = true
         }
-        
+
+        // Header
+        val header = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dpToPx(16), dpToPx(12), dpToPx(16), dpToPx(12))
+            setBackgroundColor(Color.parseColor("#252532"))
+        }
+
         val title = TextView(context).apply {
-            text = "Bind App to $direction swipe"
+            text = "Pin App • $direction"
+            textSize = 15f
             setTextColor(Color.WHITE)
-            setPadding(16, 16, 16, 16)
-            setBackgroundColor(Color.parseColor("#333333"))
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
-        container.addView(title)
-        
-        val scrollView = ScrollView(context)
-        val list = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-        
-        for (info in resolveInfos) {
-            val appName = info.loadLabel(pm).toString()
-            val pkgName = info.activityInfo.packageName
-            val item = TextView(context).apply {
-                text = appName
-                setTextColor(Color.LTGRAY)
-                setPadding(32, 24, 32, 24)
+
+        val closeBtn = TextView(context).apply {
+            text = "✕"
+            textSize = 16f
+            setTextColor(Color.parseColor("#99FFFFFF"))
+            setPadding(dpToPx(8), dpToPx(4), dpToPx(8), dpToPx(4))
+            setOnClickListener {
+                dismissSubMenus()
+            }
+        }
+        header.addView(title)
+        header.addView(closeBtn)
+        container.addView(header)
+
+        // Unbind / Clear button
+        val currentBind = prefs.getString("BIND_${parentLabel}_${direction}", null)
+        if (currentBind != null) {
+            val clearBtn = TextView(context).apply {
+                text = "✖ Unbind Current App"
+                textSize = 12f
+                setTextColor(Color.parseColor("#EF4444"))
+                gravity = Gravity.CENTER
+                setPadding(dpToPx(12), dpToPx(8), dpToPx(12), dpToPx(8))
+                setBackgroundColor(Color.parseColor("#1F1F2B"))
                 setOnClickListener {
-                    prefs.edit().putString("BIND_${parentLabel}_${direction}", pkgName).apply()
+                    prefs.edit().remove("BIND_${parentLabel}_${direction}").apply()
+                    hapticPulse()
                     dismissSubMenus()
+                    Toast.makeText(context, "Slot cleared", Toast.LENGTH_SHORT).show()
                 }
             }
-            list.addView(item)
-            val divider = View(context).apply { setBackgroundColor(Color.DKGRAY); layoutParams = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, 1) }
-            list.addView(divider)
+            container.addView(clearBtn)
         }
-        
-        scrollView.addView(list)
-        container.addView(scrollView)
-        
+
+        // Optimized recycled ListView (only inflates ~8 rows instead of 1000+ views)
+        val listView = ListView(context).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
+            divider = ColorDrawable(Color.parseColor("#15FFFFFF"))
+            dividerHeight = 1
+            isFastScrollEnabled = true
+        }
+
+        val progressBar = ProgressBar(context).apply {
+            layoutParams = LinearLayout.LayoutParams(dpToPx(40), dpToPx(40)).apply {
+                gravity = Gravity.CENTER
+                topMargin = dpToPx(80)
+                bottomMargin = dpToPx(80)
+            }
+            visibility = View.GONE
+        }
+        container.addView(progressBar)
+        container.addView(listView)
+
+        fun bindList(apps: List<AppPickerItem>) {
+            progressBar.visibility = View.GONE
+            listView.visibility = View.VISIBLE
+            listView.adapter = object : BaseAdapter() {
+                override fun getCount(): Int = apps.size
+                override fun getItem(pos: Int): Any = apps[pos]
+                override fun getItemId(pos: Int): Long = pos.toLong()
+                override fun getView(pos: Int, convertView: View?, parent: ViewGroup): View {
+                    val row = (convertView as? LinearLayout) ?: LinearLayout(context).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        setPadding(dpToPx(16), dpToPx(10), dpToPx(16), dpToPx(10))
+                        val iv = ImageView(context).apply {
+                            id = 2001
+                            layoutParams = LinearLayout.LayoutParams(dpToPx(28), dpToPx(28)).apply {
+                                marginEnd = dpToPx(12)
+                            }
+                        }
+                        val tv = TextView(context).apply {
+                            id = 2002
+                            textSize = 14f
+                            setTextColor(Color.WHITE)
+                            maxLines = 1
+                            ellipsize = android.text.TextUtils.TruncateAt.END
+                            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                        }
+                        addView(iv)
+                        addView(tv)
+                    }
+                    val item = apps[pos]
+                    row.findViewById<ImageView>(2001).setImageDrawable(item.icon)
+                    row.findViewById<TextView>(2002).text = item.name
+                    row.setOnClickListener {
+                        prefs.edit().putString("BIND_${parentLabel}_${direction}", item.pkgName).apply()
+                        hapticPulse()
+                        dismissSubMenus()
+                        Toast.makeText(context, "Pinned ${item.name}", Toast.LENGTH_SHORT).show()
+                    }
+                    return row
+                }
+            }
+        }
+
+        val cached = cachedAppList
+        if (cached != null) {
+            bindList(cached)
+        } else {
+            progressBar.visibility = View.VISIBLE
+            listView.visibility = View.GONE
+            CoroutineScope(Dispatchers.IO).launch {
+                val pm = context.packageManager
+                val intent = android.content.Intent(android.content.Intent.ACTION_MAIN, null).apply {
+                    addCategory(android.content.Intent.CATEGORY_LAUNCHER)
+                }
+                val list = pm.queryIntentActivities(intent, 0).mapNotNull { info ->
+                    try {
+                        val name = info.loadLabel(pm).toString()
+                        val pkg = info.activityInfo.packageName
+                        val icon = info.loadIcon(pm)
+                        AppPickerItem(name, pkg, icon)
+                    } catch (e: Exception) { null }
+                }.sortedBy { it.name.lowercase() }
+                
+                cachedAppList = list
+                withContext(Dispatchers.Main) {
+                    bindList(list)
+                }
+            }
+        }
+
         appPickerLayout = container
         addView(container)
+    }
+
+    private fun vibrateLongPress() {
+        try {
+            val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                vibrator?.vibrate(android.os.VibrationEffect.createWaveform(longArrayOf(0, 30, 40, 40), -1))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator?.vibrate(60)
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Haptic long press failed")
+        }
     }
 
 
@@ -955,7 +1452,17 @@ class InputOverlay(
     }
 
     fun cleanup() {
+        dismissSubMenus()
+        activeSlots.forEach { removeView(it) }
+        activeSlots.clear()
+        activeBubbleSlots.clear()
+        appPickerLayout?.let { removeView(it); appPickerLayout = null }
         voiceController.cleanup()
+    }
+
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        cleanup()
     }
 
     // === Drawing helpers ===
