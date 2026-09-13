@@ -27,7 +27,8 @@ class MCPServer(
     private val audioRecorder: AudioRecorder,
     val sensorManager: SensorFusionManager,
     private val memoryManager: MemoryManager,
-    private val skillManager: SkillManager
+    private val skillManager: SkillManager,
+    private val fileTools: com.ghost.api.hardware.FileToolSet = com.ghost.api.hardware.FileToolSet(context)
 ) {
     
     data class ToolDefinition(val name: String, val description: String, val parameters: Map<String, ParameterSpec>)
@@ -207,52 +208,60 @@ class MCPServer(
                     val res = networkTools.open_system_browser_bar(queryOrUrl)
                     ToolResult(res["result"] == "success", res["message"] ?: "")
                 }
+                // Messaging
+                "reply_notification" -> {
+                    val pkg = params["packageName"]?.toString() ?: ""
+                    val msg = params["message"]?.toString() ?: ""
+                    val res = systemTools.reply_notification(pkg, msg)
+                    ToolResult(res["result"] == "success", res["message"] ?: "")
+                }
+                "send_whatsapp_message" -> {
+                    val phone = params["phoneNumber"]?.toString() ?: ""
+                    val msg = params["message"]?.toString() ?: ""
+                    val res = systemTools.send_whatsapp_message(msg, phone)
+                    ToolResult(res["result"] == "success", res["message"] ?: "")
+                }
                 // File Management & Search
                 "search_files" -> {
                     val query = params["query"]?.toString() ?: ""
-                    val type = params["type"]?.toString() ?: "any"
-                    val res = systemTools.search_files(query, type)
-                    ToolResult(res["result"] == "success", res["matches"] ?: res["message"] ?: "")
+                    val res = fileTools.search_files(query)
+                    ToolResult(res["result"] == "success", res["files"] ?: res["message"] ?: "")
                 }
                 "list_files" -> {
-                    val target = params["target"]?.toString() ?: "downloads"
-                    val extension = params["extension"]?.toString() ?: "all"
-                    val limit = params["limit"]?.toString()?.toIntOrNull() ?: 25
-                    val res = systemTools.list_files(target, extension, limit)
+                    val folder = params["folder"]?.toString() ?: params["target"]?.toString() ?: "downloads"
+                    val res = fileTools.list_files(folder)
                     ToolResult(res["result"] == "success", res["files"] ?: res["message"] ?: "")
                 }
                 "move_file" -> {
                     val src = params["sourcePath"]?.toString() ?: ""
                     val dst = params["destinationPath"]?.toString() ?: ""
-                    val res = systemTools.move_file(src, dst)
+                    val res = fileTools.move_file(src, dst)
                     ToolResult(res["result"] == "success", res["message"] ?: "")
                 }
                 "copy_file" -> {
                     val src = params["sourcePath"]?.toString() ?: ""
                     val dst = params["destinationPath"]?.toString() ?: ""
-                    val res = systemTools.copy_file(src, dst)
+                    val res = fileTools.copy_file(src, dst)
                     ToolResult(res["result"] == "success", res["message"] ?: "")
                 }
                 "delete_file" -> {
                     val path = params["filePath"]?.toString() ?: ""
-                    val res = systemTools.delete_file(path)
+                    val res = fileTools.delete_file(path)
                     ToolResult(res["result"] == "success", res["message"] ?: "")
                 }
                 "get_file_info" -> {
                     val path = params["filePath"]?.toString() ?: ""
-                    val res = systemTools.get_file_info(path)
+                    val res = fileTools.get_file_info(path)
                     ToolResult(res["result"] == "success", res.toString())
                 }
                 "open_file" -> {
                     val path = params["filePath"]?.toString() ?: ""
-                    val app = params["appName"]?.toString() ?: ""
-                    val res = systemTools.open_file(path, app)
+                    val res = fileTools.open_file(path)
                     ToolResult(res["result"] == "success", res["message"] ?: "")
                 }
                 "read_file_text" -> {
                     val path = params["filePath"]?.toString() ?: ""
-                    val lines = params["maxLines"]?.toString()?.toIntOrNull() ?: 100
-                    val res = systemTools.read_file_text(path, lines)
+                    val res = fileTools.read_file_text(path)
                     ToolResult(res["result"] == "success", res["content"] ?: res["message"] ?: "")
                 }
                 // Skills

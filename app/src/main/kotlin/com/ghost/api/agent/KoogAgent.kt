@@ -42,7 +42,7 @@ class KoogAgent(
     private val checkpointDir: File,
     private val coreTools: List<com.google.ai.edge.litertlm.ToolSet> = emptyList(),
     private val uiTools: List<com.google.ai.edge.litertlm.ToolSet> = emptyList(),
-    private val termuxTools: List<com.google.ai.edge.litertlm.ToolSet> = emptyList(),
+    private val fileTools: List<com.google.ai.edge.litertlm.ToolSet> = emptyList(),
     private val callbacks: AgentPlatformCallbacks? = null
 ) {
     private var currentTools = coreTools
@@ -715,24 +715,24 @@ class KoogAgent(
                 callbacks?.updateNotification("(╭r_•́)")
             }
 
-            // --- Tiered Tool Loading (Lazy inject heavy UI or Termux macros if explicitly requested) ---
+            // --- Tiered Tool Loading (Lazy inject heavy UI or File tools if explicitly requested) ---
             if (!event.isDream) {
-                val wantsUi = Regex("""\b(tap|click\s+on|scroll\s+(up|down)|swipe|press\s+button)\b""", RegexOption.IGNORE_CASE).containsMatchIn(event.message)
-                val wantsTermux = Regex("""\b(termux|adb|bash|shell\s+command|run\s+script)\b""", RegexOption.IGNORE_CASE).containsMatchIn(event.message)
+                val wantsUi = Regex("""\b(tap|click\s+on|scroll\s+(up|down)|swipe|press\s+button|type\s+in|read\s+screen)\b""", RegexOption.IGNORE_CASE).containsMatchIn(event.message)
+                val wantsFiles = Regex("""\b(file|folder|doc|pdf|mp3|download|storage|photo|picture|directory)\b""", RegexOption.IGNORE_CASE).containsMatchIn(event.message)
                 
                 var targetTools = currentTools
                 if (wantsUi && uiTools.isNotEmpty() && !currentTools.containsAll(uiTools)) {
                     targetTools = targetTools + uiTools
                 }
-                if (wantsTermux && termuxTools.isNotEmpty() && !currentTools.containsAll(termuxTools)) {
-                    targetTools = targetTools + termuxTools
+                if (wantsFiles && fileTools.isNotEmpty() && !currentTools.containsAll(fileTools)) {
+                    targetTools = targetTools + fileTools
                 }
 
                 // Only softReset when expanding tool capabilities for the active session, never thrash back and forth
                 if (targetTools.size > currentTools.size) {
                     currentTools = targetTools
                     llmEngine.softReset(buildSystemPrompt() + getRollingMemoryString(), currentTools)
-                    Timber.i("lazy_tools: Expanded tools for active session (UI: $wantsUi, Termux: $wantsTermux)")
+                    Timber.i("lazy_tools: Expanded tools for active session (UI: $wantsUi, Files: $wantsFiles)")
                 }
             }
             // -----------------------------------------------------------------------

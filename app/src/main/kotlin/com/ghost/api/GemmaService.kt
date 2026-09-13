@@ -323,6 +323,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     private lateinit var automationToolSet: AutomationToolSet // Cron Bridge
     private lateinit var termuxAdbToolSet: TermuxAdbToolSet // Power User Bridge
     private lateinit var uiMacroToolSet: com.ghost.api.hardware.UiMacroToolSet // UI Automation Bridge
+    private lateinit var fileToolSet: com.ghost.api.hardware.FileToolSet // MediaStore & Files Bridge
     private lateinit var shakeDetector: ShakeDetector // Shake to summon
     lateinit var overlayManager: OverlayManager // Floating input
     private lateinit var audioRecorder: AudioRecorder // Hearing
@@ -392,6 +393,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             termuxAdbToolSet = TermuxAdbToolSet(this) // Init Power User Bridge
             reportStatus("Init: UiMacroToolSet...")
             uiMacroToolSet = com.ghost.api.hardware.UiMacroToolSet(this) // Init UI Automation
+            fileToolSet = com.ghost.api.hardware.FileToolSet(this) // Init MediaStore & Files Lazy Bridge
             reportStatus("Init: AudioRecorder...")
             audioRecorder = AudioRecorder(this) // Init Hearing
 
@@ -798,10 +800,10 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 "CPU"
             } else null
 
-            // Determine Tools
+            // Determine Tools (Tier 1 Core)
             val coreTools = listOf(hardwareToolSet, networkToolSet, systemToolSet, automationToolSet, com.ghost.api.skills.SkillToolSet(skillManager))
             val uiTools = listOf(uiMacroToolSet)
-            val termuxTools = listOf(termuxAdbToolSet)
+            val fileTools = listOf(fileToolSet)
 
             // Engine Creation (Locked to prevent double allocation)
             val newEngine = engineMutex.withLock {
@@ -860,7 +862,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 checkpointDir = getExternalFilesDir(null) ?: filesDir,
                 coreTools = coreTools,
                 uiTools = uiTools,
-                termuxTools = termuxTools,
+                fileTools = fileTools,
                 callbacks = this@GemmaService
             )
 
