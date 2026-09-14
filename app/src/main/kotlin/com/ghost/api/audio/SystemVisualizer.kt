@@ -39,10 +39,13 @@ object SystemVisualizer {
     private var audioManager: AudioManager? = null
     private var playbackCallback: AudioManager.AudioPlaybackCallback? = null
 
-    // Track last active foreground package and active speaking agent
+    // Track last active foreground package, speaking AI agent, and recent foreground AI app
     var lastForegroundPackage: String? = null
         private set
-    private var activeAgentPackage: String? = null
+    var activeAudioSpeakingPackage: String? = null
+        private set
+    private var lastForegroundAiPackage: String? = null
+    private var lastForegroundAiTime: Long = 0L
     private var currentAppliedPackage: String? = null
 
     // Audio activity state & silence decay
@@ -248,14 +251,21 @@ object SystemVisualizer {
                         (stateMethod.invoke(config) as? Int) == 2 // PLAYER_STATE_STARTED
                     } catch (e: Exception) {
                         try {
-                            val method = config.javaClass.getDeclaredMethod("isActive").apply { isAccessible = true }
-                            method.invoke(config) as? Boolean ?: false
+                            val activeMethod = config.javaClass.getDeclaredMethod("isActive").apply { isAccessible = true }
+                            activeMethod.invoke(config) as? Boolean ?: false
                         } catch (e2: Exception) {
                             false
                         }
                     }
                 }
                 if (!isStarted) continue
+
+                // Direct package name check if present in config string (e.g. package:com.anthropic.claude)
+                val pkgMatch = Regex("""package:([a-zA-Z0-9_.]+)""").find(configStr)
+                val pkgFromStr = pkgMatch?.groupValues?.get(1)
+                if (pkgFromStr != null && !isTransientOverlay(pkgFromStr) && findBrandPalette(pkgFromStr) != null) {
+                    return pkgFromStr
+                }
 
                 // 3. Extract Client UID
                 var clientUid: Int? = null
@@ -360,7 +370,7 @@ object SystemVisualizer {
             val isPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
             val currentFg = lastForegroundPackage ?: getForegroundAppFromUsageStats()
             val fgBrand = currentFg?.let { findBrandPalette(it) }
-            if (isPlaying && fgBrand == null && activeAgentPackage == null) {
+            if (isPlaying && fgBrand == null && activeAudioSpeakingPackage == null) {
                 extractColorsFromMetadata(metadata)
             }
         }
@@ -371,7 +381,7 @@ object SystemVisualizer {
             val fgBrand = currentFg?.let { findBrandPalette(it) }
 
             if (isPlaying) {
-                activeAgentPackage = null
+                activeAudioSpeakingPackage = null
                 cancelPendingRevert()
                 if (fgBrand == null) {
                     if (activeMediaArtColors != null) {
@@ -386,7 +396,7 @@ object SystemVisualizer {
                 if (!isAudioActive) {
                     if (fgBrand != null) {
                         applyAiBrandColor(currentFg!!, fgBrand)
-                    } else if (activeAgentPackage != null) {
+                    } else if (activeAudioSpeakingPackage != null) {
                         scheduleRevertToDefault(2500L)
                     } else {
                         revertToDefaultColors()
@@ -403,9 +413,12 @@ object SystemVisualizer {
 
             if (state?.state == PlaybackState.STATE_PLAYING) {
                 cancelPendingRevert()
-                activeAgentPackage = pkg
+                activeAudioSpeakingPackage = pkg
                 applyAiBrandColor(pkg, brand)
             } else if (state?.state == PlaybackState.STATE_STOPPED || state?.state == PlaybackState.STATE_PAUSED) {
+                if (activeAudioSpeakingPackage == pkg) {
+                    activeAudioSpeakingPackage = null
+                }
                 val currentFg = lastForegroundPackage ?: getForegroundAppFromUsageStats()
                 val fgBrand = currentFg?.let { findBrandPalette(it) }
                 if (fgBrand != null) {
@@ -478,6 +491,7 @@ object SystemVisualizer {
                         if (intensity > 0.04f) {
                             lastAudioActivityTime = System.currentTimeMillis()
                             cancelPendingRevert()
+                            val wasAudioActive = isAudioActive
                             if (!isAudioActive) {
                                 isAudioActive = true
                             }
@@ -501,23 +515,42 @@ object SystemVisualizer {
                             // 4. Active Music MediaSession (YouTube Music, Spotify, etc.)
                             val isMediaPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
 
-                            if (fgBrand != null) {
-                                activeAgentPackage = fgPkg
-                                applyAiBrandColor(fgPkg!!, fgBrand)
-                            } else if (hwBrand != null) {
-                                activeAgentPackage = hwPkg
-                                applyAiBrandColor(hwPkg!!, hwBrand)
-                            } else if (aiMediaBrand != null) {
-                                activeAgentPackage = aiMediaPkg
-                                applyAiBrandColor(aiMediaPkg!!, aiMediaBrand)
-                            } else if (activeAgentPackage != null) {
-                                // Agent voice active while app is minimized to home screen / background!
-                                val agentBrand = findBrandPalette(activeAgentPackage!!)
-                                if (agentBrand != null) {
-                                    applyAiBrandColor(activeAgentPackage!!, agentBrand)
+                            // Establish active speaking source if newly active or unknown
+                            if (!wasAudioActive || activeAudioSpeakingPackage == null) {
+                                if (hwBrand != null) {
+                                    activeAudioSpeakingPackage = hwPkg
+                                } else if (aiMediaBrand != null) {
+                                    activeAudioSpeakingPackage = aiMediaPkg
+                                } else if (fgBrand != null) {
+                                    activeAudioSpeakingPackage = fgPkg
+                                } else {
+                                    val recentAi = if (lastForegroundAiPackage != null && (System.currentTimeMillis() - lastForegroundAiTime < 4000L)) {
+                                        lastForegroundAiPackage
+                                    } else null
+                                    if (recentAi != null) {
+                                        activeAudioSpeakingPackage = recentAi
+                                    }
                                 }
+                            }
+
+                            // Presentation Priority:
+                            if (fgBrand != null) {
+                                // Focused on-screen AI app takes visual priority while in foreground
+                                applyAiBrandColor(fgPkg!!, fgBrand)
+                            } else if (activeAudioSpeakingPackage != null) {
+                                // Agent voice active while user is on home screen / background!
+                                val agentBrand = findBrandPalette(activeAudioSpeakingPackage!!)
+                                if (agentBrand != null) {
+                                    applyAiBrandColor(activeAudioSpeakingPackage!!, agentBrand)
+                                }
+                            } else if (aiMediaBrand != null) {
+                                activeAudioSpeakingPackage = aiMediaPkg
+                                applyAiBrandColor(aiMediaPkg!!, aiMediaBrand)
+                            } else if (hwBrand != null) {
+                                activeAudioSpeakingPackage = hwPkg
+                                applyAiBrandColor(hwPkg!!, hwBrand)
                             } else if (isMediaPlaying) {
-                                activeAgentPackage = null
+                                activeAudioSpeakingPackage = null
                                 if (activeMediaArtColors != null) {
                                     applyMediaAlbumArt(activeMediaArtColors!!)
                                 } else {
@@ -527,6 +560,7 @@ object SystemVisualizer {
                             // Any unbranded system sound (clicks, shutter, lock, etc.) is ignored!
                         } else if (isAudioActive && (System.currentTimeMillis() - lastAudioActivityTime > 2500)) {
                             isAudioActive = false
+                            activeAudioSpeakingPackage = null
                             val isMediaPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
                             if (isMediaPlaying && activeMediaArtColors != null) {
                                 applyMediaAlbumArt(activeMediaArtColors!!)
@@ -537,7 +571,6 @@ object SystemVisualizer {
                                 if (fgBrand != null) {
                                     applyAiBrandColor(fgPkg, fgBrand)
                                 } else {
-                                    activeAgentPackage = null
                                     revertToDefaultColors()
                                 }
                             }
@@ -581,7 +614,7 @@ object SystemVisualizer {
             val aiBrand = findBrandPalette(aiPkg)
             if (aiPkg != null && aiBrand != null) {
                 cancelPendingRevert()
-                activeAgentPackage = aiPkg
+                activeAudioSpeakingPackage = aiPkg
                 applyAiBrandColor(aiPkg, aiBrand)
             }
         }
@@ -597,7 +630,7 @@ object SystemVisualizer {
         if (activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING) {
             val currentFg = lastForegroundPackage ?: getForegroundAppFromUsageStats()
             val fgBrand = currentFg?.let { findBrandPalette(it) }
-            if (fgBrand == null && activeAgentPackage == null) {
+            if (fgBrand == null && activeAudioSpeakingPackage == null) {
                 extractColorsFromMetadata(activeMediaController?.metadata)
             }
         }
@@ -710,9 +743,22 @@ object SystemVisualizer {
         // Strict AI Isolation: Only track and react to curated AI apps
         val brandPalette = findBrandPalette(packageName)
         if (brandPalette != null) {
+            lastForegroundAiPackage = packageName
+            lastForegroundAiTime = System.currentTimeMillis()
             cancelPendingRevert()
-            activeAgentPackage = packageName
-            applyAiBrandColor(packageName, brandPalette)
+
+            // If no AI audio is currently speaking in the background, or if this AI app is the speaker:
+            if (!isAudioActive || activeAudioSpeakingPackage == null || activeAudioSpeakingPackage == packageName) {
+                activeAudioSpeakingPackage = packageName
+                applyAiBrandColor(packageName, brandPalette)
+            } else {
+                // Another AI app is actively speaking in the background (e.g. Claude TTS is talking,
+                // but user opened DeepSeek).
+                // While the user is focused on DeepSeek, show DeepSeek's palette & glyph on screen:
+                applyAiBrandColor(packageName, brandPalette)
+                // BUT CRITICALLY: DO NOT overwrite activeAudioSpeakingPackage!
+                // activeAudioSpeakingPackage remains Claude so when DeepSeek closes, it returns to Claude!
+            }
         } else {
             // User switched to Home Screen (launcher) or a non-AI app (Chrome, Settings, Files, etc.)
             val isMediaPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
@@ -720,28 +766,28 @@ object SystemVisualizer {
 
             if (isMediaPlaying && activeMediaArtColors != null) {
                 cancelPendingRevert()
-                activeAgentPackage = null
+                activeAudioSpeakingPackage = null
                 applyMediaAlbumArt(activeMediaArtColors!!)
-            } else if (isAudioActive && activeAgentPackage != null) {
+            } else if (isAudioActive && activeAudioSpeakingPackage != null) {
                 // The AI agent is currently talking in the background!
-                // Keep its signature colors active and dancing on the edge lights / visualizer!
+                // Restore its signature colors and glyph immediately!
                 cancelPendingRevert()
-                val agentBrand = findBrandPalette(activeAgentPackage!!)
-                if (agentBrand != null) {
-                    applyAiBrandColor(activeAgentPackage!!, agentBrand)
+                val speakingBrand = findBrandPalette(activeAudioSpeakingPackage!!)
+                if (speakingBrand != null) {
+                    applyAiBrandColor(activeAudioSpeakingPackage!!, speakingBrand)
                 }
             } else if (isAiMediaPlaying && activeAiController?.packageName != null) {
                 val aiPkg = activeAiController!!.packageName
                 val agentBrand = findBrandPalette(aiPkg)
                 if (agentBrand != null) {
                     cancelPendingRevert()
-                    activeAgentPackage = aiPkg
+                    activeAudioSpeakingPackage = aiPkg
                     applyAiBrandColor(aiPkg, agentBrand)
                 }
-            } else if (activeAgentPackage != null) {
-                // User was in an AI agent and minimized (e.g. pressed Play before minimizing while TTS loads).
-                // Give a 2.5s grace offset before fading to default so TTS startup isn't cut off!
-                scheduleRevertToDefault(2500L)
+            } else if (lastForegroundAiPackage != null && (System.currentTimeMillis() - lastForegroundAiTime < 3000L)) {
+                // User was just in an AI agent and minimized (e.g. pressed Play before minimizing while TTS loads).
+                // Give a 3.0s grace offset before fading to default so TTS startup isn't cut off!
+                scheduleRevertToDefault(3000L)
             } else {
                 revertToDefaultColors()
             }
@@ -753,7 +799,7 @@ object SystemVisualizer {
     fun scheduleRevertToDefault(delayMs: Long = 2500L) {
         cancelPendingRevert()
         pendingRevertRunnable = Runnable {
-            activeAgentPackage = null
+            activeAudioSpeakingPackage = null
             revertToDefaultColors()
             pendingRevertRunnable = null
         }.also { handler.postDelayed(it, delayMs) }
@@ -771,6 +817,7 @@ object SystemVisualizer {
     fun revertToDefaultColors() {
         cancelPendingRevert()
         activeAgentGlyph = "✧"
+        activeAudioSpeakingPackage = null
         if (currentAlbumColors == null && currentAppliedPackage == null) return
         currentAlbumColors = null
         currentAppliedPackage = null
@@ -784,6 +831,7 @@ object SystemVisualizer {
         // 1. If an AI brand palette is matched, apply it immediately!
         val brandPalette = findBrandPalette(packageName)
         if (brandPalette != null) {
+            activeAudioSpeakingPackage = packageName
             applyAiBrandColor(packageName, brandPalette)
             return
         }
@@ -812,7 +860,7 @@ object SystemVisualizer {
             packageName.contains("mistral", ignoreCase = true) -> "🟧"
             else -> "✧"
         }
-        if (currentAlbumColors == brandPalette) return
+        if (currentAlbumColors == brandPalette && currentAppliedPackage == packageName) return
         currentAppliedPackage = packageName
         currentAlbumColors = brandPalette
         if (overrideEmotionColors == null) {
@@ -823,17 +871,21 @@ object SystemVisualizer {
 
     fun setActivePeer(callsign: String?) {
         if (callsign.isNullOrBlank()) {
-            scheduleRevertToDefault(2000L)
+            if (!isAudioActive) {
+                scheduleRevertToDefault(2000L)
+            }
             return
         }
         cancelPendingRevert()
         when {
             callsign.contains("deepseek", ignoreCase = true) || callsign.contains("whale", ignoreCase = true) -> {
+                activeAudioSpeakingPackage = "com.deepseek.chat"
                 val palette = AI_BRAND_PALETTES.find { it.third == "DeepSeek" }?.second
                 if (palette != null) applyAiBrandColor("com.deepseek.chat", palette)
                 else activeAgentGlyph = "🐋"
             }
             callsign.contains("gemini", ignoreCase = true) || callsign.contains("mum", ignoreCase = true) -> {
+                activeAudioSpeakingPackage = "com.google.android.apps.bard"
                 val palette = intArrayOf(
                     Color.parseColor("#8BB4F6"), // 0: Ethereal Cobalt
                     Color.parseColor("#4285F4"), // 1: Google Blue
@@ -845,6 +897,7 @@ object SystemVisualizer {
             }
             else -> {
                 activeAgentGlyph = "✧"
+                activeAudioSpeakingPackage = null
                 revertToDefaultColors()
             }
         }
