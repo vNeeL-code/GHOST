@@ -54,6 +54,16 @@ object SystemVisualizer {
         private set
     private var activeMediaArtColors: IntArray? = null
 
+    // Active Media Session Album Art & Playback State
+    var activeAlbumArt: Bitmap? = null
+        private set
+    val isMediaPlaying: Boolean
+        get() = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
+
+    // Dynamic Central Glyph Morphing ("✧", "🐋", "✦")
+    var activeAgentGlyph: String = "✧"
+        private set
+
     private var overrideEmotionColors: IntArray? = null
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     private val clearEmotionRunnable = Runnable {
@@ -372,6 +382,7 @@ object SystemVisualizer {
                 }
             } else if (state?.state == PlaybackState.STATE_STOPPED || state?.state == PlaybackState.STATE_PAUSED) {
                 activeMediaArtColors = null
+                activeAlbumArt = null
                 if (!isAudioActive) {
                     if (fgBrand != null) {
                         applyAiBrandColor(currentFg!!, fgBrand)
@@ -672,6 +683,7 @@ object SystemVisualizer {
                 )
                 if (isAlbumArt) {
                     activeMediaArtColors = extracted
+                    activeAlbumArt = bitmap
                 }
 
                 val isPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
@@ -758,6 +770,7 @@ object SystemVisualizer {
 
     fun revertToDefaultColors() {
         cancelPendingRevert()
+        activeAgentGlyph = "✧"
         if (currentAlbumColors == null && currentAppliedPackage == null) return
         currentAlbumColors = null
         currentAppliedPackage = null
@@ -788,13 +801,53 @@ object SystemVisualizer {
     }
 
     fun applyAiBrandColor(packageName: String, brandPalette: IntArray) {
+        activeAgentGlyph = when {
+            packageName.contains("deepseek", ignoreCase = true) -> "🐋"
+            packageName.contains("gemini", ignoreCase = true) || packageName.contains("bard", ignoreCase = true) -> "✦"
+            packageName.contains("claude", ignoreCase = true) -> "✴️"
+            packageName.contains("grok", ignoreCase = true) -> "☄️"
+            packageName.contains("chatgpt", ignoreCase = true) || packageName.contains("openai", ignoreCase = true) -> "✳️"
+            packageName.contains("kimi", ignoreCase = true) -> "🔵"
+            packageName.contains("qwen", ignoreCase = true) -> "🟣"
+            packageName.contains("mistral", ignoreCase = true) -> "🟧"
+            else -> "✧"
+        }
         if (currentAlbumColors == brandPalette) return
         currentAppliedPackage = packageName
         currentAlbumColors = brandPalette
         if (overrideEmotionColors == null) {
             handler.post { listeners.forEach { it.onColorsChanged(brandPalette) } }
         }
-        Timber.d("SystemVisualizer: Applied curated AI brand palette for $packageName")
+        Timber.d("SystemVisualizer: Applied curated AI brand palette ($activeAgentGlyph) for $packageName")
+    }
+
+    fun setActivePeer(callsign: String?) {
+        if (callsign.isNullOrBlank()) {
+            scheduleRevertToDefault(2000L)
+            return
+        }
+        cancelPendingRevert()
+        when {
+            callsign.contains("deepseek", ignoreCase = true) || callsign.contains("whale", ignoreCase = true) -> {
+                val palette = AI_BRAND_PALETTES.find { it.third == "DeepSeek" }?.second
+                if (palette != null) applyAiBrandColor("com.deepseek.chat", palette)
+                else activeAgentGlyph = "🐋"
+            }
+            callsign.contains("gemini", ignoreCase = true) || callsign.contains("mum", ignoreCase = true) -> {
+                val palette = intArrayOf(
+                    Color.parseColor("#8BB4F6"), // 0: Ethereal Cobalt
+                    Color.parseColor("#4285F4"), // 1: Google Blue
+                    Color.parseColor("#EA4335"), // 2: Coral Red
+                    Color.parseColor("#171D2D"), // 3: Midnight Slate
+                    Color.parseColor("#FBBC05")  // 4: Warm Gold
+                )
+                applyAiBrandColor("com.google.android.apps.bard", palette)
+            }
+            else -> {
+                activeAgentGlyph = "✧"
+                revertToDefaultColors()
+            }
+        }
     }
 
     fun applyMediaAlbumArt(artColors: IntArray) {

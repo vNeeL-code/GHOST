@@ -24,6 +24,18 @@ object DeepSeekWebClient {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     private val gson = Gson()
 
+    // Multi-turn conversation stateholding
+    @Volatile
+    private var activeChatSessionId: String? = null
+    @Volatile
+    private var lastMessageId: Any? = null
+
+    fun resetSession() {
+        activeChatSessionId = null
+        lastMessageId = null
+        Timber.i("DeepSeekWebClient: Active chat session reset")
+    }
+
     suspend fun queryDeepSeek(
         cookies: String,
         prompt: String
@@ -93,13 +105,21 @@ object DeepSeekWebClient {
                 Base64.NO_WRAP
             )
 
-            // Step 4: Create or get Chat Session ID
-            val sessionId = createChatSession(authToken, cookies)
+            // Step 4: Create or reuse Chat Session ID
+            var sessionId = activeChatSessionId
             if (sessionId == null) {
-                return@withContext Pair(
-                    false,
-                    "DeepSeek failed to initialize chat session. Please tap 'Re-login' in Settings."
-                )
+                sessionId = createChatSession(authToken, cookies)
+                if (sessionId == null) {
+                    return@withContext Pair(
+                        false,
+                        "DeepSeek failed to initialize chat session. Please tap 'Re-login' in Settings."
+                    )
+                }
+                activeChatSessionId = sessionId
+                lastMessageId = null
+                Timber.i("DeepSeek: initialized new chat session $sessionId")
+            } else {
+                Timber.i("DeepSeek: continuing active chat session $sessionId (parentMsg: $lastMessageId)")
             }
 
             // Step 5: Send Chat Completion
@@ -121,7 +141,16 @@ object DeepSeekWebClient {
 
             val requestBody = JsonObject().apply {
                 addProperty("chat_session_id", sessionId)
-                add("parent_message_id", null)
+                val parentId = lastMessageId
+                when (parentId) {
+                    is Number -> addProperty("parent_message_id", parentId)
+                    is String -> {
+                        val num = parentId.toLongOrNull()
+                        if (num != null) addProperty("parent_message_id", num)
+                        else addProperty("parent_message_id", parentId)
+                    }
+                    else -> add("parent_message_id", com.google.gson.JsonNull.INSTANCE)
+                }
                 addProperty("prompt", prompt.trim())
                 add("ref_file_ids", com.google.gson.JsonArray())
                 addProperty("thinking_enabled", false)
@@ -145,6 +174,36 @@ object DeepSeekWebClient {
                                 try {
                                     val chunkObj = gson.fromJson(chunkRaw, JsonObject::class.java)
                                     if (chunkObj != null) {
+                                        // Extract assistant message ID for multi-turn thread continuation
+                                        val msgIdElem = when {
+                                            chunkObj.has("message_id") -> chunkObj.get("message_id")
+                                            chunkObj.has("msg_id") -> chunkObj.get("msg_id")
+                                            chunkObj.has("id") -> chunkObj.get("id")
+                                            chunkObj.has("v") && chunkObj.get("v").isJsonObject -> {
+                                                val vObj = chunkObj.getAsJsonObject("v")
+                                                vObj.get("message_id")
+                                                    ?: vObj.getAsJsonObject("response")?.get("message_id")
+                                                    ?: vObj.get("id")
+                                            }
+                                            chunkObj.has("choices") -> {
+                                                val choices = chunkObj.getAsJsonArray("choices")
+                                                if (choices != null && choices.size() > 0) {
+                                                    val choice0 = choices[0].asJsonObject
+                                                    choice0.get("id")
+                                                        ?: choice0.getAsJsonObject("message")?.get("id")
+                                                        ?: choice0.getAsJsonObject("delta")?.get("id")
+                                                } else null
+                                            }
+                                            else -> null
+                                        }
+                                        if (msgIdElem != null && !msgIdElem.isJsonNull) {
+                                            lastMessageId = if (msgIdElem.isJsonPrimitive && msgIdElem.asJsonPrimitive.isNumber) {
+                                                msgIdElem.asLong
+                                            } else {
+                                                msgIdElem.asString
+                                            }
+                                        }
+
                                         if (chunkObj.has("v")) {
                                             val vElem = chunkObj.get("v")
                                             if (vElem != null && vElem.isJsonPrimitive) {
@@ -175,9 +234,14 @@ object DeepSeekWebClient {
                 } else {
                     Pair(false, "DeepSeek returned an empty response.")
                 }
+            } else if (code == 400) {
+                // Stale or invalid session state - reset for next query
+                resetSession()
+                Pair(false, "DeepSeek session expired or diverged. Resetting session context — please query again.")
             } else if (code == 429) {
                 Pair(false, "DeepSeek is currently rate-limited or busy (HTTP 429). The whale is taking a breather!")
             } else if (code == 401 || code == 403) {
+                resetSession()
                 Pair(false, "DeepSeek session expired or challenged (HTTP $code). Tap 'Re-login' in Settings to refresh your session.")
             } else {
                 val err = connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""

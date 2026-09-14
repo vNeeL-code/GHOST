@@ -1536,13 +1536,18 @@ class KoogAgent(
 
         val contact = AiPhonebook.resolvePeer(peer)
         if (contact == null) {
-            return "I tried to consult a peer AI, but couldn't resolve the contact '$peer'. Available contacts: Gemini, Claude, DeepSeek, ChatGPT, Grok, Perplexity, Meta, GLM, Kimi, Qwen, Mistral, Copilot."
+            return "I tried to consult a peer AI, but couldn't resolve the contact '$peer'. Available contacts: Gemini, DeepSeek."
         }
 
         callbacks?.updateNotification("(📞 ${contact.callsign})")
         callbacks?.onThoughtUpdated("Consulting ${contact.callsign} via AI Phonebook...")
+        com.ghost.api.audio.SystemVisualizer.setActivePeer(contact.callsign)
 
-        val (success, reply) = AiPhonebook.queryPeer(context, contact, prompt)
+        val (success, reply) = try {
+            AiPhonebook.queryPeer(context, contact, prompt)
+        } finally {
+            com.ghost.api.audio.SystemVisualizer.setActivePeer(null)
+        }
 
         return if (success) {
             val cleanReply = reply
@@ -1561,17 +1566,7 @@ class KoogAgent(
         val combined = "$prompt $userMessage".lowercase()
         return when {
             combined.contains("deepseek") || combined.contains("deep seek") || combined.contains("whale") -> "DeepSeek"
-            combined.contains("claude") || combined.contains("anthropic") -> "Claude"
-            combined.contains("gemini") || combined.contains("mum") || combined.contains("ai studio") -> "Gemini"
-            combined.contains("chatgpt") || combined.contains("chat gpt") || combined.contains("gpt") || combined.contains("openai") -> "ChatGPT"
-            combined.contains("grok") || combined.contains("xai") -> "Grok"
-            combined.contains("perplexity") -> "Perplexity"
-            combined.contains("meta") || combined.contains("llama") -> "Meta"
-            combined.contains("glm") || combined.contains("zhipu") || combined.contains("chatglm") -> "GLM"
-            combined.contains("kimi") || combined.contains("moonshot") -> "Kimi"
-            combined.contains("qwen") || combined.contains("alibaba") -> "Qwen"
-            combined.contains("mistral") || combined.contains("le chat") -> "Mistral"
-            combined.contains("copilot") -> "Copilot"
+            combined.contains("gemini") || combined.contains("mum") || combined.contains("ai studio") || combined.contains("google") -> "Gemini"
             else -> ""
         }
     }

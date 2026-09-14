@@ -160,17 +160,18 @@ class NetworkToolSet(private val context: Context) : ToolSet {
         }
     }
 
-    @Tool(description = "Consults a peer AI from Gemma's phonebook (Claude, DeepSeek, Gemini, Grok, Perplexity, Kimi, Qwen, Mistral, Copilot, ChatGPT, Meta, GLM) for frontier reasoning, coding, math, or expert analysis")
+    @Tool(description = "Consults a peer AI from Gemma's phonebook (Gemini, DeepSeek) for frontier reasoning, coding, math, or Google search grounding")
     fun consult_peer(
-        @ToolParam(description = "Peer name or callsign: Claude, DeepSeek, Gemini, Grok, Perplexity, Kimi, Qwen, Mistral, Copilot, ChatGPT, Meta, GLM") peer: String,
+        @ToolParam(description = "Peer name or callsign: Gemini, DeepSeek") peer: String,
         @ToolParam(description = "The prompt or question to ask the peer") prompt: String
     ): Map<String, String> = runBlocking(Dispatchers.IO) {
         com.ghost.api.GemmaService.instance?.showWorkSignal("PHONEBOOK", 2500)
+        com.ghost.api.audio.SystemVisualizer.setActivePeer(peer)
         try {
             val contact = com.ghost.api.logic.AiPhonebook.resolvePeer(peer)
                 ?: return@runBlocking mapOf(
                     "result" to "error",
-                    "message" to "Peer '$peer' not found in AI Phonebook. Available: Gemini, Claude, DeepSeek, Grok, Perplexity, Kimi, Qwen, Mistral, Copilot, ChatGPT, Meta, GLM."
+                    "message" to "Peer '$peer' not found in AI Phonebook. Available: Gemini, DeepSeek."
                 )
 
             val (success, reply) = com.ghost.api.logic.AiPhonebook.queryPeer(context, contact, prompt)
@@ -185,13 +186,14 @@ class NetworkToolSet(private val context: Context) : ToolSet {
             Timber.e(e, "consult_peer failed")
             mapOf("result" to "error", "message" to "Failed to consult peer '$peer': ${e.message}")
         } finally {
+            com.ghost.api.audio.SystemVisualizer.setActivePeer(null)
             com.ghost.api.GemmaService.instance?.hideWorkSignal()
         }
     }
 
     @Tool(description = "Alias for consult_peer. Consults a peer AI from Gemma's phonebook.")
     fun consultpeer(
-        @ToolParam(description = "Peer name or callsign: Claude, DeepSeek, Gemini, Grok, Perplexity, Kimi, Qwen, Mistral, Copilot, ChatGPT, Meta, GLM") peer: String,
+        @ToolParam(description = "Peer name or callsign: Gemini, DeepSeek") peer: String,
         @ToolParam(description = "The prompt or question to ask the peer") prompt: String
     ): Map<String, String> = consult_peer(peer, prompt)
 

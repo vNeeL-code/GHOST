@@ -97,6 +97,42 @@ class AvatarWallpaperService : WallpaperService() {
         private val cachedHexPath = Path()
         private val cachedWallPath = Path()
         private val cachedFlowerPath = Path()
+        private val cachedAperturePath = Path()
+
+        // Album Art Persona Mask Drawing Assets
+        private val albumArtPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        private val albumArtDstRect = RectF()
+        private val albumArtSrcRect = Rect()
+        private var glyphAlpha = 255f
+        private var albumArtAlpha = 0f
+
+        private fun drawApertureAlbumArt(
+            canvas: Canvas,
+            cx: Float,
+            cy: Float,
+            radius: Float,
+            path: Path,
+            alpha: Int
+        ) {
+            val art = SystemVisualizer.activeAlbumArt ?: return
+            if (alpha <= 5) return
+
+            canvas.save()
+            canvas.clipPath(path)
+
+            val srcW = art.width
+            val srcH = art.height
+            val minDim = minOf(srcW, srcH)
+            val srcX = (srcW - minDim) / 2
+            val srcY = (srcH - minDim) / 2
+            albumArtSrcRect.set(srcX, srcY, srcX + minDim, srcY + minDim)
+            albumArtDstRect.set(cx - radius, cy - radius, cx + radius, cy + radius)
+
+            albumArtPaint.alpha = alpha
+            canvas.drawBitmap(art, albumArtSrcRect, albumArtDstRect, albumArtPaint)
+
+            canvas.restore()
+        }
 
         // Cached Preferences - avoid framework disk/mutex hits inside Choreographer loop
         private var cachedBackend = "AUTO"
@@ -428,6 +464,27 @@ class AvatarWallpaperService : WallpaperService() {
                     // Legacy Option A baseline for 1250px star aperture offset
                     val optABaseCx = width / 2f - 15f
                     val optABaseCy = height / 2f - 75f
+                    interpolateColors()
+
+                    // Dynamic Album Art & Central Glyph Transitions
+                    val isMedia = SystemVisualizer.isMediaPlaying && SystemVisualizer.activeAlbumArt != null
+                    val activeGlyph = SystemVisualizer.activeAgentGlyph
+                    val isAgentSpeaking = activeGlyph != "✧" || (isCustomPaletteActive && !isMedia)
+
+                    val targetGlyphAlpha = when {
+                        isAgentSpeaking -> 255f
+                        isMedia -> 0f   // Fade central glyph down so album art acts as persona mask!
+                        else -> 255f    // Solid default glyph
+                    }
+
+                    val targetAlbumArtAlpha = when {
+                        !isMedia -> 0f
+                        isAgentSpeaking -> 50f  // Dimmed while agent speaks
+                        else -> 235f            // Crisp persona mask
+                    }
+
+                    glyphAlpha += (targetGlyphAlpha - glyphAlpha) * 0.08f
+                    albumArtAlpha += (targetAlbumArtAlpha - albumArtAlpha) * 0.08f
 
                     canvas.drawColor(COLOR_BACKGROUND)
                     
@@ -692,42 +749,61 @@ class AvatarWallpaperService : WallpaperService() {
             canvas.restore()
 
             val baseStarSize = 1250f
+            val activeGlyph = SystemVisualizer.activeAgentGlyph
+            val currentGlyphAlpha = glyphAlpha.toInt().coerceIn(0, 255)
+            val currentAlbumAlpha = albumArtAlpha.toInt().coerceIn(0, 255)
+
+            // Album Art Persona Mask for Option A
+            if (currentAlbumAlpha > 5) {
+                cachedAperturePath.reset()
+                val apertureRadius = dynamicBaseRadius * 2.2f + (smoothedBass * 0.4f)
+                cachedAperturePath.addCircle(starCx + 12f, starCy + 40f, apertureRadius, Path.Direction.CW)
+                drawApertureAlbumArt(canvas, starCx + 12f, starCy + 40f, apertureRadius, cachedAperturePath, currentAlbumAlpha)
+
+                // Cybernetic aperture rim
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = 2.5f
+                paint.color = resolveColor(COLOR_CYAN_ACCENT, currentColors[0])
+                paint.alpha = (currentAlbumAlpha * 0.7f).toInt().coerceIn(0, 255)
+                canvas.drawCircle(starCx + 12f, starCy + 40f, apertureRadius, paint)
+            }
 
             // 3. Multi-pass bloom glow:
-            // Soft radiant ethereal glow - strictly concentric with core star
-            logoPaint.clearShadowLayer()
-            logoPaint.style = Paint.Style.FILL
-            for (i in 0 until 4) {
-                val bloomSize = when (i) {
-                    0 -> baseStarSize + 550f + bassBoost + idleBreath         // 0: Outermost Corona
-                    1 -> baseStarSize + 340f + bassBoost + (idleBreath * 0.6f) // 1: Mid-Outer Halo
-                    2 -> baseStarSize + 170f + (bassBoost * 0.7f)              // 2: Mid-Inner Aura
-                    else -> baseStarSize + 50f + (bassBoost * 0.3f)            // 3: Inner (Closest to Star)
-                }
-                val swatchIndex = when (i) {
-                    3 -> 1 % currentColors.size // Vibrant
-                    2 -> 0 % currentColors.size // Dominant
-                    1 -> 2 % currentColors.size // Muted
-                    else -> 3 % currentColors.size // Dark Vibrant
-                }
-                val rawColor = resolveColor(COLOR_COBALT_GLOW, currentColors[swatchIndex])
-                val layerColor = ensureVisibleBloomColor(rawColor, COLOR_COBALT_GLOW)
+            if (currentGlyphAlpha > 5) {
+                logoPaint.clearShadowLayer()
+                logoPaint.style = Paint.Style.FILL
+                for (i in 0 until 4) {
+                    val bloomSize = when (i) {
+                        0 -> baseStarSize + 550f + bassBoost + idleBreath         // 0: Outermost Corona
+                        1 -> baseStarSize + 340f + bassBoost + (idleBreath * 0.6f) // 1: Mid-Outer Halo
+                        2 -> baseStarSize + 170f + (bassBoost * 0.7f)              // 2: Mid-Inner Aura
+                        else -> baseStarSize + 50f + (bassBoost * 0.3f)            // 3: Inner (Closest to Star)
+                    }
+                    val swatchIndex = when (i) {
+                        3 -> 1 % currentColors.size // Vibrant
+                        2 -> 0 % currentColors.size // Dominant
+                        1 -> 2 % currentColors.size // Muted
+                        else -> 3 % currentColors.size // Dark Vibrant
+                    }
+                    val rawColor = resolveColor(COLOR_COBALT_GLOW, currentColors[swatchIndex])
+                    val layerColor = ensureVisibleBloomColor(rawColor, COLOR_COBALT_GLOW)
 
-                // Set textSize BEFORE calculating descent/ascent so optical center is EXACT!
-                logoPaint.color = layerColor
-                logoPaint.textSize = bloomSize
-                logoPaint.alpha = BLOOM_ALPHAS_OPTION_A[i]
-                val bloomCenterOffset = (logoPaint.descent() + logoPaint.ascent()) / 2f
-                canvas.drawText("✧", starCx, starCy - bloomCenterOffset, logoPaint)
+                    // Set textSize BEFORE calculating descent/ascent so optical center is EXACT!
+                    logoPaint.color = layerColor
+                    logoPaint.textSize = bloomSize
+                    logoPaint.alpha = (BLOOM_ALPHAS_OPTION_A[i] * (currentGlyphAlpha / 255f)).toInt().coerceIn(0, 255)
+                    val bloomCenterOffset = (logoPaint.descent() + logoPaint.ascent()) / 2f
+                    canvas.drawText(activeGlyph, starCx, starCy - bloomCenterOffset, logoPaint)
+                }
+
+                // 4. Crisp Core star (pure solid white sparkle)
+                logoPaint.style = Paint.Style.FILL
+                logoPaint.color = COLOR_STAR_CORE
+                logoPaint.alpha = currentGlyphAlpha
+                logoPaint.textSize = baseStarSize
+                val starCenterOffset = (logoPaint.descent() + logoPaint.ascent()) / 2f
+                canvas.drawText(activeGlyph, starCx, starCy - starCenterOffset, logoPaint)
             }
-            
-            // 4. Crisp Core star (pure solid white sparkle)
-            logoPaint.style = Paint.Style.FILL
-            logoPaint.color = COLOR_STAR_CORE
-            logoPaint.alpha = 255
-            logoPaint.textSize = baseStarSize
-            val starCenterOffset = (logoPaint.descent() + logoPaint.ascent()) / 2f
-            canvas.drawText("✧", starCx, starCy - starCenterOffset, logoPaint)
         }
 
         /**
@@ -897,10 +973,18 @@ class AvatarWallpaperService : WallpaperService() {
             canvas.rotate(rotationAngle * 0.35f)
 
             // 2A. Mother Hexagon (Hollow Obsidian Cyber Chamber)
+            val currentAlbumAlpha = albumArtAlpha.toInt().coerceIn(0, 255)
+            val currentGlyphAlpha = glyphAlpha.toInt().coerceIn(0, 255)
+            val activeGlyph = SystemVisualizer.activeAgentGlyph
+
             paint.style = Paint.Style.FILL
             paint.color = COLOR_VOID
             paint.alpha = 245
             drawHexagon(canvas, 0f, 0f, coreRadius, paint)
+
+            if (currentAlbumAlpha > 5) {
+                drawApertureAlbumArt(canvas, 0f, 0f, coreRadius, cachedHexPath, currentAlbumAlpha)
+            }
 
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 4f
@@ -996,17 +1080,19 @@ class AvatarWallpaperService : WallpaperService() {
 
             canvas.restore() // Restores unrotated frame
 
-            // 3. Model Unicode Glyph (✧) Centered, Crisp White & Contained
+            // 3. Model Unicode Glyph Centered, Crisp White & Contained
             val glyphCx = baseCx + tiltX * 1.22f
             val glyphCy = baseCy + tiltY * 1.22f
 
-            logoPaint.clearShadowLayer()
-            logoPaint.style = Paint.Style.FILL
-            logoPaint.color = Color.WHITE
-            logoPaint.alpha = 255
-            logoPaint.textSize = coreRadius * 1.35f
-            val off = (logoPaint.descent() + logoPaint.ascent()) / 2f
-            canvas.drawText("✧", glyphCx, glyphCy - off, logoPaint)
+            if (currentGlyphAlpha > 5) {
+                logoPaint.clearShadowLayer()
+                logoPaint.style = Paint.Style.FILL
+                logoPaint.color = Color.WHITE
+                logoPaint.alpha = currentGlyphAlpha
+                logoPaint.textSize = coreRadius * 1.35f
+                val off = (logoPaint.descent() + logoPaint.ascent()) / 2f
+                canvas.drawText(activeGlyph, glyphCx, glyphCy - off, logoPaint)
+            }
         }
 
         /**
@@ -1137,10 +1223,18 @@ class AvatarWallpaperService : WallpaperService() {
             }
 
             // Solid Obsidian Cyber Chamber for Central Triangle
+            val currentAlbumAlpha = albumArtAlpha.toInt().coerceIn(0, 255)
+            val currentGlyphAlpha = glyphAlpha.toInt().coerceIn(0, 255)
+            val activeGlyph = SystemVisualizer.activeAgentGlyph
+
             paint.style = Paint.Style.FILL
             paint.color = COLOR_VOID
             paint.alpha = 240
             drawEquilateralTriangle(canvas, 0f, triangleNudgeY, focalRadius, 0f, paint)
+
+            if (currentAlbumAlpha > 5) {
+                drawApertureAlbumArt(canvas, 0f, triangleNudgeY, focalRadius, cachedTrianglePath, currentAlbumAlpha)
+            }
 
             val innerColor = resolveColor(COLOR_CYAN_ACCENT, currentColors[0])
             val baseInnerAlpha = (25 + (melodyExpansion * 1.8f).toInt()).coerceIn(20, 90)
@@ -1161,17 +1255,19 @@ class AvatarWallpaperService : WallpaperService() {
             paint.alpha = 200
             drawEquilateralTriangle(canvas, 0f, triangleNudgeY, focalRadius * 0.80f, 0f, paint)
 
-            // 4. Center Model Unicode Glyph (✧): Clean, Crisp, Centered White Core
+            // 4. Center Model Unicode Glyph: Clean, Crisp, Centered Core
             // Jewel depth 0.96f (subtle float, cannot breach container)
-            val glyphSize = focalRadius * 1.15f
-            logoPaint.clearShadowLayer()
-            logoPaint.color = COLOR_STAR_CORE
-            logoPaint.textSize = glyphSize
-            logoPaint.alpha = 255
-            val off = (logoPaint.descent() + logoPaint.ascent()) / 2f
-            val shiftX = tiltX * 0.06f
-            val shiftY = tiltY * 0.06f
-            canvas.drawText("✧", shiftX, -off + shiftY + triangleNudgeY, logoPaint)
+            if (currentGlyphAlpha > 5) {
+                val glyphSize = focalRadius * 1.15f
+                logoPaint.clearShadowLayer()
+                logoPaint.color = COLOR_STAR_CORE
+                logoPaint.textSize = glyphSize
+                logoPaint.alpha = currentGlyphAlpha
+                val off = (logoPaint.descent() + logoPaint.ascent()) / 2f
+                val shiftX = tiltX * 0.06f
+                val shiftY = tiltY * 0.06f
+                canvas.drawText(activeGlyph, shiftX, -off + shiftY + triangleNudgeY, logoPaint)
+            }
 
             canvas.restore()
         }
@@ -1269,10 +1365,18 @@ class AvatarWallpaperService : WallpaperService() {
                 drawDiamond(canvas, 0f, 0f, radius, paint)
             }
 
+            val currentAlbumAlpha = albumArtAlpha.toInt().coerceIn(0, 255)
+            val currentGlyphAlpha = glyphAlpha.toInt().coerceIn(0, 255)
+            val activeGlyph = SystemVisualizer.activeAgentGlyph
+
             paint.style = Paint.Style.FILL
             paint.color = COLOR_VOID
             paint.alpha = 240
             drawDiamond(canvas, 0f, 0f, coreCubeRadius, paint)
+
+            if (currentAlbumAlpha > 5) {
+                drawApertureAlbumArt(canvas, 0f, 0f, coreCubeRadius, cachedDiamondPath, currentAlbumAlpha)
+            }
 
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 4f + (strobeFlash * 2.5f)
@@ -1285,15 +1389,17 @@ class AvatarWallpaperService : WallpaperService() {
             paint.alpha = 200
             drawDiamond(canvas, 0f, 0f, coreCubeRadius * 0.82f, paint)
 
-            // Centered crisp white ✧ star glyph (0.96x depth, cannot breach cube container)
-            logoPaint.clearShadowLayer()
-            logoPaint.color = Color.WHITE
-            logoPaint.alpha = 255
-            logoPaint.textSize = coreCubeRadius * 1.35f
-            val cOff = (logoPaint.descent() + logoPaint.ascent()) / 2f
-            val shiftX = tiltX * 0.06f
-            val shiftY = tiltY * 0.06f
-            canvas.drawText("✧", shiftX, -cOff + shiftY, logoPaint)
+            // Centered crisp white star glyph (0.96x depth, cannot breach cube container)
+            if (currentGlyphAlpha > 5) {
+                logoPaint.clearShadowLayer()
+                logoPaint.color = Color.WHITE
+                logoPaint.alpha = currentGlyphAlpha
+                logoPaint.textSize = coreCubeRadius * 1.35f
+                val cOff = (logoPaint.descent() + logoPaint.ascent()) / 2f
+                val shiftX = tiltX * 0.06f
+                val shiftY = tiltY * 0.06f
+                canvas.drawText(activeGlyph, shiftX, -cOff + shiftY, logoPaint)
+            }
 
             canvas.restore()
 

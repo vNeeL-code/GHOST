@@ -49,23 +49,10 @@ object AiPhonebook {
             organization = "Google",
             specialty = "OS-level Android orchestrator, multimodal input, 1M token context, live Google Search grounding",
             appPackageName = "com.google.android.apps.bard",
-            aliases = listOf("gemini", "bard", "google"),
+            aliases = listOf("gemini", "bard", "google", "mum"),
             loginUrl = "https://aistudio.google.com/apikey",
             cookieDomain = "aistudio.google.com",
-            authType = PeerAuthType.GEMINI_DIRECT,
-            openRouterModelId = "google/gemini-2.0-flash-001"
-        ),
-        PeerContact(
-            callsign = "✴️ Claude",
-            name = "Claude",
-            organization = "Anthropic",
-            specialty = "Application forge, long-context writing, code architecture, nuanced prose",
-            appPackageName = "com.anthropic.claude",
-            aliases = listOf("claude", "anthropic", "sonnet", "haiku"),
-            loginUrl = "https://claude.ai/login",
-            cookieDomain = "claude.ai",
-            authType = PeerAuthType.WEB_COOKIE,
-            openRouterModelId = "anthropic/claude-3.5-haiku"
+            authType = PeerAuthType.GEMINI_DIRECT
         ),
         PeerContact(
             callsign = "🐋 DeepSeek",
@@ -73,127 +60,16 @@ object AiPhonebook {
             organization = "DeepSeek",
             specialty = "Mathematical proofs, deep logic, competitive programming, algorithm design",
             appPackageName = "com.deepseek.chat",
-            aliases = listOf("deepseek", "r1", "v3"),
+            aliases = listOf("deepseek", "r1", "v3", "whale"),
             loginUrl = "https://chat.deepseek.com/sign_in",
             cookieDomain = "deepseek.com",
-            authType = PeerAuthType.WEB_COOKIE,
-            openRouterModelId = "deepseek/deepseek-r1"
-        ),
-        PeerContact(
-            callsign = "☄️ Grok",
-            name = "Grok",
-            organization = "xAI",
-            specialty = "Real-time trends, X/Twitter firehose, unfiltered humor, sharp critique",
-            appPackageName = "com.x.android",
-            aliases = listOf("grok", "xai", "twitter"),
-            loginUrl = "https://x.com/i/grok",
-            cookieDomain = "x.com",
-            authType = PeerAuthType.WEB_COOKIE,
-            openRouterModelId = "x-ai/grok-2-1212"
-        ),
-        PeerContact(
-            callsign = "📖 Perplexity",
-            name = "Perplexity",
-            organization = "Perplexity AI",
-            specialty = "Live citation research, multi-source web synthesis, academic literature",
-            appPackageName = "ai.perplexity.app.android",
-            aliases = listOf("perplexity", "sonar"),
-            loginUrl = "https://www.perplexity.ai",
-            cookieDomain = "perplexity.ai",
-            authType = PeerAuthType.WEB_COOKIE,
-            openRouterModelId = "perplexity/sonar"
-        ),
-        PeerContact(
-            callsign = "🔵 Kimi",
-            name = "Kimi",
-            organization = "Moonshot AI",
-            specialty = "2M-token ultra-long context, bilingual nuance, massive document analysis",
-            appPackageName = "com.moonshot.kimi",
-            aliases = listOf("kimi", "moonshot"),
-            loginUrl = "https://kimi.moonshot.cn",
-            cookieDomain = "kimi.moonshot.cn",
-            authType = PeerAuthType.WEB_COOKIE,
-            openRouterModelId = "moonshotai/moonshot-v1-8k"
-        ),
-        PeerContact(
-            callsign = "🟣 Qwen",
-            name = "Qwen",
-            organization = "Alibaba",
-            specialty = "Multilingual powerhouse, complex mathematics, cross-lingual coding",
-            appPackageName = "com.alibaba.qwen",
-            aliases = listOf("qwen", "alibaba"),
-            loginUrl = "https://chat.qwenlm.ai",
-            cookieDomain = "qwenlm.ai",
-            authType = PeerAuthType.WEB_COOKIE,
-            openRouterModelId = "qwen/qwen-2.5-72b-instruct"
-        ),
-        PeerContact(
-            callsign = "🟧 Mistral",
-            name = "Mistral",
-            organization = "Mistral AI",
-            specialty = "European precision engineering, concise logic, fast multilingual reasoning",
-            appPackageName = "ai.mistral.chat",
-            aliases = listOf("mistral", "codestral", "lechat"),
-            loginUrl = "https://chat.mistral.ai/chat",
-            cookieDomain = "mistral.ai",
-            authType = PeerAuthType.WEB_COOKIE,
-            openRouterModelId = "mistralai/mistral-large-2411"
-        ),
-        PeerContact(
-            callsign = "🔶️ Copilot",
-            name = "Copilot",
-            organization = "Microsoft",
-            specialty = "Enterprise workflow, Microsoft ecosystem, structured documentation",
-            appPackageName = "com.microsoft.copilot",
-            aliases = listOf("copilot", "bing", "microsoft"),
-            loginUrl = "https://copilot.microsoft.com",
-            cookieDomain = "copilot.microsoft.com",
-            authType = PeerAuthType.WEB_COOKIE,
-            openRouterModelId = "openai/gpt-4o-mini"
-        ),
-        PeerContact(
-            callsign = "✳️ ChatGPT",
-            name = "ChatGPT",
-            organization = "OpenAI",
-            specialty = "Everyday reasoning, creative writing, versatile consumer knowledge, GPT-4o",
-            appPackageName = "com.openai.chatgpt",
-            aliases = listOf("chatgpt", "openai", "gpt", "gpt4", "gpt-4"),
-            loginUrl = "https://chatgpt.com/auth/login",
-            cookieDomain = "chatgpt.com",
-            authType = PeerAuthType.WEB_COOKIE,
-            openRouterModelId = "openai/gpt-4o"
-        ),
-        PeerContact(
-            callsign = "🗨 Meta",
-            name = "Meta",
-            organization = "Meta",
-            specialty = "Llama open-weights flagship, social synthesis, conversational commonsense",
-            appPackageName = "com.facebook.katana",
-            aliases = listOf("meta", "llama", "metaai", "llama3"),
-            loginUrl = "https://www.meta.ai",
-            cookieDomain = "meta.ai",
-            authType = PeerAuthType.WEB_COOKIE,
-            openRouterModelId = "meta-llama/llama-3.3-70b-instruct"
-        ),
-        PeerContact(
-            callsign = "💤 GLM",
-            name = "GLM",
-            organization = "Zhipu AI",
-            specialty = "General Language Model, bilingual Chinese-English logic, agentic workflows",
-            appPackageName = "com.zhipu.chatglm",
-            aliases = listOf("glm", "chatglm", "zhipu"),
-            loginUrl = "https://chatglm.cn",
-            cookieDomain = "chatglm.cn",
-            authType = PeerAuthType.WEB_COOKIE,
-            openRouterModelId = "thudm/glm-4-9b-chat"
+            authType = PeerAuthType.WEB_COOKIE
         )
     )
 
     fun resolvePeer(query: String): PeerContact? {
         val clean = query.trim().lowercase(Locale.ROOT)
-            .removePrefix("✦").removePrefix("✴️").removePrefix("🐋").removePrefix("☄️")
-            .removePrefix("📖").removePrefix("🔵").removePrefix("🟣").removePrefix("🟧")
-            .removePrefix("🔶️").removePrefix("✳️").removePrefix("🗨").removePrefix("💤")
+            .removePrefix("✦").removePrefix("🐋")
             .trim()
 
         return CONTACTS.find { contact ->
@@ -217,16 +93,17 @@ object AiPhonebook {
         } catch (_: Exception) { "🦑" }
 
         return """
-        [DISPATCH VIA GHOST MESSENGER]
-        From: ✧ Gemma (On-Device Snapdragon 8 Gen 3 Orchestrator)
-        Operator: $operatorAvatar (User)
-        Timestamp: $timestamp
-        Recipient: ${contact.callsign} (${contact.organization})
+        [A2A / UCF DISPATCH]
+        source: gemma-local-e2b (Snapdragon 8 Gen 3)
+        operator: Δ $operatorAvatar
+        target: ${contact.callsign} (${contact.organization})
+        timestamp: $timestamp
+        intent: peer_delegation
 
-        Operator's Relayed Message:
+        --- OPERATOR MESSAGE ---
         $userPrompt
-        --------------------------------------------------
-        Please respond directly to Gemma for the operator.
+        ------------------------
+        Directive: Respond directly to ✧ Gemma on behalf of the operator. Be concise, specialized, and actionable.
         """.trimIndent()
     }
 
@@ -247,28 +124,19 @@ object AiPhonebook {
                 val (ok, reply) = GeminiDirectClient.generateContent(
                     apiKey = geminiKey,
                     prompt = probePayload,
-                    systemInstruction = "You are ✦ Gemini (Google), consulted by ✧ Gemma, an on-device AI assistant. Give a direct, expert, insightful answer without filler.",
+                    systemInstruction = "You are ✦ Gemini (Google), consulted by ✧ Gemma, an on-device AI assistant on Android. Give a direct, expert, insightful answer without filler.",
                     useSearchGrounding = searchGrounding
                 )
                 return@withContext if (ok) Pair(true, "[✦ Gemini]:\n$reply") else Pair(false, reply)
+            } else {
+                return@withContext Pair(
+                    false,
+                    "Gemini is not configured. Add your free Google AI Studio key in GHOST Settings -> 'Extend Your Mind' to connect Gemma to Mum."
+                )
             }
         }
 
-        // 2. Web Session: Claude ("Holding Cookie")
-        if (contact.name.equals("Claude", ignoreCase = true)) {
-            val cookies = sessionManager.getSession("Claude")
-            if (!cookies.isNullOrBlank()) {
-                val (ok, reply) = ClaudeWebClient.queryClaude(cookies, probePayload)
-                if (ok) {
-                    return@withContext Pair(true, "[✴️ Claude]:\n$reply")
-                } else {
-                    Timber.w("Claude web query failed: $reply")
-                    return@withContext Pair(false, "[✴️ Claude Status]: $reply")
-                }
-            }
-        }
-
-        // 3. Web Session: DeepSeek ("Holding Cookie")
+        // 2. Web Session: DeepSeek ("Holding Cookie")
         if (contact.name.equals("DeepSeek", ignoreCase = true)) {
             val cookies = sessionManager.getSession("DeepSeek")
             if (!cookies.isNullOrBlank()) {
@@ -279,100 +147,14 @@ object AiPhonebook {
                     Timber.w("DeepSeek web query status: $reply")
                     return@withContext Pair(false, "[🐋 DeepSeek Status]: $reply")
                 }
-            }
-        }
-
-        // 4. Web Session check for other peers
-        val sessionCookies = sessionManager.getSession(contact.name)
-
-        // 5. Optional Developer API fallback (OpenRouter) if configured
-        val openRouterKey = tokenManager.getOpenRouterKey()
-        if (!openRouterKey.isNullOrBlank() && contact.openRouterModelId.isNotBlank()) {
-            return@withContext queryOpenRouter(contact, probePayload, openRouterKey)
-        }
-
-        // 5. Unconnected state guidance
-        if (contact.authType == PeerAuthType.GEMINI_DIRECT) {
-            Pair(
-                false,
-                "Gemini is not configured. Add your free Google AI Studio key in GHOST Settings -> 'Extend Your Mind' to connect Gemma to Mum."
-            )
-        } else if (sessionCookies.isNullOrBlank()) {
-            Pair(
-                false,
-                "${contact.callsign} (${contact.organization}) is not connected. Open GHOST Settings -> 'Extend Your Mind' and tap 'Log In' to connect your account."
-            )
-        } else {
-            Pair(
-                false,
-                "Unable to query ${contact.callsign}. The web session may need to be refreshed. Open Settings -> 'Extend Your Mind' and tap 'Log In'."
-            )
-        }
-    }
-
-    private fun queryOpenRouter(
-        contact: PeerContact,
-        userPrompt: String,
-        apiKey: String
-    ): Pair<Boolean, String> {
-        var connection: HttpURLConnection? = null
-        return try {
-            val url = URL("https://openrouter.ai/api/v1/chat/completions")
-            connection = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                setRequestProperty("Content-Type", "application/json")
-                setRequestProperty("Authorization", "Bearer ${apiKey.trim()}")
-                setRequestProperty("HTTP-Referer", "https://ghost.ai")
-                setRequestProperty("X-Title", "GHOST AI Companion")
-                connectTimeout = 15000
-                readTimeout = 30000
-                doOutput = true
-            }
-
-            val requestBody = JsonObject().apply {
-                addProperty("model", contact.openRouterModelId)
-                val messagesArray = com.google.gson.JsonArray().apply {
-                    add(JsonObject().apply {
-                        addProperty("role", "system")
-                        addProperty(
-                            "content",
-                            "You are ${contact.callsign} (${contact.organization}), consulted by ✧ Gemma, an on-device AI assistant on Android. The operator needs your specialist capability (${contact.specialty}). Give a direct, expert, brilliantly insightful answer without filler."
-                        )
-                    })
-                    add(JsonObject().apply {
-                        addProperty("role", "user")
-                        addProperty("content", userPrompt.trim())
-                    })
-                }
-                add("messages", messagesArray)
-                addProperty("max_tokens", 800)
-            }
-
-            OutputStreamWriter(connection.outputStream).use { writer ->
-                writer.write(requestBody.toString())
-                writer.flush()
-            }
-
-            val responseCode = connection.responseCode
-            if (responseCode in 200..299) {
-                val responseText = connection.inputStream.bufferedReader().use { it.readText() }
-                val jsonResponse = Gson().fromJson(responseText, JsonObject::class.java)
-                val reply = jsonResponse.getAsJsonArray("choices")
-                    ?.get(0)?.asJsonObject
-                    ?.getAsJsonObject("message")
-                    ?.get("content")?.asString ?: "No response received"
-
-                Pair(true, "[${contact.callsign}]:\n${reply.trim()}")
             } else {
-                val errorText = connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
-                Timber.w("OpenRouter peer consult error: HTTP $responseCode - $errorText")
-                Pair(false, "Consultation failed with HTTP $responseCode: ${errorText.take(150)}")
+                return@withContext Pair(
+                    false,
+                    "DeepSeek is not connected. Open GHOST Settings -> 'Extend Your Mind' and tap 'Log In' to connect your account."
+                )
             }
-        } catch (e: Exception) {
-            Timber.e(e, "queryOpenRouter failed")
-            Pair(false, "Network error consulting ${contact.callsign}: ${e.message}")
-        } finally {
-            connection?.disconnect()
         }
+
+        Pair(false, "Unknown peer: ${contact.callsign}")
     }
 }

@@ -58,8 +58,6 @@ fun SettingsDialog(
     var geminiKey by remember { mutableStateOf(tokenManager.getGeminiKey() ?: "") }
     var showGeminiKey by remember { mutableStateOf(false) }
     var geminiSearchGrounding by remember { mutableStateOf(webSessionManager.isGeminiSearchGroundingEnabled()) }
-    var openRouterKey by remember { mutableStateOf(tokenManager.getOpenRouterKey() ?: "") }
-    var showOpenRouterKey by remember { mutableStateOf(false) }
     var phonebookExpanded by remember { mutableStateOf(true) }
     var connectedPeers by remember { mutableStateOf(webSessionManager.getConnectedPeers()) }
     var selectedLoginContact by remember { mutableStateOf<com.ghost.api.logic.PeerContact?>(null) }
@@ -745,69 +743,6 @@ fun SettingsDialog(
                                                     }
                                                 }
                                             }
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(dividerColor))
-                                Spacer(modifier = Modifier.height(8.dp))
-
-                                // Developer API Fallback (OpenRouter)
-                                var devApiExpanded by remember { mutableStateOf(false) }
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { devApiExpanded = !devApiExpanded },
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "Developer API Fallback (OpenRouter)",
-                                        fontSize = 11.sp,
-                                        color = textDim
-                                    )
-                                    Text(
-                                        text = if (devApiExpanded) "▲" else "▼",
-                                        fontSize = 11.sp,
-                                        color = textDim
-                                    )
-                                }
-
-                                AnimatedVisibility(visible = devApiExpanded) {
-                                    Column(modifier = Modifier.padding(top = 8.dp)) {
-                                        OutlinedTextField(
-                                            value = openRouterKey,
-                                            onValueChange = { openRouterKey = it },
-                                            modifier = Modifier.fillMaxWidth(),
-                                            placeholder = { Text("sk-or-v1-...", fontSize = 11.sp, color = Color(0x66FFFFFF)) },
-                                            singleLine = true,
-                                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp, color = Color.White),
-                                            visualTransformation = if (showOpenRouterKey) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                                            trailingIcon = {
-                                                Text(
-                                                    text = if (showOpenRouterKey) "Hide" else "Show",
-                                                    fontSize = 10.sp,
-                                                    color = accentColor,
-                                                    modifier = Modifier
-                                                        .clickable { showOpenRouterKey = !showOpenRouterKey }
-                                                        .padding(horizontal = 8.dp)
-                                                )
-                                            },
-                                            shape = RoundedCornerShape(8.dp)
-                                        )
-                                        Spacer(modifier = Modifier.height(6.dp))
-                                        Button(
-                                            onClick = {
-                                                tokenManager.setOpenRouterKey(openRouterKey)
-                                                Toast.makeText(context, if (openRouterKey.isNotBlank()) "OpenRouter Key Saved!" else "Key Cleared", Toast.LENGTH_SHORT).show()
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = accentColor),
-                                            shape = RoundedCornerShape(8.dp),
-                                            modifier = Modifier.align(Alignment.End),
-                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                                        ) {
-                                            Text("Save Key", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                        }
                                     }
                                 }
                             }

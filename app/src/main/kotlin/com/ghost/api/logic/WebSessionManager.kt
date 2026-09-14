@@ -71,6 +71,10 @@ class WebSessionManager(private val context: Context) {
             .remove(PREFIX_TIMESTAMP + key)
             .apply()
 
+        if (peerName.equals("DeepSeek", ignoreCase = true)) {
+            DeepSeekWebClient.resetSession()
+        }
+
         val contact = AiPhonebook.resolvePeer(peerName)
         if (contact != null && contact.cookieDomain.isNotBlank()) {
             try {
