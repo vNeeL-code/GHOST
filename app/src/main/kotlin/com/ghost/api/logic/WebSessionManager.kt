@@ -102,7 +102,9 @@ class WebSessionManager(private val context: Context) {
      * Returns a set of peer names currently holding an active session.
      */
     fun getConnectedPeers(): Set<String> {
-        return AiPhonebook.CONTACTS.map { it.name }
+        return AiPhonebook.CONTACTS
+            .filter { it.authType == PeerAuthType.WEB_COOKIE }
+            .map { it.name }
             .filter { hasSession(it) }
             .toSet()
     }

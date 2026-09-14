@@ -106,27 +106,45 @@ class AvatarWallpaperService : WallpaperService() {
         private var glyphAlpha = 255f
         private var albumArtAlpha = 0f
 
-        private fun drawApertureAlbumArt(
+        private fun drawStationaryAlbumArtThroughAperture(
             canvas: Canvas,
-            cx: Float,
-            cy: Float,
-            radius: Float,
-            path: Path,
-            alpha: Int
+            aperturePath: Path,
+            apertureLocalCx: Float,
+            apertureLocalCy: Float,
+            apertureGlobalCx: Float,
+            apertureGlobalCy: Float,
+            boardGlobalCx: Float,
+            boardGlobalCy: Float,
+            alpha: Int,
+            localRotationDegrees: Float = 0f
         ) {
             val art = SystemVisualizer.activeAlbumArt ?: return
             if (alpha <= 5) return
 
-            canvas.save()
-            canvas.clipPath(path)
+            val boardRadius = minOf(canvas.width, canvas.height) * 0.30f
 
+            canvas.save()
+            // 1. Clip to moving aperture cutout in local coordinates
+            canvas.clipPath(aperturePath)
+
+            // 2. Undo local rotation so board underneath stays upright (cancels spinning in Hexagon)
+            if (localRotationDegrees != 0f) {
+                canvas.rotate(-localRotationDegrees, apertureLocalCx, apertureLocalCy)
+            }
+
+            // 3. Shift from moving aperture center to stationary board center
+            val dx = boardGlobalCx - apertureGlobalCx
+            val dy = boardGlobalCy - apertureGlobalCy
+            canvas.translate(apertureLocalCx + dx, apertureLocalCy + dy)
+
+            // 4. Draw fixed-scale, unrotated, unstretched square album art at (0, 0)
             val srcW = art.width
             val srcH = art.height
             val minDim = minOf(srcW, srcH)
             val srcX = (srcW - minDim) / 2
             val srcY = (srcH - minDim) / 2
             albumArtSrcRect.set(srcX, srcY, srcX + minDim, srcY + minDim)
-            albumArtDstRect.set(cx - radius, cy - radius, cx + radius, cy + radius)
+            albumArtDstRect.set(-boardRadius, -boardRadius, boardRadius, boardRadius)
 
             albumArtPaint.alpha = alpha
             canvas.drawBitmap(art, albumArtSrcRect, albumArtDstRect, albumArtPaint)
@@ -473,8 +491,8 @@ class AvatarWallpaperService : WallpaperService() {
 
                     val targetGlyphAlpha = when {
                         isAgentSpeaking -> 255f
-                        isMedia -> 0f   // Fade central glyph down so album art acts as persona mask!
-                        else -> 255f    // Solid default glyph
+                        isMedia && cachedPreset != "OPTION_A" -> 0f   // In B, C, D: album art takes over central jewel chamber
+                        else -> 255f    // Solid default glyph (In Option A: star remains visible at 255 as aperture frame!)
                     }
 
                     val targetAlbumArtAlpha = when {
@@ -753,19 +771,32 @@ class AvatarWallpaperService : WallpaperService() {
             val currentGlyphAlpha = glyphAlpha.toInt().coerceIn(0, 255)
             val currentAlbumAlpha = albumArtAlpha.toInt().coerceIn(0, 255)
 
-            // Album Art Persona Mask for Option A
+            // Album Art Persona Mask for Option A (Ouija Board stationary under star aperture)
             if (currentAlbumAlpha > 5) {
                 cachedAperturePath.reset()
-                val apertureRadius = dynamicBaseRadius * 2.2f + (smoothedBass * 0.4f)
-                cachedAperturePath.addCircle(starCx + 12f, starCy + 40f, apertureRadius, Path.Direction.CW)
-                drawApertureAlbumArt(canvas, starCx + 12f, starCy + 40f, apertureRadius, cachedAperturePath, currentAlbumAlpha)
+                val apertureRadius = (dynamicBaseRadius * 1.35f + (smoothedBass * 0.25f)).coerceIn(80f, 160f)
+                val apX = starCx + 12f
+                val apY = starCy + 40f
+                cachedAperturePath.addCircle(apX, apY, apertureRadius, Path.Direction.CW)
+                drawStationaryAlbumArtThroughAperture(
+                    canvas = canvas,
+                    aperturePath = cachedAperturePath,
+                    apertureLocalCx = apX,
+                    apertureLocalCy = apY,
+                    apertureGlobalCx = apX,
+                    apertureGlobalCy = apY,
+                    boardGlobalCx = baseCx + 12f,
+                    boardGlobalCy = baseCy + 40f,
+                    alpha = currentAlbumAlpha,
+                    localRotationDegrees = 0f
+                )
 
                 // Cybernetic aperture rim
                 paint.style = Paint.Style.STROKE
                 paint.strokeWidth = 2.5f
                 paint.color = resolveColor(COLOR_CYAN_ACCENT, currentColors[0])
                 paint.alpha = (currentAlbumAlpha * 0.7f).toInt().coerceIn(0, 255)
-                canvas.drawCircle(starCx + 12f, starCy + 40f, apertureRadius, paint)
+                canvas.drawCircle(apX, apY, apertureRadius, paint)
             }
 
             // 3. Multi-pass bloom glow:
@@ -983,7 +1014,18 @@ class AvatarWallpaperService : WallpaperService() {
             drawHexagon(canvas, 0f, 0f, coreRadius, paint)
 
             if (currentAlbumAlpha > 5) {
-                drawApertureAlbumArt(canvas, 0f, 0f, coreRadius, cachedHexPath, currentAlbumAlpha)
+                drawStationaryAlbumArtThroughAperture(
+                    canvas = canvas,
+                    aperturePath = cachedHexPath,
+                    apertureLocalCx = 0f,
+                    apertureLocalCy = 0f,
+                    apertureGlobalCx = avatarCx,
+                    apertureGlobalCy = avatarCy,
+                    boardGlobalCx = baseCx,
+                    boardGlobalCy = baseCy,
+                    alpha = currentAlbumAlpha,
+                    localRotationDegrees = rotationAngle * 0.35f
+                )
             }
 
             paint.style = Paint.Style.STROKE
@@ -1232,17 +1274,28 @@ class AvatarWallpaperService : WallpaperService() {
             paint.alpha = 240
             drawEquilateralTriangle(canvas, 0f, triangleNudgeY, focalRadius, 0f, paint)
 
-            if (currentAlbumAlpha > 5) {
-                drawApertureAlbumArt(canvas, 0f, triangleNudgeY, focalRadius, cachedTrianglePath, currentAlbumAlpha)
-            }
-
             val innerColor = resolveColor(COLOR_CYAN_ACCENT, currentColors[0])
-            val baseInnerAlpha = (25 + (melodyExpansion * 1.8f).toInt()).coerceIn(20, 90)
-            val kickInnerAlpha = if (strobeFlash > 0.04f) (strobeFlash * 70f).toInt() else 0
-            paint.style = Paint.Style.FILL
-            paint.color = innerColor
-            paint.alpha = (baseInnerAlpha + kickInnerAlpha).coerceIn(20, 160)
-            drawEquilateralTriangle(canvas, 0f, triangleNudgeY, focalRadius * 0.85f, 0f, paint)
+            if (currentAlbumAlpha > 5) {
+                drawStationaryAlbumArtThroughAperture(
+                    canvas = canvas,
+                    aperturePath = cachedTrianglePath,
+                    apertureLocalCx = 0f,
+                    apertureLocalCy = triangleNudgeY,
+                    apertureGlobalCx = focalCx,
+                    apertureGlobalCy = focalCy + triangleNudgeY,
+                    boardGlobalCx = baseCx,
+                    boardGlobalCy = baseCy + triangleNudgeY,
+                    alpha = currentAlbumAlpha,
+                    localRotationDegrees = 0f
+                )
+            } else {
+                val baseInnerAlpha = (25 + (melodyExpansion * 1.8f).toInt()).coerceIn(20, 90)
+                val kickInnerAlpha = if (strobeFlash > 0.04f) (strobeFlash * 70f).toInt() else 0
+                paint.style = Paint.Style.FILL
+                paint.color = innerColor
+                paint.alpha = (baseInnerAlpha + kickInnerAlpha).coerceIn(20, 160)
+                drawEquilateralTriangle(canvas, 0f, triangleNudgeY, focalRadius * 0.85f, 0f, paint)
+            }
 
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 3.8f + (strobeFlash * 2.5f)
@@ -1375,7 +1428,18 @@ class AvatarWallpaperService : WallpaperService() {
             drawDiamond(canvas, 0f, 0f, coreCubeRadius, paint)
 
             if (currentAlbumAlpha > 5) {
-                drawApertureAlbumArt(canvas, 0f, 0f, coreCubeRadius, cachedDiamondPath, currentAlbumAlpha)
+                drawStationaryAlbumArtThroughAperture(
+                    canvas = canvas,
+                    aperturePath = cachedDiamondPath,
+                    apertureLocalCx = 0f,
+                    apertureLocalCy = 0f,
+                    apertureGlobalCx = cubeCx,
+                    apertureGlobalCy = cubeCy,
+                    boardGlobalCx = baseCx,
+                    boardGlobalCy = baseCy,
+                    alpha = currentAlbumAlpha,
+                    localRotationDegrees = 0f
+                )
             }
 
             paint.style = Paint.Style.STROKE

@@ -58,7 +58,6 @@ fun SettingsDialog(
     var geminiKey by remember { mutableStateOf(tokenManager.getGeminiKey() ?: "") }
     var showGeminiKey by remember { mutableStateOf(false) }
     var geminiSearchGrounding by remember { mutableStateOf(webSessionManager.isGeminiSearchGroundingEnabled()) }
-    var phonebookExpanded by remember { mutableStateOf(true) }
     var connectedPeers by remember { mutableStateOf(webSessionManager.getConnectedPeers()) }
     var selectedLoginContact by remember { mutableStateOf<com.ghost.api.logic.PeerContact?>(null) }
 
@@ -419,7 +418,13 @@ fun SettingsDialog(
 
                         // 5. === Extend Your Mind === (AI Phonebook)
                         item {
-                            val activeCount = connectedPeers.size + (if (geminiKey.isNotBlank()) 1 else 0)
+                            val activeCount = com.ghost.api.logic.AiPhonebook.CONTACTS.count { contact ->
+                                if (contact.authType == com.ghost.api.logic.PeerAuthType.GEMINI_DIRECT) {
+                                    geminiKey.isNotBlank()
+                                } else {
+                                    connectedPeers.contains(contact.name)
+                                }
+                            }
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -581,172 +586,107 @@ fun SettingsDialog(
                             }
                         }
 
-                        // 5B. Frontier Peer Checklist ("Holding Cookie")
-                        item {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 4.dp, vertical = 4.dp)
-                                    .background(cardBg, RoundedCornerShape(12.dp))
-                                    .border(1.dp, Color(0x1AFFFFFF), RoundedCornerShape(12.dp))
-                                    .padding(12.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(
-                                                text = "Frontier Web Logins",
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = Color.White
+                        // 5B. Frontier Web Session Peers ("Holding Cookie")
+                        com.ghost.api.logic.AiPhonebook.CONTACTS
+                            .filter { it.authType == com.ghost.api.logic.PeerAuthType.WEB_COOKIE }
+                            .forEach { contact ->
+                                item {
+                                    val isConnected = connectedPeers.contains(contact.name)
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 4.dp, vertical = 4.dp)
+                                            .background(cardBg, RoundedCornerShape(12.dp))
+                                            .border(
+                                                1.dp,
+                                                if (isConnected) Color(0x664CAF50) else Color(0x1AFFFFFF),
+                                                RoundedCornerShape(12.dp)
                                             )
-                                            if (connectedPeers.isNotEmpty()) {
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Surface(
-                                                    shape = RoundedCornerShape(10.dp),
-                                                    color = Color(0x334CAF50)
-                                                ) {
-                                                    Text(
-                                                        text = "${connectedPeers.size} Connected",
-                                                        fontSize = 10.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = Color(0xFF81C784),
-                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                                    )
+                                            .padding(12.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = contact.callsign,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color.White
+                                                )
+                                                Text(
+                                                    text = "${contact.organization} • ${contact.specialty}",
+                                                    fontSize = 11.sp,
+                                                    color = textDim,
+                                                    maxLines = 2
+                                                )
+                                            }
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(if (isConnected) Color(0x334CAF50) else Color(0x1AFFFFFF))
+                                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                                            ) {
+                                                Text(
+                                                    text = if (isConnected) "● Connected" else "○ Not Logged In",
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = if (isConnected) Color(0xFF4CAF50) else Color(0x88FFFFFF)
+                                                )
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.height(10.dp))
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = if (isConnected) "Web session active ('Holding Cookie')" else "Tap to log in via in-app browser",
+                                                fontSize = 11.sp,
+                                                color = if (isConnected) Color(0xFF81C784) else textDim
+                                            )
+
+                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                if (isConnected) {
+                                                    OutlinedButton(
+                                                        onClick = { selectedLoginContact = contact },
+                                                        shape = RoundedCornerShape(8.dp),
+                                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                                    ) {
+                                                        Text("Re-login", color = accentColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                                    }
+                                                    Button(
+                                                        onClick = {
+                                                            webSessionManager.clearSession(contact.name)
+                                                            connectedPeers = webSessionManager.getConnectedPeers()
+                                                            Toast.makeText(context, "${contact.callsign} disconnected", Toast.LENGTH_SHORT).show()
+                                                        },
+                                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0x33FF4444)),
+                                                        shape = RoundedCornerShape(8.dp),
+                                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                                    ) {
+                                                        Text("Disconnect", color = Color(0xFFFF6666), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                                    }
+                                                } else {
+                                                    Button(
+                                                        onClick = { selectedLoginContact = contact },
+                                                        colors = ButtonDefaults.buttonColors(containerColor = accentColor),
+                                                        shape = RoundedCornerShape(8.dp),
+                                                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
+                                                    ) {
+                                                        Text("Log In", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                    }
                                                 }
                                             }
                                         }
-                                        Text(
-                                            text = "Log into your accounts to extend Gemma's mind ('Holding Cookie')",
-                                            fontSize = 11.sp,
-                                            color = textDim
-                                        )
-                                    }
-                                    Text(
-                                        text = if (phonebookExpanded) "▲ Hide" else "▼ View",
-                                        fontSize = 12.sp,
-                                        color = accentColor,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(Color(0x1A8BB4F6))
-                                            .clickable { phonebookExpanded = !phonebookExpanded }
-                                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                                    )
-                                }
-
-                                AnimatedVisibility(visible = phonebookExpanded) {
-                                    Column(
-                                        modifier = Modifier.padding(top = 10.dp),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        com.ghost.api.logic.AiPhonebook.CONTACTS
-                                            .filter { it.name != "Gemini" }
-                                            .sortedByDescending { connectedPeers.contains(it.name) }
-                                            .forEach { contact ->
-                                                val isConnected = connectedPeers.contains(contact.name)
-                                                Column(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .clip(RoundedCornerShape(10.dp))
-                                                        .background(if (isConnected) Color(0x1F4CAF50) else Color(0x0DFFFFFF))
-                                                        .border(
-                                                            1.dp,
-                                                            if (isConnected) Color(0x4D4CAF50) else Color(0x1AFFFFFF),
-                                                            RoundedCornerShape(10.dp)
-                                                        )
-                                                        .padding(10.dp),
-                                                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                                                ) {
-                                                    Row(
-                                                        modifier = Modifier.fillMaxWidth(),
-                                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                                        verticalAlignment = Alignment.CenterVertically
-                                                    ) {
-                                                        Text(
-                                                            text = contact.callsign,
-                                                            fontSize = 14.sp,
-                                                            fontWeight = FontWeight.Bold,
-                                                            color = Color.White
-                                                        )
-
-                                                        Row(
-                                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                                            verticalAlignment = Alignment.CenterVertically
-                                                        ) {
-                                                            if (isConnected) {
-                                                                Surface(
-                                                                    shape = RoundedCornerShape(6.dp),
-                                                                    color = Color(0x1A8BB4F6),
-                                                                    modifier = Modifier.clickable { selectedLoginContact = contact }
-                                                                ) {
-                                                                    Text(
-                                                                        text = "Re-login",
-                                                                        fontSize = 11.sp,
-                                                                        color = accentColor,
-                                                                        fontWeight = FontWeight.SemiBold,
-                                                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                                                    )
-                                                                }
-                                                                Surface(
-                                                                    shape = RoundedCornerShape(6.dp),
-                                                                    color = Color(0x26FF4444),
-                                                                    modifier = Modifier.clickable {
-                                                                        webSessionManager.clearSession(contact.name)
-                                                                        connectedPeers = webSessionManager.getConnectedPeers()
-                                                                        Toast.makeText(context, "${contact.callsign} disconnected", Toast.LENGTH_SHORT).show()
-                                                                    }
-                                                                ) {
-                                                                    Text(
-                                                                        text = "Disconnect",
-                                                                        fontSize = 11.sp,
-                                                                        color = Color(0xFFFF6666),
-                                                                        fontWeight = FontWeight.SemiBold,
-                                                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                                                    )
-                                                                }
-                                                            } else {
-                                                                Surface(
-                                                                    shape = RoundedCornerShape(6.dp),
-                                                                    color = accentColor,
-                                                                    modifier = Modifier.clickable { selectedLoginContact = contact }
-                                                                ) {
-                                                                    Text(
-                                                                        text = "Log In",
-                                                                        fontSize = 11.sp,
-                                                                        fontWeight = FontWeight.Bold,
-                                                                        color = Color.Black,
-                                                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-                                                                    )
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-
-                                                    Surface(
-                                                        shape = RoundedCornerShape(6.dp),
-                                                        color = if (isConnected) Color(0x334CAF50) else Color(0x14FFFFFF)
-                                                    ) {
-                                                        Text(
-                                                            text = if (isConnected) "● Connected (Holding Cookie)" else "○ Disconnected",
-                                                            fontSize = 10.sp,
-                                                            fontWeight = FontWeight.SemiBold,
-                                                            color = if (isConnected) Color(0xFF81C784) else Color(0x80FFFFFF),
-                                                            maxLines = 1,
-                                                            softWrap = false,
-                                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                                        )
-                                                    }
-                                                }
-                                            }
                                     }
                                 }
                             }
-                        }
 
                         // 6. === Inference Engine === (Category 6: Last setting, fire and forget)
                         item {
