@@ -104,12 +104,12 @@ fun ChatScreen(
             // Left close app button matching right button footprint for true mathematical center
             Text(
                 text = "✕",
-                color = Color(0xFFEF4444),
+                color = TextSecondary,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
                     .clickable { showCloseConfirmDialog = true }
-                    .alpha(0.85f)
+                    .alpha(0.8f)
                     .padding(8.dp)
             )
             

@@ -754,7 +754,7 @@ class KoogAgent(
 
             // 2.5 Proactive KV Headroom Guard (prevent mid-generation KV saturation chokes)
             val totalEstimatedTokens = estimateCurrentKvTokens(context.length, event.message.length, images.size, audioBytes)
-            if (totalEstimatedTokens > 3500 || turnsSinceKvFlush >= 8 || sessionToolTokens >= 1200) {
+            if (totalEstimatedTokens > 6500 || turnsSinceKvFlush >= 16 || sessionToolTokens >= 2400) {
                 Timber.i("🌀 Proactive KV headroom guard triggered: ~$totalEstimatedTokens tokens (turn $turnsSinceKvFlush, audio: ${incomingAudioTokens}t, img: ${incomingImageTokens}t, tools: ${sessionToolTokens}t). Compacting before inference...")
                 flushAndCompactSession()
             }
@@ -932,7 +932,7 @@ class KoogAgent(
             // 8. Dynamic KV Cache Flush based on token limit or turns
             turnsSinceKvFlush++
             val postEstimatedTokens = estimateCurrentKvTokens(context.length, 0, 0, 0)
-            if (postEstimatedTokens > 3500 || turnsSinceKvFlush >= 8 || sessionToolTokens >= 1200) {
+            if (postEstimatedTokens > 6500 || turnsSinceKvFlush >= 16 || sessionToolTokens >= 2400) {
                 Timber.i("🌀 KV cache reaching capacity (~$postEstimatedTokens tokens, $turnsSinceKvFlush turns, audio: ${sessionAudioTokens}t, img: ${sessionImageTokens}t, tools: ${sessionToolTokens}t). Auto-flushing & Compacting...")
                 flushAndCompactSession()
             }
