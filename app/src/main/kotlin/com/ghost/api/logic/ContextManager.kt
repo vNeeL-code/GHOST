@@ -136,24 +136,32 @@ class ContextManager(
         fun resolveDeviceCallSign(context: android.content.Context): String {
             return try {
                 val candidateNames = listOfNotNull(
-                    // 1. Settings.Secure bluetooth_name (Direct user-set Bluetooth name across modern Android versions)
+                    // 1. Settings.System system_device_name (Used by Nubia / RedMagic / ZTE for user device name)
+                    try {
+                        android.provider.Settings.System.getString(context.contentResolver, "system_device_name")?.takeIf { it.isNotBlank() }
+                    } catch (e: Exception) { null },
+                    // 2. Settings.Global wifi_p2p_device_name (Synced user-edited device name across Nubia/Samsung/Xiaomi)
+                    try {
+                        android.provider.Settings.Global.getString(context.contentResolver, "wifi_p2p_device_name")?.takeIf { it.isNotBlank() }
+                    } catch (e: Exception) { null },
+                    // 3. Settings.Secure bluetooth_name (Direct user-set Bluetooth name across modern Android versions)
                     try {
                         android.provider.Settings.Secure.getString(context.contentResolver, "bluetooth_name")?.takeIf { it.isNotBlank() }
                     } catch (e: Exception) { null },
-                    // 2. Bluetooth Adapter Name (Synced to user-edited device name across almost all Android OEMs)
+                    // 4. Bluetooth Adapter Name (Synced to user-edited device name across almost all Android OEMs)
                     try {
                         @Suppress("DEPRECATION")
                         android.bluetooth.BluetoothAdapter.getDefaultAdapter()?.name?.takeIf { it.isNotBlank() }
                     } catch (e: Exception) { null },
-                    // 3. Settings.System device_name (Used by Nubia/RedMagic/Xiaomi/Oppo for user device name)
+                    // 5. Settings.System device_name (Standard user-set device name on Android)
                     try {
                         android.provider.Settings.System.getString(context.contentResolver, "device_name")?.takeIf { it.isNotBlank() }
                     } catch (e: Exception) { null },
-                    // 4. Settings.Global device_name
+                    // 6. Settings.Global device_name
                     try {
                         android.provider.Settings.Global.getString(context.contentResolver, "device_name")?.takeIf { it.isNotBlank() }
                     } catch (e: Exception) { null },
-                    // 5. Settings.Global.DEVICE_NAME
+                    // 7. Settings.Global.DEVICE_NAME
                     try {
                         android.provider.Settings.Global.getString(context.contentResolver, android.provider.Settings.Global.DEVICE_NAME)?.takeIf { it.isNotBlank() }
                     } catch (e: Exception) { null }
@@ -162,13 +170,17 @@ class ContextManager(
                 val rawModel = android.os.Build.MODEL.trim()
 
                 // Find first candidate that isn't a raw cryptic factory model code (e.g. "NX779J", "SM-G991B")
-                val chosenName = candidateNames.firstOrNull { name ->
+                val nonModelCandidate = candidateNames.firstOrNull { name ->
                     val trimmed = name.trim()
                     trimmed.isNotBlank() &&
                     !trimmed.equals(rawModel, ignoreCase = true) &&
                     !trimmed.equals("Android", ignoreCase = true) &&
                     !trimmed.equals("localhost", ignoreCase = true)
-                } ?: candidateNames.firstOrNull { it.isNotBlank() } ?: "Gemma"
+                }
+
+                // System input user name / Bluetooth name takes highest priority.
+                // Factory model code (e.g. NX779J) only comes up if user-assigned names are blank.
+                val chosenName = nonModelCandidate ?: candidateNames.firstOrNull { it.isNotBlank() } ?: rawModel.takeIf { it.isNotBlank() } ?: "Gemma"
 
                 val clean = chosenName
                     .removePrefix("✧")

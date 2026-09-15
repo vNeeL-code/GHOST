@@ -628,6 +628,11 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
             permissionsToRequest.add(android.Manifest.permission.READ_CALENDAR)
             permissionsToRequest.add(android.Manifest.permission.WRITE_CALENDAR)
         }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            if (checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(android.Manifest.permission.BLUETOOTH_CONNECT)
+            }
+        }
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
                 permissionsToRequest.add(android.Manifest.permission.POST_NOTIFICATIONS)
