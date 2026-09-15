@@ -23,7 +23,7 @@ Generative volume isn't the bottleneck. Legibility is. When talking about robots
 
 GPT-6 ARC-AGI3 scores and Claude both showed that scores swing drastically based on which provider harness the model was plugged into.
 
-Models need tailor made Harnesses, tailored around model /hardware pairing capabilities and limitation.
+Models need tailor made Harnesses, designed around model / hardware pairing capabilities and limitation.
 
 ✧ GHOST is an example of such harness. **Gemma Hosting Open Source thingamajig** is a privacy first, personal, AI assistant + launcher interface (similar to Niagara and others) for users who want a capable, general purpose Android UX assistant that provides standard system integration with advanced, localized agentic capabilities - running entirely in the palm of your hand. Not dependant on subscription models, accounts or network outages.
 
