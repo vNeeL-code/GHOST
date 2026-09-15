@@ -17,7 +17,7 @@
 
 - The verification bottleneck and compute speed disparity.
 An agent can generate a paragraph in seconds. It takes a human minutes to perceive it.
-voice agents speak in real time and generate 'less depth' per turn.
+Voice agents speak in real time and generate 'less depth' per turn.
 
 Generative volume isn't the bottleneck. Legibility is. When talking about robots or AI holograms. The staging still needs to be designed and paced at human perception speed. Having the transformer generate its own avatar/hologram is compute overhead when it can be done procedurally from a seed. Same as for a robot 'ability to balance' is separate from doing tasks. So you can think of it this way: The wall of text generated fast - that was the 'transformer/ai' the audio you hear? the animations and holograms you see? these are 'ghosts' of a computation that is faster than a human can perceive it.
 
