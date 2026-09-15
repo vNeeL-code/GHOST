@@ -205,7 +205,7 @@ fun PeerLoginSheet(
                             text = if (hasDetectedSession) {
                                 "✨ Active session detected! Tap '✓ Save Session' above to connect ${contact.callsign}."
                             } else {
-                                "Sign into your account below. Once you reach your chat screen, tap 'Save Session' above."
+                                "Log in via Email/Password or SMS code below (Google blocks WebView sign-in). Once in chat, tap 'Save Session'."
                             },
                             fontSize = 11.sp,
                             color = if (hasDetectedSession) successColor else Color(0xFFD0E0FF)
@@ -225,7 +225,7 @@ fun PeerLoginSheet(
                                     builtInZoomControls = true
                                     displayZoomControls = false
                                     userAgentString =
-                                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                                        "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
                                 }
 
                                 val cm = CookieManager.getInstance()

@@ -1546,7 +1546,7 @@ class KoogAgent(
         val (success, reply) = try {
             AiPhonebook.queryPeer(context, contact, prompt)
         } finally {
-            com.ghost.api.audio.SystemVisualizer.setActivePeer(null)
+            com.ghost.api.audio.SystemVisualizer.scheduleRevertToDefault(6000L)
         }
 
         return if (success) {

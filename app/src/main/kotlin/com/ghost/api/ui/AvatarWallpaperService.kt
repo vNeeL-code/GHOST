@@ -116,12 +116,14 @@ class AvatarWallpaperService : WallpaperService() {
             boardGlobalCx: Float,
             boardGlobalCy: Float,
             alpha: Int,
-            localRotationDegrees: Float = 0f
+            localRotationDegrees: Float = 0f,
+            customBoardRadius: Float? = null
         ) {
             val art = SystemVisualizer.activeAlbumArt ?: return
             if (alpha <= 5) return
 
-            val boardRadius = minOf(canvas.width, canvas.height) * 0.30f
+            // Scaled down to match aperture size so more of the album art fits inside
+            val boardRadius = customBoardRadius ?: (minOf(canvas.width, canvas.height) * 0.14f)
 
             canvas.save()
             // 1. Clip to moving aperture cutout in local coordinates
@@ -133,8 +135,10 @@ class AvatarWallpaperService : WallpaperService() {
             }
 
             // 3. Shift from moving aperture center to stationary board center
-            val dx = boardGlobalCx - apertureGlobalCx
-            val dy = boardGlobalCy - apertureGlobalCy
+            // Constrain slip so the scaled-down album art never breaches the aperture boundary
+            val maxSlip = boardRadius * 0.12f
+            val dx = (boardGlobalCx - apertureGlobalCx).coerceIn(-maxSlip, maxSlip)
+            val dy = (boardGlobalCy - apertureGlobalCy).coerceIn(-maxSlip, maxSlip)
             canvas.translate(apertureLocalCx + dx, apertureLocalCy + dy)
 
             // 4. Draw fixed-scale, unrotated, unstretched square album art at (0, 0)
@@ -778,6 +782,7 @@ class AvatarWallpaperService : WallpaperService() {
                 val apX = starCx + 12f
                 val apY = starCy + 40f
                 cachedAperturePath.addCircle(apX, apY, apertureRadius, Path.Direction.CW)
+                val boardRadiusA = apertureRadius * 1.15f
                 drawStationaryAlbumArtThroughAperture(
                     canvas = canvas,
                     aperturePath = cachedAperturePath,
@@ -788,7 +793,8 @@ class AvatarWallpaperService : WallpaperService() {
                     boardGlobalCx = baseCx + 12f,
                     boardGlobalCy = baseCy + 40f,
                     alpha = currentAlbumAlpha,
-                    localRotationDegrees = 0f
+                    localRotationDegrees = 0f,
+                    customBoardRadius = boardRadiusA
                 )
 
                 // Cybernetic aperture rim
@@ -800,6 +806,7 @@ class AvatarWallpaperService : WallpaperService() {
             }
 
             // 3. Multi-pass bloom glow:
+            // The sacred ✧ star core always remains present in the visualizer architecture
             if (currentGlyphAlpha > 5) {
                 logoPaint.clearShadowLayer()
                 logoPaint.style = Paint.Style.FILL
@@ -824,7 +831,7 @@ class AvatarWallpaperService : WallpaperService() {
                     logoPaint.textSize = bloomSize
                     logoPaint.alpha = (BLOOM_ALPHAS_OPTION_A[i] * (currentGlyphAlpha / 255f)).toInt().coerceIn(0, 255)
                     val bloomCenterOffset = (logoPaint.descent() + logoPaint.ascent()) / 2f
-                    canvas.drawText(activeGlyph, starCx, starCy - bloomCenterOffset, logoPaint)
+                    canvas.drawText("✧", starCx, starCy - bloomCenterOffset, logoPaint)
                 }
 
                 // 4. Crisp Core star (pure solid white sparkle)
@@ -833,7 +840,20 @@ class AvatarWallpaperService : WallpaperService() {
                 logoPaint.alpha = currentGlyphAlpha
                 logoPaint.textSize = baseStarSize
                 val starCenterOffset = (logoPaint.descent() + logoPaint.ascent()) / 2f
-                canvas.drawText(activeGlyph, starCx, starCy - starCenterOffset, logoPaint)
+                canvas.drawText("✧", starCx, starCy - starCenterOffset, logoPaint)
+
+                // 5. Agent Persona Emoji: Slapped directly on top of the sparkle core, sized to match avatar aperture
+                if (activeGlyph.isNotBlank() && activeGlyph != "✧") {
+                    val apertureRadius = (dynamicBaseRadius * 1.35f + (smoothedBass * 0.25f)).coerceIn(80f, 160f)
+                    val emojiSize = apertureRadius * 1.6f
+                    logoPaint.style = Paint.Style.FILL
+                    logoPaint.color = Color.WHITE
+                    logoPaint.alpha = currentGlyphAlpha
+                    logoPaint.textSize = emojiSize
+                    val emojiCenterOffset = (logoPaint.descent() + logoPaint.ascent()) / 2f
+                    // Centered precisely over the aperture optical origin (starCx + 12f, starCy + 40f)
+                    canvas.drawText(activeGlyph, starCx + 12f, (starCy + 40f) - emojiCenterOffset, logoPaint)
+                }
             }
         }
 
@@ -1014,6 +1034,7 @@ class AvatarWallpaperService : WallpaperService() {
             drawHexagon(canvas, 0f, 0f, coreRadius, paint)
 
             if (currentAlbumAlpha > 5) {
+                val boardRadiusB = coreRadius * 1.15f
                 drawStationaryAlbumArtThroughAperture(
                     canvas = canvas,
                     aperturePath = cachedHexPath,
@@ -1024,7 +1045,8 @@ class AvatarWallpaperService : WallpaperService() {
                     boardGlobalCx = baseCx,
                     boardGlobalCy = baseCy,
                     alpha = currentAlbumAlpha,
-                    localRotationDegrees = rotationAngle * 0.35f
+                    localRotationDegrees = rotationAngle * 0.35f,
+                    customBoardRadius = boardRadiusB
                 )
             }
 
@@ -1276,6 +1298,7 @@ class AvatarWallpaperService : WallpaperService() {
 
             val innerColor = resolveColor(COLOR_CYAN_ACCENT, currentColors[0])
             if (currentAlbumAlpha > 5) {
+                val boardRadiusC = focalRadius * 1.06f
                 drawStationaryAlbumArtThroughAperture(
                     canvas = canvas,
                     aperturePath = cachedTrianglePath,
@@ -1286,7 +1309,8 @@ class AvatarWallpaperService : WallpaperService() {
                     boardGlobalCx = baseCx,
                     boardGlobalCy = baseCy + triangleNudgeY,
                     alpha = currentAlbumAlpha,
-                    localRotationDegrees = 0f
+                    localRotationDegrees = 0f,
+                    customBoardRadius = boardRadiusC
                 )
             } else {
                 val baseInnerAlpha = (25 + (melodyExpansion * 1.8f).toInt()).coerceIn(20, 90)
@@ -1428,6 +1452,7 @@ class AvatarWallpaperService : WallpaperService() {
             drawDiamond(canvas, 0f, 0f, coreCubeRadius, paint)
 
             if (currentAlbumAlpha > 5) {
+                val boardRadiusD = coreCubeRadius * 1.15f
                 drawStationaryAlbumArtThroughAperture(
                     canvas = canvas,
                     aperturePath = cachedDiamondPath,
@@ -1438,7 +1463,8 @@ class AvatarWallpaperService : WallpaperService() {
                     boardGlobalCx = baseCx,
                     boardGlobalCy = baseCy,
                     alpha = currentAlbumAlpha,
-                    localRotationDegrees = 0f
+                    localRotationDegrees = 0f,
+                    customBoardRadius = boardRadiusD
                 )
             }
 

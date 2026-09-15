@@ -168,7 +168,7 @@ object SystemVisualizer {
         ), "Copilot"),
 
         // Google Gemini / Bard: Google Sparkle Blue, Google Off-White, Sparkle Violet, Deep Space Slate, Electric Cyan
-        Triple(listOf("bard", "gemini"), intArrayOf(
+        Triple(listOf("bard", "gemini", "googleassistant", "googlequicksearchbox"), intArrayOf(
             Color.parseColor("#4285F4"), // 0: Google Sparkle Blue
             Color.parseColor("#F8F9FA"), // 1: Google Off-White
             Color.parseColor("#9B51E0"), // 2: Sparkle Violet
@@ -851,7 +851,10 @@ object SystemVisualizer {
     fun applyAiBrandColor(packageName: String, brandPalette: IntArray) {
         activeAgentGlyph = when {
             packageName.contains("deepseek", ignoreCase = true) -> "🐋"
-            packageName.contains("gemini", ignoreCase = true) || packageName.contains("bard", ignoreCase = true) -> "✦"
+            packageName.contains("gemini", ignoreCase = true) ||
+            packageName.contains("bard", ignoreCase = true) ||
+            packageName.contains("googleassistant", ignoreCase = true) ||
+            packageName.contains("googlequicksearchbox", ignoreCase = true) -> "✦"
             packageName.contains("claude", ignoreCase = true) -> "✴️"
             packageName.contains("grok", ignoreCase = true) -> "☄️"
             packageName.contains("chatgpt", ignoreCase = true) || packageName.contains("openai", ignoreCase = true) -> "✳️"

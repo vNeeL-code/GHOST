@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.ghost.api.Constants
+import com.ghost.api.GemmaAccessibilityService
 import com.ghost.api.GemmaNotificationListener
 import com.ghost.api.GemmaService
 import com.ghost.api.hardware.HardwareToggleReceiver
@@ -71,6 +72,9 @@ fun SettingsDialog(
     val flat = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
     val isNotifGranted = flat != null && flat.contains(cn.flattenToString())
     val isOverlayGranted = Settings.canDrawOverlays(context)
+    val accessCn = remember { ComponentName(context, GemmaAccessibilityService::class.java) }
+    val enabledServices = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
+    val isAccessibilityGranted = enabledServices != null && enabledServices.contains(accessCn.flattenToString())
 
     // In-App WebView Login Sheet for AI Phonebook Contacts ("Holding Cookie")
     selectedLoginContact?.let { contact ->
@@ -464,7 +468,7 @@ fun SettingsDialog(
                                             color = Color.White
                                         )
                                         Text(
-                                            text = "Gemma's anchor ('Mum') • Android orchestrator • 1M context",
+                                            text = "Cloud Reasoning & Synthesis • 1M Context",
                                             fontSize = 11.sp,
                                             color = textDim
                                         )
@@ -490,7 +494,7 @@ fun SettingsDialog(
                                     value = geminiKey,
                                     onValueChange = { geminiKey = it },
                                     modifier = Modifier.fillMaxWidth(),
-                                    placeholder = { Text("AI Studio Key (AIzaSy...)", fontSize = 12.sp, color = Color(0x66FFFFFF)) },
+                                    placeholder = { Text("Google AI Studio API Key", fontSize = 12.sp, color = Color(0x66FFFFFF)) },
                                     singleLine = true,
                                     textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp, color = Color.White),
                                     visualTransformation = if (showGeminiKey) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
@@ -566,7 +570,7 @@ fun SettingsDialog(
                                             color = Color.White
                                         )
                                         Text(
-                                            text = "Direct web search via Mum (replaces DuckDuckGo)",
+                                            text = "Real-time Google search grounding for live web knowledge",
                                             fontSize = 10.sp,
                                             color = textDim
                                         )
@@ -609,20 +613,12 @@ fun SettingsDialog(
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = contact.callsign,
-                                                    fontSize = 14.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = Color.White
-                                                )
-                                                Text(
-                                                    text = "${contact.organization} • ${contact.specialty}",
-                                                    fontSize = 11.sp,
-                                                    color = textDim,
-                                                    maxLines = 2
-                                                )
-                                            }
+                                            Text(
+                                                text = contact.callsign,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White
+                                            )
                                             Box(
                                                 modifier = Modifier
                                                     .clip(RoundedCornerShape(6.dp))
@@ -642,45 +638,38 @@ fun SettingsDialog(
 
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            horizontalArrangement = Arrangement.End,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text(
-                                                text = if (isConnected) "Web session active ('Holding Cookie')" else "Tap to log in via in-app browser",
-                                                fontSize = 11.sp,
-                                                color = if (isConnected) Color(0xFF81C784) else textDim
-                                            )
-
-                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                                if (isConnected) {
-                                                    OutlinedButton(
-                                                        onClick = { selectedLoginContact = contact },
-                                                        shape = RoundedCornerShape(8.dp),
-                                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                                                    ) {
-                                                        Text("Re-login", color = accentColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                                                    }
-                                                    Button(
-                                                        onClick = {
-                                                            webSessionManager.clearSession(contact.name)
-                                                            connectedPeers = webSessionManager.getConnectedPeers()
-                                                            Toast.makeText(context, "${contact.callsign} disconnected", Toast.LENGTH_SHORT).show()
-                                                        },
-                                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0x33FF4444)),
-                                                        shape = RoundedCornerShape(8.dp),
-                                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                                                    ) {
-                                                        Text("Disconnect", color = Color(0xFFFF6666), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                                                    }
-                                                } else {
-                                                    Button(
-                                                        onClick = { selectedLoginContact = contact },
-                                                        colors = ButtonDefaults.buttonColors(containerColor = accentColor),
-                                                        shape = RoundedCornerShape(8.dp),
-                                                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
-                                                    ) {
-                                                        Text("Log In", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                                    }
+                                            if (isConnected) {
+                                                OutlinedButton(
+                                                    onClick = { selectedLoginContact = contact },
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                                                ) {
+                                                    Text("Re-login", color = accentColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                                }
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Button(
+                                                    onClick = {
+                                                        webSessionManager.clearSession(contact.name)
+                                                        connectedPeers = webSessionManager.getConnectedPeers()
+                                                        Toast.makeText(context, "${contact.callsign} disconnected", Toast.LENGTH_SHORT).show()
+                                                    },
+                                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0x33FF4444)),
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                                                ) {
+                                                    Text("Disconnect", color = Color(0xFFFF6666), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                                }
+                                            } else {
+                                                Button(
+                                                    onClick = { selectedLoginContact = contact },
+                                                    colors = ButtonDefaults.buttonColors(containerColor = accentColor),
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    contentPadding = PaddingValues(horizontal = 18.dp, vertical = 6.dp)
+                                                ) {
+                                                    Text("Log In", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                                 }
                                             }
                                         }
@@ -738,16 +727,31 @@ fun SettingsDialog(
                         }
 
                         // === Permissions & Access ===
-                        if (!isNotifGranted || !isOverlayGranted) {
+                        if (!isNotifGranted || !isOverlayGranted || !isAccessibilityGranted) {
                             item {
                                 SettingsSectionHeader(title = "Required System Access")
+                            }
+                        }
+                        if (!isAccessibilityGranted) {
+                            item {
+                                SettingsActionCard(
+                                    title = "Grant Accessibility Service",
+                                    subtitle = "Required for active agent app awareness & dynamic avatar reactivity",
+                                    isWarning = true,
+                                    onClick = {
+                                        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                        context.startActivity(intent)
+                                    }
+                                )
                             }
                         }
                         if (!isNotifGranted) {
                             item {
                                 SettingsActionCard(
                                     title = "Grant Notification Listener Access",
-                                    subtitle = "Required for context awareness & passive TTS",
+                                    subtitle = "Required for reading notifications, auto-replies & context awareness",
                                     isWarning = true,
                                     onClick = {
                                         val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
