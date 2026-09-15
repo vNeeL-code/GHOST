@@ -119,10 +119,10 @@ Truly 'YOURS' AI would require you to own the entire inference pipeline that wor
 * [x] **Edge Lighting UI:** Dynamic physical display edge illumination during live inference tracking.
 * [x] **Visual Engine:** Native Milkdrop3 style visualization rendering engine mapped to live audio pipelines.
 * [x] **Intent Vector Mapping:** Direct Android intent routing wired straight to the localized `@tool` orchestration matrix.
-* [x] **Advanced toolsets** Advanced toolchains and automation workflows
-* [ ] **Polishing Animations** Those don't come from nowhere.
-* [ ] **A2A capabilities** Deferral to bigger cloud models
-* [ ] **App store release** 🦕💭 ''I need about tree fiddy''
+* [x] **Advanced toolsets:** Advanced toolchains and automation workflows
+* [ ] **Polishing Animations:** Those don't come from nowhere.
+* [ ] **A2A capabilities:** Deferral to bigger cloud models
+* [ ] **App store release:** 🦕💭 ''I need about tree fiddy''
 
 ---
 
