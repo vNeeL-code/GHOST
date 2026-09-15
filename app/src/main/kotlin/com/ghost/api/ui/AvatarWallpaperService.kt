@@ -491,11 +491,11 @@ class AvatarWallpaperService : WallpaperService() {
                     // Dynamic Album Art & Central Glyph Transitions
                     val isMedia = SystemVisualizer.isMediaPlaying && SystemVisualizer.activeAlbumArt != null
                     val activeGlyph = SystemVisualizer.activeAgentGlyph
-                    val isAgentSpeaking = activeGlyph != "✧" || (isCustomPaletteActive && !isMedia)
+                    val isAgentSpeaking = (activeGlyph != "✧" && !isMedia) || (isCustomPaletteActive && !isMedia)
 
                     val targetGlyphAlpha = when {
-                        isAgentSpeaking -> 255f
                         isMedia && cachedPreset != "OPTION_A" -> 0f   // In B, C, D: album art takes over central jewel chamber
+                        isAgentSpeaking -> 255f
                         else -> 255f    // Solid default glyph (In Option A: star remains visible at 255 as aperture frame!)
                     }
 
@@ -843,7 +843,8 @@ class AvatarWallpaperService : WallpaperService() {
                 canvas.drawText("✧", starCx, starCy - starCenterOffset, logoPaint)
 
                 // 5. Agent Persona Emoji: Slapped directly on top of the sparkle core, sized to match avatar aperture
-                if (activeGlyph.isNotBlank() && activeGlyph != "✧") {
+                // STRICT ALBUM ART PROTECTION: Never render emoji on top of album artwork!
+                if (activeGlyph.isNotBlank() && activeGlyph != "✧" && currentAlbumAlpha <= 5 && !SystemVisualizer.isMediaPlaying) {
                     val apertureRadius = (dynamicBaseRadius * 1.35f + (smoothedBass * 0.25f)).coerceIn(80f, 160f)
                     val emojiSize = apertureRadius * 1.6f
                     logoPaint.style = Paint.Style.FILL
@@ -1148,7 +1149,7 @@ class AvatarWallpaperService : WallpaperService() {
             val glyphCx = baseCx + tiltX * 1.22f
             val glyphCy = baseCy + tiltY * 1.22f
 
-            if (currentGlyphAlpha > 5) {
+            if (currentGlyphAlpha > 5 && currentAlbumAlpha <= 5 && !SystemVisualizer.isMediaPlaying) {
                 logoPaint.clearShadowLayer()
                 logoPaint.style = Paint.Style.FILL
                 logoPaint.color = Color.WHITE
@@ -1334,7 +1335,7 @@ class AvatarWallpaperService : WallpaperService() {
 
             // 4. Center Model Unicode Glyph: Clean, Crisp, Centered Core
             // Jewel depth 0.96f (subtle float, cannot breach container)
-            if (currentGlyphAlpha > 5) {
+            if (currentGlyphAlpha > 5 && currentAlbumAlpha <= 5 && !SystemVisualizer.isMediaPlaying) {
                 val glyphSize = focalRadius * 1.15f
                 logoPaint.clearShadowLayer()
                 logoPaint.color = COLOR_STAR_CORE
@@ -1480,7 +1481,7 @@ class AvatarWallpaperService : WallpaperService() {
             drawDiamond(canvas, 0f, 0f, coreCubeRadius * 0.82f, paint)
 
             // Centered crisp white star glyph (0.96x depth, cannot breach cube container)
-            if (currentGlyphAlpha > 5) {
+            if (currentGlyphAlpha > 5 && currentAlbumAlpha <= 5 && !SystemVisualizer.isMediaPlaying) {
                 logoPaint.clearShadowLayer()
                 logoPaint.color = Color.WHITE
                 logoPaint.alpha = currentGlyphAlpha

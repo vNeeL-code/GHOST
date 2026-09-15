@@ -516,7 +516,16 @@ object SystemVisualizer {
                             val isMediaPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
 
                             // Establish active speaking source if newly active or unknown
-                            if (!wasAudioActive || activeAudioSpeakingPackage == null) {
+                            if (isMediaPlaying) {
+                                // When music is playing, only confirmed hardware TTS/media streams count as AI speech
+                                if (hwBrand != null) {
+                                    activeAudioSpeakingPackage = hwPkg
+                                } else if (aiMediaBrand != null) {
+                                    activeAudioSpeakingPackage = aiMediaPkg
+                                } else {
+                                    activeAudioSpeakingPackage = null
+                                }
+                            } else if (!wasAudioActive || activeAudioSpeakingPackage == null) {
                                 if (hwBrand != null) {
                                     activeAudioSpeakingPackage = hwPkg
                                 } else if (aiMediaBrand != null) {
@@ -537,20 +546,30 @@ object SystemVisualizer {
                             if (fgBrand != null) {
                                 // Focused on-screen AI app takes visual priority while in foreground
                                 applyAiBrandColor(fgPkg!!, fgBrand)
+                            } else if (isMediaPlaying && hwBrand == null && aiMediaBrand == null) {
+                                // Music media takes absolute priority when no AI hardware stream is talking!
+                                activeAudioSpeakingPackage = null
+                                activeAgentGlyph = "✧"
+                                if (activeMediaArtColors != null) {
+                                    applyMediaAlbumArt(activeMediaArtColors!!)
+                                } else {
+                                    extractColorsFromMetadata(activeMediaController?.metadata)
+                                }
+                            } else if (hwBrand != null) {
+                                activeAudioSpeakingPackage = hwPkg
+                                applyAiBrandColor(hwPkg!!, hwBrand)
+                            } else if (aiMediaBrand != null) {
+                                activeAudioSpeakingPackage = aiMediaPkg
+                                applyAiBrandColor(aiMediaPkg!!, aiMediaBrand)
                             } else if (activeAudioSpeakingPackage != null) {
                                 // Agent voice active while user is on home screen / background!
                                 val agentBrand = findBrandPalette(activeAudioSpeakingPackage!!)
                                 if (agentBrand != null) {
                                     applyAiBrandColor(activeAudioSpeakingPackage!!, agentBrand)
                                 }
-                            } else if (aiMediaBrand != null) {
-                                activeAudioSpeakingPackage = aiMediaPkg
-                                applyAiBrandColor(aiMediaPkg!!, aiMediaBrand)
-                            } else if (hwBrand != null) {
-                                activeAudioSpeakingPackage = hwPkg
-                                applyAiBrandColor(hwPkg!!, hwBrand)
                             } else if (isMediaPlaying) {
                                 activeAudioSpeakingPackage = null
+                                activeAgentGlyph = "✧"
                                 if (activeMediaArtColors != null) {
                                     applyMediaAlbumArt(activeMediaArtColors!!)
                                 } else {
