@@ -68,6 +68,7 @@ fun ChatScreen(
     onClearImage: () -> Unit,
     onToggleThinking: (ChatMessage) -> Unit,
     onOpenSettings: () -> Unit,
+    onCloseApp: () -> Unit = {},
     onPlayMessage: (String) -> Unit = {},
     visualizerViewFactory: ((Context) -> android.view.View)? = null
 ) {
@@ -75,7 +76,8 @@ fun ChatScreen(
     val density = LocalDensity.current
     val imeInsets = WindowInsets.ime
     val isImeVisible = imeInsets.getBottom(density) > 0
-    
+    var showCloseConfirmDialog by remember { mutableStateOf(false) }
+
     LaunchedEffect(messages.size, isImeVisible) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
@@ -99,11 +101,16 @@ fun ChatScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            // Left spacer matching right button footprint for true mathematical center
-            Box(
+            // Left close app button matching right button footprint for true mathematical center
+            Text(
+                text = "✕",
+                color = Color(0xFFEF4444),
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
                 modifier = Modifier
-                    .size(36.dp)
-                    .alpha(0f)
+                    .clickable { showCloseConfirmDialog = true }
+                    .alpha(0.85f)
+                    .padding(8.dp)
             )
             
             // Centered Turing Machine Glyph: Green Δ, Purple 👾, Green ∇
@@ -141,6 +148,48 @@ fun ChatScreen(
                     .clickable { onOpenSettings() }
                     .alpha(0.8f)
                     .padding(8.dp)
+            )
+        }
+
+        if (showCloseConfirmDialog) {
+            AlertDialog(
+                onDismissRequest = { showCloseConfirmDialog = false },
+                title = {
+                    Text(
+                        text = "Close GHOST?",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
+                    )
+                },
+                text = {
+                    Text(
+                        text = "This will terminate background AI inference, audio visualizers, and edge listeners until reopened.",
+                        color = TextSecondary,
+                        fontSize = 14.sp
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showCloseConfirmDialog = false
+                            onCloseApp()
+                        },
+                        colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFEF4444))
+                    ) {
+                        Text("Close", fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { showCloseConfirmDialog = false },
+                        colors = ButtonDefaults.textButtonColors(contentColor = TextSecondary)
+                    ) {
+                        Text("Cancel")
+                    }
+                },
+                containerColor = Color(0xFF1E293B),
+                shape = RoundedCornerShape(16.dp)
             )
         }
 

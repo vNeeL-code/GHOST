@@ -979,13 +979,19 @@ class KoogAgent(
                 } else {
                     // Diary: use clean response directly without redundant book prefix
                     try {
-                        val cleanText = cleanForTTS(safeCleanResponse).trim()
+                        val cleanDiaryText = safeCleanResponse
+                            .replace(Regex("<think>.*?</think>", RegexOption.DOT_MATCHES_ALL), "")
+                            .replace(Regex("<\\|channel>thought.*?<channel\\|>", RegexOption.DOT_MATCHES_ALL), "")
+                            .replace(Regex("<\\|tool_call\\|?>.*?<tool_call\\|>", RegexOption.DOT_MATCHES_ALL), "")
+                            .replace(Regex("<\\|[a-z_]+\\|?>"), "")
+                            .replace(Regex("<[a-z_]+\\|>"), "")
+                            .trim()
                         val thermal = cb.getCurrentThermalState()
-                        if (cleanText.length >= 25 && !cleanText.startsWith("Error:")) {
-                            cb.writeDiaryEntry("DREAM", cleanText, thermal)
-                            Timber.i("Dream diary logged: ${cleanText.take(50)}")
+                        if (cleanDiaryText.length >= 25 && !cleanDiaryText.startsWith("Error:") && !cleanDiaryText.contains("reflection glitched")) {
+                            cb.writeDiaryEntry("DREAM", cleanDiaryText, thermal)
+                            Timber.i("Dream diary logged: ${cleanDiaryText.take(50)}")
                         } else {
-                            Timber.w("Dream diary discarded degenerate/short response: '$cleanText'")
+                            Timber.w("Dream diary discarded degenerate/short response: '$cleanDiaryText'")
                         }
                     } catch (e: Exception) {
                         Timber.e(e, "Failed to log dream diary")

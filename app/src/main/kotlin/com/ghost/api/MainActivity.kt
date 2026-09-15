@@ -175,6 +175,9 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
                     onOpenSettings = {
                         showSettings = true
                     },
+                    onCloseApp = {
+                        handleForceCloseApp()
+                    },
                     onPlayMessage = { text ->
                         val activeTts = gemmaService?.ttsManager ?: ttsManager
                         activeTts.forceSpeak(text)
@@ -534,11 +537,13 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
         }
         root.addView(container)
 
-        // Filter for human-readable diary/dream reflections (skipping legacy JSON dumps and short degenerate tokens)
+        // Filter for human-readable diary/dream reflections (skipping raw internal thoughts, legacy JSON dumps, and reflection glitches)
         val validEntries = entries.filter {
+            (it.eventType == "DREAM" || it.eventType == "DIARY") &&
             it.observation.trim().length >= 20 &&
             !it.observation.trim().startsWith("{") && 
-            !it.observation.trim().startsWith("Session distilled:")
+            !it.observation.trim().startsWith("Session distilled:") &&
+            !it.observation.contains("reflection glitched")
         }
 
         container.addView(TextView(this).apply {
@@ -654,6 +659,18 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
 
         if (permissionsToRequest.isNotEmpty()) {
             standardPermissionsLauncher.launch(permissionsToRequest.toTypedArray())
+        }
+    }
+
+    private fun handleForceCloseApp() {
+        try {
+            stopService(Intent(this, GemmaService::class.java))
+            EdgeLightsManager.hide(this)
+            finishAffinity()
+            android.os.Process.killProcess(android.os.Process.myPid())
+        } catch (e: Exception) {
+            Timber.e(e, "Error during force close")
+            finishAffinity()
         }
     }
 

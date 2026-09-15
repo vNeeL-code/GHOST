@@ -747,8 +747,13 @@ object SystemVisualizer {
             lastForegroundAiTime = System.currentTimeMillis()
             cancelPendingRevert()
 
-            // If no AI audio is currently speaking in the background, or if this AI app is the speaker:
-            if (!isAudioActive || activeAudioSpeakingPackage == null || activeAudioSpeakingPackage == packageName) {
+            // If media/music is actively playing, the audio is from music, NOT the AI app:
+            val isMediaPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
+            if (isMediaPlaying) {
+                // Show AI brand while focused on the AI app, but DO NOT claim audio speaking package
+                activeAudioSpeakingPackage = null
+                applyAiBrandColor(packageName, brandPalette)
+            } else if (!isAudioActive || activeAudioSpeakingPackage == null || activeAudioSpeakingPackage == packageName) {
                 activeAudioSpeakingPackage = packageName
                 applyAiBrandColor(packageName, brandPalette)
             } else {
@@ -757,17 +762,21 @@ object SystemVisualizer {
                 // While the user is focused on DeepSeek, show DeepSeek's palette & glyph on screen:
                 applyAiBrandColor(packageName, brandPalette)
                 // BUT CRITICALLY: DO NOT overwrite activeAudioSpeakingPackage!
-                // activeAudioSpeakingPackage remains Claude so when DeepSeek closes, it returns to Claude!
             }
         } else {
             // User switched to Home Screen (launcher) or a non-AI app (Chrome, Settings, Files, etc.)
             val isMediaPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
             val isAiMediaPlaying = activeAiController?.playbackState?.state == PlaybackState.STATE_PLAYING
 
-            if (isMediaPlaying && activeMediaArtColors != null) {
+            if (isMediaPlaying) {
                 cancelPendingRevert()
                 activeAudioSpeakingPackage = null
-                applyMediaAlbumArt(activeMediaArtColors!!)
+                activeAgentGlyph = "✧"
+                if (activeMediaArtColors != null) {
+                    applyMediaAlbumArt(activeMediaArtColors!!)
+                } else {
+                    extractColorsFromMetadata(activeMediaController?.metadata)
+                }
             } else if (isAudioActive && activeAudioSpeakingPackage != null) {
                 // The AI agent is currently talking in the background!
                 // Restore its signature colors and glyph immediately!
@@ -907,6 +916,7 @@ object SystemVisualizer {
     }
 
     fun applyMediaAlbumArt(artColors: IntArray) {
+        activeAgentGlyph = "✧" // Album artwork takes center stage; reset persona emoji to neutral core
         if (currentAlbumColors == artColors) return
         currentAlbumColors = artColors
         if (overrideEmotionColors == null) {

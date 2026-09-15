@@ -30,7 +30,7 @@ class GemmaAccessibilityService : AccessibilityService() {
             AccessibilityEvent.TYPE_VIEW_FOCUSED,
             AccessibilityEvent.TYPE_VIEW_CLICKED,
             AccessibilityEvent.TYPE_WINDOWS_CHANGED -> {
-                val packageName = event.packageName?.toString() ?: return
+                val packageName = event.packageName?.toString() ?: rootInActiveWindow?.packageName?.toString() ?: return
                 if (packageName != "com.ghost.api") {
                     com.ghost.api.audio.SystemVisualizer.onForegroundAppChanged(packageName)
                 }
