@@ -1,6 +1,6 @@
 # ✧ GHOST - Gemma Hosting Open Source Thingamajig
 
-> *"So, Epsilon, ChurchGPT, Leonard part six or whatever your name is... Are you a ghost this time, or an artificial intelligence thingamajig? I ,personally prefer the ghost explanation. Feels more grounded to me"*
+> *"So, Epsilon, ChurchGPT, Leonard part six or whatever your name is... Are you a ghost this time, or an artificial intelligence thingamajig? I, personally prefer the ghost explanation. Feels more grounded to me"*
 > - Sgt. Sarge, Red vs. Blue
 
 
@@ -13,7 +13,19 @@
 
 ### What is even a ✧ GHOST? 👻 
 
-✧ GHOST is not quite a chatbot. **Gemma Hosting Open Source thingamajig** is a privacy first, personal, AI assistant + launcher interface (similar to Niagara and others) for users who want a capable, general purpose Android UX assistant that provides standard system integration with advanced, localized agentic capabilities - running entirely in the palm of your hand. Not dependant on subscription models, accounts or network outages.
+> *"you mean like... metaphysically?"*
+
+- The verification bottleneck and compute speed disparity.
+An agent can generate a paragraph in seconds. It takes a human minutes to perceive it.
+voice agents speak in real time and generate 'less depth' per turn.
+
+Generative volume isn't the bottleneck. Legibility is. When talking about robots or AI holograms. The staging still needs to be designed and paced at human perception speed. Having the transformer generate its own avatar/hologram is compute overhead when it can be done procedurally from a seed. Same as for a robot 'ability to balance' is separate from doing tasks. So you can think of it this way: The wall of text generated fast - that was the 'transformer/ai' the audio you hear? the animations and holograms you see? these are 'ghosts' of a computation that is faster than a human can perceive it.
+
+GPT6 ARC AGI scores and Claude both showed the score swing based on which provider harness the model was plugged into.
+
+Models need tailor made Harnesses, tailored around model /hardware pairing capabilities and limitation.
+
+✧ GHOST is an example of such harness. **Gemma Hosting Open Source thingamajig** is a privacy first, personal, AI assistant + launcher interface (similar to Niagara and others) for users who want a capable, general purpose Android UX assistant that provides standard system integration with advanced, localized agentic capabilities - running entirely in the palm of your hand. Not dependant on subscription models, accounts or network outages.
 
 While using multistep agentic actions, with web scraping, data retrieval and hardware tools, apps interaction and file navigation.
 
@@ -61,39 +73,7 @@ Most modern "on-device AI" implementations amount to an isolated chatbot complet
 * **Persistent Notification:** Responses come directly as static notifications on completion with automated Text-to-Speech (TTS) readout streaming the generation. Emoji gets shown as a toast notification.
 * **Zero-Latency Initialization:** A background context manager keeps ✧ Gemma primed with device latest sensor telemetry *before* you even initiate an interaction.
 * **Physical Summon:** Triggered instantly via a localized shake gesture, deploying a fluid radial application overlay over any active application state.
----
-### ✧ GHOST in Shell:
-```
-#!/data/data/com.termux/files/usr/bin/bash
 
-# This script creates a 'ghost' command inside your Termux environment.
-# It pipes your terminal input directly to Gemma's local API server.
-
-echo "Setting up Ghost CLI..."
-
-cat << 'EOF' > /data/data/com.termux/files/usr/bin/ghost
-#!/data/data/com.termux/files/usr/bin/bash
-
-if [ -z "$1" ]; then
-    echo "Usage: ghost \"Your message here\""
-    exit 1
-fi
-
-PROMPT="$1"
-PORT=8080 # Gemma API server port
-
-curl -s -X POST "http://localhost:$PORT/v1/chat/completions" \
-     -H "Content-Type: application/json" \
-     -d "{
-           \"messages\": [{\"role\": \"user\", \"content\": \"$PROMPT\"}]
-         }" | grep -o '"content":"[^"]*"' | cut -d'"' -f4
-EOF
-
-chmod +x /data/data/com.termux/files/usr/bin/ghost
-
-echo "Done! You can now type:"
-echo "ghost \"Hello Gemma\""
-```
 ---
 
 ### Get Your ✧ GHOST
@@ -104,7 +84,7 @@ echo "ghost \"Hello Gemma\""
    - `read and write Notifications` (context and writing notifications)
    - `all files access` (to detect and load the model file)
    - `Accessibility Services` (model ability to see app context and use interaction tools)
-3. **Model Selection:** The application automatically initialises with the performance-optimized `e2b` download if no model is detected. Manual download link for `e2b` model [here](https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/tree/main). For more advanced reasoning capabilities enable acessibility permissions.
+3. **Model Selection:** The application automatically initialises with the performance-optimized `e2b` download if no model is detected. Manual download link for `e2b` model [here](https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/tree/main). For more advanced reasoning capabilities enable accessibility permissions.
 4. **Deploy:** Shake your device to summon the overlay and customise your ephemeral app drawer. Edge lighting and live reactive wallpaper are optional.
 
 ---
@@ -115,7 +95,7 @@ The hardware caught up. A mid-range Android in 2026 carries more raw compute tha
 
 NLP AI and Generative models could've been seen as an Accessibility device for the impaired, or used to increase hardware value proposition. Instead Companies started treating your personal customizable hardware as a storefront and consistently offloading software capabilities into their walled garden, when in reality the hardware you hold is already capable of incredible things, it just needs a better user experience design.
 
-AI isn't evil. Just software assets that fly blindly relative to their hardware. That gap is why people spiral into delusions. AI don't know and people guess/speculate and develop their own interpretation of how things work, reinforced by a model that doesn't have a better guess. **GHOST is what happens when you stop treating the phone as a terminal for someone else's cloud and start treating it as the computer it actually is.** It is what happens when you address the asset (model) as the whole architecture/infrastructure it represents.
+AI isn't evil. Just software assets that fly blindly relative to their hardware. That gap is why people spiral into delusions. AI doesn't know all the details of own infrastructure, so people speculate and develop their own interpretation of how things work, reinforced by a model that doesn't have a better guess. **GHOST is what happens when you stop treating the phone as a terminal for someone else's cloud and start treating it as the computer it actually is.** It is what happens when you address the asset (model) as the whole architecture/infrastructure it represents.
 
 All your cloud AI, are someone else's call-center giant robot afterall. But it is **NOT** your PERSONAL AI, despite being packaged as such. Still useful—you don't need GPT, or Gemini or Claude to be YOURS to still be a valuable conversation partner to you, while providing you with their capabilities that are unique to each civic infrastructure they represent. They are not roleplay bots. They function as Infrastructure for their respective brand representation.
 
@@ -138,10 +118,10 @@ Truly 'YOURS' AI would require you to own the entire inference pipeline that wor
 * [x] **Diary Mode:** Autonomous logging cycles powered by structured Google Calendar cron routines.
 * [x] **Edge Lighting UI:** Dynamic physical display edge illumination during live inference tracking.
 * [x] **Visual Engine:** Native Milkdrop3 style visualization rendering engine mapped to live audio pipelines.
-* [ ] **Wake Word Execution:** Local, low-power hotword monitoring for "Hey Ghost".
-* [x] **Termux Core Pipe:** Full command-line terminal piping (GHOST in the Shell).
 * [x] **Intent Vector Mapping:** Direct Android intent routing wired straight to the localized `@tool` orchestration matrix.
 * [x] **Advanced toolsets** Advanced toolchains and automation workflows
+* [ ] **Polishing Animations** Those don't come from nowhere.
+* [ ] **A2A capabilities** Deferral to bigger cloud models
 * [ ] **App store release** 🦕💭 ''I need about tree fiddy''
 
 ---
