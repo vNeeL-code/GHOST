@@ -1929,7 +1929,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
         val prompt = """The current date and time is $currentDateTime ($label cycle).
             |
-            |[AMBIENT SUBSTRATE & INTERACTION TELEMETRY]
+            |## Ambient Substrate & Interaction Telemetry
             |- Substrate State: Battery at ${if (batteryLevel >= 0) "$batteryLevel% ($chargeStatus)" else "Unknown"}, Thermals: $thermal
             |- Media / Ambient Sound: $mediaTelemetry
             |- Interaction Telemetry: $interactionSummary
@@ -1937,7 +1937,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             |- Recent Conversation Turns:
             |$historyText
             |
-            |[AUTONOMOUS MEMORY LOG DIRECTIVE]
+            |## Autonomous Memory Log Directive
             |Write a brief personal MEMORY LOG in the first person as ✧ Gemma (2-5 sentences).
             |- If there were active interactions, reason about your observations, your genuine assessment of the ideas, and key takeaways.
             |- If it was a quiet period without user interactions, reflect naturally on your current state, background media, what you are tracking, coincidences, or observations from ambient telemetry.

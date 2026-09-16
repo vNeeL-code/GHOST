@@ -669,7 +669,7 @@ class KoogAgent(
             },
             onError = { err ->
                 Timber.e("SSE stream error: $err")
-                onToken("\n[Error: $err]")
+                onToken("\nError: $err")
             }
         )
         } finally {
@@ -1047,7 +1047,7 @@ class KoogAgent(
             val rawObservation = "Tool results:\n${event.toolResults.joinToString("\n")}"
             // Cap single tool output to 3500 chars so massive web searches or page fetches don't exhaust the KV budget
             val observation = if (rawObservation.length > 3500) {
-                rawObservation.take(3500) + "\n...[Output truncated for token headroom]"
+                rawObservation.take(3500) + "\n...(Output truncated for token headroom)"
             } else rawObservation
 
             Timber.d("KoogAgent: Tool execution complete, reflecting...")
@@ -1064,7 +1064,7 @@ class KoogAgent(
             // NOT as its own hallucinated Assistant generation.
             val observationMsg = Message(
                 role = "user",
-                content = "[System Observation]\n$observation"
+                content = "Observation:\n$observation"
             )
             synchronized(_conversationHistory) {
                 _conversationHistory.add(observationMsg)
@@ -1317,9 +1317,9 @@ class KoogAgent(
         // We only inject context (body/sensors) here.
         val contextBlock = if (context.isNotBlank()) context else perceive()
         val mediaCue = when {
-            images != null && images.isNotEmpty() && audio != null -> "[Multimodal Input: User attached image and voice audio recording. Inspect image and listen to audio.]"
-            images != null && images.isNotEmpty() -> "[Multimodal Input: User attached image. Inspect image directly.]"
-            audio != null -> "[Multimodal Input: User attached voice audio recording. Listen to the audio and respond directly to what was spoken.]"
+            images != null && images.isNotEmpty() && audio != null -> "(Multimodal Input: User attached image and voice audio recording. Inspect image and listen to audio.)"
+            images != null && images.isNotEmpty() -> "(Multimodal Input: User attached image. Inspect image directly.)"
+            audio != null -> "(Multimodal Input: User attached voice audio recording. Listen to the audio and respond directly to what was spoken.)"
             else -> null
         }
         val fullPrompt = buildString {
@@ -1471,7 +1471,7 @@ class KoogAgent(
     private suspend fun buildSystemPrompt(): String {
         val basePrompt = contextManager.buildSystemPrompt(this@KoogAgent.context, rollingMemoryJson, skillManager)
         val oldMemory = memoryManager.getCompactedSessionMemory().take(1500).trim()
-        val longTermMemoryPatch = if (oldMemory.isNotBlank()) "\n\n[LONG-TERM EPISODIC MEMORY — Continuity from earlier conversations]\n$oldMemory\n[END LONG-TERM EPISODIC MEMORY]\n" else ""
+        val longTermMemoryPatch = if (oldMemory.isNotBlank()) "## Long-Term Memory (continuity from earlier conversations)\n$oldMemory\n\n" else ""
         return longTermMemoryPatch + basePrompt
     }
 

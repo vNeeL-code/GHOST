@@ -67,12 +67,12 @@ class GemmaNotificationListener : NotificationListenerService() {
 
             if (isMessaging) {
                 val appName = pkg.split('.').lastOrNull()?.replaceFirstChar { it.uppercase() } ?: pkg
-                var prompt = "[SYSTEM EVENT: Incoming message on $appName from $title. Message says: \"$text\". Briefly tell the user about this message in your own words"
+                var prompt = "Δ 👾 ∇ GHOST: Incoming message on $appName from $title: \"$text\". Briefly tell the user about this message in your own words"
                 
                 if (replyCache.containsKey(pkg)) {
-                    prompt += ", and ask if they would like you to reply to it.]"
+                    prompt += ", and ask if they would like you to reply to it."
                 } else {
-                    prompt += ".]"
+                    prompt += "."
                 }
                 
                 // Fire and forget to GemmaService

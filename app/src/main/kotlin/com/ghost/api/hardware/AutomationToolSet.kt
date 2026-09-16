@@ -23,7 +23,7 @@ class AutomationToolSet(private val context: Context) : ToolSet {
     @Tool(description = "Schedules a background task in the future. Essential for multi-step autonomy or executing plans. Provide the exact system prompt you want to receive when it wakes up.")
     fun schedule_task(
         @ToolParam(description = "Delay in minutes before the prompt is triggered") delayMinutes: Int,
-        @ToolParam(description = "The exact prompt text to feed back into your own context. Start with [SYSTEM: Task Wakeup]") prompt: String
+        @ToolParam(description = "The exact prompt text to feed back into your own context. Start with Δ 👾 ∇ GHOST: Task Wakeup") prompt: String
     ): Map<String, String> {
         com.ghost.api.GemmaService.instance?.showWorkSignal("SCHEDULE", 1500)
         return try {
