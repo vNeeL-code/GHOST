@@ -754,7 +754,7 @@ class KoogAgent(
 
             // 2.5 Proactive KV Headroom Guard (prevent mid-generation KV saturation chokes)
             val totalEstimatedTokens = estimateCurrentKvTokens(context.length, event.message.length, images.size, audioBytes)
-            if (totalEstimatedTokens > 6500 || turnsSinceKvFlush >= 16 || sessionToolTokens >= 2400) {
+            if (totalEstimatedTokens > 4200 || turnsSinceKvFlush >= 10 || sessionToolTokens >= 1500) {
                 Timber.i("🌀 Proactive KV headroom guard triggered: ~$totalEstimatedTokens tokens (turn $turnsSinceKvFlush, audio: ${incomingAudioTokens}t, img: ${incomingImageTokens}t, tools: ${sessionToolTokens}t). Compacting before inference...")
                 flushAndCompactSession()
             }
@@ -932,7 +932,7 @@ class KoogAgent(
             // 8. Dynamic KV Cache Flush based on token limit or turns
             turnsSinceKvFlush++
             val postEstimatedTokens = estimateCurrentKvTokens(context.length, 0, 0, 0)
-            if (postEstimatedTokens > 6500 || turnsSinceKvFlush >= 16 || sessionToolTokens >= 2400) {
+            if (postEstimatedTokens > 4200 || turnsSinceKvFlush >= 10 || sessionToolTokens >= 1500) {
                 Timber.i("🌀 KV cache reaching capacity (~$postEstimatedTokens tokens, $turnsSinceKvFlush turns, audio: ${sessionAudioTokens}t, img: ${sessionImageTokens}t, tools: ${sessionToolTokens}t). Auto-flushing & Compacting...")
                 flushAndCompactSession()
             }
@@ -1040,7 +1040,7 @@ class KoogAgent(
 
             // Pre-reflection KV headroom check: if context + huge observation approaches limit, compact first
             val preEstimatedTokens = estimateCurrentKvTokens(event.context.length, observation.length, 0)
-            if (preEstimatedTokens > 3500 || turnsSinceKvFlush >= 6 || sessionToolTokens >= 1200) {
+            if (preEstimatedTokens > 4200 || turnsSinceKvFlush >= 10 || sessionToolTokens >= 1500) {
                 Timber.i("🌀 Pre-reflection KV headroom guard triggered: ~$preEstimatedTokens tokens (turn $turnsSinceKvFlush). Compacting before tool reflection...")
                 flushAndCompactSession()
             }
@@ -1091,7 +1091,7 @@ class KoogAgent(
             // Post-reflection: increment turnsSinceKvFlush and guard KV headroom
             turnsSinceKvFlush++
             val postEstimatedTokens = estimateCurrentKvTokens(event.context.length, 0, 0)
-            if (isEmojiChoke || postEstimatedTokens > 3500 || turnsSinceKvFlush >= 6 || sessionToolTokens >= 1200) {
+            if (isEmojiChoke || postEstimatedTokens > 4200 || turnsSinceKvFlush >= 10 || sessionToolTokens >= 1500) {
                 Timber.i("🌀 Post-reflection KV headroom guard: ~$postEstimatedTokens tokens (turn $turnsSinceKvFlush). Compacting...")
                 flushAndCompactSession()
             }
