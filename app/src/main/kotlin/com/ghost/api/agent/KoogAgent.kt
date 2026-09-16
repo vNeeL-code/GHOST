@@ -1195,6 +1195,12 @@ class KoogAgent(
         return ContextManager.resolveDeviceCallSign(this@KoogAgent.context)
     }
 
+    fun getRecentConversationTurns(maxTurns: Int = 3): List<Message> {
+        return synchronized(_conversationHistory) {
+            _conversationHistory.takeLast(maxTurns * 2).toList()
+        }
+    }
+
     private fun cleanAssistantHistory(raw: String): String {
         val assistantCallSign = getAssistantCallSign()
         return wrapResponse(raw)
@@ -1571,8 +1577,9 @@ class KoogAgent(
         callbacks?.onThoughtUpdated("Consulting ${contact.callsign} via AI Phonebook...")
         com.ghost.api.audio.SystemVisualizer.setActivePeer(contact.callsign)
 
+        val recentHistory = getRecentConversationTurns(3)
         val (success, reply) = try {
-            AiPhonebook.queryPeer(context, contact, prompt)
+            AiPhonebook.queryPeer(context, contact, prompt, recentHistory)
         } finally {
             com.ghost.api.audio.SystemVisualizer.scheduleRevertToDefault(6000L)
         }

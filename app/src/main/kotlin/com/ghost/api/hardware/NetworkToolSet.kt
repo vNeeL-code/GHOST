@@ -174,7 +174,8 @@ class NetworkToolSet(private val context: Context) : ToolSet {
                     "message" to "Peer '$peer' not found in AI Phonebook. Available: Gemini, DeepSeek."
                 )
 
-            val (success, reply) = com.ghost.api.logic.AiPhonebook.queryPeer(context, contact, prompt)
+            val recentHistory = com.ghost.api.GemmaService.instance?.koogAgent?.getRecentConversationTurns(3) ?: emptyList()
+            val (success, reply) = com.ghost.api.logic.AiPhonebook.queryPeer(context, contact, prompt, recentHistory)
             val cleanReply = sanitizeToolString(reply, 1800)
             if (success) {
                 com.ghost.api.GemmaService.instance?.recordToolOutput(cleanReply.length)

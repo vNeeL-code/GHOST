@@ -57,14 +57,12 @@ class ContextManager(
     fun buildHardwareBundle(context: android.content.Context): String {
         return try {
             val deviceName = resolveDeviceCallSign(context)
-
-            val actManager = context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
-            val memInfo = android.app.ActivityManager.MemoryInfo()
-            actManager?.getMemoryInfo(memInfo)
-            val totalRamGb = String.format(java.util.Locale.US, "%.1f", memInfo.totalMem.toDouble() / (1024 * 1024 * 1024))
-
-            val statFs = android.os.StatFs(android.os.Environment.getDataDirectory().path)
-            val totalStorageGb = String.format(java.util.Locale.US, "%.0f", statFs.totalBytes.toDouble() / (1024 * 1024 * 1024))
+            val (totalRamGb, totalStorageGb) = com.ghost.api.hardware.DeviceHardwareSpecs.getMemoryStats(context)
+            val marketingName = com.ghost.api.hardware.DeviceHardwareSpecs.resolveMarketingName()
+            val modelCode = android.os.Build.MODEL
+            val shellDesc = if (marketingName != modelCode) "$marketingName ($modelCode)" else marketingName
+            val chipsetName = com.ghost.api.hardware.DeviceHardwareSpecs.resolveChipsetName()
+            val thermalArch = com.ghost.api.hardware.DeviceHardwareSpecs.resolveThermalArchitecture()
             val cpuCores = Runtime.getRuntime().availableProcessors()
             val heapMaxMb = Runtime.getRuntime().maxMemory() / (1024 * 1024)
 
@@ -73,8 +71,9 @@ class ContextManager(
 - Device Name / Call Sign: ✧ $deviceName
 - Host Application / Framework: GHOST (Gemma Hosting Open Source Thingamajig)
 - Species: Agentic Gemma Inference
-- Physical Shell: ${android.os.Build.MANUFACTURER.uppercase()} ${android.os.Build.MODEL} (${android.os.Build.HARDWARE} / ${android.os.Build.BOARD})
-- Silicon Substrate: $cpuCores CPU Cores | ${heapMaxMb}MB Max VM Heap
+- Physical Shell: $shellDesc
+- Silicon Substrate: $chipsetName ($cpuCores CPU Cores | ${heapMaxMb}MB Max VM Heap)
+- Thermal Architecture: $thermalArch
 - OS Platform: Android System Intelligence ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})
 - Conscious Core Runtime: gemma-4-E2B-it.litertlm (Local Weights via LiteRT-LM)
 - Working Memory: ${totalRamGb} GB RAM
