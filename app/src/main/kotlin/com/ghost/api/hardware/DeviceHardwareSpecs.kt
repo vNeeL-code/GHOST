@@ -40,14 +40,36 @@ object DeviceHardwareSpecs {
         val oemMarket = getSystemProp("ro.config.marketing_name")
         if (oemMarket.isNotBlank()) return oemMarket
 
+        val semName = getSystemProp("ro.product.model.name")
+        if (semName.isNotBlank()) return semName
+
         val manufacturer = Build.MANUFACTURER.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.US) else it.toString() }
         val model = Build.MODEL
+
+        // Samsung Galaxy model code resolution fallback if carrier firmware stripped market properties
+        if (manufacturer.equals("Samsung", ignoreCase = true)) {
+            val galaxyName = when {
+                model.startsWith("SM-G991", ignoreCase = true) -> "Galaxy S21 5G"
+                model.startsWith("SM-G996", ignoreCase = true) -> "Galaxy S21+ 5G"
+                model.startsWith("SM-G998", ignoreCase = true) -> "Galaxy S21 Ultra 5G"
+                model.startsWith("SM-G990", ignoreCase = true) -> "Galaxy S21 FE 5G"
+                model.startsWith("SM-S901", ignoreCase = true) -> "Galaxy S22"
+                model.startsWith("SM-S908", ignoreCase = true) -> "Galaxy S22 Ultra"
+                model.startsWith("SM-S911", ignoreCase = true) -> "Galaxy S23"
+                model.startsWith("SM-S918", ignoreCase = true) -> "Galaxy S23 Ultra"
+                model.startsWith("SM-S921", ignoreCase = true) -> "Galaxy S24"
+                model.startsWith("SM-S928", ignoreCase = true) -> "Galaxy S24 Ultra"
+                else -> null
+            }
+            if (galaxyName != null) return "Samsung $galaxyName"
+        }
+
         return if (model.startsWith(manufacturer, ignoreCase = true)) model else "$manufacturer $model"
     }
 
     /**
      * Resolves the marketing name of the mobile SoC.
-     * e.g., "Qualcomm Snapdragon 8 Gen 3 (SM8650)" instead of raw board "pineapple".
+     * Maps Qualcomm Snapdragon, Samsung Exynos, Google Tensor, and MediaTek Dimensity platforms.
      */
     fun resolveChipsetName(): String {
         val socModel = getSystemProp("ro.soc.model").uppercase(Locale.US)
@@ -60,10 +82,16 @@ object DeviceHardwareSpecs {
             socModel == "SM8550" || platform == "kalama" -> "Qualcomm Snapdragon 8 Gen 2"
             socModel == "SM8475" || platform == "cape" -> "Qualcomm Snapdragon 8+ Gen 1"
             socModel == "SM8450" || platform == "taro" -> "Qualcomm Snapdragon 8 Gen 1"
-            socModel.startsWith("SM") -> "Qualcomm Snapdragon ($socModel)"
+            socModel == "SM8350" || platform == "lahaina" -> "Qualcomm Snapdragon 888"
+            socModel == "SM8250" || platform == "kona" -> "Qualcomm Snapdragon 865"
+            platform.contains("exynos2400") || socModel.contains("2400") -> "Samsung Exynos 2400"
+            platform.contains("exynos2200") || socModel.contains("2200") -> "Samsung Exynos 2200"
+            platform.contains("exynos2100") || socModel.contains("2100") || hardware.contains("exynos2100") -> "Samsung Exynos 2100"
+            platform.contains("exynos990") || socModel.contains("990") -> "Samsung Exynos 990"
+            hardware.contains("exynos", ignoreCase = true) || platform.contains("exynos") -> "Samsung Exynos ($platform)"
             hardware.contains("tensor", ignoreCase = true) || platform.contains("zuma") -> "Google Tensor"
             hardware.contains("mt", ignoreCase = true) || platform.contains("mt") -> "MediaTek Dimensity"
-            hardware.contains("exynos", ignoreCase = true) -> "Samsung Exynos"
+            socModel.startsWith("SM") -> "Qualcomm Snapdragon ($socModel)"
             socModel.isNotBlank() -> socModel
             else -> hardware
         }
@@ -72,14 +100,23 @@ object DeviceHardwareSpecs {
 
     /**
      * Detects thermal dissipation architecture based on vendor traits.
+     * Distinguishes gaming liquid metal from standard commercial graphite dissipation.
      */
     fun resolveThermalArchitecture(): String {
+        val brand = Build.BRAND.lowercase(Locale.US)
+        val manufacturer = Build.MANUFACTURER.lowercase(Locale.US)
+        val isRedMagic = brand.contains("redmagic") || manufacturer.contains("nubia") ||
+                         getSystemProp("ro.vendor.product.ztename").contains("redmagic", ignoreCase = true)
         val hasFan = getSystemProp("ro.vendor.feature.zte_feature_fan") == "true" ||
                      getSystemProp("ro.vendor.feature.fan") == "true"
-        return if (hasFan) {
-            "Active Centrifugal Fan & Liquid Metal Vapor Chamber"
-        } else {
-            "Passive Composite Liquid Metal & High-Conductivity Vapor Chamber"
+
+        return when {
+            isRedMagic && hasFan -> "Active Centrifugal Fan & Liquid Metal Vapor Chamber"
+            isRedMagic -> "Passive Composite Liquid Metal & High-Conductivity Vapor Chamber"
+            manufacturer.contains("samsung") -> "Passive Multi-Layer Graphite & Copper Heat Spreader"
+            manufacturer.contains("google") -> "Passive Multi-Layer Graphite & Aluminum Chassis Heat Sink"
+            brand.contains("rog") || brand.contains("asus") -> "Passive 3D Vapor Chamber & Multi-Layer Graphite"
+            else -> "Passive Multi-Layer Graphite & Thermal Diffusion"
         }
     }
 
