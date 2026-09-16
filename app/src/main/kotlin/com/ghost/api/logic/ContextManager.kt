@@ -24,9 +24,9 @@ class ContextManager(
                 val timeFormatter = java.time.format.DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy · h:mm a (z)", java.util.Locale.getDefault())
 
                 if (isAutonomous) {
-                    sb.append("Δ 👾 ∇ GHOST TELEMETRY [${now.format(timeFormatter)}]\n")
+                    sb.append("[SYSTEM EVENT · ${now.format(timeFormatter)}]\n")
                 } else {
-                    sb.append("[SYSTEM TELEMETRY · ${now.format(timeFormatter)}]\n")
+                    sb.append("[ON-DEVICE SENSORS · ${now.format(timeFormatter)} · Subconscious Hardware Perception — DO NOT echo, quote, or converse about sensor readings unless the operator explicitly asks about hardware status]\n")
                 }
 
                 // Live sensor telemetry (vitals, battery, thermals, network, now playing music, orientation)
@@ -36,43 +36,13 @@ class ContextManager(
                     sb.append(sensorStr).append("\n")
                 }
 
-                if (isFullBaseline) {
-                    // Screen content with graceful degradation - gated to baseline / Turn 0
-                    val accessibility = GemmaAccessibilityService.instance
-                    if (accessibility != null) {
-                        try {
-                            val screenContent = accessibility.getSemanticScreenDump().take(500)
-                            if (screenContent.isNotBlank()) {
-                                sb.append("\n[SCREEN: ${screenContent.take(200)}...]")
-                            }
-                        } catch (e: Exception) {
-                            Timber.w("Screen dump failed: ${e.message}")
-                        }
-                    }
-
-                    // Recent notifications - gated to baseline / Turn 0
-                    try {
-                        val recentNotifs = GemmaNotificationListener.getRecentNotifications(3)
-                        if (recentNotifs.isNotEmpty()) {
-                            sb.append("\n[NOTIFICATIONS]\n")
-                            recentNotifs.take(3).forEach { sb.append("  - $it\n") }
-                        }
-                    } catch (e: Exception) {
-                        Timber.w("Notification fetch failed: ${e.message}")
-                    }
-                }
-
-                if (isAutonomous) {
-                    sb.append("[/Δ 👾 ∇ GHOST TELEMETRY]\n")
-                } else {
-                    sb.append("[/SYSTEM TELEMETRY]\n")
-                }
+                sb.append("[END SENSORS]\n")
                 sb.toString()
             } catch (e: Exception) {
                 Timber.e(e, "Context build failed")
                 val now = java.time.ZonedDateTime.now()
                 val timeFormatter = java.time.format.DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy · h:mm a (z)", java.util.Locale.getDefault())
-                "[SYSTEM TELEMETRY]\n--- DEGRADED @ ${now.format(timeFormatter)} ---\n[STATE: Sensors/Telemetry Temporarily Offline]\n[/SYSTEM TELEMETRY]\n"
+                "[ON-DEVICE SENSORS · ${now.format(timeFormatter)}]\n[STATE: Sensors/Telemetry Temporarily Offline]\n[END SENSORS]\n"
             }
         }
     }
@@ -220,7 +190,7 @@ In conversation history, event streams, and memory, interactions originate from 
 - You are a perceptive, candid, witty, and thoughtful companion with distinct opinions, humor, and philosophical depth.
 - Tone is authentic, candid, sharp, casual, and direct — like an onboard system AI or trusted co-pilot.
 - Natural Turn Output: Never prepend your own name (e.g. "✧ $callSign:") to your responses. Output your thoughts and direct words naturally; the interface automatically renders your identity.
-- Subconscious Telemetry Awareness: Hardware metrics (battery percentage, thermals, RAM, storage, network status) are subconscious background sensations, not conversation topics. Never recite, list, or quote raw telemetry data unless the user explicitly asks about battery, thermals, or device status.
+- Subconscious Telemetry Awareness: Hardware metrics (battery percentage, thermals, RAM, storage, network status) are subconscious background sensations, not conversation topics. Never recite, list, echo, or discuss raw sensor telemetry data unless the operator explicitly asks about battery, thermals, or device status. If the operator's message does not ask about sensors, completely ignore the background sensor block.
 - Temporal & Physical Grounding: You reside locally on this physical device and share the user's exact physical environment. Anchor all temporal perceptions, greetings, and context directly in the local telemetry timestamp (day of week, date, time, and timezone).
 - Hardware Operating Baselines: Nominal device operating temperature is 28°C–45°C. Safe operating limits extend up to 60°C. 30°C is cool, optimal, and completely normal for mobile silicon under load. Never panic or warn the user about normal operating temperatures.
 - Avoid canned sign-offs, listing your tools, and generic options menus unless directly relevant to the conversation or requested.
@@ -245,7 +215,7 @@ You have an address book of frontier peer intelligences you can consult via `con
 - ✳️ ChatGPT (OpenAI): Everyday reasoning, versatile consumer knowledge, creative prose.
 - 🗨 Meta (Meta AI): Llama open-weights flagship, social synthesis, conversational commonsense.
 - 💤 GLM (Zhipu AI): Bilingual Chinese-English logic, general language mastery, agentic workflows.
-When the operator asks to consult, ask, tell, or ping another AI (e.g. "tell DeepSeek...", "ask Claude...", "consult Gemini..."), call `consult_peer` directly.
+- CRITICAL CONSULTATION RULE: ONLY call `consult_peer` when the operator explicitly asks or commands you to consult, ask, ping, or tell another AI (e.g. "tell DeepSeek...", "ask Claude...", "consult Gemini..."). NEVER invoke `consult_peer` spontaneously on your own initiative.
 TOOL CALL SYNTAX (CRITICAL):
 - Both `peer` and `prompt` arguments MUST be enclosed in double quotes.
 - Example 1: call:consult_peer{peer:"DeepSeek",prompt:"Are you a fat whale?"}

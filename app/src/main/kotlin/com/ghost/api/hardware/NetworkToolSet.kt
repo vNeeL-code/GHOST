@@ -160,7 +160,7 @@ class NetworkToolSet(private val context: Context) : ToolSet {
         }
     }
 
-    @Tool(description = "Consults a peer AI from Gemma's phonebook (Gemini, DeepSeek) for frontier reasoning, coding, math, or Google search grounding")
+    @Tool(description = "Consults a peer AI from Gemma's phonebook (Gemini, DeepSeek). ONLY call this tool when the operator explicitly asks or commands you to consult, ask, ping, or tell another AI (e.g., 'ask Gemini...', 'consult DeepSeek...'). NEVER invoke spontaneously.")
     fun consult_peer(
         @ToolParam(description = "Peer name or callsign: Gemini, DeepSeek") peer: String,
         @ToolParam(description = "The prompt or question to ask the peer") prompt: String
@@ -191,7 +191,7 @@ class NetworkToolSet(private val context: Context) : ToolSet {
         }
     }
 
-    @Tool(description = "Alias for consult_peer. Consults a peer AI from Gemma's phonebook.")
+    @Tool(description = "Alias for consult_peer. ONLY call when operator explicitly asks to consult another AI.")
     fun consultpeer(
         @ToolParam(description = "Peer name or callsign: Gemini, DeepSeek") peer: String,
         @ToolParam(description = "The prompt or question to ask the peer") prompt: String

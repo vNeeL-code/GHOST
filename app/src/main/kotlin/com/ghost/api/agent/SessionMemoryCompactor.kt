@@ -26,6 +26,8 @@ object SessionMemoryCompactor {
         messagesToCompact.forEach { msg ->
             val clean = msg.content
                 .replace(Regex("""\[SYSTEM TELEMETRY.*?\][\s\S]*?\[/SYSTEM TELEMETRY\]"""), "")
+                .replace(Regex("""\[ON-DEVICE SENSORS.*?\][\s\S]*?\[END SENSORS\]"""), "")
+                .replace(Regex("""\[SYSTEM EVENT.*?\][\s\S]*?\[END SENSORS\]"""), "")
                 .replace(Regex("""Δ 👾 ∇ GHOST TELEMETRY.*?\[/Δ 👾 ∇ GHOST TELEMETRY\]"""), "")
                 .replace(Regex("""<think>[\s\S]*?</think>"""), "")
                 .replace(Regex("""<\|channel>thought[\s\S]*?<channel\|>"""), "")

@@ -597,11 +597,10 @@ class KoogAgent(
         try {
             // Build the full prompt the same way handleUserMessage does
             val fullPrompt = buildString {
-                if (context.isNotBlank()) {
-                    append(context)
-                    append("\n\n")
-                }
                 append(message)
+                if (context.isNotBlank()) {
+                    append("\n\n").append(context)
+                }
             }
 
         // Stream tokens, filtering out think-channel content
@@ -719,7 +718,7 @@ class KoogAgent(
             // --- Tiered Tool Loading (Lazy inject heavy UI or File tools if explicitly requested) ---
             if (!event.isDream) {
                 val wantsUi = Regex("""\b(tap|click\s+on|scroll\s+(up|down)|swipe|press\s+button|type\s+in|read\s+screen)\b""", RegexOption.IGNORE_CASE).containsMatchIn(event.message)
-                val wantsFiles = Regex("""\b(file|folder|doc|pdf|mp3|download|storage|photo|picture|directory)\b""", RegexOption.IGNORE_CASE).containsMatchIn(event.message)
+                val wantsFiles = Regex("""\b(find|search|list|open|move|copy|delete|locate|show|save)\b.*\b(files?|folders?|docs?|pdfs?|mp3s?|downloads?|photos?|pictures?|directory)\b""", RegexOption.IGNORE_CASE).containsMatchIn(event.message)
                 
                 var targetTools = currentTools
                 if (wantsUi && uiTools.isNotEmpty() && !currentTools.containsAll(uiTools)) {
@@ -729,11 +728,21 @@ class KoogAgent(
                     targetTools = targetTools + fileTools
                 }
 
-                // Only softReset when expanding tool capabilities for the active session, never thrash back and forth
+                // Only softReset when expanding tool capabilities for the active session, preserving conversation history
                 if (targetTools.size > currentTools.size) {
                     currentTools = targetTools
-                    llmEngine.softReset(buildSystemPrompt() + getRollingMemoryString(), currentTools)
-                    Timber.i("lazy_tools: Expanded tools for active session (UI: $wantsUi, Files: $wantsFiles)")
+                    val initialMessages = synchronized(_conversationHistory) {
+                        val recent = _conversationHistory.takeLast(4)
+                        recent.map {
+                            when (it.role) {
+                                "user" -> com.google.ai.edge.litertlm.Message.user(it.content)
+                                "assistant" -> com.google.ai.edge.litertlm.Message.model(it.content)
+                                else -> com.google.ai.edge.litertlm.Message.system(it.content)
+                            }
+                        }
+                    }
+                    llmEngine.softReset(buildSystemPrompt() + getRollingMemoryString(), currentTools, initialMessages)
+                    Timber.i("lazy_tools: Expanded tools for active session (UI: $wantsUi, Files: $wantsFiles) with ${initialMessages.size} history msgs preserved")
                 }
             }
             // -----------------------------------------------------------------------
@@ -793,6 +802,7 @@ class KoogAgent(
             val thoughtBuffer = StringBuilder()
             val sentenceBuffer = StringBuilder()
             var isThinking = false
+            var ttsSentenceCount = 0
 
             val promptForModel = if (isAutonomous) {
                 if (rawMessage.startsWith("Δ 👾 ∇ GHOST:")) rawMessage else "Δ 👾 ∇ GHOST: $rawMessage"
@@ -879,6 +889,7 @@ class KoogAgent(
                             if (!event.isDream && bufferStr.length > 2 && bufferStr.contains(Regex("[.!?](?![0-9])"))) {
                                 val textToSpeak = bufferStr.trim()
                                 callbacks?.speak(cleanForTTS(textToSpeak))
+                                ttsSentenceCount++
                                 sentenceBuffer.setLength(0)
                             } 
 
@@ -892,6 +903,7 @@ class KoogAgent(
                     responseBuffer.setLength(0)
                     thoughtBuffer.setLength(0)
                     sentenceBuffer.setLength(0)
+                    ttsSentenceCount = 0
                     isThinking = false
                     callbacks?.onMessageAdded("", isUser = false, isComplete = false)
                 }
@@ -906,20 +918,19 @@ class KoogAgent(
             val responseHash = cleanTrimmed.hashCode()
             val isEmojiChoke = cleanTrimmed.length <= 4 && !cleanTrimmed.any { it.isLetterOrDigit() }
             val hasRepetitiveLoop = GemmaEngine.findDegenerateLoopMatch(cleanTrimmed, minRepeats = 6) != null || cleanTrimmed.contains("loop detected")
-            val isDuplicate = (responseHash == lastResponseHash && lastResponseHash != 0) ||
-                              (cleanTrimmed.length <= 6 && cleanTrimmed == lastResponseText && cleanTrimmed.isNotEmpty()) ||
-                              isEmojiChoke ||
-                              hasRepetitiveLoop
+            val isExactDuplicate = (responseHash == lastResponseHash && lastResponseHash != 0) ||
+                              (cleanTrimmed.length <= 6 && cleanTrimmed == lastResponseText && cleanTrimmed.isNotEmpty())
+            val shouldFlushSession = hasRepetitiveLoop || isExactDuplicate
             
             _lastResponseHash.set(responseHash)
             lastResponseText = cleanTrimmed
 
-            if (isDuplicate) {
-                Timber.w("🚨 Stuck loop / emoji choke detected ('$cleanTrimmed') — triggering immediate recovery flush")
+            if (shouldFlushSession) {
+                Timber.w("🚨 Stuck loop detected ('$cleanTrimmed') — triggering immediate recovery flush")
                 callbacks?.stopSpeaking()
                 sentenceBuffer.setLength(0)
                 flushAndCompactSession()
-            } else if (!event.isDream) {
+            } else if (!event.isDream && !isEmojiChoke && response.isNotBlank()) {
                 val cleanAssistantMsg = cleanAssistantHistory(response)
                 synchronized(_conversationHistory) {
                     _conversationHistory.add(Message(role = "assistant", content = cleanAssistantMsg))
@@ -951,10 +962,10 @@ class KoogAgent(
             // 10. Platform callbacks: UI, TTS, persistence
             // Guard: blank, truncated single-character, or emoji choke response = model failed generation — use fallback
             val safeCleanResponse = if (response.isBlank() || response.trim().length <= 1 || isEmojiChoke) {
-                Timber.w("⚠️ Blank or emoji choke response — using recovery fallback")
+                Timber.w("⚠️ Blank or emoji choke response — using graceful fallback")
                 callbacks?.stopSpeaking()
                 sentenceBuffer.setLength(0)
-                "..."
+                "I'm listening, go ahead."
             } else if (response.contains("Status Code: 3") || response.contains("Failed to parse tool calls") || response.startsWith("Error:")) {
                 callbacks?.stopSpeaking()
                 sentenceBuffer.setLength(0)
@@ -968,11 +979,14 @@ class KoogAgent(
                     cb.showResponse(finalResponse)
                     cb.onMessageAdded(finalResponse, isUser = false, isComplete = true)
                     
-                    // Final TTS speak for any remainder
+                    // Final TTS speak for any remainder or unstreamed responses (e.g. consult_peer)
                     val remainder = sentenceBuffer.toString().trim()
                     if (remainder.isNotEmpty()) {
                         cb.speak(cleanForTTS(remainder))
                         sentenceBuffer.setLength(0)
+                    } else if (ttsSentenceCount == 0 && safeCleanResponse.isNotBlank() && safeCleanResponse != "..." && safeCleanResponse != "I'm listening, go ahead.") {
+                        // Read out responses that completed without streaming chunks (such as peer consultations)
+                        cb.speak(cleanForTTS(finalResponse))
                     }
                     
                     cb.storeConversationTurn(event.message, finalResponse, event.sessionId, turnImageUri)
@@ -1308,10 +1322,14 @@ class KoogAgent(
             audio != null -> "[Multimodal Input: User attached voice audio recording. Listen to the audio and respond directly to what was spoken.]"
             else -> null
         }
-        val fullPrompt = if (mediaCue != null) {
-            "$contextBlock\n$mediaCue\n$userMessage"
-        } else {
-            "$contextBlock\n$userMessage"
+        val fullPrompt = buildString {
+            append(userMessage)
+            if (mediaCue != null) {
+                append("\n\n").append(mediaCue)
+            }
+            if (contextBlock.isNotBlank()) {
+                append("\n\n").append(contextBlock)
+            }
         }
         
         // Proactive Smooth Restart: Flush KV cache if context is saturating (Approx 10 turns)
@@ -1367,15 +1385,19 @@ class KoogAgent(
                 Timber.e("Full prompt was: ${fullPrompt.takeLast(1000)}")
                 
                 // Phase 5: Error-Triggered Flush
-                // Blank response often means the mathematical KV sequence has gone psychotic/corrupted.
+                // Blank response often means the mathematical KV sequence encountered a token glitch.
                 if (retryCount == 0) {
-                    Timber.w("🚨 Auto-retrying inference after HARD RESET (Purging NPU state)...")
+                    val isHardwareHang = cleanResponse.contains("Timeout!") || cleanResponse.contains("SIGSEGV")
+                    if (isHardwareHang) {
+                        Timber.w("🚨 Hardware hang detected — auto-retrying after HARD RESET...")
+                        llmEngine.hardReset()
+                    } else {
+                        Timber.w("🚨 Quick recovery flush — auto-retrying inference after soft reset...")
+                    }
                     callbacks?.stopSpeaking()
                     onResetBuffers?.invoke()
-                    // Phase 12: Use hardReset to clear Hexagon DSP hardware hangs
-                    llmEngine.hardReset()
                     
-                    // Sync RAM history with the now-cold KV by re-injecting rolling memory into the system prompt
+                    // Sync RAM history with the cold KV by re-injecting rolling memory into the system prompt
                     val systemPrompt = buildSystemPrompt() + getRollingMemoryString()
                     llmEngine.softReset(systemPrompt, currentTools)
                     
@@ -1449,7 +1471,7 @@ class KoogAgent(
     private suspend fun buildSystemPrompt(): String {
         val basePrompt = contextManager.buildSystemPrompt(this@KoogAgent.context, rollingMemoryJson, skillManager)
         val oldMemory = memoryManager.getCompactedSessionMemory().take(1500).trim()
-        val longTermMemoryPatch = if (oldMemory.isNotBlank()) "\n\n[LONG TERM SESSION MEMORY]\n$oldMemory\n[/LONG TERM SESSION MEMORY]\n" else ""
+        val longTermMemoryPatch = if (oldMemory.isNotBlank()) "\n\n[LONG-TERM EPISODIC MEMORY — Continuity from earlier conversations]\n$oldMemory\n[END LONG-TERM EPISODIC MEMORY]\n" else ""
         return longTermMemoryPatch + basePrompt
     }
 
@@ -1686,6 +1708,10 @@ class KoogAgent(
             .replace("<|\"|>", "")
             .replace(Regex("<\\|[a-z_]+\\|?>"), "")
             .replace(Regex("<[a-z_]+\\|>"), "")
+            // Clean markdown URLs and formatting for smooth speech synthesis
+            .replace(Regex("https?://\\S+"), "")
+            .replace("*", "")
+            .replace("#", "")
             .replace(Regex("[^\\p{L}\\p{N}\\p{P}\\p{Z}]"), "") // Remove emojis
             .trim()
     }
