@@ -9,7 +9,7 @@ plugins {
 
 android {
     namespace = "com.ghost.api"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.ghost.api"
@@ -79,6 +79,11 @@ ksp {
 dependencies {
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.12.0")
 
+    // Google Agent Development Kit (ADK) for Kotlin & Android
+    implementation("com.google.adk:google-adk-kotlin-core-android:1.0.0")
+    implementation("com.google.adk:google-adk-kotlin-litertlm:1.0.0")
+    ksp("com.google.adk:google-adk-kotlin-processor:1.0.0")
+
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.activity:activity-ktx:1.10.0")
     implementation("androidx.constraintlayout:constraintlayout:2.2.1")
@@ -97,9 +102,10 @@ dependencies {
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("com.jakewharton.timber:timber:5.0.1")
 
-    implementation("androidx.room:room-runtime:2.6.1")
-    implementation("androidx.room:room-ktx:2.6.1")
-    ksp("androidx.room:room-compiler:2.6.1")
+    val roomVersion = "2.7.2"
+    implementation("androidx.room:room-runtime:$roomVersion")
+    implementation("androidx.room:room-ktx:$roomVersion")
+    ksp("androidx.room:room-compiler:$roomVersion")
     
     implementation("androidx.work:work-runtime-ktx:2.9.0")
     

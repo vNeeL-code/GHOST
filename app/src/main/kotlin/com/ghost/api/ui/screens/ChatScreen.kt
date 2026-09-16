@@ -10,6 +10,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -992,15 +993,75 @@ fun InputBar(
     // U+2B24 BLACK LARGE CIRCLE ⬤ — standard tintable circle matching VoiceInputController
     val CIRCLE_GLYPH = "\u2B24"
 
-    Row(
+    // Autocomplete for @ mentions (AI Phonebook Peer Contacts)
+    val atQuery = remember(text) {
+        val lastAt = text.lastIndexOf('@')
+        if (lastAt != -1 && (lastAt == 0 || text[lastAt - 1].isWhitespace())) {
+            val after = text.substring(lastAt + 1)
+            if (!after.contains(' ') && !after.contains('\n')) after else null
+        } else null
+    }
+
+    val matchingPeers = remember(atQuery) {
+        if (atQuery == null) {
+            emptyList()
+        } else if (atQuery.isBlank()) {
+            com.ghost.api.logic.AiPhonebook.CONTACTS
+        } else {
+            val q = atQuery.lowercase(Locale.ROOT)
+            com.ghost.api.logic.AiPhonebook.CONTACTS.filter { peer ->
+                peer.name.lowercase(Locale.ROOT).contains(q) ||
+                peer.aliases.any { it.lowercase(Locale.ROOT).contains(q) } ||
+                peer.callsign.lowercase(Locale.ROOT).contains(q)
+            }
+        }
+    }
+
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 12.dp)
-            .background(BubbleUser, RoundedCornerShape(24.dp))
-            .border(1.dp, AccentBorder, RoundedCornerShape(24.dp))
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
     ) {
+        if (matchingPeers.isNotEmpty()) {
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                items(matchingPeers) { peer ->
+                    Box(
+                        modifier = Modifier
+                            .background(BubbleGemma, RoundedCornerShape(16.dp))
+                            .border(1.dp, AccentBorder.copy(alpha = 0.7f), RoundedCornerShape(16.dp))
+                            .clickable {
+                                val lastAt = text.lastIndexOf('@')
+                                if (lastAt != -1) {
+                                    val prefix = text.substring(0, lastAt)
+                                    text = "$prefix@${peer.name} "
+                                }
+                            }
+                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                    ) {
+                        Text(
+                            text = peer.callsign,
+                            color = TextPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(BubbleUser, RoundedCornerShape(24.dp))
+                .border(1.dp, AccentBorder, RoundedCornerShape(24.dp))
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
         // Sparkle / Image Attachment Button(s)
         val currentImages = remember(attachedImages, attachedImage) {
             if (attachedImages.isNotEmpty()) attachedImages else listOfNotNull(attachedImage)
@@ -1165,5 +1226,6 @@ fun InputBar(
                 textAlign = TextAlign.Center
             )
         }
+    }
     }
 }

@@ -715,6 +715,52 @@ class KoogAgent(
                 callbacks?.updateNotification("(╭r_•́)")
             }
 
+            // --- Fast-Path @Peer Dispatch (Deterministic A2A routing, zero Gemma tool-choke) ---
+            if (!event.isDream) {
+                val atPeerRegex = Regex("""@([a-zA-Z0-9_]+)""")
+                val atMatch = atPeerRegex.find(event.message)
+                if (atMatch != null) {
+                    val peerCandidate = atMatch.groupValues[1]
+                    val resolvedContact = com.ghost.api.logic.AiPhonebook.resolvePeer(peerCandidate)
+                    if (resolvedContact != null) {
+                        Timber.i("🚀 Fast-path @-mention routing directly to peer: ${resolvedContact.callsign}")
+                        callbacks?.updateNotification("(📞 ${resolvedContact.callsign})")
+                        callbacks?.onThoughtUpdated("Consulting ${resolvedContact.callsign} via AI Phonebook...")
+                        com.ghost.api.audio.SystemVisualizer.setActivePeer(resolvedContact.callsign)
+
+                        val cleanPrompt = event.message.replace(atMatch.value, "").trim().ifBlank { event.message }
+                        val recentHistory = getRecentConversationTurns(3)
+                        val (success, reply) = try {
+                            com.ghost.api.logic.AiPhonebook.queryPeer(context, resolvedContact, cleanPrompt, recentHistory)
+                        } finally {
+                            com.ghost.api.audio.SystemVisualizer.scheduleRevertToDefault(6000L)
+                        }
+
+                        val finalResponse = if (success) {
+                            val cleanReply = reply.removePrefix("[${resolvedContact.callsign}]:").removePrefix("[${resolvedContact.name}]:").trim()
+                            "[${resolvedContact.callsign}]:\n$cleanReply\n${java.time.ZonedDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy · h:mm a (z)"))}"
+                        } else {
+                            "⚠️ Connection to ${resolvedContact.callsign} failed:\n\n$reply"
+                        }
+
+                        // Add to RAM conversation history
+                        synchronized(_conversationHistory) {
+                            _conversationHistory.add(Message("user", event.message))
+                            _conversationHistory.add(Message("assistant", finalResponse))
+                        }
+
+                        // Stream output to UI & play TTS
+                        callbacks?.showResponse(finalResponse)
+                        callbacks?.onMessageAdded(finalResponse, isUser = false, isComplete = true)
+                        callbacks?.speak(cleanForTTS(finalResponse))
+                        callbacks?.storeConversationTurn(event.message, finalResponse, event.sessionId)
+
+                        event.responseChannel.complete(finalResponse)
+                        return
+                    }
+                }
+            }
+
             // --- Tiered Tool Loading (Lazy inject heavy UI or File tools if explicitly requested) ---
             if (!event.isDream) {
                 val wantsUi = Regex("""\b(tap|click\s+on|scroll\s+(up|down)|swipe|press\s+button|type\s+in|read\s+screen)\b""", RegexOption.IGNORE_CASE).containsMatchIn(event.message)
