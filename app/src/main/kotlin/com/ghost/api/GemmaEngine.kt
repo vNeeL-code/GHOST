@@ -9,7 +9,9 @@ import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
+import com.google.ai.edge.litertlm.Capabilities
 import com.google.ai.edge.litertlm.ExperimentalApi
+import com.google.ai.edge.litertlm.ExperimentalFlags
 import com.google.ai.edge.litertlm.LogSeverity
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.MessageCallback
@@ -120,9 +122,21 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                     cacheDir = context.codeCacheDir.absolutePath  // Private internal storage (safe from Samsung Knox SELinux sandbox blocks)
                 )
 
+                var supportsSpeculativeDecoding = false
                 try {
+                    Capabilities(modelPath).use {
+                        supportsSpeculativeDecoding = it.hasSpeculativeDecodingSupport()
+                    }
+                    Timber.i("Speculative decoding support for $modelPath: $supportsSpeculativeDecoding")
+                } catch (e: Exception) {
+                    Timber.d("Speculative decoding capability check skipped/unsupported: ${e.message}")
+                }
+
+                try {
+                    ExperimentalFlags.enableSpeculativeDecoding = (isGpu && supportsSpeculativeDecoding)
                     val newEngine = Engine(engineConfig)
                     newEngine.initialize()
+                    ExperimentalFlags.enableSpeculativeDecoding = false
 
                     val conversationConfig = ConversationConfig(
                         samplerConfig = samplerConfig,
@@ -130,15 +144,17 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                         tools = toolSets.map { tool(it) }
                     )
 
+                    ExperimentalFlags.enableConversationConstrainedDecoding = true
                     val newConversation = newEngine.createConversation(conversationConfig)
+                    ExperimentalFlags.enableConversationConstrainedDecoding = false
 
                     engine?.close()
                     conversation?.close()
                     engine = newEngine
                     conversation = newConversation
 
-                    activeBackend = "LiteRT-LM ($backendName)"
-                    Timber.i("GemmaEngine initialized successfully on $backendName")
+                    activeBackend = "LiteRT-LM ($backendName${if (supportsSpeculativeDecoding && isGpu) " + MTP" else ""})"
+                    Timber.i("GemmaEngine initialized successfully on $backendName (MTP=$supportsSpeculativeDecoding)")
                     return null // Success!
                 } catch (e: Exception) {
                     Timber.w(e, "Native Engine Initialization Failed for $backendName")
@@ -276,6 +292,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
 
 
 
+    @OptIn(ExperimentalApi::class)
     override suspend fun softReset(systemPrompt: String, newToolSets: List<ToolSet>?, initialMessages: List<com.google.ai.edge.litertlm.Message>?) {
         lastSystemPrompt = systemPrompt
         if (newToolSets != null) {
@@ -291,7 +308,9 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                     tools = toolSets.map { tool(it) },
                     initialMessages = initialMessages ?: emptyList()
                 )
+                ExperimentalFlags.enableConversationConstrainedDecoding = true
                 conversation = eng.createConversation(config)
+                ExperimentalFlags.enableConversationConstrainedDecoding = false
                 Timber.i("Soft reset complete.")
             } catch (e: Exception) {
                 Timber.e(e, "Soft reset failed")

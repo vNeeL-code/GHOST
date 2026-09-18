@@ -182,4 +182,21 @@ class ModelDownloader(
             _downloadStatus.value = DownloadState.Error("Download manually cancelled")
         }
     }
+
+    fun downloadE4B(hfToken: String? = null) {
+        startDownload(Constants.MODEL_REPO_E4B, Constants.MODEL_NAME_E4B, hfToken)
+    }
+
+    fun downloadE2B(hfToken: String? = null) {
+        startDownload(Constants.MODEL_REPO_E2B, Constants.MODEL_NAME_E2B, hfToken)
+    }
+
+    fun isModelDownloaded(fileName: String): Boolean {
+        val modelsDir = context.getExternalFilesDir("models") ?: File(context.getExternalFilesDir(null), "models")
+        val protectedFile = File(modelsDir, fileName)
+        if (protectedFile.exists() && protectedFile.length() > 200 * 1024 * 1024L) return true
+        val publicDownloadDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+        val publicFile = File(publicDownloadDir, fileName)
+        return publicFile.exists() && publicFile.length() > 200 * 1024 * 1024L
+    }
 }

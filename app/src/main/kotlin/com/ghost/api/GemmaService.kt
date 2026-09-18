@@ -595,6 +595,22 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     }
 
     /**
+     * Hot-swaps the active model core (E4B or E2B) live.
+     */
+    fun reloadWithModel(modelCore: String) {
+        val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        prefs.edit().putString(Constants.PREF_SELECTED_MODEL, modelCore).apply()
+
+        serviceScope.launch {
+            updateNotification("Loading Gemma $modelCore...")
+            initialize()
+            withContext(Dispatchers.Main) {
+                android.widget.Toast.makeText(this@GemmaService, "Active model core: $modelCore 🧠", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    /**
      * Compacts session conversation history into semantic memory and resets the KV cache.
      */
     fun flushSessionMemory() {
@@ -671,6 +687,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 appFilesDir,
                 downloadDir
             )
+            val selectedModel = prefs.getString(Constants.PREF_SELECTED_MODEL, "E4B") ?: "E4B"
+            val targetVariant = selectedModel.lowercase()
+
             val candidateFile = searchDirs.flatMap { dir ->
                 dir.listFiles { file ->
                     val name = file.name
@@ -683,7 +702,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 val name = file.name.lowercase()
                 var score = 0
                 if (file.parentFile?.canonicalPath == protectedModelsDir.canonicalPath) score += 100 // Prefer protected models dir
-                if (name.contains("e2b")) score += 80
+                if (name.contains(targetVariant)) score += 150 // Prioritize user-selected core (E4B or E2B)
+                else if (name.contains("e4b") || name.contains("e2b")) score += 60 // Fallback to any valid Gemma 4 core
                 if (name.endsWith(".litertlm")) score += 50
                 score
             }.firstOrNull()
@@ -729,7 +749,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             if (modelFile != null) {
                 uiCallback?.onDownloadProgress(null)
                 val variant = when {
-                    modelFile.name.contains("E2B") -> "E2B (lite)"
+                    modelFile.name.contains("E4B", ignoreCase = true) -> "E4B (Frontier)"
+                    modelFile.name.contains("E2B", ignoreCase = true) -> "E2B (Compact)"
                     else -> "unknown variant"
                 }
                 Timber.i("\uD83D\uDCE6 Found model: ${modelFile.name} ($variant) in ${modelFile.parent}")
@@ -738,9 +759,11 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             if (modelFile == null) {
                 val searchedPaths = searchDirs.mapNotNull { it?.absolutePath }
                 Timber.e("No model found! Searched: $searchedPaths")
-                updateNotification("Downloading E2B model...")
+                val hfRepo = if (selectedModel.equals("E2B", ignoreCase = true)) Constants.MODEL_REPO_E2B else Constants.MODEL_REPO_E4B
+                val hfFileName = if (selectedModel.equals("E2B", ignoreCase = true)) Constants.MODEL_NAME_E2B else Constants.MODEL_NAME_E4B
+                updateNotification("Downloading $selectedModel model...")
                 
-                modelDownloader.startDownload("litert-community/gemma-4-E2B-it-litert-lm", "gemma-4-E2B-it.litertlm")
+                modelDownloader.startDownload(hfRepo, hfFileName)
                 
                 scope.launch {
                     try {

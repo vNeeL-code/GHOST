@@ -24,14 +24,20 @@ object Constants {
     const val THERMAL_PATH = "/sys/class/thermal/thermal_zone3/temp"
     const val THERMAL_LIMIT_CELSIUS = 65
 
-    // Token budget tuned for stability (Balanced profile)
-    const val MAX_TOKENS = 5120
+    // Token budget tuned for stability (Balanced profile for mobile GPU / unified memory)
+    const val MAX_TOKENS = 1536
 
-    // Model download URL
+    // Model download URLs and repos
     const val MODEL_URL_E2B = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm"
+    const val MODEL_URL_E4B = "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm"
+    const val MODEL_REPO_E2B = "litert-community/gemma-4-E2B-it-litert-lm"
+    const val MODEL_REPO_E4B = "litert-community/gemma-4-E4B-it-litert-lm"
+    const val MODEL_NAME_E2B = "gemma-4-E2B-it.litertlm"
+    const val MODEL_NAME_E4B = "gemma-4-E4B-it.litertlm"
 
     val DEFAULT_MODEL_NAMES = listOf(
-        "gemma-4-E2B-it.litertlm"
+        MODEL_NAME_E4B,
+        MODEL_NAME_E2B
     )
 
     // Notification
@@ -50,6 +56,7 @@ object Constants {
     const val PREF_AUTONOMOUS_DIARY = "autonomous_diary_enabled"
     const val PREF_DIARY_CADENCE = "autonomous_diary_cadence" // "1", "3", "12", "OFF"
     const val PREF_USER_BACKEND = "user_backend_override"  // "AUTO", "CPU", "GPU"
+    const val PREF_SELECTED_MODEL = "selected_model_core"   // "E4B", "E2B"
     const val PREF_VISUALIZER_PRESET = "visualizer_preset"  // "OPTION_A", "OPTION_B", "OPTION_C", "OPTION_D"
     const val PREF_OPERATOR_AVATAR = "operator_avatar_emoji"
     const val PREF_EDGE_LIGHTS_ENABLED = "edge_lights_enabled"

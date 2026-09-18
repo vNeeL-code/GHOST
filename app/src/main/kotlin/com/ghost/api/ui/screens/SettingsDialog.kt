@@ -52,6 +52,7 @@ fun SettingsDialog(
     var diaryCadence by remember { mutableStateOf(prefs.getString(Constants.PREF_DIARY_CADENCE, "12") ?: "12") }
     var ttsEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_TTS_ENABLED, true)) }
     var backend by remember { mutableStateOf(prefs.getString(Constants.PREF_USER_BACKEND, "AUTO") ?: "AUTO") }
+    var selectedModel by remember { mutableStateOf(prefs.getString(Constants.PREF_SELECTED_MODEL, "E4B") ?: "E4B") }
     var visualizerPreset by remember { mutableStateOf(prefs.getString(Constants.PREF_VISUALIZER_PRESET, "OPTION_A") ?: "OPTION_A") }
 
     val tokenManager = remember { com.ghost.api.logic.HFTokenManager(context) }
@@ -680,6 +681,65 @@ fun SettingsDialog(
                         // 6. === Inference Engine === (Category 6: Last setting, fire and forget)
                         item {
                             SettingsSectionHeader(title = "Inference Engine")
+                        }
+                        item {
+                            Column(modifier = Modifier.padding(bottom = 14.dp)) {
+                                Text(
+                                    text = "Active Model Core",
+                                    fontSize = 12.sp,
+                                    color = textDim,
+                                    modifier = Modifier.padding(bottom = 8.dp)
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    val models = listOf(
+                                        Triple("E4B", "🧠 Gemma 4 E4B", "3.65GB • Frontier"),
+                                        Triple("E2B", "⚡ Gemma 4 E2B", "2.4GB • Compact")
+                                    )
+                                    val downloader = (gemmaService ?: GemmaService.instance)?.modelDownloader
+                                    for ((mKey, mTitle, mSub) in models) {
+                                        val isSelected = selectedModel == mKey
+                                        val fileName = if (mKey == "E4B") Constants.MODEL_NAME_E4B else Constants.MODEL_NAME_E2B
+                                        val isDownloaded = downloader?.isModelDownloaded(fileName) ?: false
+
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(if (isSelected) accentColor else cardBg)
+                                                .border(1.dp, if (isSelected) accentColor else Color(0x22FFFFFF), RoundedCornerShape(10.dp))
+                                                .clickable {
+                                                    selectedModel = mKey
+                                                    prefs.edit().putString(Constants.PREF_SELECTED_MODEL, mKey).apply()
+                                                    val svc = gemmaService ?: GemmaService.instance
+                                                    if (svc != null) {
+                                                        svc.reloadWithModel(mKey)
+                                                    } else {
+                                                        Toast.makeText(context, "Selected $mKey", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
+                                                .padding(horizontal = 10.dp, vertical = 10.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                Text(
+                                                    text = mTitle,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                    color = if (isSelected) Color.Black else Color.White
+                                                )
+                                                Text(
+                                                    text = if (isDownloaded) "$mSub (Ready)" else "$mSub (Download)",
+                                                    fontSize = 10.sp,
+                                                    color = if (isSelected) Color(0xCC000000) else textDim
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                         item {
                             Column {
