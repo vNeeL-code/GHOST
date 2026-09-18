@@ -470,14 +470,14 @@ class KoogAgent(
     }
 
     fun shouldCompactKv(estimatedTokens: Int): Boolean {
-        val tokenLimit = (Constants.MAX_TOKENS * 0.65).toInt() // ~1000 tokens for 1536 max tokens
-        val toolTokenLimit = (Constants.MAX_TOKENS * 0.35).toInt() // ~537 tokens
-        return estimatedTokens > tokenLimit || turnsSinceKvFlush >= 6 || sessionToolTokens >= toolTokenLimit
+        val tokenLimit = 4600 // Compact before reaching 5120 max tokens ceiling
+        val toolTokenLimit = 800 // Compact if tool outputs accumulate heavily
+        return estimatedTokens > tokenLimit || turnsSinceKvFlush >= 8 || sessionToolTokens >= toolTokenLimit
     }
 
     /**
      * Accurately estimate current tokens in the native C++ KV cache.
-     * - Tightened system prompt (~250 tokens) + active tool schemas (~350 tokens) = ~600 tokens
+     * - Base overhead: system prompt (~300 tokens) + 5 registered ToolSets schemas (~3500 tokens) = ~3800 tokens
      * - Cumulative telemetry context injected on each turn (~45 tokens/turn)
      * - Message history characters / 4
      * - Accumulated and incoming Image tokens (576 tokens/image)
@@ -496,8 +496,7 @@ class KoogAgent(
         val imageTokens = sessionImageTokens + (incomingImageCount * Constants.TOKENS_PER_IMAGE)
         val audioTokens = sessionAudioTokens + calculateAudioTokens(incomingAudioBytes)
         val toolTokens = sessionToolTokens
-        // Base overhead: tightened base system prompt (~250t) + active core tool declarations (~350t) = 600t
-        val baseOverhead = 600
+        val baseOverhead = 3800
         return baseOverhead + telemetryTokens + textTokens + imageTokens + audioTokens + toolTokens
     }
 

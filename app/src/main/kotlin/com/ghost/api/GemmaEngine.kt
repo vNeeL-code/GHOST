@@ -144,9 +144,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                         tools = toolSets.map { tool(it) }
                     )
 
-                    ExperimentalFlags.enableConversationConstrainedDecoding = true
                     val newConversation = newEngine.createConversation(conversationConfig)
-                    ExperimentalFlags.enableConversationConstrainedDecoding = false
 
                     engine?.close()
                     conversation?.close()
@@ -308,9 +306,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                     tools = toolSets.map { tool(it) },
                     initialMessages = initialMessages ?: emptyList()
                 )
-                ExperimentalFlags.enableConversationConstrainedDecoding = true
                 conversation = eng.createConversation(config)
-                ExperimentalFlags.enableConversationConstrainedDecoding = false
                 Timber.i("Soft reset complete.")
             } catch (e: Exception) {
                 Timber.e(e, "Soft reset failed")

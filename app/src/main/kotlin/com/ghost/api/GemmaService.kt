@@ -698,12 +698,12 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                      name.endsWith(".nexa", ignoreCase = true)) &&
                     file.length() > 200 * 1024 * 1024L // Must be > 200MB to avoid partial/corrupted downloads
                 }?.toList() ?: emptyList()
+            }.filter { file ->
+                file.name.contains(targetVariant, ignoreCase = true)
             }.sortedByDescending { file ->
                 val name = file.name.lowercase()
                 var score = 0
                 if (file.parentFile?.canonicalPath == protectedModelsDir.canonicalPath) score += 100 // Prefer protected models dir
-                if (name.contains(targetVariant)) score += 150 // Prioritize user-selected core (E4B or E2B)
-                else if (name.contains("e4b") || name.contains("e2b")) score += 60 // Fallback to any valid Gemma 4 core
                 if (name.endsWith(".litertlm")) score += 50
                 score
             }.firstOrNull()

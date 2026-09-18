@@ -698,11 +698,38 @@ fun SettingsDialog(
                                         Triple("E4B", "🧠 Gemma 4 E4B", "3.65GB • Frontier"),
                                         Triple("E2B", "⚡ Gemma 4 E2B", "2.4GB • Compact")
                                     )
-                                    val downloader = (gemmaService ?: GemmaService.instance)?.modelDownloader
+                                    val downloader = remember(gemmaService) { (gemmaService ?: GemmaService.instance)?.modelDownloader }
+                                    val downloadStatusState = downloader?.downloadStatus?.collectAsState(initial = com.ghost.api.ModelDownloader.DownloadState.Idle)
+                                    val currentDownloadState = downloadStatusState?.value ?: com.ghost.api.ModelDownloader.DownloadState.Idle
+
+                                    LaunchedEffect(currentDownloadState) {
+                                        if (currentDownloadState is com.ghost.api.ModelDownloader.DownloadState.Success) {
+                                            val file = currentDownloadState.file
+                                            val modelKey = if (file.name.contains("E4B", ignoreCase = true)) "E4B" else "E2B"
+                                            selectedModel = modelKey
+                                            prefs.edit().putString(Constants.PREF_SELECTED_MODEL, modelKey).apply()
+                                            val svc = gemmaService ?: GemmaService.instance
+                                            svc?.reloadWithModel(modelKey)
+                                            Toast.makeText(context, "Downloaded $modelKey! Model active 🧠", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+
                                     for ((mKey, mTitle, mSub) in models) {
                                         val isSelected = selectedModel == mKey
                                         val fileName = if (mKey == "E4B") Constants.MODEL_NAME_E4B else Constants.MODEL_NAME_E2B
+                                        val hfRepo = if (mKey == "E4B") Constants.MODEL_REPO_E4B else Constants.MODEL_REPO_E2B
                                         val isDownloaded = downloader?.isModelDownloaded(fileName) ?: false
+                                        val isDownloadingThis = currentDownloadState is com.ghost.api.ModelDownloader.DownloadState.Downloading &&
+                                            !isDownloaded
+
+                                        val subtitleText = when {
+                                            isDownloaded -> "$mSub (Ready)"
+                                            isDownloadingThis -> {
+                                                val pct = (currentDownloadState as com.ghost.api.ModelDownloader.DownloadState.Downloading).progressPercent
+                                                "Downloading $pct%..."
+                                            }
+                                            else -> "$mSub (Tap to Download)"
+                                        }
 
                                         Box(
                                             modifier = Modifier
@@ -711,13 +738,19 @@ fun SettingsDialog(
                                                 .background(if (isSelected) accentColor else cardBg)
                                                 .border(1.dp, if (isSelected) accentColor else Color(0x22FFFFFF), RoundedCornerShape(10.dp))
                                                 .clickable {
-                                                    selectedModel = mKey
-                                                    prefs.edit().putString(Constants.PREF_SELECTED_MODEL, mKey).apply()
-                                                    val svc = gemmaService ?: GemmaService.instance
-                                                    if (svc != null) {
-                                                        svc.reloadWithModel(mKey)
+                                                    if (!isDownloaded) {
+                                                        val token = tokenManager.getToken()
+                                                        downloader?.startDownload(hfRepo, fileName, token)
+                                                        Toast.makeText(context, "Starting download for $mKey (3.65 GB)...", Toast.LENGTH_SHORT).show()
                                                     } else {
-                                                        Toast.makeText(context, "Selected $mKey", Toast.LENGTH_SHORT).show()
+                                                        selectedModel = mKey
+                                                        prefs.edit().putString(Constants.PREF_SELECTED_MODEL, mKey).apply()
+                                                        val svc = gemmaService ?: GemmaService.instance
+                                                        if (svc != null) {
+                                                            svc.reloadWithModel(mKey)
+                                                        } else {
+                                                            Toast.makeText(context, "Selected $mKey", Toast.LENGTH_SHORT).show()
+                                                        }
                                                     }
                                                 }
                                                 .padding(horizontal = 10.dp, vertical = 10.dp),
@@ -731,7 +764,7 @@ fun SettingsDialog(
                                                     color = if (isSelected) Color.Black else Color.White
                                                 )
                                                 Text(
-                                                    text = if (isDownloaded) "$mSub (Ready)" else "$mSub (Download)",
+                                                    text = subtitleText,
                                                     fontSize = 10.sp,
                                                     color = if (isSelected) Color(0xCC000000) else textDim
                                                 )
