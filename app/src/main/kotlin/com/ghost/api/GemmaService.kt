@@ -652,12 +652,21 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         // WATCHDOG: Detect previous crash
         // NOTE: Counter is already incremented in onCreate(). Do NOT double-increment here.
         val crashCount = prefs.getInt("init_crash_count", 0)
-
+        val selectedModel = prefs.getString(Constants.PREF_SELECTED_MODEL, "E4B") ?: "E4B"
         if (prefs.getBoolean("is_initializing", false)) {
-            Timber.e("\uD83D\uDEA8 WATCHDOG: Previous initialization crashed! (Count: $crashCount)")
+            Timber.e("🚨 WATCHDOG: Previous initialization crashed! (Count: $crashCount, Model: $selectedModel)")
             
-            // Audit 2.0: Be less aggressive (4 crashes instead of 2) to allow for memory pressure recovery
-            if (crashCount >= 4) {
+            // If heavy E4B crashed during initialization 2 times in a row (e.g. killed by OEM LMK),
+            // automatically fall back to lightweight E2B (Compact) to prevent infinite restart loops.
+            if (selectedModel.equals("E4B", ignoreCase = true) && crashCount >= 2) {
+                Timber.w("🛡️ WATCHDOG: E4B killed by OS memory manager. Automatically falling back to E2B (Compact).")
+                prefs.edit()
+                    .putString(Constants.PREF_SELECTED_MODEL, "E2B")
+                    .putBoolean("force_cpu", false)
+                    .putInt("init_crash_count", 0)
+                    .apply()
+                updateNotification("Memory Safety: Switched to E2B (Compact)")
+            } else if (crashCount >= 4) {
                  prefs.edit().putBoolean("force_cpu", true).apply()
                  updateNotification("Safe Mode: Forcing CPU")
             }

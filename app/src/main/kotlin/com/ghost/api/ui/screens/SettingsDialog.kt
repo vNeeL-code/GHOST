@@ -756,24 +756,38 @@ fun SettingsDialog(
                                                 .padding(horizontal = 10.dp, vertical = 10.dp),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                Text(
-                                                    text = mTitle,
-                                                    fontSize = 12.sp,
-                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                                    color = if (isSelected) Color.Black else Color.White
-                                                )
-                                                Text(
-                                                    text = subtitleText,
-                                                    fontSize = 10.sp,
-                                                    color = if (isSelected) Color(0xCC000000) else textDim
-                                                )
+                                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                    Text(
+                                                        text = mTitle,
+                                                        fontSize = 12.sp,
+                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                        color = if (isSelected) Color.Black else Color.White
+                                                    )
+                                                    Text(
+                                                        text = subtitleText,
+                                                        fontSize = 10.sp,
+                                                        color = if (isSelected) Color(0xCC000000) else textDim
+                                                    )
+                                                }
                                             }
                                         }
                                     }
+
+                                    val isNubiaDevice = remember {
+                                        android.os.Build.MANUFACTURER.contains("Nubia", ignoreCase = true) ||
+                                        android.os.Build.BRAND.contains("Nubia", ignoreCase = true) ||
+                                        android.os.Build.MANUFACTURER.contains("ZTE", ignoreCase = true)
+                                    }
+                                    if (isNubiaDevice && selectedModel == "E4B") {
+                                        Text(
+                                            text = "🎮 REDMAGIC Tip: Add GHOST to Game Space for high-priority memory & 24/7 background immunity.",
+                                            fontSize = 10.sp,
+                                            color = Color(0xFFFFB74D),
+                                            modifier = Modifier.padding(top = 6.dp)
+                                        )
+                                    }
                                 }
                             }
-                        }
                         item {
                             Column {
                                 Text(
