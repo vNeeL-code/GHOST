@@ -109,12 +109,6 @@ class SkillManager(private val context: Context) {
 
     fun buildSystemPromptPatch(): String {
         if (skills.isEmpty()) return ""
-        
-        return buildString {
-            append("\n\nAVAILABLE SKILLS:\n")
-            append(getSkillsListPrompt())
-            append("\n\nIf a user's request aligns with a skill, you MUST call the appropriate tool ('run_js' or 'run_intent') as described in the skill's instructions.\n")
-            append("To see instructions for a specific skill, use 'loadSkill(name)'.")
-        }
+        return "\n\nSkills: " + skills.keys.sorted().joinToString(", ") + " (call load_skill(name) for instructions)"
     }
 }

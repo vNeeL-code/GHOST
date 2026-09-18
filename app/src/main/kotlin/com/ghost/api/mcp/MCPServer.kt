@@ -280,7 +280,7 @@ class MCPServer(
                     ToolResult(res["result"] == "success", res["content"] ?: res["message"] ?: "")
                 }
                 // Skills
-                "loadSkill" -> {
+                "loadSkill", "load_skill" -> {
                     val skillName = params["name"]?.toString() ?: ""
                     val inst = skillManager.getSkillInstructions(skillName)
                     if (inst != null) ToolResult(true, inst) else ToolResult(false, "", "Skill not found: $skillName")

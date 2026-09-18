@@ -41,7 +41,8 @@ import com.ghost.api.ui.OverlayManager
 import com.ghost.api.database.ConversationTurn
 import java.util.concurrent.atomic.AtomicReference
 import com.ghost.api.agent.AgentPlatformCallbacks
-import com.ghost.api.agent.KoogAgent
+import com.ghost.api.agent.GhostAgent
+import com.ghost.api.agent.GhostMcpTool
 import com.ghost.api.mcp.MCPServer
 import com.ghost.api.hardware.SensorFusionManager
 import com.ghost.api.hardware.BatteryState
@@ -51,9 +52,9 @@ import com.ghost.api.logic.ContextManager
 /**
  * Background service that loads Gemma and runs API server
  *
- * NEW: Koog-first architecture with MCP protocol
- * - KoogAgent handles orchestration (perceive-think-act loop)
- * - MCPServer exposes tools and resources
+ * NEW: Google ADK Architecture with Dynamic MCP Toolset
+ * - GhostAgent handles orchestration (perceive-think-act loop)
+ * - GhostMcpTool exposes lean dynamic action router (~80 tokens)
  * - GemmaEngine is pure inference
  */
 class GemmaService : Service(), AgentPlatformCallbacks {
@@ -123,9 +124,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     lateinit var memoryManager: MemoryManager
     internal lateinit var contextManager: com.ghost.api.logic.ContextManager
 
-    // NEW: Koog-first architecture
+    // NEW: ADK Dynamic MCP Architecture
     internal lateinit var mcpServer: MCPServer
-    internal lateinit var koogAgent: KoogAgent
+    internal lateinit var ghostAgent: GhostAgent
     internal lateinit var ttsManager: com.ghost.api.services.TTSManager
     internal lateinit var diaryManager: com.ghost.api.hardware.DiaryManager
     internal lateinit var sensorFusionManager: com.ghost.api.hardware.SensorFusionManager
@@ -236,8 +237,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
                 if (!imagePath.isNullOrEmpty()) {
                     val bitmap = decodeAndDownsample(imagePath, 1024)
-                    if (bitmap != null && ::koogAgent.isInitialized) {
-                        koogAgent.offerImage(bitmap, imagePath)
+                    if (bitmap != null && ::ghostAgent.isInitialized) {
+                        ghostAgent.offerImage(bitmap, imagePath)
                         updateNotification("Image ready ✨ ask me about it!")
 
                         if (!sharedQuery.isNullOrEmpty()) {
@@ -264,7 +265,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                     // Trigger capture via Accessibility Service
                     // Note: captureScreen accepts a callback (Bitmap?) -> Unit
                     accessService.captureScreen { bitmap ->
-                        if (bitmap != null && ::koogAgent.isInitialized) {
+                        if (bitmap != null && ::ghostAgent.isInitialized) {
                             val persistentPath = try {
                                 val dir = java.io.File(filesDir, "chat_images").apply { mkdirs() }
                                 val file = java.io.File(dir, "screen_${System.currentTimeMillis()}.jpg")
@@ -275,7 +276,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                             } catch (e: Exception) {
                                 null
                             }
-                            koogAgent.offerImage(bitmap, persistentPath)
+                            ghostAgent.offerImage(bitmap, persistentPath)
                             Timber.i("Agent screenshot captured and queued (path=$persistentPath)")
                         } else {
                             Timber.e("Agent screenshot failed (null bitmap)")
@@ -291,16 +292,16 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                  val isApproved = (intent.action == "com.ghost.api.ACTION_CONFIRM_TOOL")
 
                  scope.launch {
-                     if (::koogAgent.isInitialized) {
+                     if (::ghostAgent.isInitialized) {
                          val pendingData = PendingConfirmationStash.pendingConfirmations[toolName]
 
                          if (pendingData != null) {
-                             koogAgent.submitConfirmationDecision(
-                                toolName = toolName,
-                                params = pendingData.params,
-                                isApproved = isApproved,
-                                originalResponse = pendingData.originalResponse,
-                                responseChannel = pendingData.responseChannel
+                             ghostAgent.submitConfirmationDecision(
+                                 toolName = toolName,
+                                 params = pendingData.params,
+                                 isApproved = isApproved,
+                                 originalResponse = pendingData.originalResponse,
+                                 responseChannel = pendingData.responseChannel
                              )
 
                              // Clear stash
@@ -535,14 +536,14 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 Timber.e(e, "Failed to delete checkpoint files")
             }
 
-            // Reset Koog agent if initialized
-            if (::koogAgent.isInitialized) {
+            // Reset Ghost agent if initialized
+            if (::ghostAgent.isInitialized) {
                 try {
                     scope.launch {
-                        koogAgent.softReset()
+                        ghostAgent.softReset()
                     }
                 } catch (e: Exception) {
-                    Timber.w(e, "Failed to soft reset Koog agent history")
+                    Timber.w(e, "Failed to soft reset Ghost agent history")
                 }
             }
         }
@@ -615,8 +616,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
      */
     fun flushSessionMemory() {
         serviceScope.launch {
-            if (::koogAgent.isInitialized) {
-                koogAgent.flushAndCompactSession()
+            if (::ghostAgent.isInitialized) {
+                ghostAgent.flushAndCompactSession()
                 withContext(Dispatchers.Main) {
                     android.widget.Toast.makeText(this@GemmaService, "Session compacted & KV cache cleared ✨", android.widget.Toast.LENGTH_SHORT).show()
                 }
@@ -625,11 +626,11 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     }
 
     /**
-     * Records tool execution output length into KoogAgent's KV cache budget tracker.
+     * Records tool execution output length into GhostAgent's KV cache budget tracker.
      */
     fun recordToolOutput(charCount: Int) {
-        if (::koogAgent.isInitialized) {
-            koogAgent.recordToolChars(charCount)
+        if (::ghostAgent.isInitialized) {
+            ghostAgent.recordToolChars(charCount)
         }
     }
 
@@ -823,10 +824,13 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 "CPU"
             } else null
 
-            // Determine Tools (Tier 1 Core)
-            val coreTools = listOf(hardwareToolSet, networkToolSet, systemToolSet, automationToolSet, com.ghost.api.skills.SkillToolSet(skillManager))
-            val uiTools = listOf(uiMacroToolSet)
-            val fileTools = listOf(fileToolSet)
+            // Determine Tools (ADK Dynamic MCP Toolset: ~80 tokens instead of ~3,800 tokens)
+            val ghostMcpTool = GhostMcpTool(
+                context = applicationContext,
+                mcpServer = mcpServer,
+                skillManager = skillManager
+            )
+            val adkTools = listOf(ghostMcpTool)
 
             // Engine Creation (Locked to prevent double allocation)
             val newEngine = engineMutex.withLock {
@@ -841,7 +845,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 val error = engineInstance.initialize(
                     modelFile.absolutePath, 
                     "", 
-                    toolSets = coreTools, 
+                    toolSets = adkTools, 
                     forcedBackend = forcedBackend
                 )
                 
@@ -854,7 +858,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                         error.contains("memory", ignoreCase = true) || error.contains("OOM", ignoreCase = true) ->
                             " (Try quantizing device backend)"
                         error.contains("GPU", ignoreCase = true) ->
-                            " (GPU init failed ⚠\uFE0F device may not support this model natively)"
+                            " (GPU init failed ⚠️ device may not support this model natively)"
                         else -> ""
                     }
                     Timber.e("Model load failed: $error")
@@ -868,35 +872,33 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             engineRef.set(newEngine)
 
             // Init Cognitive Layer (now that engine is ready)
-            reportStatus("Init: KoogAgent...")
-            if (::koogAgent.isInitialized) {
+            reportStatus("Init: GhostAgent...")
+            if (::ghostAgent.isInitialized) {
                 try {
-                    koogAgent.shutdown()
+                    ghostAgent.shutdown()
                 } catch (e: Exception) {
-                    Timber.w(e, "Failed to shutdown old KoogAgent")
+                    Timber.w(e, "Failed to shutdown old GhostAgent")
                 }
             }
-            koogAgent = KoogAgent(
+            ghostAgent = GhostAgent(
                 context = applicationContext,
                 llmEngine = newEngine,
                 sensorManager = sensorFusionManager,
                 contextManager = contextManager,
                 skillManager = skillManager,
                 checkpointDir = getExternalFilesDir(null) ?: filesDir,
-                coreTools = coreTools,
-                uiTools = uiTools,
-                fileTools = fileTools,
+                mcpTool = ghostMcpTool,
                 callbacks = this@GemmaService
             )
 
-            koogAgent.onConfirmationRequest = { event ->
+            ghostAgent.onConfirmationRequest = { event ->
                 scope.launch(Dispatchers.Main) {
                     showConfirmationNotification(event)
                 }
             }
 
-            koogAgent.initialize()
-            Timber.i("KoogAgent ready")
+            ghostAgent.initialize()
+            Timber.i("GhostAgent ready")
 
             // Success: Clear watchdog
             prefs.edit()
@@ -949,7 +951,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
      */
 
     fun processNotificationContext(prompt: String) {
-        if (!::koogAgent.isInitialized || !koogAgent.isReady) return
+        if (!::ghostAgent.isInitialized || !ghostAgent.isReady) return
         
         serviceScope.launch {
             try {
@@ -981,7 +983,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             return
         }
 
-        if (!::koogAgent.isInitialized || !koogAgent.isReady) {
+        if (!::ghostAgent.isInitialized || !ghostAgent.isReady) {
             uiCallback?.onMessageAdded("System is still initializing. Please wait a moment and try again.", isUser = false)
             return
         }
@@ -1024,7 +1026,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             uiCallback?.onMessageAdded("Inference Engine is set to OFF in Settings. Select AUTO, CPU, or GPU to enable on-device chat.", isUser = false)
             return
         }
-        if (!::koogAgent.isInitialized || !koogAgent.isReady) {
+        if (!::ghostAgent.isInitialized || !ghostAgent.isReady) {
              uiCallback?.onMessageAdded("System is still initializing. Please wait.", isUser = false)
              return
         }
@@ -1043,9 +1045,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         }
 
         images?.forEachIndexed { idx, bmp ->
-            koogAgent.offerImage(bmp, persistentUris?.getOrNull(idx))
+            ghostAgent.offerImage(bmp, persistentUris?.getOrNull(idx))
         }
-        audio?.let { koogAgent.offerAudio(it) }
+        audio?.let { ghostAgent.offerAudio(it) }
 
         // Emit user message with attached image preview
         val primaryUri = persistentUris?.firstOrNull()
@@ -1101,7 +1103,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             return@withLock msg
         }
 
-        if (!::koogAgent.isInitialized || !koogAgent.isReady) {
+        if (!::ghostAgent.isInitialized || !ghostAgent.isReady) {
             responseNotificationManager.showResponse("⚠️ System still starting up... try again in a moment")
             return@withLock "System is still initializing. Please wait a moment and try again."
         }
@@ -1123,7 +1125,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         isInferencing = true
         try {
             return kotlinx.coroutines.withTimeoutOrNull(240000) {
-                val response = koogAgent.processUserMessage(
+                val response = ghostAgent.processUserMessage(
                     message = userPrompt,
                     sessionId = sessionId ?: java.util.UUID.randomUUID().toString(),
                     isDream = isDream
@@ -1154,13 +1156,13 @@ class GemmaService : Service(), AgentPlatformCallbacks {
      * Used by ApiServer /v1/chat/completions when stream=true.
      */
     suspend fun streamQueryTokens(prompt: String, onToken: (String) -> Unit) = engineMutex.withLock {
-        if (!::koogAgent.isInitialized || !koogAgent.isReady) {
+        if (!::ghostAgent.isInitialized || !ghostAgent.isReady) {
             onToken("System is still initializing.")
             return@withLock
         }
         markActivity()
         // Register a temporary token observer, then run inference
-        koogAgent.streamUserMessageTokens(
+        ghostAgent.streamUserMessageTokens(
             message = prompt,
             sessionId = java.util.UUID.randomUUID().toString(),
             onToken = onToken
@@ -1330,9 +1332,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 
                 if (now - lastActivityTime > 15 * 60 * 1000 && now - lastKvFlushTime > 15 * 60 * 1000) {
                     lastKvFlushTime = now
-                    if (::koogAgent.isInitialized) {
+                    if (::ghostAgent.isInitialized) {
                         Timber.d("GemmaService: Triggering 15-min inactivity KV Cache Flush")
-                        koogAgent.sendSystemEvent(KoogAgent.SystemEventType.KV_CACHE_FLUSH)
+                        ghostAgent.sendSystemEvent(GhostAgent.SystemEventType.KV_CACHE_FLUSH)
                     }
                 }
 
@@ -1392,12 +1394,12 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         super.onTaskRemoved(rootIntent)
         Timber.i("GemmaService: onTaskRemoved - checkpointing (NOT tearing down)")
         // Checkpoint agent state in case process is killed next
-        if (::koogAgent.isInitialized) {
+        if (::ghostAgent.isInitialized) {
             try {
                 serviceScope.launch {
                     try {
                         kotlinx.coroutines.withTimeout(2000L) {
-                            koogAgent.checkpoint()
+                            ghostAgent.checkpoint()
                         }
                     } catch (e: Exception) {
                         Timber.w(e, "Async checkpoint failed")
@@ -1459,7 +1461,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     private suspend fun performCriticalCleanup() {
         // Fast cleanup
         try {
-            if (::koogAgent.isInitialized) koogAgent.shutdown()
+            if (::ghostAgent.isInitialized) ghostAgent.shutdown()
             
             // Clean up sensors properly to stop threads and listeners (RAM leak fix)
             if (::sensorFusionManager.isInitialized) {
@@ -1479,7 +1481,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     }
 
 
-    // Tool execution lives in KoogAgent.act() → MCPServer.executeTool()
+    // Tool execution lives in GhostAgent → MCPServer.executeTool()
 
     // === SAFETY UI ===
 
@@ -1497,7 +1499,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         }
     }
 
-    private fun showConfirmationNotification(event: KoogAgent.AgentEvent.ConfirmationRequired) {
+    private fun showConfirmationNotification(event: GhostAgent.AgentEvent.ConfirmationRequired) {
         // Stash the state (params + channel) so we can resume later
         PendingConfirmationStash.pendingConfirmations[event.toolName] = ConfirmationData(
             event.toolParams,
@@ -1713,8 +1715,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         overlayManager.setAudioQueryCallback { audio ->
             scope.launch {
                 // LiteRT LLM expects WAV format for miniaudio decoder
-                if (::koogAgent.isInitialized) {
-                    koogAgent.offerAudio(audio)
+                if (::ghostAgent.isInitialized) {
+                    ghostAgent.offerAudio(audio)
                 }
                 Timber.w("AUDIO_DEBUG: Queued ${audio.size} bytes of WAV audio")
 
@@ -1871,7 +1873,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     suspend fun runDiaryCycleSuspend(): Boolean {
         val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
         val userBackend = prefs.getString(Constants.PREF_USER_BACKEND, "AUTO")
-        if (userBackend == "OFF" || !::koogAgent.isInitialized || !koogAgent.isReady) {
+        if (userBackend == "OFF" || !::ghostAgent.isInitialized || !ghostAgent.isReady) {
             Timber.w("📔 Diary cycle skipped — engine is OFF or not ready")
             return false
         }
@@ -1966,7 +1968,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             |- If it was a quiet period without user interactions, reflect naturally on your current state, background media, what you are tracking, coincidences, or observations from ambient telemetry.
             |- Tone is free to be fitting of system state observations.""".trimMargin()
 
-        Timber.i("📔 Diary cycle ($label) — generating via KoogAgent...")
+        Timber.i("📔 Diary cycle ($label) — generating via GhostAgent...")
         return try {
             val diaryResponse = processQuery(prompt, isDream = true)
 

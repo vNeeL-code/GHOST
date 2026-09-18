@@ -1,7 +1,7 @@
 package com.ghost.api.agent
 
 /**
- * Bridge between KoogAgent (brain) and GemmaService (Android shell).
+ * Bridge between GhostAgent (brain) and GemmaService (Android shell).
  */
 interface AgentPlatformCallbacks {
     fun showThinking()

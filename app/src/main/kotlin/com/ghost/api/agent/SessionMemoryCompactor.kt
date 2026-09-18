@@ -13,7 +13,7 @@ object SessionMemoryCompactor {
      * or locks the on-device LiteRT-LM inference engine.
      */
     suspend fun compactOldMessages(
-        messagesToCompact: List<KoogAgent.Message>,
+        messagesToCompact: List<AgentMessage>,
         currentMemory: String,
         llmEngine: LlmBackend? = null,
         assistantCallSign: String = "Assistant"

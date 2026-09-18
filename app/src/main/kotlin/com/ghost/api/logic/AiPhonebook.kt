@@ -160,7 +160,7 @@ object AiPhonebook {
         context: Context,
         contact: PeerContact,
         userPrompt: String,
-        recentHistory: List<com.ghost.api.agent.KoogAgent.Message> = emptyList()
+        recentHistory: List<com.ghost.api.agent.AgentMessage> = emptyList()
     ): String {
         val packet = com.ghost.api.hardware.DeviceHardwareSpecs.buildPeerDispatchPacket(
             context,
@@ -212,7 +212,7 @@ object AiPhonebook {
         context: Context,
         contact: PeerContact,
         userPrompt: String,
-        recentHistory: List<com.ghost.api.agent.KoogAgent.Message> = emptyList()
+        recentHistory: List<com.ghost.api.agent.AgentMessage> = emptyList()
     ): Pair<Boolean, String> = withContext(Dispatchers.IO) {
         val tokenManager = HFTokenManager(context)
         val sessionManager = WebSessionManager.getInstance(context)

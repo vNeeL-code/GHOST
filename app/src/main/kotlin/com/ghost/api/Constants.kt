@@ -24,8 +24,8 @@ object Constants {
     const val THERMAL_PATH = "/sys/class/thermal/thermal_zone3/temp"
     const val THERMAL_LIMIT_CELSIUS = 65
 
-    // Token budget tuned for stability (Balanced profile for mobile GPU / unified memory)
-    const val MAX_TOKENS = 5120
+    // Token budget tuned for stability (Lean ADK profile for mobile GPU / unified memory)
+    const val MAX_TOKENS = 1536
 
     // Model download URLs and repos
     const val MODEL_URL_E2B = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm"
