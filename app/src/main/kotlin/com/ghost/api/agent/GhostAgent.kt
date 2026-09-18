@@ -271,7 +271,6 @@ class GhostAgent(
 
         val responseBuffer = StringBuilder()
         val thoughtBuffer = StringBuilder()
-        val sentenceBuffer = StringBuilder()
         var inThinkBlock = false
 
         try {
@@ -319,14 +318,6 @@ class GhostAgent(
                     }
 
                     responseBuffer.append(cleanToken)
-                    sentenceBuffer.append(cleanToken)
-
-                    // TTS streaming: speak completed sentences
-                    if (!isDream && sentenceBuffer.length > 2 && sentenceBuffer.contains(Regex("[.!?](?![0-9])"))) {
-                        val toSpeak = sentenceBuffer.toString().trim()
-                        callbacks?.speak(cleanForTTS(toSpeak))
-                        sentenceBuffer.setLength(0)
-                    }
 
                     if (!isDream) {
                         callbacks?.onMessageAdded(
@@ -611,9 +602,13 @@ class GhostAgent(
     }
 
     private fun cleanForTTS(text: String): String {
-        return text.replace(Regex("""[#*`_~]"""), "")
-            .replace(Regex("""https?://\S+"""), "link")
+        return text
+            .replace(Regex("""<think>.*?</think>""", RegexOption.DOT_MATCHES_ALL), "")
+            .replace(Regex("""<\|channel>thought.*?<channel\|>""", RegexOption.DOT_MATCHES_ALL), "")
             .replace(Regex("""call:[a-z_]+\{.*?\}"""), "")
+            .replace(Regex("""[#*`_~]"""), "")
+            .replace(Regex("""https?://\S+"""), "link")
+            .replace(Regex("""[^\p{L}\p{N}\p{P}\p{Z}]"""), "") // Remove emojis and special symbols
             .trim()
     }
 }
