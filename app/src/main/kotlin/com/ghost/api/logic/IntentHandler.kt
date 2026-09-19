@@ -180,8 +180,8 @@ object IntentHandler {
                     com.ghost.api.hardware.TermuxAdbToolSet(context).bash(command)
                     true
                 }
-                "execute_background_search" -> {
-                    val query = json.optString("query", "")
+                "execute_background_search", "search" -> {
+                    val query = json.optString("query", json.optString("input", ""))
                     com.ghost.api.hardware.NetworkToolSet(context).execute_background_search(query, 3)
                     true
                 }

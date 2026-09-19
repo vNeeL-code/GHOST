@@ -58,10 +58,35 @@ class GhostMcpTool(
         return executeMcpAction("flashlight", "{\"state\":\"$state\"}")
     }
 
+    @Tool(description = "DEFAULT SEARCH TOOL. Silently searches the web for fresh info, news, weather, or unknown topics.")
+    fun search(
+        @ToolParam(description = "Search query") query: String
+    ): Map<String, String> {
+        Timber.i("GhostMcpTool: search invoked with query='$query'")
+        return executeMcpAction("search", "{\"query\":\"$query\"}")
+    }
+
+    @Tool(description = "Alias for search tool. Silently searches the web for information.")
+    fun execute_background_search(
+        @ToolParam(description = "Search query") query: String
+    ): Map<String, String> {
+        Timber.i("GhostMcpTool: execute_background_search invoked with query='$query'")
+        return executeMcpAction("search", "{\"query\":\"$query\"}")
+    }
+
+    @Tool(description = "Consults a peer AI from Gemma's phonebook (Claude, DeepSeek, Gemini, Grok, Perplexity, Mistral, Copilot). Hands off prompt to official app or direct API. ONLY call when operator explicitly asks.")
+    fun consult_peer(
+        @ToolParam(description = "Peer name: Claude, DeepSeek, Gemini, Grok, Perplexity, Mistral, Copilot") peer: String,
+        @ToolParam(description = "The prompt or question to ask the peer") prompt: String
+    ): Map<String, String> {
+        Timber.i("GhostMcpTool: consult_peer invoked for peer='$peer'")
+        return executeMcpAction("consult_peer", "{\"peer\":\"$peer\",\"prompt\":\"$prompt\"}")
+    }
+
     @Tool(description = "Execute an on-device action or MCP tool by name with parameters (JSON format).")
     fun execute_action(
-        @ToolParam(description = "The exact name of the tool/action to execute (e.g. 'flashlight', 'set_edge_lights', 'app', 'media', 'alarm', 'timer', 'calendar', 'read_calendar', 'remember', 'recall', 'search_files', 'list_files', 'open_file', 'click', 'scroll', 'navigate', 'consult_peer').") toolName: String,
-        @ToolParam(description = "JSON object string with parameters (e.g. '{\"state\":\"ON\"}', '{\"name\":\"YouTube\"}', '{\"seconds\":60}').") parameters: String
+        @ToolParam(description = "The exact name of the tool/action to execute (e.g. 'search', 'flashlight', 'set_edge_lights', 'app', 'media', 'alarm', 'timer', 'calendar', 'read_calendar', 'remember', 'recall', 'search_files', 'list_files', 'open_file', 'click', 'scroll', 'navigate', 'consult_peer').") toolName: String,
+        @ToolParam(description = "JSON object string with parameters (e.g. '{\"query\":\"London weather\"}', '{\"state\":\"ON\"}', '{\"name\":\"YouTube\"}').") parameters: String
     ): Map<String, String> {
         return executeMcpAction(toolName, parameters)
     }
@@ -193,10 +218,16 @@ class GhostMcpTool(
             "app" -> mapOf("name" to plain)
             "media", "navigate" -> mapOf("action" to plain)
             "timer" -> mapOf("seconds" to (plain.toIntOrNull() ?: 60))
-            "recall", "execute_background_search", "search_files" -> mapOf("query" to plain)
+            "recall", "search", "web_search", "google", "execute_background_search", "search_files" -> mapOf("query" to plain)
+            "fetch_webpage", "fetchwebpage" -> mapOf("url" to plain)
             "list_files" -> mapOf("folder" to plain)
             "read_file_text", "open_file", "delete_file" -> mapOf("filePath" to plain)
             "loadskill", "load_skill" -> mapOf("name" to plain)
+            "consult_peer", "consultpeer" -> {
+                val peer = plain.substringBefore(" ").trim()
+                val prompt = plain.substringAfter(" ").trim()
+                mapOf("peer" to peer, "prompt" to prompt)
+            }
             else -> mapOf("input" to plain)
         }
     }

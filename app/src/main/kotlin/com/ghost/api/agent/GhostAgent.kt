@@ -585,7 +585,7 @@ class GhostAgent(
     }
 
     private suspend fun tryExecuteFallbackTool(rawResponse: String): String? {
-        val match = Regex("""(?:call:)?(turnOnFlashlight|turnOffFlashlight|execute_action|runMcpTool|flashlight|app|media|alarm|timer|set_edge_lights|search_files|list_files)\s*\{([^}]*)\}""").find(rawResponse)
+        val match = Regex("""(?:call:)?(turnOnFlashlight|turnOffFlashlight|execute_action|runMcpTool|search|execute_background_search|consult_peer|consultpeer|flashlight|app|media|alarm|timer|set_edge_lights|search_files|list_files)\s*\{([^}]*)\}""").find(rawResponse)
             ?: return null
 
         val actionName = match.groupValues[1]
@@ -596,6 +596,13 @@ class GhostAgent(
         val result = when (actionName) {
             "turnOnFlashlight" -> mcpTool.turnOnFlashlight()
             "turnOffFlashlight" -> mcpTool.turnOffFlashlight()
+            "search", "execute_background_search" -> {
+                val query = argsBody.removePrefix("{").removeSuffix("}").trim().removeSurrounding("\"")
+                mcpTool.execute_action("search", "{\"query\":\"$query\"}")
+            }
+            "consult_peer", "consultpeer" -> {
+                mcpTool.execute_action("consult_peer", argsBody)
+            }
             "execute_action", "runMcpTool" -> {
                 try {
                     val json = JSONObject(argsBody)

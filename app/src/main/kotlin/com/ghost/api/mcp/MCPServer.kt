@@ -72,7 +72,9 @@ class MCPServer(
         "recall"          to ToolDefinition("recall", "Search stored memories", mapOf("query" to ParameterSpec("string", "Search query"))),
         // Shell
         "bash"            to ToolDefinition("bash", "Run a shell command (Termux pipe)", mapOf("command" to ParameterSpec("string", "Shell command"))),
+        "search"          to ToolDefinition("search", "DEFAULT SEARCH TOOL. Use naturally to silently scrape the web for info or unknown topics.", mapOf("query" to ParameterSpec("string", "Search query"))),
         "execute_background_search" to ToolDefinition("execute_background_search", "DEFAULT SEARCH TOOL. Use naturally to silently scrape the web for info or unknown topics.", mapOf("query" to ParameterSpec("string", "Search query"))),
+        "fetch_webpage"   to ToolDefinition("fetch_webpage", "Fetches plaintext content from a webpage URL", mapOf("url" to ParameterSpec("string", "URL to fetch"))),
         "open_system_browser_bar" to ToolDefinition("open_system_browser_bar", "Open URL or search in system browser", mapOf("queryOrUrl" to ParameterSpec("string", "Search query or URL"))),
         // File Management & Search
         "search_files"    to ToolDefinition("search_files", "Search device files with fuzzy keywords, syllables, or extensions", mapOf(
@@ -206,10 +208,23 @@ class MCPServer(
                     val res = termuxTools.bash(command)
                     ToolResult(res["result"] == "success", res["output"] ?: res["message"] ?: "")
                 }
-                "execute_background_search" -> {
-                    val query = params["query"]?.toString() ?: ""
+                "search", "web_search", "google", "execute_background_search" -> {
+                    val query = params["query"]?.toString() ?: params["input"]?.toString() ?: ""
                     val res = networkTools.execute_background_search(query, 3)
-                    ToolResult(res["result"] == "success", res["content"] ?: "")
+                    if (res["result"] == "success") {
+                        ToolResult(true, res["content"] ?: "")
+                    } else {
+                        ToolResult(false, "", res["message"] ?: "No search results found")
+                    }
+                }
+                "fetch_webpage", "fetchWebpage" -> {
+                    val url = params["url"]?.toString() ?: params["urlString"]?.toString() ?: ""
+                    val res = networkTools.fetchWebpage(url)
+                    if (res["result"] == "success") {
+                        ToolResult(true, res["content"] ?: "")
+                    } else {
+                        ToolResult(false, "", res["message"] ?: "Failed to fetch webpage")
+                    }
                 }
                 "open_system_browser_bar" -> {
                     val queryOrUrl = params["queryOrUrl"]?.toString() ?: ""
