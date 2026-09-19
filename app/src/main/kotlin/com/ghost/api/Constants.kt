@@ -24,8 +24,42 @@ object Constants {
     const val THERMAL_PATH = "/sys/class/thermal/thermal_zone3/temp"
     const val THERMAL_LIMIT_CELSIUS = 65
 
-    // Token budget tuned for stability and headroom (Snapdragon 8 Elite / Game Space profile)
-    const val MAX_TOKENS = 2560
+    // Token budgets tuned per model architecture & memory footprint
+    const val MAX_TOKENS_E4B = 2560   // 12GB+ RAM profile (Game Space pinned, MTP speculative decoding)
+    const val MAX_TOKENS_E2B = 5120   // 8GB RAM profile (1.72GB peak, immune to 2GB SPKL, 4.7k free dialogue runway)
+    const val MAX_TOKENS = MAX_TOKENS_E4B // Legacy fallback
+
+    // Memory suspension safety valve thresholds (avoids false-positive unloads at 85-89% idle)
+    const val RAM_CRITICAL_UTILIZATION_THRESHOLD = 0.95f // 95% RAM utilization
+    const val RAM_CRITICAL_MIN_FREE_BYTES = 500L * 1024 * 1024 // 500 MB free memory floor
+
+    /**
+     * Resolves the maximum token context window for a given model.
+     */
+    fun getMaxTokensForModel(modelNameOrKey: String): Int {
+        return if (modelNameOrKey.contains("E2B", ignoreCase = true)) {
+            MAX_TOKENS_E2B
+        } else {
+            MAX_TOKENS_E4B
+        }
+    }
+
+    /**
+     * Automatically resolves the appropriate model core based on physical device RAM.
+     * Devices with < 10.5GB RAM (e.g. 8GB Galaxy S21) are locked to E2B (Compact).
+     * Devices with >= 10.5GB RAM (e.g. 12GB/16GB REDMAGIC) are assigned E4B (Frontier).
+     */
+    fun resolveHardwareModelTier(context: Context): String {
+        return try {
+            val actManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+            val memInfo = android.app.ActivityManager.MemoryInfo()
+            actManager?.getMemoryInfo(memInfo)
+            val totalRamGb = (memInfo.totalMem.toDouble()) / (1024.0 * 1024.0 * 1024.0)
+            if (totalRamGb >= 10.5) "E4B" else "E2B"
+        } catch (e: Exception) {
+            "E2B" // Safe fallback
+        }
+    }
 
     // Model download URLs and repos
     const val MODEL_URL_E2B = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm"

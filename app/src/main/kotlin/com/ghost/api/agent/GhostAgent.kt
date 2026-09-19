@@ -514,7 +514,14 @@ class GhostAgent(
         val count = _conversationHistory.size
         val historyChars = synchronized(_conversationHistory) { _conversationHistory.sumOf { it.content.length } }
         val estTokens = historyChars / 3
-        if (count >= 4 || turnsSinceKvFlush >= 2 || estTokens > 700) {
+
+        val maxTokens = llmEngine.maxNumTokens
+        val tokenThreshold = if (maxTokens > 3000) 4200 else 1800
+        val turnThreshold = if (maxTokens > 3000) 24 else 8
+        val kvFlushTurnThreshold = turnThreshold / 2
+
+        if (count >= turnThreshold || turnsSinceKvFlush >= kvFlushTurnThreshold || estTokens > tokenThreshold) {
+            Timber.i("GhostAgent: Triggering compaction (count=$count/$turnThreshold, turnsSinceFlush=$turnsSinceKvFlush/$kvFlushTurnThreshold, estTokens=$estTokens/$tokenThreshold)")
             compactMemory(force = true)
         }
     }

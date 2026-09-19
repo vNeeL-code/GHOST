@@ -54,6 +54,9 @@ class GemmaEngine(private val context: Context) : LlmBackend {
     override var activeBackend: String? = null
         private set
 
+    override var maxNumTokens: Int = Constants.MAX_TOKENS_E4B
+        private set
+
     private var lastModelPath: String = ""
     private var lastSystemPrompt: String = ""
     private var lastVisionEnabled: Boolean = true
@@ -105,6 +108,10 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                 else -> listOf("GPU" to sharedGpuBackend, "CPU" to Backend.CPU())
             }
             
+            val modelMaxTokens = Constants.getMaxTokensForModel(modelPath)
+            maxNumTokens = modelMaxTokens
+            Timber.i("Configuring GemmaEngine with maxNumTokens=$modelMaxTokens for model: $modelPath")
+
             var lastError: Exception? = null
             for ((backendName, preferredBackend) in backendsToTry) {
                 val isGpu = backendName == "GPU"
@@ -117,7 +124,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                     backend = preferredBackend,  // Main inference backend
                     visionBackend = visionBackend,  // Match CPU/GPU mode cleanly
                     audioBackend = if (enableAudio) Backend.CPU() else null,    // must be CPU for Gemma
-                    maxNumTokens = Constants.MAX_TOKENS,
+                    maxNumTokens = modelMaxTokens,
                     maxNumImages = if (enableVision) 2 else 0,
                     cacheDir = context.codeCacheDir.absolutePath  // Private internal storage (safe from Samsung Knox SELinux sandbox blocks)
                 )

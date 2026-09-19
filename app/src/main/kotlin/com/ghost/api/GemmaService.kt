@@ -1,10 +1,12 @@
 
 package com.ghost.api
 
+import android.app.ActivityManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.Intent
 import android.widget.Toast
@@ -359,6 +361,13 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             Timber.e("Detected crash during last init! Crash count: $newCount")
         }
 
+        // Hardware-tiered default model selection on first run
+        if (!prefs.contains(Constants.PREF_SELECTED_MODEL)) {
+            val defaultModel = Constants.resolveHardwareModelTier(this)
+            prefs.edit().putString(Constants.PREF_SELECTED_MODEL, defaultModel).apply()
+            Timber.i("🎯 First run: Hardware tier resolved default model to $defaultModel")
+        }
+
 
         try {
             val overlayPerm = android.provider.Settings.canDrawOverlays(this)
@@ -652,7 +661,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         // WATCHDOG: Detect previous crash
         // NOTE: Counter is already incremented in onCreate(). Do NOT double-increment here.
         val crashCount = prefs.getInt("init_crash_count", 0)
-        val selectedModel = prefs.getString(Constants.PREF_SELECTED_MODEL, "E4B") ?: "E4B"
+        val defaultModel = Constants.resolveHardwareModelTier(this)
+        val selectedModel = prefs.getString(Constants.PREF_SELECTED_MODEL, defaultModel) ?: defaultModel
         if (prefs.getBoolean("is_initializing", false)) {
             Timber.e("🚨 WATCHDOG: Previous initialization crashed! (Count: $crashCount, Model: $selectedModel)")
             
@@ -697,8 +707,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 appFilesDir,
                 downloadDir
             )
-            val selectedModel = prefs.getString(Constants.PREF_SELECTED_MODEL, "E4B") ?: "E4B"
-            val targetVariant = selectedModel.lowercase()
+            val activeModel = prefs.getString(Constants.PREF_SELECTED_MODEL, defaultModel) ?: defaultModel
+            val targetVariant = activeModel.lowercase()
 
             val candidateFile = searchDirs.flatMap { dir ->
                 dir.listFiles { file ->
@@ -1112,7 +1122,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             return@withLock msg
         }
 
-        if (!::ghostAgent.isInitialized || !ghostAgent.isReady) {
+        if (!ensureEngineReady()) {
             responseNotificationManager.showResponse("⚠️ System still starting up... try again in a moment")
             return@withLock "System is still initializing. Please wait a moment and try again."
         }
@@ -1165,7 +1175,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
      * Used by ApiServer /v1/chat/completions when stream=true.
      */
     suspend fun streamQueryTokens(prompt: String, onToken: (String) -> Unit) = engineMutex.withLock {
-        if (!::ghostAgent.isInitialized || !ghostAgent.isReady) {
+        if (!ensureEngineReady()) {
             onToken("System is still initializing.")
             return@withLock
         }
@@ -1335,6 +1345,11 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                     updateNotification(" $frame")
                 }
 
+                // RAM Safety Valve: Check if system is under critical memory pressure (>= 95% or < 500MB free)
+                if (isIdle()) {
+                    checkRamPressureAndSuspendIfNeeded()
+                }
+
                 val now = System.currentTimeMillis()
                 // Audit 3.0: Reduced refresh rate to 5s to slash IPC overhead
                 val delayMs = if (isInteractive) 5000L else 30000L 
@@ -1388,6 +1403,78 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     private fun isIdle(): Boolean {
         // Idle if no activity for 30 seconds
         return (System.currentTimeMillis() - lastActivityTime) > (30 * 1000)
+    }
+
+    private fun isSpeaking(): Boolean = if (::ttsManager.isInitialized) ttsManager.isSpeaking() else false
+
+    /**
+     * RAM Safety Valve: Proactively suspends Gemma engine weights if system memory utilization
+     * reaches >= 95% or available memory drops below 500MB while GHOST is idle.
+     * Prevents OEM LMK / ZTE SPKL terminations when memory-heavy apps (camera, games) are launched.
+     */
+    fun checkRamPressureAndSuspendIfNeeded(): Boolean {
+        if (isInferencing || isSpeaking() || !isGemmaLoaded()) return false
+        val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return false
+        val memInfo = ActivityManager.MemoryInfo()
+        activityManager.getMemoryInfo(memInfo)
+
+        val usedMem = memInfo.totalMem - memInfo.availMem
+        val utilization = usedMem.toDouble() / memInfo.totalMem.toDouble()
+
+        if (utilization >= Constants.RAM_CRITICAL_UTILIZATION_THRESHOLD || 
+            memInfo.availMem < Constants.RAM_CRITICAL_MIN_FREE_BYTES || 
+            memInfo.lowMemory) {
+            Timber.w("🚨 RAM critical pressure detected: ${(utilization * 100).toInt()}% utilized (${memInfo.availMem / (1024 * 1024)}MB free). Suspending engine weights...")
+            suspendEngineWeights("Critical system RAM pressure (${(utilization * 100).toInt()}% utilized, ${memInfo.availMem / (1024 * 1024)}MB free)")
+            return true
+        }
+        return false
+    }
+
+    private fun suspendEngineWeights(reason: String) {
+        serviceScope.launch {
+            if (isInferencing || isSpeaking()) {
+                Timber.w("Skipping engine suspension: currently active (inferencing=$isInferencing, speaking=${isSpeaking()})")
+                return@launch
+            }
+            unloadEngine()
+            updateNotification("✧ Gemma: Suspended (Freed RAM for other apps)")
+            Timber.i("✧ Gemma engine weights unloaded due to: $reason")
+        }
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        Timber.i("onTrimMemory received: level=$level")
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL || 
+            level >= ComponentCallbacks2.TRIM_MEMORY_COMPLETE) {
+            if (!isInferencing && !isSpeaking() && isGemmaLoaded()) {
+                Timber.w("🚨 TRIM_MEMORY critical pressure ($level). Suspending engine weights...")
+                suspendEngineWeights("System TRIM_MEMORY ($level)")
+            }
+        }
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        Timber.w("🚨 onLowMemory received from OS! Suspending engine weights immediately...")
+        if (!isInferencing && !isSpeaking() && isGemmaLoaded()) {
+            suspendEngineWeights("System onLowMemory")
+        }
+    }
+
+    /**
+     * Ensures Gemma engine weights and GhostAgent are loaded and ready.
+     * Re-initializes seamlessly from checkpoint if engine was suspended due to RAM pressure.
+     */
+    suspend fun ensureEngineReady(): Boolean {
+        if (isGemmaLoaded() && ::ghostAgent.isInitialized && ghostAgent.isReady) {
+            return true
+        }
+        Timber.i("Engine not loaded or agent not ready. Waking up engine weights...")
+        updateNotification("Waking up Gemma...")
+        initialize()
+        return isGemmaLoaded() && ::ghostAgent.isInitialized && ghostAgent.isReady
     }
 
     /**

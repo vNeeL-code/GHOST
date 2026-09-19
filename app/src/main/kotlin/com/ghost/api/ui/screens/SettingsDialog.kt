@@ -52,7 +52,8 @@ fun SettingsDialog(
     var diaryCadence by remember { mutableStateOf(prefs.getString(Constants.PREF_DIARY_CADENCE, "12") ?: "12") }
     var ttsEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_TTS_ENABLED, true)) }
     var backend by remember { mutableStateOf(prefs.getString(Constants.PREF_USER_BACKEND, "AUTO") ?: "AUTO") }
-    var selectedModel by remember { mutableStateOf(prefs.getString(Constants.PREF_SELECTED_MODEL, "E4B") ?: "E4B") }
+    val hardwareTier = remember { Constants.resolveHardwareModelTier(context) }
+    var selectedModel by remember { mutableStateOf(prefs.getString(Constants.PREF_SELECTED_MODEL, hardwareTier) ?: hardwareTier) }
     var visualizerPreset by remember { mutableStateOf(prefs.getString(Constants.PREF_VISUALIZER_PRESET, "OPTION_A") ?: "OPTION_A") }
 
     val tokenManager = remember { com.ghost.api.logic.HFTokenManager(context) }
@@ -685,8 +686,9 @@ fun SettingsDialog(
                         }
                         item {
                             Column(modifier = Modifier.padding(bottom = 14.dp)) {
+                                val is8GbDevice = hardwareTier == "E2B"
                                 Text(
-                                    text = "Active Model Core",
+                                    text = if (is8GbDevice) "Active Model Core • 8GB Tier (Hardware Locked)" else "Active Model Core • 12GB+ Tier (Frontier)",
                                     fontSize = 12.sp,
                                     color = textDim,
                                     modifier = Modifier.padding(bottom = 8.dp)
@@ -696,8 +698,8 @@ fun SettingsDialog(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     val models = listOf(
-                                        Triple("E4B", "🧠 Gemma 4 E4B", "3.65GB • Frontier"),
-                                        Triple("E2B", "⚡ Gemma 4 E2B", "2.4GB • Compact")
+                                        Triple("E4B", "🧠 Gemma 4 E4B", if (is8GbDevice) "Requires 12GB+ RAM" else "3.65GB • 2.5k Frontier"),
+                                        Triple("E2B", "⚡ Gemma 4 E2B", if (is8GbDevice) "2.4GB • 5k Compact (Locked)" else "2.4GB • 5k Compact")
                                     )
                                     val downloader = remember(gemmaService) { (gemmaService ?: GemmaService.instance)?.modelDownloader }
                                     val downloadStatusState = downloader?.downloadStatus?.collectAsState(initial = com.ghost.api.ModelDownloader.DownloadState.Idle)
@@ -716,7 +718,8 @@ fun SettingsDialog(
                                     }
 
                                     for ((mKey, mTitle, mSub) in models) {
-                                        val isSelected = selectedModel == mKey
+                                        val isLockedForHardware = is8GbDevice && mKey == "E4B"
+                                        val isSelected = selectedModel == mKey && !isLockedForHardware
                                         val fileName = if (mKey == "E4B") Constants.MODEL_NAME_E4B else Constants.MODEL_NAME_E2B
                                         val hfRepo = if (mKey == "E4B") Constants.MODEL_REPO_E4B else Constants.MODEL_REPO_E2B
                                         val isDownloaded = downloader?.isModelDownloaded(fileName) ?: false
@@ -724,6 +727,7 @@ fun SettingsDialog(
                                             !isDownloaded
 
                                         val subtitleText = when {
+                                            isLockedForHardware -> "Requires 12GB+ RAM"
                                             isDownloaded -> "$mSub (Ready)"
                                             isDownloadingThis -> {
                                                 val pct = (currentDownloadState as com.ghost.api.ModelDownloader.DownloadState.Downloading).progressPercent
@@ -736,13 +740,35 @@ fun SettingsDialog(
                                             modifier = Modifier
                                                 .weight(1f)
                                                 .clip(RoundedCornerShape(10.dp))
-                                                .background(if (isSelected) accentColor else cardBg)
-                                                .border(1.dp, if (isSelected) accentColor else Color(0x22FFFFFF), RoundedCornerShape(10.dp))
+                                                .background(
+                                                    when {
+                                                        isLockedForHardware -> Color(0xFF0E0E12)
+                                                        isSelected -> accentColor
+                                                        else -> cardBg
+                                                    }
+                                                )
+                                                .border(
+                                                    1.dp,
+                                                    when {
+                                                        isLockedForHardware -> Color(0x11FFFFFF)
+                                                        isSelected -> accentColor
+                                                        else -> Color(0x22FFFFFF)
+                                                    },
+                                                    RoundedCornerShape(10.dp)
+                                                )
                                                 .clickable {
+                                                    if (isLockedForHardware) {
+                                                        Toast.makeText(
+                                                            context,
+                                                            "Gemma 4 E4B requires 12GB+ RAM. Your device is hardware-optimized for E2B (5k Context).",
+                                                            Toast.LENGTH_LONG
+                                                        ).show()
+                                                        return@clickable
+                                                    }
                                                     if (!isDownloaded) {
                                                         val token = tokenManager.getToken()
                                                         downloader?.startDownload(hfRepo, fileName, token)
-                                                        Toast.makeText(context, "Starting download for $mKey (3.65 GB)...", Toast.LENGTH_SHORT).show()
+                                                        Toast.makeText(context, "Starting download for $mKey...", Toast.LENGTH_SHORT).show()
                                                     } else {
                                                         selectedModel = mKey
                                                         prefs.edit().putString(Constants.PREF_SELECTED_MODEL, mKey).apply()
@@ -757,22 +783,30 @@ fun SettingsDialog(
                                                 .padding(horizontal = 10.dp, vertical = 10.dp),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                    Text(
-                                                        text = mTitle,
-                                                        fontSize = 12.sp,
-                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                                        color = if (isSelected) Color.Black else Color.White
-                                                    )
-                                                    Text(
-                                                        text = subtitleText,
-                                                        fontSize = 10.sp,
-                                                        color = if (isSelected) Color(0xCC000000) else textDim
-                                                    )
-                                                }
+                                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                Text(
+                                                    text = mTitle,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                    color = when {
+                                                        isLockedForHardware -> Color(0x44FFFFFF)
+                                                        isSelected -> Color.Black
+                                                        else -> Color.White
+                                                    }
+                                                )
+                                                Text(
+                                                    text = subtitleText,
+                                                    fontSize = 10.sp,
+                                                    color = when {
+                                                        isLockedForHardware -> Color(0x33FFFFFF)
+                                                        isSelected -> Color(0xCC000000)
+                                                        else -> textDim
+                                                    }
+                                                )
                                             }
                                         }
                                     }
+                                }
 
                                     val isNubiaDevice = remember {
                                         android.os.Build.MANUFACTURER.contains("Nubia", ignoreCase = true) ||
