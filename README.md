@@ -83,8 +83,10 @@ Most modern "on-device AI" implementations amount to an isolated chatbot complet
    - `Display Over Other Apps` (overlay and lighting)
    - `read and write Notifications` (context and writing notifications)
    - `all files access` (to detect and load the model file)
-   - `Accessibility Services` (model ability to see app context and use interaction tools)
-3. **Model Selection:** The application automatically initialises with the performance-optimized `e2b` download if no model is detected. Manual download link for `e2b` model [here](https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/tree/main). For more advanced reasoning capabilities enable accessibility permissions.
+3. **Hardware-Tiered Model Auto-Selection:** GHOST automatically detects your physical device RAM and locks to the optimal neural core on first launch:
+   - **8GB RAM devices** (e.g. Galaxy S21): Locked to **Gemma 4 E2B** (Compact Core, 5,120 token dialogue runway, ~1.7GB peak RAM, immune to LMK).
+   - **12GB+ RAM devices** (e.g. REDMAGIC 10 Air): Locked to **Gemma 4 E4B** (Frontier Core, 2,560 token deep reasoning, MTP speculative decoding).
+   Zero manual toggling needed — GHOST automatically downloads and locks the exact neural core for your hardware tier.
 4. **Deploy:** Shake your device to summon the overlay and customise your ephemeral app drawer. Edge lighting and live reactive wallpaper are optional.
 
 ---

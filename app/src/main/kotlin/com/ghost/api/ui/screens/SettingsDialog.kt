@@ -564,142 +564,56 @@ fun SettingsDialog(
                         item {
                             Column(modifier = Modifier.padding(bottom = 14.dp)) {
                                 val is8GbDevice = hardwareTier == "E2B"
-                                Text(
-                                    text = if (is8GbDevice) "Active Model Core • 8GB Tier (Hardware Locked)" else "Active Model Core • 12GB+ Tier (Frontier)",
-                                    fontSize = 12.sp,
-                                    color = textDim,
-                                    modifier = Modifier.padding(bottom = 8.dp)
-                                )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                val coreTitle = if (is8GbDevice) "Gemma 4 E2B • 8GB Compact" else "Gemma 4 E4B • 12GB+ Frontier"
+                                val coreSubtitle = if (is8GbDevice) "5,120 token dialogue runway (Hardware Locked)" else "2,560 token reasoning (MTP Speculative Decoding)"
+
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(cardBg)
+                                        .border(1.dp, Color(0x22FFFFFF), RoundedCornerShape(10.dp))
+                                        .padding(horizontal = 14.dp, vertical = 12.dp)
                                 ) {
-                                    val models = listOf(
-                                        Triple("E4B", "🧠 Gemma 4 E4B", if (is8GbDevice) "Requires 12GB+ RAM" else "3.65GB • 2.5k Frontier"),
-                                        Triple("E2B", "⚡ Gemma 4 E2B", if (is8GbDevice) "2.4GB • 5k Compact (Locked)" else "2.4GB • 5k Compact")
-                                    )
-                                    val downloader = remember(gemmaService) { (gemmaService ?: GemmaService.instance)?.modelDownloader }
-                                    val downloadStatusState = downloader?.downloadStatus?.collectAsState(initial = com.ghost.api.ModelDownloader.DownloadState.Idle)
-                                    val currentDownloadState = downloadStatusState?.value ?: com.ghost.api.ModelDownloader.DownloadState.Idle
-
-                                    LaunchedEffect(currentDownloadState) {
-                                        if (currentDownloadState is com.ghost.api.ModelDownloader.DownloadState.Success) {
-                                            val file = currentDownloadState.file
-                                            val modelKey = if (file.name.contains("E4B", ignoreCase = true)) "E4B" else "E2B"
-                                            selectedModel = modelKey
-                                            prefs.edit().putString(Constants.PREF_SELECTED_MODEL, modelKey).apply()
-                                            val svc = gemmaService ?: GemmaService.instance
-                                            svc?.reloadWithModel(modelKey)
-                                            Toast.makeText(context, "Downloaded $modelKey! Model active 🧠", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-
-                                    for ((mKey, mTitle, mSub) in models) {
-                                        val isLockedForHardware = is8GbDevice && mKey == "E4B"
-                                        val isSelected = selectedModel == mKey && !isLockedForHardware
-                                        val fileName = if (mKey == "E4B") Constants.MODEL_NAME_E4B else Constants.MODEL_NAME_E2B
-                                        val hfRepo = if (mKey == "E4B") Constants.MODEL_REPO_E4B else Constants.MODEL_REPO_E2B
-                                        val isDownloaded = downloader?.isModelDownloaded(fileName) ?: false
-                                        val isDownloadingThis = currentDownloadState is com.ghost.api.ModelDownloader.DownloadState.Downloading &&
-                                            !isDownloaded
-
-                                        val subtitleText = when {
-                                            isLockedForHardware -> "Requires 12GB+ RAM"
-                                            isDownloaded -> "$mSub (Ready)"
-                                            isDownloadingThis -> {
-                                                val pct = (currentDownloadState as com.ghost.api.ModelDownloader.DownloadState.Downloading).progressPercent
-                                                "Downloading $pct%..."
-                                            }
-                                            else -> "$mSub (Tap to Download)"
-                                        }
-
-                                        Box(
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .clip(RoundedCornerShape(10.dp))
-                                                .background(
-                                                    when {
-                                                        isLockedForHardware -> Color(0xFF0E0E12)
-                                                        isSelected -> accentColor
-                                                        else -> cardBg
-                                                    }
-                                                )
-                                                .border(
-                                                    1.dp,
-                                                    when {
-                                                        isLockedForHardware -> Color(0x11FFFFFF)
-                                                        isSelected -> accentColor
-                                                        else -> Color(0x22FFFFFF)
-                                                    },
-                                                    RoundedCornerShape(10.dp)
-                                                )
-                                                .clickable {
-                                                    if (isLockedForHardware) {
-                                                        Toast.makeText(
-                                                            context,
-                                                            "Gemma 4 E4B requires 12GB+ RAM. Your device is hardware-optimized for E2B (5k Context).",
-                                                            Toast.LENGTH_LONG
-                                                        ).show()
-                                                        return@clickable
-                                                    }
-                                                    if (!isDownloaded) {
-                                                        val token = tokenManager.getToken()
-                                                        downloader?.startDownload(hfRepo, fileName, token)
-                                                        Toast.makeText(context, "Starting download for $mKey...", Toast.LENGTH_SHORT).show()
-                                                    } else {
-                                                        selectedModel = mKey
-                                                        prefs.edit().putString(Constants.PREF_SELECTED_MODEL, mKey).apply()
-                                                        val svc = gemmaService ?: GemmaService.instance
-                                                        if (svc != null) {
-                                                            svc.reloadWithModel(mKey)
-                                                        } else {
-                                                            Toast.makeText(context, "Selected $mKey", Toast.LENGTH_SHORT).show()
-                                                        }
-                                                    }
-                                                }
-                                                .padding(horizontal = 10.dp, vertical = 10.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                Text(
-                                                    text = mTitle,
-                                                    fontSize = 12.sp,
-                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                                    color = when {
-                                                        isLockedForHardware -> Color(0x44FFFFFF)
-                                                        isSelected -> Color.Black
-                                                        else -> Color.White
-                                                    }
-                                                )
-                                                Text(
-                                                    text = subtitleText,
-                                                    fontSize = 10.sp,
-                                                    color = when {
-                                                        isLockedForHardware -> Color(0x33FFFFFF)
-                                                        isSelected -> Color(0xCC000000)
-                                                        else -> textDim
-                                                    }
-                                                )
-                                            }
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        Text(
+                                            text = if (is8GbDevice) "⚡" else "🧠",
+                                            fontSize = 22.sp
+                                        )
+                                        Column {
+                                            Text(
+                                                text = coreTitle,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = Color.White
+                                            )
+                                            Text(
+                                                text = coreSubtitle,
+                                                fontSize = 11.sp,
+                                                color = textDim
+                                            )
                                         }
                                     }
                                 }
 
-                                    val isNubiaDevice = remember {
-                                        android.os.Build.MANUFACTURER.contains("Nubia", ignoreCase = true) ||
-                                        android.os.Build.BRAND.contains("Nubia", ignoreCase = true) ||
-                                        android.os.Build.MANUFACTURER.contains("ZTE", ignoreCase = true)
-                                    }
-                                    if (isNubiaDevice && selectedModel == "E4B") {
-                                        Text(
-                                            text = "🎮 REDMAGIC Tip: Add GHOST to Game Space for high-priority memory & 24/7 background immunity.",
-                                            fontSize = 10.sp,
-                                            color = Color(0xFFFFB74D),
-                                            modifier = Modifier.padding(top = 6.dp)
-                                        )
-                                    }
+                                val isNubiaDevice = remember {
+                                    android.os.Build.MANUFACTURER.contains("Nubia", ignoreCase = true) ||
+                                    android.os.Build.BRAND.contains("Nubia", ignoreCase = true) ||
+                                    android.os.Build.MANUFACTURER.contains("ZTE", ignoreCase = true)
+                                }
+                                if (isNubiaDevice && !is8GbDevice) {
+                                    Text(
+                                        text = "🎮 REDMAGIC Tip: Add GHOST to Game Space for high-priority memory & 24/7 background immunity.",
+                                        fontSize = 10.sp,
+                                        color = Color(0xFFFFB74D),
+                                        modifier = Modifier.padding(top = 6.dp)
+                                    )
                                 }
                             }
+                        }
                         item {
                             Column {
                                 Text(

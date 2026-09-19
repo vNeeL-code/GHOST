@@ -42,7 +42,13 @@ class ContextManager(
             val (totalRamGb, totalStorageGb) = com.ghost.api.hardware.DeviceHardwareSpecs.getMemoryStats(context)
             val marketingName = com.ghost.api.hardware.DeviceHardwareSpecs.resolveMarketingName()
             val chipsetName = com.ghost.api.hardware.DeviceHardwareSpecs.resolveChipsetName()
-            "Vessel: ✧ $deviceName ($marketingName, $chipsetName, ${totalRamGb}GB RAM, ${totalStorageGb}GB storage, Android ${android.os.Build.VERSION.RELEASE})"
+            val tier = com.ghost.api.Constants.resolveHardwareModelTier(context)
+            val coreDescription = if (tier == "E4B") {
+                "Gemma 4 E4B (Frontier Core, 2,560 tokens, MTP speculative decoding)"
+            } else {
+                "Gemma 4 E2B (Compact Core, 5,120 tokens)"
+            }
+            "Vessel: ✧ $deviceName ($marketingName, $chipsetName, ${totalRamGb}GB RAM, ${totalStorageGb}GB storage, Android ${android.os.Build.VERSION.RELEASE})\nConscious Core Runtime: $coreDescription"
         } catch (e: Exception) {
             "Vessel: Android Device"
         }
