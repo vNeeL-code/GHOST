@@ -348,4 +348,79 @@ class SystemToolSet(private val context: Context) : ToolSet {
             mapOf("result" to "error", "message" to "Failed to open WhatsApp: ${e.message}")
         }
     }
+
+    companion object {
+        /**
+         * Robustly parses (hour, minutes, label) from flexible parameter maps.
+         * Handles:
+         * - 12-hour: "6pm", "6:00 PM", "6 pm", "6:30pm"
+         * - 24-hour: "18:00", "18:30", "18"
+         * - Explicit parameters: "hour": 6, "am_pm": "pm", "minutes": 30
+         * - Raw input: "6pm Debug GHOST"
+         *
+         * Returns Triple(hour, minutes, label) or null if no valid time could be parsed.
+         */
+        fun parseAlarmParams(params: Map<String, Any?>): Triple<Int, Int, String>? {
+            var label = (params["label"] ?: params["message"] ?: params["note"])?.toString() ?: ""
+            val timeCandidate = (params["time"] ?: params["hour"] ?: params["input"])?.toString()?.trim() ?: ""
+            val rawMinutes = params["minutes"]?.toString()?.toIntOrNull()
+            val amPmParam = (params["am_pm"] ?: params["period"] ?: params["ampm"])?.toString()?.lowercase()?.trim()
+
+            // 1. Match "HH:MM" or "H:MM" with optional AM/PM (e.g. "6:00 PM", "18:00", "6:30pm")
+            val colonPattern = Regex("""(?i)\b(\d{1,2}):(\d{2})\s*([ap]\.?m\.?)?\b""")
+            val colonMatch = colonPattern.find(timeCandidate)
+            if (colonMatch != null) {
+                var h = colonMatch.groupValues[1].toInt()
+                val m = colonMatch.groupValues[2].toInt()
+                val meridiem = (colonMatch.groupValues[3].ifBlank { amPmParam ?: "" }).lowercase().replace(".", "")
+                if (meridiem == "pm" && h < 12) h += 12
+                else if (meridiem == "am" && h == 12) h = 0
+                if (label.isBlank() && params["input"] != null) {
+                    label = timeCandidate.replace(colonMatch.value, "").trim()
+                }
+                return Triple(h.coerceIn(0, 23), m.coerceIn(0, 59), label)
+            }
+
+            // 2. Match "6pm", "6 am", "11pm"
+            val simpleAmPmPattern = Regex("""(?i)\b(\d{1,2})\s*([ap]\.?m\.?)\b""")
+            val simpleMatch = simpleAmPmPattern.find(timeCandidate)
+            if (simpleMatch != null) {
+                var h = simpleMatch.groupValues[1].toInt()
+                val m = rawMinutes ?: 0
+                val meridiem = simpleMatch.groupValues[2].lowercase().replace(".", "")
+                if (meridiem == "pm" && h < 12) h += 12
+                else if (meridiem == "am" && h == 12) h = 0
+                if (label.isBlank() && params["input"] != null) {
+                    label = timeCandidate.replace(simpleMatch.value, "").trim()
+                }
+                return Triple(h.coerceIn(0, 23), m.coerceIn(0, 59), label)
+            }
+
+            // 3. Integer hour param (with possible am_pm param)
+            val directHour = params["hour"]?.toString()?.toIntOrNull()
+            if (directHour != null) {
+                var h = directHour
+                val m = rawMinutes ?: 0
+                if (amPmParam?.contains("pm") == true && h < 12) h += 12
+                else if (amPmParam?.contains("am") == true && h == 12) h = 0
+                return Triple(h.coerceIn(0, 23), m.coerceIn(0, 59), label)
+            }
+
+            // 4. Standalone number in time candidate (e.g. "18" or "8")
+            val numberPattern = Regex("""\b(\d{1,2})\b""")
+            val numberMatch = numberPattern.find(timeCandidate)
+            if (numberMatch != null) {
+                var h = numberMatch.groupValues[1].toInt()
+                val m = rawMinutes ?: 0
+                if (amPmParam?.contains("pm") == true && h < 12) h += 12
+                else if (amPmParam?.contains("am") == true && h == 12) h = 0
+                if (label.isBlank() && params["input"] != null) {
+                    label = timeCandidate.replace(numberMatch.value, "").trim()
+                }
+                return Triple(h.coerceIn(0, 23), m.coerceIn(0, 59), label)
+            }
+
+            return null
+        }
+    }
 }

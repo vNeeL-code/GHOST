@@ -249,12 +249,18 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                         }
                         fullResponse += token
 
-                        // Live runaway loop guard: immediately halt if token/phrase repeats 6+ times
-                        val tail = fullResponse.takeLast(60)
-                        val loopMatch = findDegenerateLoopMatch(tail, minRepeats = 6)
+                        // Live runaway loop guard: immediately halt if token/phrase repeats
+                        val tail = fullResponse.takeLast(400)
+                        val loopMatch = findDegenerateLoopMatch(tail)
                         if (loopMatch != null) {
-                            Timber.w("🚨 Live runaway token loop detected in stream ('${loopMatch.value}'). Terminating generation early.")
+                            Timber.w("🚨 Live runaway token loop detected in stream ('${loopMatch.value.take(60)}...'). Terminating generation early.")
                             isLoopDetected = true
+                            try {
+                                conversation?.close()
+                            } catch (e: Exception) {
+                                Timber.w(e, "Error closing conversation on loop detect")
+                            }
+                            conversation = null
                             val truncated = truncateRepetition(fullResponse)
                             onComplete(truncated)
                             isBusy.set(false)
@@ -406,15 +412,15 @@ class GemmaEngine(private val context: Context) : LlmBackend {
             for ((i, sentence) in sentences.withIndex()) {
                 val normalized = sentence.trim().lowercase()
                 if (!seen.add(normalized) && i > 4) {
-                    return sentences.take(i).joinToString(" ") + "\n\n(...loop detected)"
+                    return sentences.take(i).joinToString(" ")
                 }
             }
         }
         
-        // 2. Token / word / phrase repetition: e.g. "a,a,a,a,a", "s's's's's'", "word word word"
-        val match = findDegenerateLoopMatch(response, minRepeats = 6)
+        // 2. Token / word / phrase repetition
+        val match = findDegenerateLoopMatch(response)
         if (match != null) {
-            return response.substring(0, match.range.first).trimEnd() + "\n\n(...loop detected)"
+            return response.substring(0, match.range.first).trimEnd()
         }
         
         return response
@@ -461,26 +467,48 @@ class GemmaEngine(private val context: Context) : LlmBackend {
 
     companion object {
         /**
-         * Detects runaway degenerative token/phrase loops (e.g. "s's's's's'", "a,a,a,a,a,a", "word word word").
-         * Crucially enforces that the repeating sequence MUST contain alphabetic letters.
-         * This strictly prevents false positives on numbers (e.g. "666666", "1000000"), markdown rules ("---"),
-         * code block indentation, or punctuation sequences.
+         * Detects runaway degenerative token/phrase loops:
+         * - Single letter repeated 8+ times (e.g. "aaaaaaaa")
+         * - Short units (2-3 chars) repeated 6+ times (e.g. "a,a,a,a,a,a")
+         * - Medium phrases (4-9 chars) repeated 4+ times (e.g. "test test test test ")
+         * - Long phrases (10-40 chars) repeated 3+ times (e.g. "a fascinating example of a fascinating example of a fascinating example of ")
+         *
+         * Enforces that repeating sequences MUST contain alphabetic letters.
          */
-        fun findDegenerateLoopMatch(text: String, minRepeats: Int = 6): MatchResult? {
-            // 1. Single-letter runaway loop (must be a letter, 10+ consecutive repeats, e.g. "aaaaaaaaaa")
-            val singleLetterMatch = Regex("""([a-zA-Z])\1{9,}""").find(text)
+        fun findDegenerateLoopMatch(text: String): MatchResult? {
+            if (text.length < 8) return null
+
+            // 1. Single-letter runaway loop (must be a letter, 8+ consecutive repeats)
+            val singleLetterMatch = Regex("""([a-zA-Z])\1{7,}""").find(text)
             if (singleLetterMatch != null) return singleLetterMatch
 
-            // 2. Multi-character repeating sequence (length 2..25, repeated minRepeats+ times)
-            // E.g. "a,a,a,a,a,a" or "s's's's's's's'"
-            val pattern = Regex("""(.{2,25}?)\1{${minRepeats - 1},}""")
-            for (m in pattern.findAll(text)) {
+            // 2. Long phrases (10..40 chars) repeated 3+ times (e.g. "a fascinating example of ")
+            val longPattern = Regex("""(.{10,40}?)\1{2,}""")
+            for (m in longPattern.findAll(text)) {
                 val unit = m.groupValues[1]
-                // Must contain at least one letter so we don't trip on digits (6666), markdown dividers (---), or whitespace
                 if (unit.any { it.isLetter() }) {
                     return m
                 }
             }
+
+            // 3. Medium phrases (4..9 chars) repeated 4+ times (e.g. "test ")
+            val mediumPattern = Regex("""(.{4,9}?)\1{3,}""")
+            for (m in mediumPattern.findAll(text)) {
+                val unit = m.groupValues[1]
+                if (unit.any { it.isLetter() }) {
+                    return m
+                }
+            }
+
+            // 4. Short units (2..3 chars) repeated 6+ times (e.g. "s'")
+            val shortPattern = Regex("""(.{2,3}?)\1{5,}""")
+            for (m in shortPattern.findAll(text)) {
+                val unit = m.groupValues[1]
+                if (unit.any { it.isLetter() }) {
+                    return m
+                }
+            }
+
             return null
         }
     }

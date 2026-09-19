@@ -83,6 +83,35 @@ class GhostMcpTool(
         return executeMcpAction("consult_peer", "{\"peer\":\"$peer\",\"prompt\":\"$prompt\"}")
     }
 
+    @Tool(description = "Sets an alarm for a specific time via the system Clock app")
+    fun alarm(
+        @ToolParam(description = "Hour in 24-hour format (0-23, e.g. 18 for 6 PM, or 1-12 with label/am_pm)") hour: Int,
+        @ToolParam(description = "Minutes (0-59)") minutes: Int = 0,
+        @ToolParam(description = "Optional label or note for the alarm") label: String = ""
+    ): Map<String, String> {
+        Timber.i("GhostMcpTool: alarm invoked for hour=$hour, minutes=$minutes, label='$label'")
+        return executeMcpAction("alarm", "{\"hour\":$hour,\"minutes\":$minutes,\"label\":\"$label\"}")
+    }
+
+    @Tool(description = "Sets a countdown timer via the system Clock app")
+    fun timer(
+        @ToolParam(description = "Total duration in seconds (e.g. 300 for 5 minutes)") seconds: Int,
+        @ToolParam(description = "Optional label for the timer") label: String = ""
+    ): Map<String, String> {
+        Timber.i("GhostMcpTool: timer invoked for seconds=$seconds, label='$label'")
+        return executeMcpAction("timer", "{\"seconds\":$seconds,\"label\":\"$label\"}")
+    }
+
+    @Tool(description = "Creates a calendar event")
+    fun calendar(
+        @ToolParam(description = "Title of the calendar event") title: String,
+        @ToolParam(description = "Description or details of the event") description: String = "",
+        @ToolParam(description = "Duration in minutes (defaults to 30)") minutes: Int = 30
+    ): Map<String, String> {
+        Timber.i("GhostMcpTool: calendar invoked for title='$title'")
+        return executeMcpAction("calendar", "{\"title\":\"$title\",\"description\":\"$description\",\"minutes\":$minutes}")
+    }
+
     @Tool(description = "Execute an on-device action or MCP tool by name with parameters (JSON format).")
     fun execute_action(
         @ToolParam(description = "The exact name of the tool/action to execute (e.g. 'search', 'flashlight', 'set_edge_lights', 'app', 'media', 'alarm', 'timer', 'calendar', 'read_calendar', 'read_diary', 'remember', 'recall', 'search_files', 'list_files', 'open_file', 'click', 'scroll', 'navigate', 'consult_peer').") toolName: String,
@@ -208,7 +237,13 @@ class GhostMcpTool(
                 }
                 return map
             } catch (e: Exception) {
-                Timber.w(e, "GhostMcpTool: Failed to parse JSON parameters, using heuristic")
+                Timber.w(e, "GhostMcpTool: Failed to parse JSON parameters, attempting raw key-value recovery")
+                val inner = trimmed.removePrefix("{").removeSuffix("}").trim()
+                val recovered = parseRawToolArgs(inner)
+                if (recovered.isNotEmpty()) {
+                    Timber.i("GhostMcpTool: Successfully recovered ${recovered.size} parameters from unquoted syntax")
+                    return recovered
+                }
             }
         }
 
@@ -218,6 +253,9 @@ class GhostMcpTool(
             "app" -> mapOf("name" to plain)
             "media", "navigate" -> mapOf("action" to plain)
             "timer" -> mapOf("seconds" to (plain.toIntOrNull() ?: 60))
+            "alarm" -> mapOf("input" to plain)
+            "calendar" -> mapOf("title" to plain)
+            "remember" -> mapOf("content" to plain)
             "recall", "search", "web_search", "google", "execute_background_search", "search_files" -> mapOf("query" to plain)
             "fetch_webpage", "fetchwebpage" -> mapOf("url" to plain)
             "list_files" -> mapOf("folder" to plain)
@@ -231,5 +269,43 @@ class GhostMcpTool(
             }
             else -> mapOf("input" to plain)
         }
+    }
+
+    /**
+     * Auto-heals malformed/unquoted tool call arguments (e.g. `{hour: 18, label: Debug GHOST}`)
+     * when standard JSON parsers fail.
+     */
+    private fun parseRawToolArgs(rawArgs: String): MutableMap<String, Any> {
+        val params = mutableMapOf<String, Any>()
+        if (rawArgs.isBlank()) return params
+
+        val keyPattern = Regex("""([a-zA-Z0-9_]+)\s*:\s*""")
+        val matches = keyPattern.findAll(rawArgs).toList()
+
+        for (i in matches.indices) {
+            val key = matches[i].groupValues[1]
+            val startIndex = matches[i].range.last + 1
+            val endIndex = if (i + 1 < matches.size) {
+                val nextKeyStart = matches[i + 1].range.first
+                var end = nextKeyStart
+                while (end > startIndex && (rawArgs[end - 1] == ',' || rawArgs[end - 1].isWhitespace())) {
+                    end--
+                }
+                end
+            } else {
+                rawArgs.length
+            }
+
+            var value = rawArgs.substring(startIndex, endIndex).trim()
+            value = value.trim('"', '\'', ' ', ',')
+            // Attempt to preserve integer types for numeric parameters
+            val intVal = value.toIntOrNull()
+            if (intVal != null) {
+                params[key] = intVal
+            } else {
+                params[key] = value
+            }
+        }
+        return params
     }
 }

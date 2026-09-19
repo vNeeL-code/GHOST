@@ -121,11 +121,26 @@ object IntentHandler {
                     true
                 }
                 "alarm" -> {
-                    val hour = json.optInt("hour", 8)
-                    val minutes = json.optInt("minutes", 0)
-                    val label = json.optString("label", "")
-                    com.ghost.api.hardware.SystemToolSet(context).alarm(hour, minutes, label)
-                    true
+                    val paramsMap = mutableMapOf<String, Any?>()
+                    val keys = json.keys()
+                    while (keys.hasNext()) {
+                        val k = keys.next()
+                        paramsMap[k] = json.get(k)
+                    }
+                    val parsed = com.ghost.api.hardware.SystemToolSet.parseAlarmParams(paramsMap)
+                    if (parsed != null) {
+                        val (hour, minutes, label) = parsed
+                        com.ghost.api.hardware.SystemToolSet(context).alarm(hour, minutes, label)
+                        true
+                    } else {
+                        val hour = json.optInt("hour", -1)
+                        if (hour >= 0) {
+                            val minutes = json.optInt("minutes", 0)
+                            val label = json.optString("label", "")
+                            com.ghost.api.hardware.SystemToolSet(context).alarm(hour, minutes, label)
+                            true
+                        } else false
+                    }
                 }
                 "timer" -> {
                     val seconds = json.optInt("seconds", 60)

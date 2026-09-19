@@ -152,11 +152,14 @@ class MCPServer(
                     ToolResult(res["result"] == "success", res["message"] ?: "")
                 }
                 "alarm" -> {
-                    val hour    = params["hour"]?.toString()?.toIntOrNull() ?: 8
-                    val minutes = params["minutes"]?.toString()?.toIntOrNull() ?: 0
-                    val label   = params["label"]?.toString() ?: ""
-                    val res = systemTools.alarm(hour, minutes, label)
-                    ToolResult(res["result"] == "success", res["message"] ?: "")
+                    val parsed = com.ghost.api.hardware.SystemToolSet.parseAlarmParams(params)
+                    if (parsed != null) {
+                        val (hour, minutes, label) = parsed
+                        val res = systemTools.alarm(hour, minutes, label)
+                        ToolResult(res["result"] == "success", res["message"] ?: "")
+                    } else {
+                        ToolResult(false, "", "Could not parse alarm time from input. Please specify a time (e.g. 6:00 PM or 18:00).")
+                    }
                 }
                 "timer" -> {
                     val seconds = params["seconds"]?.toString()?.toIntOrNull() ?: 60

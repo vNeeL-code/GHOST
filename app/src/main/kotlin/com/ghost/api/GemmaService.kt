@@ -531,6 +531,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             try {
                 val checkpointDir = getExternalFilesDir(null) ?: filesDir
                 listOf(
+                    "ghost_agent_checkpoint.json",
                     "koog_agent_checkpoint.json",
                     "oracle_agent_checkpoint.json",  // Legacy
                     "koog_checkpoint.json",
@@ -1904,7 +1905,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             "3" -> now.plusHours(3).toInstant().toEpochMilli()
             "6" -> now.plusHours(6).toInstant().toEpochMilli()
             "24" -> {
-                val nextMidnight = (if (now.hour >= 0) now.plusDays(1) else now)
+                val nextMidnight = (if (now.hour > 0 || now.minute > 0) now.plusDays(1) else now)
                     .withHour(0).withMinute(0).withSecond(0).withNano(0)
                 nextMidnight.toInstant().toEpochMilli()
             }
