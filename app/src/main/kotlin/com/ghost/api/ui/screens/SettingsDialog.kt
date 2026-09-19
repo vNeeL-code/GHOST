@@ -407,29 +407,9 @@ fun SettingsDialog(
                             }
                         }
 
-                        // 5. === Extend Your Mind === (AI Phonebook)
+                        // 5. === Cloud Reasoning & Search Grounding ===
                         item {
-                            val activeCount = com.ghost.api.logic.AiPhonebook.CONTACTS.count { contact ->
-                                if (contact.authType == com.ghost.api.logic.PeerAuthType.GEMINI_DIRECT) {
-                                    geminiKey.isNotBlank() || com.ghost.api.logic.AiPhonebook.isAppInstalled(context, contact)
-                                } else {
-                                    com.ghost.api.logic.AiPhonebook.isAppInstalled(context, contact)
-                                }
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                SettingsSectionHeader(title = "Extend Your Mind (AI Phonebook)")
-                                Text(
-                                    text = "$activeCount / ${com.ghost.api.logic.AiPhonebook.CONTACTS.size} Ready",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (activeCount > 0) Color(0xFF4CAF50) else textDim,
-                                    modifier = Modifier.padding(end = 4.dp)
-                                )
-                            }
+                            SettingsSectionHeader(title = "Cloud Reasoning & Search Grounding")
                         }
 
                         // 5A. Direct Pipe: ✦ Gemini ("Mum")
@@ -576,109 +556,6 @@ fun SettingsDialog(
                                 }
                             }
                         }
-
-                        // 5B. Frontier Peer Apps (Native App Hand-Off)
-                        com.ghost.api.logic.AiPhonebook.CONTACTS
-                            .filter { it.authType == com.ghost.api.logic.PeerAuthType.APP_HANDOFF }
-                            .forEach { contact ->
-                                item {
-                                    val effectivePkg = com.ghost.api.logic.AiPhonebook.resolveEffectivePackage(context, contact)
-                                    val isInstalled = effectivePkg != null
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 4.dp, vertical = 4.dp)
-                                            .background(cardBg, RoundedCornerShape(12.dp))
-                                            .border(
-                                                1.dp,
-                                                if (isInstalled) Color(0x664CAF50) else Color(0x1AFFFFFF),
-                                                RoundedCornerShape(12.dp)
-                                            )
-                                            .padding(12.dp)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = contact.callsign,
-                                                    fontSize = 14.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = Color.White
-                                                )
-                                                Text(
-                                                    text = "${contact.organization} • ${contact.specialty}",
-                                                    fontSize = 11.sp,
-                                                    color = textDim,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                            }
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Box(
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(6.dp))
-                                                    .background(if (isInstalled) Color(0x334CAF50) else Color(0x1AFFFFFF))
-                                                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                                            ) {
-                                                Text(
-                                                    text = if (isInstalled) "● Installed" else "○ Not Installed",
-                                                    fontSize = 11.sp,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    color = if (isInstalled) Color(0xFF4CAF50) else Color(0x88FFFFFF)
-                                                )
-                                            }
-                                        }
-
-                                        Spacer(modifier = Modifier.height(10.dp))
-
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.End,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            if (isInstalled && effectivePkg != null) {
-                                                Button(
-                                                    onClick = {
-                                                        val launchIntent = context.packageManager.getLaunchIntentForPackage(effectivePkg)
-                                                        if (launchIntent != null) {
-                                                            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                                            context.startActivity(launchIntent)
-                                                        }
-                                                    },
-                                                    colors = ButtonDefaults.buttonColors(containerColor = accentColor),
-                                                    shape = RoundedCornerShape(8.dp),
-                                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
-                                                ) {
-                                                    Text("Open App", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                                }
-                                            } else {
-                                                OutlinedButton(
-                                                    onClick = {
-                                                        try {
-                                                            val marketIntent = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=${contact.appPackageName}")).apply {
-                                                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                                            }
-                                                            context.startActivity(marketIntent)
-                                                        } catch (e: Exception) {
-                                                            val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse(contact.loginUrl)).apply {
-                                                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                                            }
-                                                            context.startActivity(webIntent)
-                                                        }
-                                                    },
-                                                    shape = RoundedCornerShape(8.dp),
-                                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
-                                                ) {
-                                                    Text("Get App", color = accentColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
 
                         // 6. === Inference Engine === (Category 6: Last setting, fire and forget)
                         item {
