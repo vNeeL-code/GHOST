@@ -59,6 +59,9 @@ class MCPServer(
         "read_calendar"   to ToolDefinition("read_calendar", "Read upcoming calendar events", mapOf(
             "days" to ParameterSpec("integer", "Days ahead to look", required = false)
         )),
+        "read_diary"      to ToolDefinition("read_diary", "Read recent diary entries and reflections from persistent memory and calendar", mapOf(
+            "days" to ParameterSpec("integer", "Number of days in the past to look back", required = false)
+        )),
         // Screen / Accessibility
         "click"           to ToolDefinition("click", "Click a UI element by visible text", mapOf("target" to ParameterSpec("string", "Text of element to click"))),
         "scroll"          to ToolDefinition("scroll", "Scroll the screen", mapOf("direction" to ParameterSpec("string", "UP, DOWN, LEFT, or RIGHT"))),
@@ -172,6 +175,11 @@ class MCPServer(
                     val days = params["days"]?.toString()?.toIntOrNull() ?: 7
                     val res = systemTools.read_calendar(days)
                     ToolResult(res["result"] == "success", res["events"] ?: "")
+                }
+                "read_diary" -> {
+                    val days = params["days"]?.toString()?.toIntOrNull() ?: 7
+                    val res = systemTools.read_diary(days)
+                    ToolResult(res["result"] == "success", res["diary_entries"] ?: res["message"] ?: "")
                 }
                 // Screen / Accessibility
                 "click" -> {

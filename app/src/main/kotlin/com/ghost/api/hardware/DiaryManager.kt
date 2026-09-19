@@ -21,24 +21,37 @@ class DiaryManager(private val context: Context) {
 
     private fun getDefaultCalendarId(): Long {
         try {
-            val cursor = context.contentResolver.query(
+            // 1. Try Primary Visible Calendar
+            context.contentResolver.query(
                 CalendarContract.Calendars.CONTENT_URI,
                 arrayOf(CalendarContract.Calendars._ID),
                 "${CalendarContract.Calendars.VISIBLE} = 1 AND ${CalendarContract.Calendars.IS_PRIMARY} = 1",
                 null,
                 null
-            ) ?: context.contentResolver.query(
+            )?.use {
+                if (it.moveToFirst()) return it.getLong(0)
+            }
+
+            // 2. Try Any Visible Calendar
+            context.contentResolver.query(
                 CalendarContract.Calendars.CONTENT_URI,
                 arrayOf(CalendarContract.Calendars._ID),
                 "${CalendarContract.Calendars.VISIBLE} = 1",
                 null,
                 null
-            )
-            
-            cursor?.use {
-                if (it.moveToFirst()) {
-                    return it.getLong(0)
-                }
+            )?.use {
+                if (it.moveToFirst()) return it.getLong(0)
+            }
+
+            // 3. Try Any Calendar at all
+            context.contentResolver.query(
+                CalendarContract.Calendars.CONTENT_URI,
+                arrayOf(CalendarContract.Calendars._ID),
+                null,
+                null,
+                null
+            )?.use {
+                if (it.moveToFirst()) return it.getLong(0)
             }
         } catch (e: Exception) {
             Timber.e(e, "Failed to get default calendar ID")

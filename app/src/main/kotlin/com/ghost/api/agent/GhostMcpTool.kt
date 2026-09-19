@@ -85,7 +85,7 @@ class GhostMcpTool(
 
     @Tool(description = "Execute an on-device action or MCP tool by name with parameters (JSON format).")
     fun execute_action(
-        @ToolParam(description = "The exact name of the tool/action to execute (e.g. 'search', 'flashlight', 'set_edge_lights', 'app', 'media', 'alarm', 'timer', 'calendar', 'read_calendar', 'remember', 'recall', 'search_files', 'list_files', 'open_file', 'click', 'scroll', 'navigate', 'consult_peer').") toolName: String,
+        @ToolParam(description = "The exact name of the tool/action to execute (e.g. 'search', 'flashlight', 'set_edge_lights', 'app', 'media', 'alarm', 'timer', 'calendar', 'read_calendar', 'read_diary', 'remember', 'recall', 'search_files', 'list_files', 'open_file', 'click', 'scroll', 'navigate', 'consult_peer').") toolName: String,
         @ToolParam(description = "JSON object string with parameters (e.g. '{\"query\":\"London weather\"}', '{\"state\":\"ON\"}', '{\"name\":\"YouTube\"}').") parameters: String
     ): Map<String, String> {
         return executeMcpAction(toolName, parameters)
@@ -221,6 +221,7 @@ class GhostMcpTool(
             "recall", "search", "web_search", "google", "execute_background_search", "search_files" -> mapOf("query" to plain)
             "fetch_webpage", "fetchwebpage" -> mapOf("url" to plain)
             "list_files" -> mapOf("folder" to plain)
+            "read_calendar", "read_diary" -> mapOf("days" to (plain.toIntOrNull() ?: 7))
             "read_file_text", "open_file", "delete_file" -> mapOf("filePath" to plain)
             "loadskill", "load_skill" -> mapOf("name" to plain)
             "consult_peer", "consultpeer" -> {

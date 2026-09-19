@@ -2070,6 +2070,34 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
             if (diaryResponse != null && diaryResponse.trim().length >= 25 && !diaryResponse.startsWith("Error:")) {
                 val cleanContent = diaryResponse.trim()
+
+                // 1. Persist to SQLite Room Database (Local persistent memory & diary history)
+                try {
+                    memoryManager.writeDiaryEntry(
+                        eventType = "DREAM",
+                        observation = cleanContent,
+                        contextData = label
+                    )
+                    memoryManager.storeSemanticFact(
+                        title = "Diary Entry ($label, $currentDateTime)",
+                        content = cleanContent
+                    )
+                    Timber.i("📔 Diary entry saved to MemoryManager (Room DB)")
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to persist diary to MemoryManager")
+                }
+
+                // 2. Persist to Android Calendar (Google Calendar persistent episodic store)
+                try {
+                    if (::diaryManager.isInitialized) {
+                        diaryManager.storeMemory("DREAM: $label cycle", cleanContent)
+                        Timber.i("📔 Diary entry saved to Calendar via DiaryManager")
+                    }
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to persist diary to Calendar")
+                }
+
+                // 3. Broadcast to UI / listeners
                 val intent = Intent("com.ghost.api.ACTION_DIARY_ENTRY_POSTED").apply {
                     putExtra("content", cleanContent)
                     setPackage(packageName)
