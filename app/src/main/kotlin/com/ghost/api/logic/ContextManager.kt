@@ -22,17 +22,8 @@ class ContextManager(
                 val now = java.time.ZonedDateTime.now()
                 val timeFormatter = java.time.format.DateTimeFormatter.ofPattern("EEE MMM d · h:mm a", java.util.Locale.getDefault())
                 val timeStr = now.format(timeFormatter)
-                val vitals = sensorManager.getNotificationSummary()
-                val ctx = sensorManager.getContextSnapshot()
-                val media = ctx.audio.nowPlaying?.let { np ->
-                    if (np.isPlaying || (np.title.isNotBlank() && np.title != "Unknown")) {
-                        val status = if (np.isPlaying) "Playing" else "Paused"
-                        val artist = if (!np.artist.isNullOrBlank()) " by ${np.artist}" else ""
-                        val app = if (!np.app.isNullOrBlank()) " on ${np.app}" else ""
-                        " | Media: $status \"${np.title}\"$artist$app"
-                    } else null
-                } ?: ""
-                "[$timeStr | $vitals$media]"
+                val sensorData = sensorManager.getContextString()
+                "--- Perceptual Grounding [$timeStr] ---\n$sensorData\n---"
             } catch (e: Exception) {
                 ""
             }

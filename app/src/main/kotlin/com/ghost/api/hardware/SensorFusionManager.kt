@@ -909,7 +909,7 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
         if (ctx.battery.currentNow < 0) sb.append(" (${ctx.battery.currentNow}mA drain)")
 
         sb.append(" | 🌡️ ${Math.round(ctx.battery.temperature)}°C")
-        sb.append(" | 🧠 ${ctx.system.ramUsedPercent}%")
+        sb.append(" | 🧠 RAM: ${ctx.system.ramUsedPercent}%")
         sb.append(" | 💿 ${String.format(java.util.Locale.US, "%.1f", ctx.system.storageFreeGB)}GB free")
         sb.append("\n")
 
