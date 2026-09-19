@@ -157,7 +157,8 @@ class GhostMcpTool(
         val result = runBlocking(Dispatchers.IO) {
             mcpServer.executeTool(cleanTool, paramsMap)
         }
-        val outputStr = if (result.success) result.output else (result.error ?: "Action failed")
+        val rawOutput = if (result.success) result.output else (result.error ?: "Action failed")
+        val outputStr = rawOutput.take(1500)
         com.ghost.api.GemmaService.instance?.recordToolOutput(outputStr.length)
         onToolExecuted?.invoke(cleanTool, cleanParams, outputStr)
 

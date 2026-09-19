@@ -97,6 +97,16 @@ class GhostAgent(
     private var rollingMemory = ""
     private var lastInferenceTime = 0L
 
+    private val sentenceBoundaryRegex = Regex("""(?<!\b(?:Mr|Mrs|Ms|Dr|e\.g|i\.e|vs|etc|approx|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.)(?<!\d)([.!?]+['"”’)]*)(?:\s+|\n+)""")
+
+    private fun isToolInvocation(buffer: CharSequence): Boolean {
+        val s = buffer.trimStart()
+        return s.startsWith("call:") ||
+               s.startsWith("<|tool") ||
+               s.startsWith("execute_action") ||
+               s.startsWith("runMcpTool")
+    }
+
     // Media queues
     data class QueuedImage(val bitmap: Bitmap, val uri: String?)
     private val imageQueue = ConcurrentLinkedQueue<QueuedImage>()
@@ -222,9 +232,12 @@ class GhostAgent(
     ): String? = inferenceMutex.withLock {
         if (!isReady) return "System is still initializing. Please wait."
 
+        // Interrupt any ongoing speech when operator sends a new turn
+        callbacks?.stopSpeaking()
+
         val currentTurn = turnCount.incrementAndGet()
         turnsSinceKvFlush++
-        Timber.i("🧠 GhostAgent: Turn $currentTurn - Starting...")
+        Timber.i("🧠 GhostAgent: Turn $currentTurn - Starting (turnsSinceKvFlush=$turnsSinceKvFlush, historySize=${_conversationHistory.size})...")
 
         // 1. Proactive Memory Compaction
         maybeCompactHistory()
@@ -271,6 +284,8 @@ class GhostAgent(
 
         val responseBuffer = StringBuilder()
         val thoughtBuffer = StringBuilder()
+        val ttsSentenceBuffer = StringBuilder()
+        var spokenAnyStreamingTts = false
         var inThinkBlock = false
 
         try {
@@ -325,13 +340,44 @@ class GhostAgent(
                             isUser = false,
                             isComplete = false
                         )
+
+                        // Streaming sentence-by-sentence TTS for instant speech onset (~1.5s TTFT)
+                        if (!isToolInvocation(responseBuffer)) {
+                            ttsSentenceBuffer.append(cleanToken)
+                            while (true) {
+                                val currentText = ttsSentenceBuffer.toString()
+                                val match = sentenceBoundaryRegex.find(currentText) ?: break
+                                val punctuationEnd = match.range.first + match.groupValues[1].length
+                                val sentence = currentText.substring(0, punctuationEnd).trim()
+                                val remainder = currentText.substring(match.range.last + 1).trimStart()
+
+                                val ttsChunk = cleanForTTS(sentence)
+                                if (ttsChunk.isNotBlank() && ttsChunk.length >= 10) {
+                                    callbacks?.speak(ttsChunk)
+                                    spokenAnyStreamingTts = true
+                                    ttsSentenceBuffer.clear()
+                                    ttsSentenceBuffer.append(remainder)
+                                } else {
+                                    break
+                                }
+                            }
+                        }
                     }
                 },
                 onComplete = {
                     callbacks?.cancelThinking()
+                    if (!isDream && !isToolInvocation(responseBuffer)) {
+                        val leftover = cleanForTTS(ttsSentenceBuffer.toString().trim())
+                        if (leftover.isNotBlank()) {
+                            callbacks?.speak(leftover)
+                            spokenAnyStreamingTts = true
+                            ttsSentenceBuffer.clear()
+                        }
+                    }
                 },
                 onError = { error ->
                     callbacks?.cancelThinking()
+                    ttsSentenceBuffer.clear()
                     Timber.e("GhostAgent: LLM stream error: $error")
                 }
             )
@@ -371,7 +417,11 @@ class GhostAgent(
                     webviewUrl = webviewUrl,
                     webviewAspectRatio = webviewRatio
                 )
-                callbacks?.speak(cleanForTTS(finalOutput))
+                // Speak final output ONLY IF nothing was spoken during streaming
+                // (e.g. tool execution recovery or short responses without terminal punctuation)
+                if (!spokenAnyStreamingTts) {
+                    callbacks?.speak(cleanForTTS(finalOutput))
+                }
                 callbacks?.storeConversationTurn(message, finalOutput, sessionId, turnImageUri)
             }
 
@@ -462,20 +512,25 @@ class GhostAgent(
 
     private suspend fun maybeCompactHistory() {
         val count = _conversationHistory.size
-        if (count >= 6 || turnsSinceKvFlush >= 3) {
-            compactMemory(force = false)
+        val historyChars = synchronized(_conversationHistory) { _conversationHistory.sumOf { it.content.length } }
+        val estTokens = historyChars / 3
+        if (count >= 4 || turnsSinceKvFlush >= 2 || estTokens > 700) {
+            compactMemory(force = true)
         }
     }
 
     private suspend fun compactMemory(force: Boolean = false) {
         try {
             val toCompact = synchronized(_conversationHistory) {
-                if (_conversationHistory.size <= 2 && !force) return
-                val old = _conversationHistory.dropLast(2)
-                val keep = _conversationHistory.takeLast(2)
-                _conversationHistory.clear()
-                _conversationHistory.addAll(keep)
-                old
+                if (_conversationHistory.size > 2) {
+                    val old = _conversationHistory.dropLast(2)
+                    val keep = _conversationHistory.takeLast(2)
+                    _conversationHistory.clear()
+                    _conversationHistory.addAll(keep)
+                    old
+                } else {
+                    emptyList()
+                }
             }
 
             if (toCompact.isNotEmpty()) {
@@ -485,9 +540,11 @@ class GhostAgent(
                     currentMemory = rollingMemory,
                     llmEngine = llmEngine,
                     assistantCallSign = assistantCallSign
-                ).take(250).trim()
-                turnsSinceKvFlush = 0
+                ).take(800).trim()
+            }
 
+            if (toCompact.isNotEmpty() || force) {
+                turnsSinceKvFlush = 0
                 val newPrompt = buildSystemPrompt()
                 val recentMessages = synchronized(_conversationHistory) {
                     _conversationHistory.map {
@@ -496,7 +553,7 @@ class GhostAgent(
                     }
                 }
                 llmEngine.softReset(newPrompt, listOf(mcpTool), recentMessages)
-                Timber.i("GhostAgent: Compacted ${toCompact.size} messages into rolling memory. Active history: ${_conversationHistory.size}")
+                Timber.i("GhostAgent: KV cache flushed & compacted (${toCompact.size} msgs into memory). Active history: ${_conversationHistory.size}")
             }
         } catch (e: Exception) {
             Timber.e(e, "GhostAgent: Memory compaction failed")
@@ -515,7 +572,7 @@ class GhostAgent(
 
     private suspend fun buildSystemPrompt(): String {
         val basePrompt = contextManager.buildSystemPrompt(context, rollingMemory.ifBlank { null }, skillManager)
-        val oldMemory = memoryManager.getCompactedSessionMemory().take(250).trim()
+        val oldMemory = memoryManager.getCompactedSessionMemory().take(600).trim()
         val longTermMemoryPatch = if (oldMemory.isNotBlank()) "## Long-Term Memory\n$oldMemory\n\n" else ""
         return longTermMemoryPatch + basePrompt
     }
