@@ -1162,6 +1162,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         } finally {
             isInferencing = false
             currentInFlightQuery = null
+            responseNotificationManager.cancelThinking()
             if (!fromUi && !isDream) {
                 withContext(Dispatchers.Main) {
                     uiCallback?.onThinkingStateChanged(false)

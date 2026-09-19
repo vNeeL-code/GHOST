@@ -25,8 +25,8 @@ class GemmaNotificationManager(private val context: Context) {
     private val STATUS_CHANNEL_ID = "ghost_status_v1"
     private val CONVO_CHANNEL_ID = "ghost_convo_v5"
     
-    private val STATUS_NOTIF_ID = 1
-    private val RESPONSE_NOTIF_ID = 2
+    private val STATUS_NOTIF_ID = 101
+    private val RESPONSE_NOTIF_ID = 102
 
     init {
         pruneStaleChannels()
@@ -72,9 +72,11 @@ class GemmaNotificationManager(private val context: Context) {
             .setContentTitle("GHOST")
             .setContentText(telemetry)
             .setSmallIcon(android.R.drawable.ic_popup_sync)
-            .setOngoing(true)
+            .setOngoing(false)
+            .setAutoCancel(true)
             .setSilent(true)
             .setOnlyAlertOnce(true)
+            .setTimeoutAfter(20000)
             .build()
         notificationManager.notify(STATUS_NOTIF_ID, notification)
     }

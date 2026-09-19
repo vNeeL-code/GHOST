@@ -112,6 +112,39 @@ class GhostMcpTool(
         return executeMcpAction("calendar", "{\"title\":\"$title\",\"description\":\"$description\",\"minutes\":$minutes}")
     }
 
+    @Tool(description = "Searches device storage and MediaStore for files matching keywords or extensions (e.g. invoice, mp3, pdf)")
+    fun search_files(
+        @ToolParam(description = "Keywords, syllables, or extension to search (e.g. invoice, mp3, pdf)") query: String
+    ): Map<String, String> {
+        Timber.i("GhostMcpTool: search_files invoked for query='$query'")
+        return executeMcpAction("search_files", "{\"query\":\"$query\"}")
+    }
+
+    @Tool(description = "Lists files in a specific folder (downloads, documents, music, pictures, or path)")
+    fun list_files(
+        @ToolParam(description = "Folder name: downloads, documents, music, pictures, or directory path") folder: String = "downloads"
+    ): Map<String, String> {
+        Timber.i("GhostMcpTool: list_files invoked for folder='$folder'")
+        return executeMcpAction("list_files", "{\"folder\":\"$folder\"}")
+    }
+
+    @Tool(description = "Opens a file with the system default viewer app")
+    fun open_file(
+        @ToolParam(description = "Absolute path of the file to open") filePath: String
+    ): Map<String, String> {
+        Timber.i("GhostMcpTool: open_file invoked for filePath='$filePath'")
+        return executeMcpAction("open_file", "{\"filePath\":\"$filePath\"}")
+    }
+
+    @Tool(description = "Moves or renames a file from sourcePath to destinationPath")
+    fun move_file(
+        @ToolParam(description = "Absolute path of existing source file") sourcePath: String,
+        @ToolParam(description = "Absolute destination directory or new file path") destinationPath: String
+    ): Map<String, String> {
+        Timber.i("GhostMcpTool: move_file invoked for '$sourcePath' -> '$destinationPath'")
+        return executeMcpAction("move_file", "{\"sourcePath\":\"$sourcePath\",\"destinationPath\":\"$destinationPath\"}")
+    }
+
     @Tool(description = "Execute an on-device action or MCP tool by name with parameters (JSON format).")
     fun execute_action(
         @ToolParam(description = "The exact name of the tool/action to execute (e.g. 'search', 'flashlight', 'set_edge_lights', 'app', 'media', 'alarm', 'timer', 'calendar', 'read_calendar', 'read_diary', 'remember', 'recall', 'search_files', 'list_files', 'open_file', 'click', 'scroll', 'navigate', 'consult_peer').") toolName: String,
