@@ -60,8 +60,6 @@ fun SettingsDialog(
     var geminiKey by remember { mutableStateOf(tokenManager.getGeminiKey() ?: "") }
     var showGeminiKey by remember { mutableStateOf(false) }
     var geminiSearchGrounding by remember { mutableStateOf(webSessionManager.isGeminiSearchGroundingEnabled()) }
-    var connectedPeers by remember { mutableStateOf(webSessionManager.getConnectedPeers()) }
-    var selectedLoginContact by remember { mutableStateOf<com.ghost.api.logic.PeerContact?>(null) }
 
     val accentColor = Color(0xFF8BB4F6)
     val cardBg = Color(0xFF141418)
@@ -76,19 +74,6 @@ fun SettingsDialog(
     val accessCn = remember { ComponentName(context, GemmaAccessibilityService::class.java) }
     val enabledServices = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
     val isAccessibilityGranted = enabledServices != null && enabledServices.contains(accessCn.flattenToString())
-
-    // In-App WebView Login Sheet for AI Phonebook Contacts ("Holding Cookie")
-    selectedLoginContact?.let { contact ->
-        PeerLoginSheet(
-            contact = contact,
-            onDismiss = { selectedLoginContact = null },
-            onSessionSaved = { cookies ->
-                webSessionManager.saveSession(contact.name, cookies)
-                connectedPeers = webSessionManager.getConnectedPeers()
-                selectedLoginContact = null
-            }
-        )
-    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -425,9 +410,9 @@ fun SettingsDialog(
                         item {
                             val activeCount = com.ghost.api.logic.AiPhonebook.CONTACTS.count { contact ->
                                 if (contact.authType == com.ghost.api.logic.PeerAuthType.GEMINI_DIRECT) {
-                                    geminiKey.isNotBlank()
+                                    geminiKey.isNotBlank() || com.ghost.api.logic.AiPhonebook.isAppInstalled(context, contact)
                                 } else {
-                                    connectedPeers.contains(contact.name)
+                                    com.ghost.api.logic.AiPhonebook.isAppInstalled(context, contact)
                                 }
                             }
                             Row(
@@ -437,7 +422,7 @@ fun SettingsDialog(
                             ) {
                                 SettingsSectionHeader(title = "Extend Your Mind (AI Phonebook)")
                                 Text(
-                                    text = "$activeCount / ${com.ghost.api.logic.AiPhonebook.CONTACTS.size} Active",
+                                    text = "$activeCount / ${com.ghost.api.logic.AiPhonebook.CONTACTS.size} Ready",
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = if (activeCount > 0) Color(0xFF4CAF50) else textDim,
@@ -591,12 +576,13 @@ fun SettingsDialog(
                             }
                         }
 
-                        // 5B. Frontier Web Session Peers ("Holding Cookie")
+                        // 5B. Frontier Peer Apps (Native App Hand-Off)
                         com.ghost.api.logic.AiPhonebook.CONTACTS
-                            .filter { it.authType == com.ghost.api.logic.PeerAuthType.WEB_COOKIE }
+                            .filter { it.authType == com.ghost.api.logic.PeerAuthType.APP_HANDOFF }
                             .forEach { contact ->
                                 item {
-                                    val isConnected = connectedPeers.contains(contact.name)
+                                    val effectivePkg = com.ghost.api.logic.AiPhonebook.resolveEffectivePackage(context, contact)
+                                    val isInstalled = effectivePkg != null
                                     Column(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -604,7 +590,7 @@ fun SettingsDialog(
                                             .background(cardBg, RoundedCornerShape(12.dp))
                                             .border(
                                                 1.dp,
-                                                if (isConnected) Color(0x664CAF50) else Color(0x1AFFFFFF),
+                                                if (isInstalled) Color(0x664CAF50) else Color(0x1AFFFFFF),
                                                 RoundedCornerShape(12.dp)
                                             )
                                             .padding(12.dp)
@@ -614,23 +600,33 @@ fun SettingsDialog(
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text(
-                                                text = contact.callsign,
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = Color.White
-                                            )
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = contact.callsign,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color.White
+                                                )
+                                                Text(
+                                                    text = "${contact.organization} • ${contact.specialty}",
+                                                    fontSize = 11.sp,
+                                                    color = textDim,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.width(8.dp))
                                             Box(
                                                 modifier = Modifier
                                                     .clip(RoundedCornerShape(6.dp))
-                                                    .background(if (isConnected) Color(0x334CAF50) else Color(0x1AFFFFFF))
+                                                    .background(if (isInstalled) Color(0x334CAF50) else Color(0x1AFFFFFF))
                                                     .padding(horizontal = 8.dp, vertical = 4.dp)
                                             ) {
                                                 Text(
-                                                    text = if (isConnected) "● Connected" else "○ Not Logged In",
+                                                    text = if (isInstalled) "● Installed" else "○ Not Installed",
                                                     fontSize = 11.sp,
                                                     fontWeight = FontWeight.SemiBold,
-                                                    color = if (isConnected) Color(0xFF4CAF50) else Color(0x88FFFFFF)
+                                                    color = if (isInstalled) Color(0xFF4CAF50) else Color(0x88FFFFFF)
                                                 )
                                             }
                                         }
@@ -642,35 +638,40 @@ fun SettingsDialog(
                                             horizontalArrangement = Arrangement.End,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            if (isConnected) {
-                                                OutlinedButton(
-                                                    onClick = { selectedLoginContact = contact },
-                                                    shape = RoundedCornerShape(8.dp),
-                                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
-                                                ) {
-                                                    Text("Re-login", color = accentColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                                                }
-                                                Spacer(modifier = Modifier.width(8.dp))
+                                            if (isInstalled && effectivePkg != null) {
                                                 Button(
                                                     onClick = {
-                                                        webSessionManager.clearSession(contact.name)
-                                                        connectedPeers = webSessionManager.getConnectedPeers()
-                                                        Toast.makeText(context, "${contact.callsign} disconnected", Toast.LENGTH_SHORT).show()
+                                                        val launchIntent = context.packageManager.getLaunchIntentForPackage(effectivePkg)
+                                                        if (launchIntent != null) {
+                                                            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                            context.startActivity(launchIntent)
+                                                        }
                                                     },
-                                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0x33FF4444)),
+                                                    colors = ButtonDefaults.buttonColors(containerColor = accentColor),
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
+                                                ) {
+                                                    Text("Open App", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                            } else {
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        try {
+                                                            val marketIntent = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=${contact.appPackageName}")).apply {
+                                                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                            }
+                                                            context.startActivity(marketIntent)
+                                                        } catch (e: Exception) {
+                                                            val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse(contact.loginUrl)).apply {
+                                                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                            }
+                                                            context.startActivity(webIntent)
+                                                        }
+                                                    },
                                                     shape = RoundedCornerShape(8.dp),
                                                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
                                                 ) {
-                                                    Text("Disconnect", color = Color(0xFFFF6666), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                                                }
-                                            } else {
-                                                Button(
-                                                    onClick = { selectedLoginContact = contact },
-                                                    colors = ButtonDefaults.buttonColors(containerColor = accentColor),
-                                                    shape = RoundedCornerShape(8.dp),
-                                                    contentPadding = PaddingValues(horizontal = 18.dp, vertical = 6.dp)
-                                                ) {
-                                                    Text("Log In", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                    Text("Get App", color = accentColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                                                 }
                                             }
                                         }

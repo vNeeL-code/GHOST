@@ -58,6 +58,25 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" />
         </intent>
+        <intent>
+            <action android:name="android.intent.action.SEND" />
+            <data android:mimeType="text/plain" />
+        </intent>
+        <!-- Frontier AI Peer Apps -->
+        <package android:name="com.google.android.apps.bard" />
+        <package android:name="com.deepseek.chat.nov" />
+        <package android:name="com.deepseek.chat" />
+        <package android:name="com.anthropic.claude" />
+        <package android:name="com.twitter.android" />
+        <package android:name="com.x.android" />
+        <package android:name="com.moonshot.kimichat" />
+        <package android:name="com.moonshot.kimi" />
+        <package android:name="ai.qwenlm.chat.android" />
+        <package android:name="com.alibaba.qwen" />
+        <package android:name="ai.perplexity.app.android" />
+        <package android:name="ai.mistral.chat" />
+        <package android:name="com.microsoft.copilot" />
+        <package android:name="com.microsoft.bing" />
     </queries>
     
     <uses-feature android:name="android.hardware.camera" android:required="false" />

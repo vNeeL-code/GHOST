@@ -160,9 +160,9 @@ class NetworkToolSet(private val context: Context) : ToolSet {
         }
     }
 
-    @Tool(description = "Consults a peer AI from Gemma's phonebook (Gemini, DeepSeek). ONLY call this tool when the operator explicitly asks or commands you to consult, ask, ping, or tell another AI (e.g., 'ask Gemini...', 'consult DeepSeek...'). NEVER invoke spontaneously.")
+    @Tool(description = "Consults a peer AI from Gemma's phonebook (Claude, DeepSeek, Gemini, Grok, Perplexity, Mistral, Copilot). Hands off prompt to the official app or direct API. ONLY call this tool when the operator explicitly asks or commands you to consult, ask, ping, or tell another AI (e.g., 'ask Claude...', 'consult DeepSeek...'). NEVER invoke spontaneously.")
     fun consult_peer(
-        @ToolParam(description = "Peer name or callsign: Gemini, DeepSeek") peer: String,
+        @ToolParam(description = "Peer name or callsign: Claude, DeepSeek, Gemini, Grok, Perplexity, Mistral, Copilot") peer: String,
         @ToolParam(description = "The prompt or question to ask the peer") prompt: String
     ): Map<String, String> = runBlocking(Dispatchers.IO) {
         com.ghost.api.GemmaService.instance?.showWorkSignal("PHONEBOOK", 2500)
@@ -171,7 +171,7 @@ class NetworkToolSet(private val context: Context) : ToolSet {
             val contact = com.ghost.api.logic.AiPhonebook.resolvePeer(peer)
                 ?: return@runBlocking mapOf(
                     "result" to "error",
-                    "message" to "Peer '$peer' not found in AI Phonebook. Available: Gemini, DeepSeek."
+                    "message" to "Peer '$peer' not found in AI Phonebook. Available: Claude, DeepSeek, Gemini, Grok, Perplexity, Mistral, Copilot."
                 )
 
             val recentHistory = com.ghost.api.GemmaService.instance?.ghostAgent?.getRecentConversationTurns(3) ?: emptyList()
@@ -194,7 +194,7 @@ class NetworkToolSet(private val context: Context) : ToolSet {
 
     @Tool(description = "Alias for consult_peer. ONLY call when operator explicitly asks to consult another AI.")
     fun consultpeer(
-        @ToolParam(description = "Peer name or callsign: Gemini, DeepSeek") peer: String,
+        @ToolParam(description = "Peer name or callsign: Claude, DeepSeek, Gemini, Grok, Perplexity, Mistral, Copilot") peer: String,
         @ToolParam(description = "The prompt or question to ask the peer") prompt: String
     ): Map<String, String> = consult_peer(peer, prompt)
 

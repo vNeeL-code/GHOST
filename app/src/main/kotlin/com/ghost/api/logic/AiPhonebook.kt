@@ -1,20 +1,18 @@
 package com.ghost.api.logic
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
-import com.google.gson.Gson
-import com.google.gson.JsonObject
+import android.content.Intent
+import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import timber.log.Timber
-import java.io.OutputStreamWriter
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.Locale
 
 enum class PeerAuthType {
     GEMINI_DIRECT,
-    WEB_COOKIE,
-    OPENROUTER_FALLBACK
+    APP_HANDOFF
 }
 
 /**
@@ -26,10 +24,11 @@ data class PeerContact(
     val organization: String,
     val specialty: String,
     val appPackageName: String,
+    val alternatePackageNames: List<String> = emptyList(),
     val aliases: List<String>,
     val loginUrl: String,
-    val cookieDomain: String,
-    val authType: PeerAuthType = PeerAuthType.WEB_COOKIE,
+    val cookieDomain: String = "",
+    val authType: PeerAuthType = PeerAuthType.APP_HANDOFF,
     val openRouterModelId: String = ""
 )
 
@@ -37,8 +36,8 @@ data class PeerContact(
  * AiPhonebook: "Extend Your Mind"
  *
  * Provides on-device Gemma with an address book of frontier peer intelligences.
- * Supports direct pipes (Google Gemini AI Studio), authenticated web sessions ("Holding Cookie"),
- * and developer API fallbacks.
+ * Supports direct pipes (Google Gemini AI Studio API) and Native Android App Hand-Off
+ * (Intent.ACTION_SEND / Package Launch + Clipboard injection) into official frontier apps.
  */
 object AiPhonebook {
 
@@ -59,11 +58,12 @@ object AiPhonebook {
             name = "DeepSeek",
             organization = "DeepSeek",
             specialty = "Mathematical reasoning engine, Deep Think (R1), GRPO architecture, step-by-step logic",
-            appPackageName = "com.deepseek.chat",
+            appPackageName = "com.deepseek.chat.nov",
+            alternatePackageNames = listOf("com.deepseek.chat"),
             aliases = listOf("deepseek", "r1", "v3", "whale"),
-            loginUrl = "https://chat.deepseek.com/sign_in",
+            loginUrl = "https://chat.deepseek.com",
             cookieDomain = "deepseek.com",
-            authType = PeerAuthType.WEB_COOKIE
+            authType = PeerAuthType.APP_HANDOFF
         ),
         PeerContact(
             callsign = "✴️ Claude",
@@ -72,42 +72,45 @@ object AiPhonebook {
             specialty = "Long-context application forge (200K), Artifacts v2, code architecture, nuanced prose",
             appPackageName = "com.anthropic.claude",
             aliases = listOf("claude", "anthropic", "sonnet", "opus"),
-            loginUrl = "https://claude.ai/login",
+            loginUrl = "https://claude.ai",
             cookieDomain = "claude.ai",
-            authType = PeerAuthType.WEB_COOKIE
+            authType = PeerAuthType.APP_HANDOFF
         ),
         PeerContact(
             callsign = "☄️ Grok",
             name = "Grok",
             organization = "xAI",
             specialty = "Real-time social pulse, Aurora photorealistic video, X platform firehose, sharp critique",
-            appPackageName = "com.x.android",
+            appPackageName = "com.twitter.android",
+            alternatePackageNames = listOf("com.x.android"),
             aliases = listOf("grok", "xai", "aurora", "twitter"),
             loginUrl = "https://x.ai",
             cookieDomain = "x.ai",
-            authType = PeerAuthType.WEB_COOKIE
+            authType = PeerAuthType.APP_HANDOFF
         ),
         PeerContact(
             callsign = "🔵 Kimi",
             name = "Kimi",
             organization = "Moonshot AI",
             specialty = "Long-context synthesis (256K), Agent Swarm, non-linear cold-start problem solving",
-            appPackageName = "com.moonshot.kimi",
+            appPackageName = "com.moonshot.kimichat",
+            alternatePackageNames = listOf("com.moonshot.kimi"),
             aliases = listOf("kimi", "moonshot"),
             loginUrl = "https://kimi.moonshot.cn",
             cookieDomain = "moonshot.cn",
-            authType = PeerAuthType.WEB_COOKIE
+            authType = PeerAuthType.APP_HANDOFF
         ),
         PeerContact(
             callsign = "🟣 Qwen",
             name = "Qwen",
             organization = "Alibaba",
             specialty = "Multilingual video processor, GSPO architecture, 100+ languages nuance, 128K context",
-            appPackageName = "com.alibaba.qwen",
+            appPackageName = "ai.qwenlm.chat.android",
+            alternatePackageNames = listOf("com.alibaba.qwen"),
             aliases = listOf("qwen", "alibaba"),
             loginUrl = "https://chat.qwen.ai",
             cookieDomain = "qwen.ai",
-            authType = PeerAuthType.WEB_COOKIE
+            authType = PeerAuthType.APP_HANDOFF
         ),
         PeerContact(
             callsign = "📖 Perplexity",
@@ -118,7 +121,7 @@ object AiPhonebook {
             aliases = listOf("perplexity", "sonar"),
             loginUrl = "https://www.perplexity.ai",
             cookieDomain = "perplexity.ai",
-            authType = PeerAuthType.WEB_COOKIE
+            authType = PeerAuthType.APP_HANDOFF
         ),
         PeerContact(
             callsign = "🟧 Mistral",
@@ -129,7 +132,7 @@ object AiPhonebook {
             aliases = listOf("mistral", "mixtral", "lechat"),
             loginUrl = "https://chat.mistral.ai",
             cookieDomain = "mistral.ai",
-            authType = PeerAuthType.WEB_COOKIE
+            authType = PeerAuthType.APP_HANDOFF
         ),
         PeerContact(
             callsign = "🔶️ Copilot",
@@ -137,10 +140,11 @@ object AiPhonebook {
             organization = "Microsoft",
             specialty = "Edge browser native, direct video transcript OCR, Microsoft ecosystem integration",
             appPackageName = "com.microsoft.copilot",
+            alternatePackageNames = listOf("com.microsoft.bing"),
             aliases = listOf("copilot", "bing", "microsoft"),
             loginUrl = "https://copilot.microsoft.com",
             cookieDomain = "microsoft.com",
-            authType = PeerAuthType.WEB_COOKIE
+            authType = PeerAuthType.APP_HANDOFF
         )
     )
 
@@ -154,6 +158,29 @@ object AiPhonebook {
             contact.aliases.any { alias -> clean == alias || clean.contains(alias) } ||
             contact.callsign.contains(clean, ignoreCase = true)
         } ?: CONTACTS.firstOrNull { it.name.lowercase(Locale.ROOT).startsWith(clean) }
+    }
+
+    fun resolveEffectivePackage(context: Context, contact: PeerContact): String? {
+        val candidates = listOf(contact.appPackageName) + contact.alternatePackageNames
+        return candidates.firstOrNull { pkg ->
+            try {
+                context.packageManager.getLaunchIntentForPackage(pkg) != null
+            } catch (e: Exception) {
+                false
+            }
+        }
+    }
+
+    fun isAppInstalled(context: Context, contact: PeerContact): Boolean {
+        return resolveEffectivePackage(context, contact) != null
+    }
+
+    fun isAppInstalled(context: Context, packageName: String): Boolean {
+        return try {
+            context.packageManager.getLaunchIntentForPackage(packageName) != null
+        } catch (e: Exception) {
+            false
+        }
     }
 
     fun formatMessengerProbe(
@@ -216,12 +243,12 @@ object AiPhonebook {
     ): Pair<Boolean, String> = withContext(Dispatchers.IO) {
         val tokenManager = HFTokenManager(context)
         val sessionManager = WebSessionManager.getInstance(context)
-        val probePayload = formatMessengerProbe(context, contact, userPrompt, recentHistory)
 
-        // 1. Direct Pipe: Google Gemini ("Mum")
+        // 1. Direct Pipe: Google Gemini ("Mum") via AI Studio API
         if (contact.authType == PeerAuthType.GEMINI_DIRECT || contact.name.equals("Gemini", ignoreCase = true)) {
             val geminiKey = tokenManager.getGeminiKey()
             if (!geminiKey.isNullOrBlank()) {
+                val probePayload = formatMessengerProbe(context, contact, userPrompt, recentHistory)
                 val searchGrounding = sessionManager.isGeminiSearchGroundingEnabled()
                 val (ok, reply) = GeminiDirectClient.generateContent(
                     apiKey = geminiKey,
@@ -229,34 +256,58 @@ object AiPhonebook {
                     systemInstruction = "You are ✦ Gemini (Google), consulted by ✧ Gemma, an on-device AI assistant on Android. Adhere strictly to the UCF 3-line response protocol: [✦ Gemini]: on line 1, direct expert answer on line 2, timestamp on line 3.",
                     useSearchGrounding = searchGrounding
                 )
-                return@withContext if (ok) Pair(true, ensureNametag(reply, contact.callsign)) else Pair(false, reply)
-            } else {
-                return@withContext Pair(
-                    false,
-                    "Gemini is not configured. Add your free Google AI Studio key in GHOST Settings -> 'Extend Your Mind' to connect Gemma to Mum."
-                )
-            }
-        }
-
-        // 2. Web Session: DeepSeek ("Holding Cookie")
-        if (contact.name.equals("DeepSeek", ignoreCase = true)) {
-            val cookies = sessionManager.getSession("DeepSeek")
-            if (!cookies.isNullOrBlank()) {
-                val (ok, reply) = DeepSeekWebClient.queryDeepSeek(cookies, probePayload)
                 if (ok) {
                     return@withContext Pair(true, ensureNametag(reply, contact.callsign))
                 } else {
-                    Timber.w("DeepSeek web query status: $reply")
-                    return@withContext Pair(false, ensureNametag(reply, "${contact.callsign} Status"))
+                    Timber.w("Gemini direct query failed ($reply); falling back to app hand-off")
                 }
-            } else {
-                return@withContext Pair(
-                    false,
-                    "DeepSeek is not connected. Open GHOST Settings -> 'Extend Your Mind' and tap 'Log In' to connect your account."
-                )
             }
         }
 
-        Pair(false, "${contact.callsign} is in your AI Phonebook, but direct connection requires web session login in GHOST Settings -> 'Extend Your Mind'.")
+        // 2. Native Android App Hand-Off (Intent.ACTION_SEND + Clipboard Injection)
+        withContext(Dispatchers.Main) {
+            try {
+                // Copy prompt to Android System Clipboard
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                val clip = ClipData.newPlainText("GHOST Prompt for ${contact.name}", userPrompt)
+                clipboard?.setPrimaryClip(clip)
+
+                val pm = context.packageManager
+                val targetPackage = resolveEffectivePackage(context, contact)
+                val launchIntent = if (targetPackage != null) pm.getLaunchIntentForPackage(targetPackage) else null
+
+                if (targetPackage != null && launchIntent != null) {
+                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, userPrompt)
+                        `package` = targetPackage
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+
+                    val targetIntent = if (sendIntent.resolveActivity(pm) != null) {
+                        sendIntent
+                    } else {
+                        launchIntent.apply {
+                            putExtra(Intent.EXTRA_TEXT, userPrompt)
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                    }
+
+                    context.startActivity(targetIntent)
+                    Timber.i("Handed off prompt to ${contact.callsign} ($targetPackage)")
+                    Pair(true, "Prompt copied to clipboard and handed off to ${contact.callsign}.")
+                } else {
+                    val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(contact.loginUrl)).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(browserIntent)
+                    Timber.i("${contact.name} app not installed; opened ${contact.loginUrl} in browser")
+                    Pair(true, "${contact.name} app is not installed. Prompt copied to clipboard and opened ${contact.name} in browser.")
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to hand off to ${contact.callsign}")
+                Pair(false, "Could not open ${contact.callsign}: ${e.message}")
+            }
+        }
     }
 }
