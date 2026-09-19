@@ -48,9 +48,9 @@ class ContextManager(
             } else {
                 "Gemma 4 E2B (Compact Core, 5,120 tokens)"
             }
-            "Vessel: ✧ $deviceName ($marketingName, $chipsetName, ${totalRamGb}GB RAM, ${totalStorageGb}GB storage, Android ${android.os.Build.VERSION.RELEASE})\nConscious Core Runtime: $coreDescription"
+            "Chassis: ✧ $deviceName ($marketingName, $chipsetName, ${totalRamGb}GB RAM, ${totalStorageGb}GB storage, Android ${android.os.Build.VERSION.RELEASE})\nNeuroptics: $coreDescription\nSystems: GHOST Agentic Runtime Harness"
         } catch (e: Exception) {
-            "Vessel: Android Device"
+            "Chassis: Android Device\nSystems: GHOST Agentic Runtime Harness"
         }
     }
 
