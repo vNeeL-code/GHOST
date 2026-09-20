@@ -584,7 +584,12 @@ class GemmaService : Service(), AgentPlatformCallbacks {
      */
     fun reloadWithBackend(backend: String) {
         val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
-        prefs.edit().putString(Constants.PREF_USER_BACKEND, backend).apply()
+        prefs.edit()
+            .putString(Constants.PREF_USER_BACKEND, backend)
+            .putBoolean("force_cpu", false)
+            .putBoolean("is_initializing", false)
+            .putInt("init_crash_count", 0)
+            .apply()
 
         serviceScope.launch {
             if (backend == "OFF") {
@@ -610,7 +615,12 @@ class GemmaService : Service(), AgentPlatformCallbacks {
      */
     fun reloadWithModel(modelCore: String) {
         val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
-        prefs.edit().putString(Constants.PREF_SELECTED_MODEL, modelCore).apply()
+        prefs.edit()
+            .putString(Constants.PREF_SELECTED_MODEL, modelCore)
+            .putBoolean("force_cpu", false)
+            .putBoolean("is_initializing", false)
+            .putInt("init_crash_count", 0)
+            .apply()
 
         serviceScope.launch {
             updateNotification("Loading Gemma $modelCore...")
@@ -664,54 +674,59 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         val crashCount = prefs.getInt("init_crash_count", 0)
         val defaultModel = Constants.resolveHardwareModelTier(this)
         val selectedModel = prefs.getString(Constants.PREF_SELECTED_MODEL, defaultModel) ?: defaultModel
+
+        val protectedModelsDir = File(getExternalFilesDir(null), "models").apply { mkdirs() }
+        val appFilesDir = getExternalFilesDir(null)
+        val downloadDir = android.os.Environment.getExternalStoragePublicDirectory(
+            android.os.Environment.DIRECTORY_DOWNLOADS
+        )
+
+        val searchDirs = listOfNotNull(
+            protectedModelsDir,
+            appFilesDir,
+            downloadDir
+        )
+
         if (prefs.getBoolean("is_initializing", false)) {
-            Timber.e("🚨 WATCHDOG: Previous initialization crashed! (Count: $crashCount, Model: $selectedModel)")
+            Timber.e("🚨 WATCHDOG: Previous native initialization crashed! (Count: $crashCount, Model: $selectedModel)")
             
-            // If heavy E4B crashed during initialization 2 times in a row (e.g. killed by OEM LMK),
-            // automatically fall back to lightweight E2B (Compact) to prevent infinite restart loops.
+            // Check if lightweight E2B actually exists locally before attempting fallback
+            val hasLocalE2B = searchDirs.any { dir ->
+                dir.listFiles { f -> f.name.contains("e2b", ignoreCase = true) && f.length() > 200 * 1024 * 1024L }?.isNotEmpty() == true
+            }
+
             if (selectedModel.equals("E4B", ignoreCase = true) && crashCount >= 2) {
-                Timber.w("🛡️ WATCHDOG: E4B killed by OS memory manager. Automatically falling back to E2B (Compact).")
-                prefs.edit()
-                    .putString(Constants.PREF_SELECTED_MODEL, "E2B")
-                    .putBoolean("force_cpu", false)
-                    .putInt("init_crash_count", 0)
-                    .apply()
-                updateNotification("Memory Safety: Switched to E2B (Compact)")
+                if (hasLocalE2B) {
+                    Timber.w("🛡️ WATCHDOG: Falling back to local E2B (Compact) weights.")
+                    prefs.edit()
+                        .putString(Constants.PREF_SELECTED_MODEL, "E2B")
+                        .putBoolean("force_cpu", false)
+                        .putInt("init_crash_count", 0)
+                        .apply()
+                    updateNotification("Memory Safety: Switched to E2B (Compact)")
+                } else {
+                    Timber.w("🛡️ WATCHDOG: E4B crashed during init, but no local E2B file exists. Forcing CPU to avoid unwanted redownload.")
+                    prefs.edit().putBoolean("force_cpu", true).apply()
+                    updateNotification("Safe Mode: Forcing CPU")
+                }
             } else if (crashCount >= 4) {
                  prefs.edit().putBoolean("force_cpu", true).apply()
                  updateNotification("Safe Mode: Forcing CPU")
             }
+            prefs.edit().putBoolean("is_initializing", false).apply()
         }
 
         // PRE-INIT CLEANUP: Kill old engine to prevent memory leaks (95% RAM fix)
         // We do NOT call performCriticalCleanup() here because it kills sensors and TTS
         unloadEngine()
 
-        // Mark as initializing
-        prefs.edit().putBoolean("is_initializing", true).apply()
-
         try {
             updateNotification("Finding model...")
 
-            val protectedModelsDir = File(getExternalFilesDir(null), "models").apply { mkdirs() }
-            val appFilesDir = getExternalFilesDir(null)
-            val downloadDir = android.os.Environment.getExternalStoragePublicDirectory(
-                android.os.Environment.DIRECTORY_DOWNLOADS
-            )
-
-            // Search order:
-            // 1. App-specific protected models directory (survives app updates, immune to Downloads cleanup)
-            // 2. App-specific files directory root (for legacy app-internal storage)
-            // 3. Downloads directory (for manual user sideloading)
-            val searchDirs = listOfNotNull(
-                protectedModelsDir,
-                appFilesDir,
-                downloadDir
-            )
             val activeModel = prefs.getString(Constants.PREF_SELECTED_MODEL, defaultModel) ?: defaultModel
             val targetVariant = activeModel.lowercase()
 
-            val candidateFile = searchDirs.flatMap { dir ->
+            var candidateFile = searchDirs.flatMap { dir ->
                 dir.listFiles { file ->
                     val name = file.name
                     (name.endsWith(".litertlm", ignoreCase = true) ||
@@ -729,10 +744,35 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 score
             }.firstOrNull()
 
+            // FALLBACK SAFETY: If requested variant is missing on disk, adopt ANY valid local model before downloading
+            if (candidateFile == null) {
+                val fallbackModel = searchDirs.flatMap { dir ->
+                    dir.listFiles { file ->
+                        val name = file.name
+                        (name.endsWith(".litertlm", ignoreCase = true) ||
+                         name.endsWith(".gguf", ignoreCase = true) ||
+                         name.endsWith(".nexa", ignoreCase = true)) &&
+                        file.length() > 200 * 1024 * 1024L
+                    }?.toList() ?: emptyList()
+                }.sortedByDescending { file ->
+                    var score = 0
+                    if (file.parentFile?.canonicalPath == protectedModelsDir.canonicalPath) score += 100
+                    if (file.name.endsWith(".litertlm", ignoreCase = true)) score += 50
+                    score
+                }.firstOrNull()
+
+                if (fallbackModel != null) {
+                    val detectedVariant = if (fallbackModel.name.contains("e4b", ignoreCase = true)) "E4B" else "E2B"
+                    Timber.w("Targeted model $activeModel not found on disk, but found existing ${fallbackModel.name}. Adopting $detectedVariant to prevent redundant download.")
+                    prefs.edit().putString(Constants.PREF_SELECTED_MODEL, detectedVariant).apply()
+                    candidateFile = fallbackModel
+                }
+            }
+
             // AUTO-MIGRATION: If found outside protectedModelsDir, migrate to protected storage!
             val modelFile: File? = if (candidateFile != null && candidateFile.parentFile?.canonicalPath != protectedModelsDir.canonicalPath) {
                 val targetFile = File(protectedModelsDir, candidateFile.name)
-                Timber.i("\uD83D\uDCE6 Auto-migrating model from ${candidateFile.parent} to protected storage: ${targetFile.absolutePath}")
+                Timber.i("📦 Auto-migrating model from ${candidateFile.parent} to protected storage: ${targetFile.absolutePath}")
                 updateNotification("Securing model weights...")
                 val moved = try {
                     candidateFile.renameTo(targetFile)
@@ -862,12 +902,17 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 Runtime.getRuntime().gc()
                 
                 val engineInstance = GemmaEngine(applicationContext)
-                val error = engineInstance.initialize(
-                    modelFile.absolutePath, 
-                    "", 
-                    toolSets = adkTools, 
-                    forcedBackend = forcedBackend
-                )
+                prefs.edit().putBoolean("is_initializing", true).apply()
+                val error = try {
+                    engineInstance.initialize(
+                        modelFile.absolutePath, 
+                        "", 
+                        toolSets = adkTools, 
+                        forcedBackend = forcedBackend
+                    )
+                } finally {
+                    prefs.edit().putBoolean("is_initializing", false).apply()
+                }
                 
                 // Hardening: Final defrag after initialization
                 System.gc()
@@ -883,7 +928,6 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                     }
                     Timber.e("Model load failed: $error")
                     updateNotification("Load Error: ${error.take(80)}$hint")
-                    prefs.edit().putBoolean("is_initializing", false).apply()
                     return@initialize
                 }
                 engineInstance
@@ -1003,18 +1047,13 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             return
         }
 
-        if (!::ghostAgent.isInitialized || !ghostAgent.isReady) {
-            uiCallback?.onMessageAdded("System is still initializing. Please wait a moment and try again.", isUser = false)
-            return
-        }
-
-        // Let UI know we accepted it
+        // Accept query and emit UI bubble immediately
         uiCallback?.onMessageAdded(query, isUser = true)
         uiCallback?.onThinkingStateChanged(true)
 
         serviceScope.launch {
             try {
-                // Pass it through the core pipeline without triggering TTS audio unless explicitly asked
+                // Pass it through the core pipeline (ensureEngineReady will wake up suspended weights seamlessly)
                 val response = processQuery(query, null, false, fromUi = true)
 
                 withContext(Dispatchers.Main) {
@@ -1046,10 +1085,6 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             uiCallback?.onMessageAdded("Inference Engine is set to OFF in Settings. Select AUTO, CPU, or GPU to enable on-device chat.", isUser = false)
             return
         }
-        if (!::ghostAgent.isInitialized || !ghostAgent.isReady) {
-             uiCallback?.onMessageAdded("System is still initializing. Please wait.", isUser = false)
-             return
-        }
 
         val persistentUris = images?.mapIndexed { idx, bmp ->
             imageUris?.getOrNull(idx) ?: try {
@@ -1064,18 +1099,26 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             }
         }
 
-        images?.forEachIndexed { idx, bmp ->
-            ghostAgent.offerImage(bmp, persistentUris?.getOrNull(idx))
-        }
-        audio?.let { ghostAgent.offerAudio(it) }
-
-        // Emit user message with attached image preview
+        // Emit user message with attached image preview immediately
         val primaryUri = persistentUris?.firstOrNull()
         uiCallback?.onMessageAdded(query, isUser = true, image = images?.firstOrNull(), imageUri = primaryUri, images = images ?: emptyList())
         uiCallback?.onThinkingStateChanged(true)
 
         serviceScope.launch {
             try {
+                if (!ensureEngineReady()) {
+                    withContext(Dispatchers.Main) {
+                        uiCallback?.onThinkingStateChanged(false)
+                        uiCallback?.onMessageAdded("System is still initializing. Please wait a moment and try again.", isUser = false)
+                    }
+                    return@launch
+                }
+
+                images?.forEachIndexed { idx, bmp ->
+                    ghostAgent.offerImage(bmp, persistentUris?.getOrNull(idx))
+                }
+                audio?.let { ghostAgent.offerAudio(it) }
+
                 val response = processQuery(query, null, false, fromUi = true)
                 withContext(Dispatchers.Main) {
                     uiCallback?.onThinkingStateChanged(false)
@@ -1112,7 +1155,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         sessionId: String? = null,
         isDream: Boolean = false,
         fromUi: Boolean = false
-    ): String? = engineMutex.withLock {
+    ): String? {
         val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
         val userBackend = prefs.getString(Constants.PREF_USER_BACKEND, "AUTO")
         if (userBackend == "OFF") {
@@ -1120,52 +1163,55 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             if (!isDream) {
                 responseNotificationManager.showResponse("⚠️ $msg")
             }
-            return@withLock msg
+            return msg
         }
 
+        // Seamless wakeup from suspension OUTSIDE of engineMutex to prevent recursive mutex deadlock
         if (!ensureEngineReady()) {
             responseNotificationManager.showResponse("⚠️ System still starting up... try again in a moment")
-            return@withLock "System is still initializing. Please wait a moment and try again."
+            return "System is still initializing. Please wait a moment and try again."
         }
 
-        if (!isDream) {
-            markActivity()
-            if (::ttsManager.isInitialized) {
-                ttsManager.stop()
-            }
-            currentInFlightQuery = userPrompt
-            if (!fromUi) {
-                withContext(Dispatchers.Main) {
-                    uiCallback?.onMessageAdded(userPrompt, isUser = true)
-                    uiCallback?.onThinkingStateChanged(true)
+        return engineMutex.withLock {
+            if (!isDream) {
+                markActivity()
+                if (::ttsManager.isInitialized) {
+                    ttsManager.stop()
+                }
+                currentInFlightQuery = userPrompt
+                if (!fromUi) {
+                    withContext(Dispatchers.Main) {
+                        uiCallback?.onMessageAdded(userPrompt, isUser = true)
+                        uiCallback?.onThinkingStateChanged(true)
+                    }
                 }
             }
-        }
 
-        isInferencing = true
-        try {
-            return kotlinx.coroutines.withTimeoutOrNull(240000) {
-                val response = ghostAgent.processUserMessage(
-                    message = userPrompt,
-                    sessionId = sessionId ?: java.util.UUID.randomUUID().toString(),
-                    isDream = isDream
-                )
-                
-                // Watchdog Fix (Audit 3.0): Reset crash counter on successful inference
-                if (response != null && !response.contains("Error:")) {
-                    getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
-                        .edit().putInt("init_crash_count", 0).apply()
+            isInferencing = true
+            try {
+                return@withLock kotlinx.coroutines.withTimeoutOrNull(240000) {
+                    val response = ghostAgent.processUserMessage(
+                        message = userPrompt,
+                        sessionId = sessionId ?: java.util.UUID.randomUUID().toString(),
+                        isDream = isDream
+                    )
+                    
+                    // Watchdog Fix (Audit 3.0): Reset crash counter on successful inference
+                    if (response != null && !response.contains("Error:")) {
+                        getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+                            .edit().putInt("init_crash_count", 0).apply()
+                    }
+                    
+                    response ?: "Error: Agent returned null."
                 }
-                
-                response ?: "Error: Agent returned null."
-            }
-        } finally {
-            isInferencing = false
-            currentInFlightQuery = null
-            responseNotificationManager.cancelThinking()
-            if (!fromUi && !isDream) {
-                withContext(Dispatchers.Main) {
-                    uiCallback?.onThinkingStateChanged(false)
+            } finally {
+                isInferencing = false
+                currentInFlightQuery = null
+                responseNotificationManager.cancelThinking()
+                if (!fromUi && !isDream) {
+                    withContext(Dispatchers.Main) {
+                        uiCallback?.onThinkingStateChanged(false)
+                    }
                 }
             }
         }
@@ -1176,18 +1222,20 @@ class GemmaService : Service(), AgentPlatformCallbacks {
      * Feeds tokens to [onToken] as they arrive from the engine.
      * Used by ApiServer /v1/chat/completions when stream=true.
      */
-    suspend fun streamQueryTokens(prompt: String, onToken: (String) -> Unit) = engineMutex.withLock {
+    suspend fun streamQueryTokens(prompt: String, onToken: (String) -> Unit) {
         if (!ensureEngineReady()) {
             onToken("System is still initializing.")
-            return@withLock
+            return
         }
-        markActivity()
-        // Register a temporary token observer, then run inference
-        ghostAgent.streamUserMessageTokens(
-            message = prompt,
-            sessionId = java.util.UUID.randomUUID().toString(),
-            onToken = onToken
-        )
+        engineMutex.withLock {
+            markActivity()
+            // Register a temporary token observer, then run inference
+            ghostAgent.streamUserMessageTokens(
+                message = prompt,
+                sessionId = java.util.UUID.randomUUID().toString(),
+                onToken = onToken
+            )
+        }
     }
 
 
@@ -1438,6 +1486,13 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             if (isInferencing || isSpeaking()) {
                 Timber.w("Skipping engine suspension: currently active (inferencing=$isInferencing, speaking=${isSpeaking()})")
                 return@launch
+            }
+            if (::ghostAgent.isInitialized) {
+                try {
+                    ghostAgent.checkpoint()
+                } catch (e: Exception) {
+                    Timber.w(e, "Failed to checkpoint GhostAgent before suspend")
+                }
             }
             unloadEngine()
             updateNotification("✧ Gemma: Suspended (Freed RAM for other apps)")

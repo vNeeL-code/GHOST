@@ -123,30 +123,28 @@ class GhostAgent(
         }
     }
 
-    fun initialize() {
-        agentScope.launch {
-            try {
-                Timber.i("GhostAgent: Initializing...")
-                restoreCheckpoint()
+    suspend fun initialize() {
+        try {
+            Timber.i("GhostAgent: Initializing...")
+            restoreCheckpoint()
 
-                val initialPrompt = buildSystemPrompt()
-                val recentMessages = synchronized(_conversationHistory) {
-                    _conversationHistory.takeLast(2).map {
-                        when (it.role) {
-                            "user" -> com.google.ai.edge.litertlm.Message.user(it.content)
-                            "assistant" -> com.google.ai.edge.litertlm.Message.model(it.content)
-                            else -> com.google.ai.edge.litertlm.Message.system(it.content)
-                        }
+            val initialPrompt = buildSystemPrompt()
+            val recentMessages = synchronized(_conversationHistory) {
+                _conversationHistory.takeLast(2).map {
+                    when (it.role) {
+                        "user" -> com.google.ai.edge.litertlm.Message.user(it.content)
+                        "assistant" -> com.google.ai.edge.litertlm.Message.model(it.content)
+                        else -> com.google.ai.edge.litertlm.Message.system(it.content)
                     }
                 }
-
-                llmEngine.softReset(initialPrompt, listOf(mcpTool), recentMessages)
-                isReady = true
-                Timber.i("GhostAgent: Ready (Battery: ${getBatteryLevel()}%)")
-            } catch (e: Exception) {
-                Timber.e(e, "GhostAgent: Failed to initialize")
-                isReady = true // allow retry
             }
+
+            llmEngine.softReset(initialPrompt, listOf(mcpTool), recentMessages)
+            isReady = true
+            Timber.i("GhostAgent: Ready (Battery: ${getBatteryLevel()}%)")
+        } catch (e: Exception) {
+            Timber.e(e, "GhostAgent: Failed to initialize")
+            isReady = true // allow retry
         }
     }
 

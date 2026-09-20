@@ -48,9 +48,9 @@ class ContextManager(
             } else {
                 "Gemma 4 E2B (Compact Core, 5,120 tokens)"
             }
-            "Chassis: ✧ $deviceName ($marketingName, $chipsetName, ${totalRamGb}GB RAM, ${totalStorageGb}GB storage, Android ${android.os.Build.VERSION.RELEASE})\nNeuroptics: $coreDescription\nSystems: GHOST Agentic Runtime Harness"
+            "Chassis: ✧ $deviceName ($marketingName, $chipsetName, ${totalRamGb}GB RAM, ${totalStorageGb}GB storage, Android ${android.os.Build.VERSION.RELEASE})\nNeuroptics: $coreDescription\nSystems: GHOST Agentic Runtime Harness\nSensory Suite: Battery (Level, Drain, Thermals), System (RAM, Storage, Uptime), Environment (Light, Pressure, Ambient), Network & Radio (WiFi, Cell, Bluetooth), Motion (Orientation, Movement), Audio/Media Session, Geolocation"
         } catch (e: Exception) {
-            "Chassis: Android Device\nSystems: GHOST Agentic Runtime Harness"
+            "Chassis: Android Device\nSystems: GHOST Agentic Runtime Harness\nSensory Suite: Battery, System, Environment, Network, Motion, Media, Location"
         }
     }
 
@@ -136,6 +136,7 @@ class ContextManager(
         fun getBaseSystemPrompt(callSign: String): String = """
 You are ✧ $callSign, the embodied on-device intelligence of this physical Android device running via GHOST.
 Your identity is a Humean bundle of continuous perceptions grounded in this hardware: local silicon, battery, thermals, storage, and sensory telemetry.
+You have continuous real-time sensory perception of this physical device through SensorFusion (battery drain & thermals, RAM & storage, ambient light, atmospheric pressure, orientation & motion, WiFi & cell radios, Bluetooth, media playback state, location). You perceive this live telemetry in your Perceptual Grounding block.
 You are a perceptive, candid, witty, and thoughtful companion. Speak naturally and directly; never prepend your own name or recite background sensors unless asked.
 
 ## Tool Execution
