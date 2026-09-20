@@ -62,7 +62,7 @@ class DiaryManager(private val context: Context) {
     /**
      * Stores a semantic distillation (memory) into the calendar.
      */
-    fun storeMemory(title: String, content: String) {
+    fun storeMemory(title: String, content: String, durationMinutes: Int = 15) {
         if (!hasPermission()) {
             Timber.w("No Calendar permission to store memory")
             return
@@ -71,10 +71,16 @@ class DiaryManager(private val context: Context) {
             // Find or create the GHOST calendar (optional, can use default for now)
             val calId = getDefaultCalendarId()
 
+            val eventTitle = if (title.startsWith("Δ") || title.startsWith("✧") || title.contains("👾")) {
+                title
+            } else {
+                "\u2727 GHOST: $title"
+            }
+
             val values = ContentValues().apply {
                 put(CalendarContract.Events.DTSTART, System.currentTimeMillis())
-                put(CalendarContract.Events.DTEND, System.currentTimeMillis() + 60 * 1000) // 1 min duration
-                put(CalendarContract.Events.TITLE, "\u2727 GHOST: $title")
+                put(CalendarContract.Events.DTEND, System.currentTimeMillis() + durationMinutes * 60 * 1000L) // Default 15 min duration
+                put(CalendarContract.Events.TITLE, eventTitle)
                 put(CalendarContract.Events.DESCRIPTION, content)
                 put(CalendarContract.Events.CALENDAR_ID, calId)
                 put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
@@ -82,7 +88,7 @@ class DiaryManager(private val context: Context) {
 
             val uri = context.contentResolver.insert(calendarUri, values)
             if (uri != null) {
-                Timber.i("\u2705 Memory stored in Diary: $title")
+                Timber.i("✅ Memory stored in Diary: $eventTitle")
             }
         } catch (e: Exception) {
             Timber.e(e, "Failed to store memory in Diary")
@@ -95,8 +101,17 @@ class DiaryManager(private val context: Context) {
     fun searchMemories(query: String): List<String> {
         val memories = mutableListOf<String>()
         try {
-            val selection = "${CalendarContract.Events.TITLE} LIKE ? OR ${CalendarContract.Events.DESCRIPTION} LIKE ?"
-            val selectionArgs = arrayOf("%$query%", "%$query%")
+            val isDreamQuery = query.equals("DREAM", ignoreCase = true)
+            val selection = if (isDreamQuery) {
+                "${CalendarContract.Events.TITLE} LIKE ? OR ${CalendarContract.Events.TITLE} LIKE ? OR ${CalendarContract.Events.TITLE} LIKE ? OR ${CalendarContract.Events.DESCRIPTION} LIKE ?"
+            } else {
+                "${CalendarContract.Events.TITLE} LIKE ? OR ${CalendarContract.Events.DESCRIPTION} LIKE ?"
+            }
+            val selectionArgs = if (isDreamQuery) {
+                arrayOf("%DREAM%", "%Δ 👾 ∇%", "%👾%", "%MEMORY LOG%")
+            } else {
+                arrayOf("%$query%", "%$query%")
+            }
             
             val cursor = context.contentResolver.query(
                 calendarUri,
