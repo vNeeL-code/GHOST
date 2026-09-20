@@ -967,6 +967,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             // Success: Clear watchdog
             prefs.edit()
                 .putBoolean("is_initializing", false)
+                .putBoolean("force_cpu", false)
                 .putInt("init_crash_count", 0)
                 .apply()
 
@@ -1060,6 +1061,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                     uiCallback?.onThinkingStateChanged(false)
                     if (response == null) {
                         uiCallback?.onMessageAdded("Error: Request timed out or returned null.", isUser = false)
+                    } else if (response.startsWith("Error:") || response.startsWith("I stumbled")) {
+                        uiCallback?.onMessageAdded(response, isUser = false)
                     }
                 }
             } catch (e: Exception) {
@@ -1067,6 +1070,10 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 withContext(Dispatchers.Main) {
                     uiCallback?.onThinkingStateChanged(false)
                     uiCallback?.onMessageAdded("Error: ${e.message}", isUser = false)
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    uiCallback?.onThinkingStateChanged(false)
                 }
             }
         }
@@ -1124,6 +1131,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                     uiCallback?.onThinkingStateChanged(false)
                     if (response == null) {
                         uiCallback?.onMessageAdded("Error: Request timed out or returned null.", isUser = false)
+                    } else if (response.startsWith("Error:") || response.startsWith("I stumbled")) {
+                        uiCallback?.onMessageAdded(response, isUser = false)
                     }
                 }
             } catch (e: Exception) {
@@ -1131,6 +1140,10 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 withContext(Dispatchers.Main) {
                     uiCallback?.onThinkingStateChanged(false)
                     uiCallback?.onMessageAdded("Error: ${e.message}", isUser = false)
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    uiCallback?.onThinkingStateChanged(false)
                 }
             }
         }
@@ -1208,7 +1221,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 isInferencing = false
                 currentInFlightQuery = null
                 responseNotificationManager.cancelThinking()
-                if (!fromUi && !isDream) {
+                if (!isDream) {
                     withContext(Dispatchers.Main) {
                         uiCallback?.onThinkingStateChanged(false)
                     }
@@ -1700,7 +1713,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     //
 
     override fun showThinking() {
-        responseNotificationManager.showThinking()
+        if (uiCallback == null) {
+            responseNotificationManager.showThinking()
+        }
         showWorkSignal("THINKING")
     }
 

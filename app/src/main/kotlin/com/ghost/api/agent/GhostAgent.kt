@@ -123,21 +123,40 @@ class GhostAgent(
         }
     }
 
+    private fun getSanitizedRecentMessages(maxTurns: Int = 2): List<com.google.ai.edge.litertlm.Message> {
+        return synchronized(_conversationHistory) {
+            val list = mutableListOf<com.google.ai.edge.litertlm.Message>()
+            val candidates = _conversationHistory.takeLast(maxTurns * 2)
+            var expectedRole = "user"
+            for (msg in candidates) {
+                val clean = msg.content.trim()
+                if (clean.isBlank()) continue
+                val role = if (msg.role == "user") "user" else if (msg.role == "assistant") "model" else continue
+                if (role == expectedRole) {
+                    if (role == "user") {
+                        list.add(com.google.ai.edge.litertlm.Message.user(clean))
+                        expectedRole = "model"
+                    } else {
+                        list.add(com.google.ai.edge.litertlm.Message.model(clean))
+                        expectedRole = "user"
+                    }
+                }
+            }
+            // Must end on model so the conversation engine is ready for the incoming user prompt
+            while (list.isNotEmpty() && expectedRole == "model") {
+                list.removeAt(list.size - 1)
+            }
+            list
+        }
+    }
+
     suspend fun initialize() {
         try {
             Timber.i("GhostAgent: Initializing...")
             restoreCheckpoint()
 
             val initialPrompt = buildSystemPrompt()
-            val recentMessages = synchronized(_conversationHistory) {
-                _conversationHistory.takeLast(2).map {
-                    when (it.role) {
-                        "user" -> com.google.ai.edge.litertlm.Message.user(it.content)
-                        "assistant" -> com.google.ai.edge.litertlm.Message.model(it.content)
-                        else -> com.google.ai.edge.litertlm.Message.system(it.content)
-                    }
-                }
-            }
+            val recentMessages = getSanitizedRecentMessages(2)
 
             llmEngine.softReset(initialPrompt, listOf(mcpTool), recentMessages)
             isReady = true
@@ -159,15 +178,7 @@ class GhostAgent(
         inferenceMutex.withLock {
             turnsSinceKvFlush = 0
             val prompt = buildSystemPrompt()
-            val recentMessages = synchronized(_conversationHistory) {
-                _conversationHistory.takeLast(2).map {
-                    when (it.role) {
-                        "user" -> com.google.ai.edge.litertlm.Message.user(it.content)
-                        "assistant" -> com.google.ai.edge.litertlm.Message.model(it.content)
-                        else -> com.google.ai.edge.litertlm.Message.system(it.content)
-                    }
-                }
-            }
+            val recentMessages = getSanitizedRecentMessages(2)
             llmEngine.softReset(prompt, listOf(mcpTool), recentMessages)
             Timber.i("GhostAgent: Soft reset complete with ${recentMessages.size} history msgs preserved")
         }
@@ -285,6 +296,7 @@ class GhostAgent(
         val ttsSentenceBuffer = StringBuilder()
         var spokenAnyStreamingTts = false
         var inThinkBlock = false
+        var streamError: String? = null
 
         try {
             llmEngine.streamResponse(
@@ -330,6 +342,9 @@ class GhostAgent(
                         callbacks?.onEmotionSignal(emojiMatch.groupValues[1])
                     }
 
+                    if (responseBuffer.isEmpty()) {
+                        callbacks?.cancelThinking()
+                    }
                     responseBuffer.append(cleanToken)
 
                     if (!isDream) {
@@ -376,9 +391,20 @@ class GhostAgent(
                 onError = { error ->
                     callbacks?.cancelThinking()
                     ttsSentenceBuffer.clear()
+                    streamError = error
                     Timber.e("GhostAgent: LLM stream error: $error")
                 }
             )
+
+            if (streamError != null && responseBuffer.isEmpty()) {
+                val errorMsg = "I stumbled while executing that: $streamError"
+                callbacks?.showResponse(errorMsg)
+                if (!isDream) {
+                    _conversationHistory.add(AgentMessage(role = "assistant", content = errorMsg))
+                    callbacks?.onMessageAdded(errorMsg, isUser = false, isComplete = true)
+                }
+                return errorMsg
+            }
 
             var rawResponse = responseBuffer.toString().trim()
 
@@ -432,7 +458,13 @@ class GhostAgent(
             Timber.e(e, "GhostAgent: Inference turn failed")
             val errorMsg = "I stumbled while executing that: ${e.message}"
             callbacks?.showResponse(errorMsg)
+            if (!isDream) {
+                _conversationHistory.add(AgentMessage(role = "assistant", content = errorMsg))
+                callbacks?.onMessageAdded(errorMsg, isUser = false, isComplete = true)
+            }
             return errorMsg
+        } finally {
+            callbacks?.cancelThinking()
         }
     }
 
@@ -551,12 +583,7 @@ class GhostAgent(
             if (toCompact.isNotEmpty() || force) {
                 turnsSinceKvFlush = 0
                 val newPrompt = buildSystemPrompt()
-                val recentMessages = synchronized(_conversationHistory) {
-                    _conversationHistory.map {
-                        if (it.role == "user") com.google.ai.edge.litertlm.Message.user(it.content)
-                        else com.google.ai.edge.litertlm.Message.model(it.content)
-                    }
-                }
+                val recentMessages = getSanitizedRecentMessages(2)
                 llmEngine.softReset(newPrompt, listOf(mcpTool), recentMessages)
                 Timber.i("GhostAgent: KV cache flushed & compacted (${toCompact.size} msgs into memory). Active history: ${_conversationHistory.size}")
             }

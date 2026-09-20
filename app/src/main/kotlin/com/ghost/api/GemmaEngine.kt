@@ -206,16 +206,42 @@ class GemmaEngine(private val context: Context) : LlmBackend {
         val deferred = CompletableDeferred<Unit>()
         
         // Use a lock ONLY to start the stream and verify state
-        sessionMutex.withLock {
+        var startError: String? = null
+        val activeConv = sessionMutex.withLock {
             if (isBusy.getAndSet(true)) {
-                onError("Engine is currently busy with another inference.")
-                return@withLock
+                startError = "Engine is currently busy with another inference."
+                null
+            } else {
+                if (conversation == null) {
+                    val eng = engine
+                    if (eng != null) {
+                        try {
+                            val config = ConversationConfig(
+                                samplerConfig = samplerConfig,
+                                systemInstruction = if (lastSystemPrompt.isNotBlank()) Contents.of(lastSystemPrompt) else null,
+                                tools = toolSets.map { tool(it) }
+                            )
+                            conversation = eng.createConversation(config)
+                            Timber.i("GemmaEngine: Auto-recovered conversation from null state.")
+                        } catch (e: Exception) {
+                            Timber.e(e, "GemmaEngine: Failed to auto-recover conversation")
+                        }
+                    }
+                }
+                val conv = conversation
+                if (conv == null) {
+                    isBusy.set(false)
+                    startError = "Engine not initialized"
+                    null
+                } else {
+                    conv
+                }
             }
-            if (conversation == null) {
-                isBusy.set(false)
-                onError("Engine not initialized")
-                return@withLock
-            }
+        }
+
+        if (startError != null || activeConv == null) {
+            onError(startError ?: "Engine not initialized")
+            return
         }
 
         try {
@@ -237,7 +263,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
 
             var fullResponse = ""
             var isLoopDetected = false
-            conversation?.sendMessageAsync(
+            activeConv.sendMessageAsync(
                 Contents.of(contents),
                 object : MessageCallback {
                     override fun onMessage(message: Message) {
@@ -256,11 +282,23 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                             Timber.w("🚨 Live runaway token loop detected in stream ('${loopMatch.value.take(60)}...'). Terminating generation early.")
                             isLoopDetected = true
                             try {
-                                conversation?.close()
+                                activeConv.close()
+                                val eng = engine
+                                if (eng != null) {
+                                    val resetConfig = ConversationConfig(
+                                        samplerConfig = samplerConfig,
+                                        systemInstruction = if (lastSystemPrompt.isNotBlank()) Contents.of(lastSystemPrompt) else null,
+                                        tools = toolSets.map { tool(it) }
+                                    )
+                                    conversation = eng.createConversation(resetConfig)
+                                    Timber.i("Recreated clean conversation after loop detection.")
+                                } else {
+                                    conversation = null
+                                }
                             } catch (e: Exception) {
-                                Timber.w(e, "Error closing conversation on loop detect")
+                                Timber.w(e, "Error recreating conversation on loop detect")
+                                conversation = null
                             }
-                            conversation = null
                             val truncated = truncateRepetition(fullResponse)
                             onComplete(truncated)
                             isBusy.set(false)
@@ -313,16 +351,37 @@ class GemmaEngine(private val context: Context) : LlmBackend {
             val eng = engine ?: return@withLock
             try {
                 conversation?.close()
-                val config = ConversationConfig(
-                    samplerConfig = samplerConfig,
-                    systemInstruction = if (systemPrompt.isNotBlank()) Contents.of(systemPrompt) else null,
-                    tools = toolSets.map { tool(it) },
-                    initialMessages = initialMessages ?: emptyList()
-                )
-                conversation = eng.createConversation(config)
-                Timber.i("Soft reset complete.")
+                conversation = null
+
+                var newConv: Conversation? = null
+                if (!initialMessages.isNullOrEmpty()) {
+                    try {
+                        val config = ConversationConfig(
+                            samplerConfig = samplerConfig,
+                            systemInstruction = if (systemPrompt.isNotBlank()) Contents.of(systemPrompt) else null,
+                            tools = toolSets.map { tool(it) },
+                            initialMessages = initialMessages
+                        )
+                        newConv = eng.createConversation(config)
+                        Timber.i("Soft reset with ${initialMessages.size} initial messages succeeded.")
+                    } catch (e: Exception) {
+                        Timber.w(e, "Soft reset with initial messages failed; falling back to clean conversation.")
+                    }
+                }
+
+                if (newConv == null) {
+                    val fallbackConfig = ConversationConfig(
+                        samplerConfig = samplerConfig,
+                        systemInstruction = if (systemPrompt.isNotBlank()) Contents.of(systemPrompt) else null,
+                        tools = toolSets.map { tool(it) }
+                    )
+                    newConv = eng.createConversation(fallbackConfig)
+                    Timber.i("Clean conversation soft reset succeeded.")
+                }
+
+                conversation = newConv
             } catch (e: Exception) {
-                Timber.e(e, "Soft reset failed")
+                Timber.e(e, "Soft reset completely failed")
             }
         }
     }
