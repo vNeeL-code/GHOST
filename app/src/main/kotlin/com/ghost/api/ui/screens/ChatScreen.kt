@@ -4,15 +4,11 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.widget.Toast
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.rotate
 import com.ghost.api.ui.GhostWorkIndicatorOverlay
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -248,45 +244,23 @@ fun ChatScreen(
             }
         }
 
-        // Loading Indicator — Rotating & Breathing Destiny Ghost Star + Monospace Flavor Text
+        // Loading Indicator — Exact Destiny Ghost Cyber Capsule View
         if (isThinking) {
-            var activeFlavor by remember {
-                mutableStateOf(
-                    if (thinkingText.isNotBlank() && !thinkingText.startsWith("Thinking...")) {
-                        thinkingText
-                    } else {
-                        GhostWorkIndicatorOverlay.FlavorTexts.pick("THINK")
-                    }
-                )
-            }
-
-            LaunchedEffect(isThinking, thinkingText) {
-                if (thinkingText.isNotBlank() && !thinkingText.startsWith("Thinking...")) {
-                    activeFlavor = thinkingText
-                } else {
-                    while (isThinking) {
-                        activeFlavor = GhostWorkIndicatorOverlay.FlavorTexts.pick("THINK")
-                        kotlinx.coroutines.delay(2200)
-                    }
-                }
-            }
-
-            Row(
+            Box(
                 modifier = Modifier
-                    .padding(start = 24.dp, bottom = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(start = 20.dp, bottom = 8.dp)
             ) {
-                GhostSparkleSpinner(
-                    modifier = Modifier.size(16.dp),
-                    color = Color(0xFF8BB4F6)
-                )
-                Text(
-                    text = activeFlavor,
-                    color = Color(0xFF8BB4F6),
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp,
-                    letterSpacing = 0.05.sp,
-                    modifier = Modifier.padding(start = 10.dp)
+                AndroidView(
+                    factory = { ctx ->
+                        GhostWorkIndicatorOverlay(ctx, null).apply {
+                            show(tag = "THINKING")
+                        }
+                    },
+                    update = { view ->
+                        if (thinkingText.isNotBlank() && !thinkingText.startsWith("Thinking...")) {
+                            view.setFlavorText(thinkingText)
+                        }
+                    }
                 )
             }
         }
@@ -312,77 +286,6 @@ fun ChatScreen(
             onPickImage = onPickImage,
             onClearImage = onClearImage
         )
-    }
-}
-
-@Composable
-fun GhostSparkleSpinner(
-    modifier: Modifier = Modifier.size(16.dp),
-    color: Color = Color(0xFF8BB4F6)
-) {
-    val infiniteTransition = rememberInfiniteTransition(label = "ghostSparkle")
-    val rotation by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(3600, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "rotation"
-    )
-    val pulse by infiniteTransition.animateFloat(
-        initialValue = 0.82f,
-        targetValue = 1.18f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(850, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulse"
-    )
-
-    Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        val cx = w / 2f
-        val cy = h / 2f
-        val radius = (minOf(w, h) / 2f) * pulse
-
-        rotate(rotation, pivot = Offset(cx, cy)) {
-            // Outer subtle star glow aura
-            val glowPath = Path().apply {
-                moveTo(cx, cy - radius)
-                lineTo(cx + radius * 0.28f, cy - radius * 0.28f)
-                lineTo(cx + radius, cy)
-                lineTo(cx + radius * 0.28f, cy + radius * 0.28f)
-                lineTo(cx, cy + radius)
-                lineTo(cx - radius * 0.28f, cy + radius * 0.28f)
-                lineTo(cx - radius, cy)
-                lineTo(cx - radius * 0.28f, cy - radius * 0.28f)
-                close()
-            }
-            drawPath(path = glowPath, color = color.copy(alpha = 0.35f))
-
-            // Inner faceted star
-            val innerPath = Path().apply {
-                moveTo(cx, cy - radius * 0.85f)
-                lineTo(cx + radius * 0.22f, cy - radius * 0.22f)
-                lineTo(cx + radius * 0.85f, cy)
-                lineTo(cx + radius * 0.22f, cy + radius * 0.22f)
-                lineTo(cx, cy + radius * 0.85f)
-                lineTo(cx - radius * 0.22f, cy + radius * 0.22f)
-                lineTo(cx - radius * 0.85f, cy)
-                lineTo(cx - radius * 0.22f, cy - radius * 0.22f)
-                close()
-            }
-            drawPath(path = innerPath, color = color)
-
-            // Center Ghost Core / Eye
-            drawCircle(
-                color = Color.White,
-                radius = radius * 0.22f,
-                center = Offset(cx, cy)
-            )
-        }
     }
 }
 
@@ -1002,7 +905,7 @@ private fun buildMarkdownAnnotatedString(
                 match.value == "✧" || match.value == "✦" -> {
                     pushStyle(
                         SpanStyle(
-                            color = Color(0xFF8BB4F6),
+                            color = defaultColor,
                             fontWeight = FontWeight.Bold,
                             fontSize = 15.sp
                         )

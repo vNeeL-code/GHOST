@@ -72,6 +72,7 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
             gemmaService = svc
             svc.uiCallback = this@MainActivity
             isBound = true
+            svc.overlayManager.setAppInForeground(true)
 
             val downloadState = svc.modelDownloader.downloadStatus.value
             if (downloadState is ModelDownloader.DownloadState.Downloading) {
@@ -223,9 +224,15 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
     override fun onResume() {
         super.onResume()
         completeRitual()
+        gemmaService?.overlayManager?.setAppInForeground(true)
         if (isBound && gemmaService?.isSystemReady?.value == true) {
             loadHistoricalChat()
         }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        gemmaService?.overlayManager?.setAppInForeground(false)
     }
 
     override fun onDownloadProgress(progressText: String?) {

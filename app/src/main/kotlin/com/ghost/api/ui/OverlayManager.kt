@@ -251,11 +251,29 @@ class OverlayManager(private val context: Context) {
         }
     }
 
+    @Volatile
+    var isAppInForeground: Boolean = false
+        private set
+
+    fun setAppInForeground(inForeground: Boolean) {
+        isAppInForeground = inForeground
+        if (inForeground) {
+            // Dismiss corner indicator immediately so it doesn't double-render over foreground chat
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                ghostWorkIndicator?.hide(force = true)
+            }
+        }
+    }
+
     /**
      * Shows the Destiny Ghost HUD work signal in the screen corner during background operations.
      */
     fun showWorkSignal(tag: String = "WORKING", durationMs: Long = 0) {
         if (!canDrawOverlay()) return
+        if (isAppInForeground) {
+            // When in foreground chat screen, the indicator is rendered directly inside ChatScreen down there
+            return
+        }
 
         if (durationMs == 0L) {
             activeWorkCounter.incrementAndGet()

@@ -29,7 +29,7 @@ import kotlin.math.sin
 @SuppressLint("ViewConstructor")
 class GhostWorkIndicatorOverlay(
     context: Context,
-    private val windowManager: WindowManager
+    private val windowManager: WindowManager? = null
 ) : View(context), Choreographer.FrameCallback {
 
     private val density = context.resources.displayMetrics.density
@@ -272,25 +272,67 @@ class GhostWorkIndicatorOverlay(
         setMeasuredDimension(w, h)
     }
 
+    private var currentTag = "WORKING"
+
+    private val cycleFlavorRunnable = object : Runnable {
+        override fun run() {
+            if (visibility == View.VISIBLE && currentAlpha > 0.3f) {
+                currentFlavorText = FlavorTexts.pick(currentTag)
+                requestLayout()
+                invalidate()
+                postDelayed(this, 2400L)
+            }
+        }
+    }
+
+    fun setFlavorText(text: String) {
+        currentFlavorText = if (text.startsWith(">")) text else "> $text"
+        requestLayout()
+        invalidate()
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        if (windowManager == null) {
+            isAttachedToWindow = true
+            if (visibility == View.VISIBLE && currentAlpha > 0f) {
+                startAnimationLoop()
+            }
+        }
+    }
+
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        if (windowManager == null) {
+            isAttachedToWindow = false
+            stopAnimationLoop()
+            removeCallbacks(autoHideRunnable)
+            removeCallbacks(cycleFlavorRunnable)
+        }
+    }
+
     fun show(tag: String = "WORKING", durationMs: Long = 0) {
         showTimestamp = System.currentTimeMillis()
+        currentTag = tag
         currentFlavorText = FlavorTexts.pick(tag)
         requestLayout()
 
-        // Attach to window manager if not already attached
-        if (!isAttachedToWindow) {
-            try {
-                windowManager.addView(this, windowParams)
-                isAttachedToWindow = true
-            } catch (e: Exception) {
-                Timber.w(e, "GhostWorkIndicatorOverlay failed to attach to WindowManager")
-                return
-            }
-        } else {
-            try {
-                windowManager.updateViewLayout(this, windowParams)
-            } catch (e: Exception) {
-                Timber.w(e, "GhostWorkIndicatorOverlay layout update failed")
+        // Attach to window manager if provided and not already attached
+        windowManager?.let { wm ->
+            if (!isAttachedToWindow) {
+                try {
+                    wm.addView(this, windowParams)
+                    isAttachedToWindow = true
+                } catch (e: Exception) {
+                    Timber.w(e, "GhostWorkIndicatorOverlay failed to attach to WindowManager")
+                    return
+                }
+            } else {
+                try {
+                    wm.updateViewLayout(this, windowParams)
+                } catch (e: Exception) {
+                    Timber.w(e, "GhostWorkIndicatorOverlay layout update failed")
+                }
             }
         }
 
@@ -322,12 +364,17 @@ class GhostWorkIndicatorOverlay(
 
         startAnimationLoop()
 
+        removeCallbacks(cycleFlavorRunnable)
+        if (durationMs == 0L) {
+            postDelayed(cycleFlavorRunnable, 2400L)
+        }
+
         removeCallbacks(autoHideRunnable)
         if (durationMs > 0) {
             val safeDuration = durationMs.coerceAtLeast(minDisplayDurationMs)
             postDelayed(autoHideRunnable, safeDuration)
-        } else {
-            // Unconditional 30s failsafe: Never remain stuck on screen even if host callbacks crash
+        } else if (windowManager != null) {
+            // Unconditional 30s failsafe for floating system overlay
             postDelayed(autoHideRunnable, 30000L)
         }
     }
@@ -338,7 +385,8 @@ class GhostWorkIndicatorOverlay(
 
     fun hide(force: Boolean = false) {
         removeCallbacks(autoHideRunnable)
-        if (!isAttachedToWindow) return
+        removeCallbacks(cycleFlavorRunnable)
+        if (windowManager != null && !isAttachedToWindow) return
 
         if (force) {
             openAnimator?.cancel()
@@ -347,6 +395,7 @@ class GhostWorkIndicatorOverlay(
             openProgress = 0f
             stopAnimationLoop()
             detachSafely()
+            visibility = View.GONE
             return
         }
 
@@ -382,6 +431,7 @@ class GhostWorkIndicatorOverlay(
                 override fun onAnimationEnd(animation: android.animation.Animator) {
                     stopAnimationLoop()
                     detachSafely()
+                    visibility = View.GONE
                 }
             })
             start()
@@ -389,9 +439,10 @@ class GhostWorkIndicatorOverlay(
     }
 
     private fun detachSafely() {
-        if (isAttachedToWindow) {
+        val wm = windowManager
+        if (wm != null && isAttachedToWindow) {
             try {
-                windowManager.removeView(this)
+                wm.removeView(this)
             } catch (e: Exception) {
                 Timber.w(e, "GhostWorkIndicatorOverlay detach failed")
             } finally {
