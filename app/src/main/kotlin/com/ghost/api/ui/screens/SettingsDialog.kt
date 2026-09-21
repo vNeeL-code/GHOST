@@ -565,7 +565,7 @@ fun SettingsDialog(
                             Column(modifier = Modifier.padding(bottom = 14.dp)) {
                                 val is8GbDevice = hardwareTier == "E2B"
                                 val coreTitle = if (is8GbDevice) "Gemma 4 E2B • 8GB Compact" else "Gemma 4 E4B • 12GB+ Frontier"
-                                val coreSubtitle = if (is8GbDevice) "5,120 token dialogue runway (Hardware Locked)" else "2,560 token reasoning (MTP Speculative Decoding)"
+                                val coreSubtitle = if (is8GbDevice) "5,120 token dialogue runway (Hardware Locked)" else "4,096 token reasoning (MTP Speculative Decoding)"
 
                                 Box(
                                     modifier = Modifier

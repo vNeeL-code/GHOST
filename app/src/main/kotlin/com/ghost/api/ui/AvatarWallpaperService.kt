@@ -1254,8 +1254,8 @@ class AvatarWallpaperService : WallpaperService() {
             // Mathematical vertical centering:
             // For an equilateral triangle with circumradius R, apex is at -R and baseline is at +0.5R.
             // Shifting by +0.25R perfectly centers the triangle bounding box (apex at -0.75R, base at +0.75R).
-            // Resting height is 44dp (inside 48dp input bar), free to grow and bloom on music beats!
-            val idleFocalRadius = (44f * density) / 1.5f
+            // Resting height scaled up for clear prominence (+5dp focal radius), free to grow and bloom on music beats!
+            val idleFocalRadius = (44f * density) / 1.5f + (5f * density)
             val focalRadius = (idleFocalRadius + melodyExpansion * 0.70f + bassKick * 0.45f).coerceIn(idleFocalRadius * 0.85f, 180f)
             val focalCx = baseCx + tiltX * 1.25f
             val focalCy = baseCy + tiltY * 1.25f

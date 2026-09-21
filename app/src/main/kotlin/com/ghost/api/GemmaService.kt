@@ -871,8 +871,6 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 return
             }
 
-            updateNotification("Running Full System Diagnostics...")
-
             // Determine backend: User override > Watchdog > Auto waterfall
             val userBackend = prefs.getString(Constants.PREF_USER_BACKEND, "AUTO")
             if (userBackend == "OFF") {
@@ -887,15 +885,23 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
             val forcedBackend = if (userBackend != null && userBackend != "AUTO") {
                 Timber.i("\uD83C\uDFAE User backend override: $userBackend")
-                updateNotification("Loading on $userBackend (user selected)")
+                when (userBackend.uppercase()) {
+                    "GPU" -> updateNotification("✧ Running GPU systems diagnostic")
+                    "CPU" -> updateNotification("✧ Running CPU systems diagnostic")
+                    else -> updateNotification("✧ Running $userBackend systems diagnostic")
+                }
                 userBackend
             } else if (prefs.getInt("init_crash_count", 0) >= 4) {
                 Timber.w("\uD83D\uDEA8 Forcing CPU backend due to repeated crashes (threshold 4)")
-                updateNotification("Safe Mode: Forcing CPU")
+                updateNotification("✧ Running CPU systems diagnostic")
                 "CPU"
             } else if (prefs.getBoolean("force_cpu", false)) {
+                updateNotification("✧ Running CPU systems diagnostic")
                 "CPU"
-            } else null
+            } else {
+                updateNotification("✧ Running Full systems Diagnostic")
+                null
+            }
 
             // Determine Tools (ADK Dynamic MCP Toolset: ~80 tokens instead of ~3,800 tokens)
             val ghostMcpTool = GhostMcpTool(
@@ -949,6 +955,10 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
             engineRef.set(newEngine)
 
+            if (forcedBackend == null) {
+                updateNotification("✧ All stations are now enabled")
+            }
+
             // Init Cognitive Layer (now that engine is ready)
             reportStatus("Init: GhostAgent...")
             if (::ghostAgent.isInitialized) {
@@ -987,7 +997,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
             _isSystemReady.value = true
             reportStatus("Running on ${newEngine.activeBackend} Backend")
-            updateNotification("System Ready - localhost:${Constants.API_PORT}")
+            updateNotification("✧ Machine Status: Fully operational")
 
         } catch (e: Exception) {
             _isSystemReady.value = false
