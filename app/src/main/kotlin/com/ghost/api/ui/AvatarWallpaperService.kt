@@ -1336,19 +1336,17 @@ class AvatarWallpaperService : WallpaperService() {
 
             val innerColor = resolveColor(COLOR_CYAN_ACCENT, currentColors[0])
             if (currentAlbumAlpha > 5) {
-                // Scaled down (0.78f) and vertically centered (-0.20f * R) to span from apex (-R) to base (+0.5R)
-                // so the full artwork composition fits cleanly without hard cropping
-                val boardRadiusC = focalRadius * 0.78f
-                val artCenterY = -0.20f * focalRadius
+                // Centered strictly at pure (0, 0) matching star, widget, and horizon line
+                val boardRadiusC = focalRadius * 0.85f
                 drawStationaryAlbumArtThroughAperture(
                     canvas = canvas,
                     aperturePath = cachedTrianglePath,
                     apertureLocalCx = 0f,
-                    apertureLocalCy = artCenterY,
+                    apertureLocalCy = 0f,
                     apertureGlobalCx = focalCx,
-                    apertureGlobalCy = focalCy + artCenterY,
+                    apertureGlobalCy = focalCy,
                     boardGlobalCx = baseCx,
-                    boardGlobalCy = baseCy + artCenterY,
+                    boardGlobalCy = baseCy,
                     alpha = currentAlbumAlpha,
                     localRotationDegrees = 0f,
                     customBoardRadius = boardRadiusC
