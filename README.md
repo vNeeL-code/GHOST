@@ -84,7 +84,7 @@ $$\mathbf{Integrated\ AI\ System} = \mathbf{Chassis} + \mathbf{Model} + \mathbf{
 
 1. **The Chassis (Substrate):** The physical hardware constraints. Thermals, battery discharge curves, RAM pressure, radio environments, and motion. Without telemetry, an AI is disembodied, hallucinating blind in a sensory void.
 2. **The Model (Neuroptics):** Gemma 4 running natively via `LiteRT-LM`. Not a fictional persona reciting scripted lines, but an intelligent reasoning engine perceiving reality through structured context tokens.
-3. **The Systems Harness (GHOST):** The nervous system. It bridges the chassis to the model. Theres is plenty of 'harnesses' on the market: Ollama, Hermes, Openclaw, Codex, Claude code etc. Other AI harnesses people overlooked already lived on their smartphones and in their homes: Google Assistant, Siri, Alexa, Cortana (RIP Lumia). GHOST belongs in the company of that category. It handles continuous sensor fusion, memory compaction, hardware MCP tool execution, streaming text-to-speech, and zero-latency UI summoning.
+3. **The Systems Harness (GHOST):** The nervous system. It bridges the chassis to the model. There are plenty of 'harnesses' on the market: Ollama, Hermes, Openclaw, Codex, Claude code etc. Other AI harnesses people overlooked already lived on their smartphones and in their homes: Google Assistant, Siri, Alexa, Cortana (RIP Lumia). GHOST belongs in the company of that category. It handles continuous sensor fusion, memory compaction, hardware MCP tool execution, streaming text-to-speech, and zero-latency UI summoning.
 
 ---
 
