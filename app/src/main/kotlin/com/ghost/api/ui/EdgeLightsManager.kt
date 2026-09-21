@@ -527,48 +527,52 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
                 val cubeStrokeColor = ColorUtils.blendARGB(nodeColor, Color.WHITE, cubeFlash)
 
                 // --- SHOOTING FADING CHECKMARKS / CHEVRONS (^) ---
-                // Fading holographic corner projections shooting outward from the bezel cubes.
-                // Outer flanks project up to 3 tiers high, mid-flanks project 1-2, center remains calm.
+                // Stepped staircase: Outer flanks climb up to 5 tiers high to cap all the way up into the corners
+                // (matching Hexagon's corner architecture), while keeping the center open.
                 val maxClones = when {
-                    distFromCenter > 0.50f -> 3
-                    distFromCenter > 0.35f -> 2
-                    distFromCenter > 0.20f -> 1
-                    else -> 0
+                    distFromCenter > 0.65f -> 5  // Outer corner flank
+                    distFromCenter > 0.45f -> 4  // Mid flank
+                    distFromCenter > 0.28f -> 2  // Inner flank
+                    distFromCenter > 0.15f -> 1  // Near center
+                    else -> 0                    // Calm center gap
                 }
 
                 val activeClones = if (maxClones > 0) {
-                    val energy = (mag / 4.8f + bassPower * 0.40f).coerceIn(0f, 1.6f)
+                    val energy = (mag / 4.5f + bassPower * 0.42f).coerceIn(0f, 1.8f)
                     val countClones = (energy * maxClones).toInt()
-                    val minFlank = if (distFromCenter > 0.50f && (mag > 4f || bassPower > 3.0f)) 1 else 0
+                    val minFlank = if (distFromCenter > 0.65f && (mag > 3.5f || bassPower > 2.5f)) 2
+                        else if (distFromCenter > 0.45f && (mag > 4f || bassPower > 3.0f)) 1
+                        else 0
                     countClones.coerceIn(minFlank, maxClones)
                 } else 0
 
                 paint.strokeCap = Paint.Cap.ROUND
                 paint.strokeJoin = Paint.Join.ROUND
 
-                val wingSpread = diamondRadius * 0.95f
-                val wingH = diamondRadius * 0.75f
+                // Mathematical 90° angle: wingSpread MUST equal wingH so chevron slope is exactly 1.0,
+                // strictly parallel to the 45° faces of the dragon teeth (satisfying OCD)!
+                val wingSpan = diamondRadius * 0.88f
 
+                val tierStep = diamondRadius * 0.52f
                 for (k in 1..activeClones) {
-                    // Exact corner clone projection: 3 evenly spaced tiers projecting into screen
-                    val offset = diamondRadius * (1.15f + (k - 1) * 0.60f)
-                    val alphaRatio = 1f - ((k - 1f) / 3.2f)
+                    val offset = diamondRadius * 1.05f + (k - 1) * tierStep
+                    val alphaRatio = 1f - ((k - 1f) / 5.2f)
 
                     cachedPath.reset()
                     if (isTop) {
                         // Top view: chevron points DOWN into screen (v)
                         val apexY = dy + offset
-                        val wingY = apexY - wingH
-                        cachedPath.moveTo(dx - wingSpread, wingY)
+                        val wingY = apexY - wingSpan
+                        cachedPath.moveTo(dx - wingSpan, wingY)
                         cachedPath.lineTo(dx, apexY)
-                        cachedPath.lineTo(dx + wingSpread, wingY)
+                        cachedPath.lineTo(dx + wingSpan, wingY)
                     } else {
                         // Bottom view: chevron points UP into screen (^)
                         val apexY = dy - offset
-                        val wingY = apexY + wingH
-                        cachedPath.moveTo(dx - wingSpread, wingY)
+                        val wingY = apexY + wingSpan
+                        cachedPath.moveTo(dx - wingSpan, wingY)
                         cachedPath.lineTo(dx, apexY)
-                        cachedPath.lineTo(dx + wingSpread, wingY)
+                        cachedPath.lineTo(dx + wingSpan, wingY)
                     }
 
                     // Outer neon aura for lead chevron (bright chromatic color)

@@ -1194,81 +1194,33 @@ class AvatarWallpaperService : WallpaperService() {
             val height = canvas.height.toFloat()
 
             // ─────────────────────────────────────────────────────────────────
-            // 1. Perspective Walls & Ceiling (Wireframe Lasers into deep space)
+            // 1. Perspective Horizon
             // ─────────────────────────────────────────────────────────────────
-            val ceilingColor = resolveColor(COLOR_CYAN_ACCENT, currentColors[0])
             val horizonColor = resolveColor(COLOR_PALE_SLATE, currentColors[1 % currentColors.size])
-
-            // Horizon dividing line across screen at vanishing point
             paint.style = Paint.Style.STROKE
-            paint.strokeWidth = 2.4f + (strobeFlash * 2.0f)
+            paint.strokeWidth = 2.0f + (strobeFlash * 1.5f)
             paint.color = if (strobeFlash > 0.04f) Color.WHITE else horizonColor
-            paint.alpha = (140 + (strobeFlash * 100f).toInt()).coerceIn(100, 255)
+            paint.alpha = (70 + (strobeFlash * 120f).toInt()).coerceIn(50, 240)
             canvas.drawLine(0f, corrCy, width, corrCy, paint)
 
-            // Central vertical spine shooting straight up to the top
-            paint.strokeWidth = 2.8f + (strobeFlash * 2.5f)
-            paint.color = if (strobeFlash > 0.04f) Color.WHITE else ceilingColor
-            paint.alpha = (160 + (strobeFlash * 90f).toInt()).coerceIn(120, 255)
-            canvas.drawLine(corrCx, corrCy, corrCx, 0f, paint)
-
-            // Diagonal corner wall guide rails
-            val leftWallX = 0f
-            val leftWallY = 0f
-            val rightWallX = width
-            val rightWallY = 0f
-            paint.strokeWidth = 2.2f + (strobeFlash * 2.0f)
-            paint.color = ceilingColor
-            paint.alpha = (110 + (strobeFlash * 80f).toInt()).coerceIn(80, 220)
-            canvas.drawLine(corrCx, corrCy, leftWallX, leftWallY, paint)
-            canvas.drawLine(corrCx, corrCy, rightWallX, rightWallY, paint)
-
-            // Mid-wall perspective guide rails (shooting to upper-left and upper-right side edges)
-            val midWallY = corrCy * 0.40f
-            paint.strokeWidth = 1.6f
-            paint.alpha = (70 + (strobeFlash * 60f).toInt()).coerceIn(50, 160)
-            canvas.drawLine(corrCx, corrCy, 0f, midWallY, paint)
-            canvas.drawLine(corrCx, corrCy, width, midWallY, paint)
-
-            // Arched / chevron ceiling contour ribs bridging between the wall rails across the ceiling
-            val ceilingDepth = corrCy
-            val numCeilingRibs = 3
-            for (cr in 1..numCeilingRibs) {
-                val p = cr.toFloat() / (numCeilingRibs + 1)
-                val ribY = corrCy - (ceilingDepth * p) - (melodyExpansion * 0.15f)
-                val spreadX = (corrCx * p * 1.05f) + (melodyExpansion * 0.20f)
-                val wallRibY = corrCy - (ceilingDepth * p * 0.65f)
-
-                cachedWallPath.reset()
-                cachedWallPath.moveTo(corrCx - spreadX, wallRibY)
-                cachedWallPath.lineTo(corrCx, ribY)
-                cachedWallPath.lineTo(corrCx + spreadX, wallRibY)
-
-                val ribColor = resolveColor(if (cr % 2 == 0) COLOR_CYAN_ACCENT else COLOR_COBALT_GLOW, currentColors[cr % currentColors.size])
-                paint.style = Paint.Style.STROKE
-                paint.strokeWidth = 2.0f + (strobeFlash * 1.5f)
-                paint.color = ribColor
-                paint.alpha = (120 + (melodyExpansion * 1.5f).toInt() + (strobeFlash * 60f).toInt()).coerceIn(80, 240)
-                canvas.drawPath(cachedWallPath, paint)
-            }
-
-            // ─────────────────────────────────────────────────────────────────
-            // 2. Perspective Floor (Concentric Downward Chevron Pyramid / Waves)
-            // ─────────────────────────────────────────────────────────────────
-            // Nested inverted chevrons expanding downwards from horizon, pulsing with sub-bass (like Cuboid's Sun)
             val floorDepth = (height - corrCy).coerceAtLeast(100f)
             val flareBoom = (bassKick * 0.70f) + (strobeFlash * 60f)
 
             // Multipliers from outer (widest/deepest) to inner (closest to vanishing point)
-            val floorMults = floatArrayOf(1.05f, 0.78f, 0.52f, 0.28f)
-            val floorAlphas = intArrayOf(55, 95, 140, 190)
-            val floorFillAlphas = intArrayOf(15, 25, 40, 65)
+            val floorMults = floatArrayOf(1.70f, 1.20f, 0.75f, 0.40f)
+            val floorFillAlphas = intArrayOf(12, 18, 28, 48)
+            val floorStrokeAlphas = intArrayOf(22, 38, 65, 110)
 
+            // ─────────────────────────────────────────────────────────────────
+            // 2. Perspective Floor (Concentric Downward Chevron Pyramid / Waves)
+            // Completely covers bottom half with no blackspace, very translucent by default
+            // with color surging in on bass kicks (like the Black Sun in Cuboid)
+            // ─────────────────────────────────────────────────────────────────
             for (fb in 0 until 4) {
                 val mult = floorMults[fb]
                 val apexDepth = (floorDepth * mult) + flareBoom
-                val apexY = (corrCy + apexDepth).coerceAtMost(height + 50f)
-                val spreadW = (width * 0.52f * mult) + (flareBoom * 0.65f)
+                val apexY = corrCy + apexDepth
+                val spreadW = width * 1.4f * mult
 
                 val primaryColor = resolveColor(if (fb % 2 == 0) COLOR_CYAN_ACCENT else COLOR_COBALT_GLOW, currentColors[fb % currentColors.size])
                 val chevronColor = if (fb == 0) Color.parseColor("#F1F5F9") else primaryColor
@@ -1279,24 +1231,50 @@ class AvatarWallpaperService : WallpaperService() {
                 cachedWallPath.lineTo(corrCx + spreadW, corrCy)
                 cachedWallPath.close()
 
-                // Translucent perspective floor facet fill
+                // Translucent perspective floor facet fill (subtle by default, flashing with bass)
                 paint.style = Paint.Style.FILL
                 paint.color = chevronColor
-                val fillAlpha = (floorFillAlphas[fb] + (bassKick * 0.40f).toInt() + (strobeFlash * 35f).toInt()).coerceIn(10, 140)
+                val fillAlpha = (floorFillAlphas[fb] + (bassKick * 0.45f).toInt() + (strobeFlash * 50f).toInt()).coerceIn(8, 180)
                 paint.alpha = fillAlpha
                 canvas.drawPath(cachedWallPath, paint)
 
                 // Razor neon chevron stroke
                 paint.style = Paint.Style.STROKE
-                paint.strokeWidth = (3.6f * (1f - fb * 0.12f) + (strobeFlash * 2.0f)).coerceIn(1.8f, 6.0f)
+                paint.strokeWidth = (3.2f * (1f - fb * 0.12f) + (strobeFlash * 1.8f)).coerceIn(1.5f, 5.5f)
                 paint.color = if (strobeFlash > 0.05f && fb == 0) Color.WHITE else chevronColor
-                val strokeAlpha = (floorAlphas[fb] + (bassKick * 0.8f).toInt() + (strobeFlash * 60f).toInt()).coerceIn(50, 255)
+                val strokeAlpha = (floorStrokeAlphas[fb] + (bassKick * 0.9f).toInt() + (strobeFlash * 75f).toInt()).coerceIn(15, 255)
                 paint.alpha = strokeAlpha
                 canvas.drawPath(cachedWallPath, paint)
             }
 
             // ─────────────────────────────────────────────────────────────────
-            // 3. Vanishing Point Focal Core & Central Triangle Housing
+            // 3. Upper Wireframe (Exact Vertical Mirror of Floor - Stroke Only)
+            // Very muted / ghostly by default like hexagon wireframe, flashing bright on transients
+            // ─────────────────────────────────────────────────────────────────
+            for (cr in 0 until 4) {
+                val mult = floorMults[cr]
+                val apexDepth = (floorDepth * mult) + flareBoom
+                val apexY = corrCy - apexDepth
+                val spreadW = width * 1.4f * mult
+
+                val wireColor = resolveColor(if (cr % 2 == 0) COLOR_CYAN_ACCENT else COLOR_PALE_SLATE, currentColors[cr % currentColors.size])
+
+                cachedWallPath.reset()
+                cachedWallPath.moveTo(corrCx - spreadW, corrCy)
+                cachedWallPath.lineTo(corrCx, apexY)
+                cachedWallPath.lineTo(corrCx + spreadW, corrCy)
+                cachedWallPath.close()
+
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = (2.2f * (1f - cr * 0.10f) + (strobeFlash * 1.8f)).coerceIn(1.2f, 4.5f)
+                paint.color = if (strobeFlash > 0.05f) Color.WHITE else wireColor
+                val wireAlpha = (14 + (strobeFlash * 190f).toInt() + (melodyExpansion * 0.8f).toInt()).coerceIn(10, 245)
+                paint.alpha = wireAlpha
+                canvas.drawPath(cachedWallPath, paint)
+            }
+
+            // ─────────────────────────────────────────────────────────────────
+            // 4. Vanishing Point Focal Core & Central Triangle Housing
             // ─────────────────────────────────────────────────────────────────
             val idleFocalRadius = (44f * density) / 1.5f + (5f * density)
             val focalRadius = (idleFocalRadius + melodyExpansion * 0.70f + bassKick * 0.45f).coerceIn(idleFocalRadius * 0.85f, 180f)
