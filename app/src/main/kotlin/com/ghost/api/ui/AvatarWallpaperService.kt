@@ -1291,12 +1291,12 @@ class AvatarWallpaperService : WallpaperService() {
 
             // ─────────────────────────────────────────────────────────────────
             // 4. Vanishing Point Focal Core & Central Triangle Housing
+            // Centered strictly on true mathematical centroid (0, 0) aligned with widget & horizon
             // ─────────────────────────────────────────────────────────────────
             val idleFocalRadius = (44f * density) / 1.5f + (5f * density)
             val focalRadius = (idleFocalRadius + melodyExpansion * 0.70f + bassKick * 0.45f).coerceIn(idleFocalRadius * 0.85f, 180f)
             val focalCx = baseCx + tiltX * 1.25f
             val focalCy = baseCy + tiltY * 1.25f
-            val triangleNudgeY = 0.25f * focalRadius
 
             canvas.save()
             canvas.translate(focalCx, focalCy)
@@ -1315,13 +1315,13 @@ class AvatarWallpaperService : WallpaperService() {
                 paint.style = Paint.Style.FILL
                 paint.color = bloomColor
                 paint.alpha = (TRI_BLOOM_ALPHAS[tb] * 0.45f).toInt().coerceIn(15, 95)
-                drawEquilateralTriangle(canvas, 0f, triangleNudgeY, radius, 0f, paint)
+                drawEquilateralTriangle(canvas, 0f, 0f, radius, 0f, paint)
 
                 paint.style = Paint.Style.STROKE
                 paint.strokeWidth = TRI_BLOOM_WIDTHS[tb]
                 paint.color = bloomColor
                 paint.alpha = TRI_BLOOM_ALPHAS[tb]
-                drawEquilateralTriangle(canvas, 0f, triangleNudgeY, radius, 0f, paint)
+                drawEquilateralTriangle(canvas, 0f, 0f, radius, 0f, paint)
             }
 
             // Solid Obsidian Cyber Chamber for Central Triangle
@@ -1332,23 +1332,21 @@ class AvatarWallpaperService : WallpaperService() {
             paint.style = Paint.Style.FILL
             paint.color = COLOR_VOID
             paint.alpha = 240
-            drawEquilateralTriangle(canvas, 0f, triangleNudgeY, focalRadius, 0f, paint)
+            drawEquilateralTriangle(canvas, 0f, 0f, focalRadius, 0f, paint)
 
             val innerColor = resolveColor(COLOR_CYAN_ACCENT, currentColors[0])
             if (currentAlbumAlpha > 5) {
-                // Scaled down specifically for Prismatic so more of the album art fits inside the triangle window,
-                // and vertically balanced so the artwork is centered inside the equilateral frame
-                val boardRadiusC = focalRadius * 0.80f
-                val artCenterY = triangleNudgeY * 0.20f
+                // Scaled down specifically for Prismatic so more album art fits, centered at (0, 0)
+                val boardRadiusC = focalRadius * 0.85f
                 drawStationaryAlbumArtThroughAperture(
                     canvas = canvas,
                     aperturePath = cachedTrianglePath,
                     apertureLocalCx = 0f,
-                    apertureLocalCy = artCenterY,
+                    apertureLocalCy = 0f,
                     apertureGlobalCx = focalCx,
-                    apertureGlobalCy = focalCy + artCenterY,
+                    apertureGlobalCy = focalCy,
                     boardGlobalCx = baseCx,
-                    boardGlobalCy = baseCy + artCenterY,
+                    boardGlobalCy = baseCy,
                     alpha = currentAlbumAlpha,
                     localRotationDegrees = 0f,
                     customBoardRadius = boardRadiusC
@@ -1359,22 +1357,22 @@ class AvatarWallpaperService : WallpaperService() {
                 paint.style = Paint.Style.FILL
                 paint.color = innerColor
                 paint.alpha = (baseInnerAlpha + kickInnerAlpha).coerceIn(20, 160)
-                drawEquilateralTriangle(canvas, 0f, triangleNudgeY, focalRadius * 0.85f, 0f, paint)
+                drawEquilateralTriangle(canvas, 0f, 0f, focalRadius * 0.85f, 0f, paint)
             }
 
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 3.8f + (strobeFlash * 2.5f)
             paint.color = if (strobeFlash > 0.05f) Color.WHITE else COLOR_STAR_CORE
             paint.alpha = 255
-            drawEquilateralTriangle(canvas, 0f, triangleNudgeY, focalRadius, 0f, paint)
+            drawEquilateralTriangle(canvas, 0f, 0f, focalRadius, 0f, paint)
 
             paint.strokeWidth = 2.2f
             paint.color = innerColor
             paint.alpha = 200
-            drawEquilateralTriangle(canvas, 0f, triangleNudgeY, focalRadius * 0.80f, 0f, paint)
+            drawEquilateralTriangle(canvas, 0f, 0f, focalRadius * 0.80f, 0f, paint)
 
             // 4. Center Model Unicode Glyph: Clean, Crisp, Centered Core
-            // Nudged upward by 5.5dp so it sits in the optical centroid of the triangle!
+            // Centered precisely on mathematical centroid (0, 0) aligned with widget & horizon line
             if (currentGlyphAlpha > 5 && currentAlbumAlpha <= 5 && !SystemVisualizer.isMediaPlaying) {
                 val glyphSize = focalRadius * 1.15f
                 logoPaint.clearShadowLayer()
@@ -1384,8 +1382,7 @@ class AvatarWallpaperService : WallpaperService() {
                 val off = (logoPaint.descent() + logoPaint.ascent()) / 2f
                 val shiftX = tiltX * 0.06f
                 val shiftY = tiltY * 0.06f
-                val glyphNudgeUp = 5.5f * density
-                canvas.drawText(activeGlyph, shiftX, -off + shiftY + triangleNudgeY - glyphNudgeUp, logoPaint)
+                canvas.drawText(activeGlyph, shiftX, -off + shiftY, logoPaint)
             }
 
             canvas.restore()
