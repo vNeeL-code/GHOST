@@ -108,7 +108,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                 else -> listOf("GPU" to sharedGpuBackend, "CPU" to Backend.CPU())
             }
             
-            val modelMaxTokens = Constants.getMaxTokensForModel(modelPath)
+            val modelMaxTokens = Constants.getMaxTokensForModel(modelPath, context)
             maxNumTokens = modelMaxTokens
             Timber.i("Configuring GemmaEngine with maxNumTokens=$modelMaxTokens for model: $modelPath")
 

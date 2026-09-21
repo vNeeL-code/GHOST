@@ -563,9 +563,20 @@ fun SettingsDialog(
                         }
                         item {
                             Column(modifier = Modifier.padding(bottom = 14.dp)) {
+                                val ramGb = Constants.getDeviceRamGb(context)
                                 val is8GbDevice = hardwareTier == "E2B"
-                                val coreTitle = if (is8GbDevice) "Gemma 4 E2B • 8GB Compact" else "Gemma 4 E4B • 12GB+ Frontier"
-                                val coreSubtitle = if (is8GbDevice) "5,120 token dialogue runway (Hardware Locked)" else "4,096 token reasoning (MTP Speculative Decoding)"
+                                val coreTitle = when {
+                                    is8GbDevice -> "Gemma 4 E2B • 8GB Compact"
+                                    ramGb >= 20.0 -> "Gemma 4 E4B • 24GB Extreme"
+                                    ramGb >= 14.5 -> "Gemma 4 E4B • 16GB Ultra"
+                                    else -> "Gemma 4 E4B • 12GB Frontier"
+                                }
+                                val coreSubtitle = when {
+                                    is8GbDevice -> "5,120 token dialogue runway (Hardware Locked)"
+                                    ramGb >= 20.0 -> "10,240 token massive runway (MTP Speculative Decoding)"
+                                    ramGb >= 14.5 -> "8,192 token extended runway (MTP Speculative Decoding)"
+                                    else -> "4,096 token reasoning (MTP Speculative Decoding)"
+                                }
 
                                 Box(
                                     modifier = Modifier

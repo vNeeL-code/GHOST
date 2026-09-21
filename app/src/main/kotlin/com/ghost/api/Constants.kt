@@ -25,8 +25,11 @@ object Constants {
     const val THERMAL_LIMIT_CELSIUS = 65
 
     // Token budgets tuned per model architecture & memory footprint
-    const val MAX_TOKENS_E4B = 4096   // 12GB+ RAM profile (Game Space pinned, MTP speculative decoding, ample prompt+tools headroom)
-    const val MAX_TOKENS_E2B = 5120   // 8GB RAM profile (1.72GB peak, immune to 2GB SPKL, 4.7k free dialogue runway)
+    const val MAX_TOKENS_E2B = 5120       // 8GB RAM profile (1.72GB peak, immune to 2GB SPKL, 4.7k free dialogue runway)
+    const val MAX_TOKENS_E4B_12GB = 4096  // 12GB RAM profile (Game Space pinned, MTP speculative decoding, ample prompt+tools headroom)
+    const val MAX_TOKENS_E4B_16GB = 8192  // 16GB RAM profile (8k native context runway, holds deep conversation history)
+    const val MAX_TOKENS_E4B_24GB = 10240 // 24GB RAM profile (10k deep reasoning runway, massive tool execution history)
+    const val MAX_TOKENS_E4B = MAX_TOKENS_E4B_12GB
     const val MAX_TOKENS = MAX_TOKENS_E4B // Legacy fallback
 
     // Memory suspension safety valve thresholds (avoids false-positive unloads at 85-89% idle)
@@ -34,31 +37,44 @@ object Constants {
     const val RAM_CRITICAL_MIN_FREE_BYTES = 500L * 1024 * 1024 // 500 MB free memory floor
 
     /**
-     * Resolves the maximum token context window for a given model.
+     * Reads total physical RAM in GB.
      */
-    fun getMaxTokensForModel(modelNameOrKey: String): Int {
-        return if (modelNameOrKey.contains("E2B", ignoreCase = true)) {
-            MAX_TOKENS_E2B
-        } else {
-            MAX_TOKENS_E4B
+    fun getDeviceRamGb(context: Context): Double {
+        return try {
+            val actManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+            val memInfo = android.app.ActivityManager.MemoryInfo()
+            actManager?.getMemoryInfo(memInfo)
+            (memInfo?.totalMem?.toDouble() ?: (8.0 * 1024.0 * 1024.0 * 1024.0)) / (1024.0 * 1024.0 * 1024.0)
+        } catch (e: Exception) {
+            8.0
+        }
+    }
+
+    /**
+     * Resolves the maximum token context window for a given model, dynamically scaling
+     * with physical device RAM on 12GB, 16GB, and 24GB tiers.
+     */
+    fun getMaxTokensForModel(modelNameOrKey: String, context: Context? = null): Int {
+        if (modelNameOrKey.contains("E2B", ignoreCase = true)) {
+            return MAX_TOKENS_E2B
+        }
+        if (context == null) return MAX_TOKENS_E4B_12GB
+        val ramGb = getDeviceRamGb(context)
+        return when {
+            ramGb >= 20.0 -> MAX_TOKENS_E4B_24GB // 24GB Extreme tier: 10,240 tokens (10k)
+            ramGb >= 14.5 -> MAX_TOKENS_E4B_16GB // 16GB Ultra tier: 8,192 tokens (8k)
+            else -> MAX_TOKENS_E4B_12GB          // 12GB Frontier tier: 4,096 tokens
         }
     }
 
     /**
      * Automatically resolves the appropriate model core based on physical device RAM.
      * Devices with < 10.5GB RAM (e.g. 8GB Galaxy S21) are locked to E2B (Compact).
-     * Devices with >= 10.5GB RAM (e.g. 12GB/16GB REDMAGIC) are assigned E4B (Frontier).
+     * Devices with >= 10.5GB RAM (e.g. 12GB/16GB/24GB REDMAGIC) are assigned E4B (Frontier).
      */
     fun resolveHardwareModelTier(context: Context): String {
-        return try {
-            val actManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
-            val memInfo = android.app.ActivityManager.MemoryInfo()
-            actManager?.getMemoryInfo(memInfo)
-            val totalRamGb = (memInfo.totalMem.toDouble()) / (1024.0 * 1024.0 * 1024.0)
-            if (totalRamGb >= 10.5) "E4B" else "E2B"
-        } catch (e: Exception) {
-            "E2B" // Safe fallback
-        }
+        val totalRamGb = getDeviceRamGb(context)
+        return if (totalRamGb >= 10.5) "E4B" else "E2B"
     }
 
     // Model download URLs and repos

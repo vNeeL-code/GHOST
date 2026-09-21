@@ -301,9 +301,10 @@ class GhostAgent(
             compactMemory(force = true)
         }
 
-        val boundedPrompt = if (promptForModel.length > 3500) {
-            Timber.w("GhostAgent: Truncating overly long prompt (${promptForModel.length} chars) to 3500 chars")
-            promptForModel.take(3500)
+        val promptTruncationLimit = ((maxTokens - 600) * 3).coerceIn(3500, 24000)
+        val boundedPrompt = if (promptForModel.length > promptTruncationLimit) {
+            Timber.w("GhostAgent: Truncating overly long prompt (${promptForModel.length} chars) to $promptTruncationLimit chars")
+            promptForModel.take(promptTruncationLimit)
         } else {
             promptForModel
         }

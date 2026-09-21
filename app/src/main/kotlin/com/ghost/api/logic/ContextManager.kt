@@ -43,10 +43,18 @@ class ContextManager(
             val marketingName = com.ghost.api.hardware.DeviceHardwareSpecs.resolveMarketingName()
             val chipsetName = com.ghost.api.hardware.DeviceHardwareSpecs.resolveChipsetName()
             val tier = com.ghost.api.Constants.resolveHardwareModelTier(context)
+            val ramGb = com.ghost.api.Constants.getDeviceRamGb(context)
+            val maxTokens = com.ghost.api.Constants.getMaxTokensForModel(tier, context)
+            val formattedTokens = java.text.NumberFormat.getIntegerInstance(java.util.Locale.US).format(maxTokens)
             val coreDescription = if (tier == "E4B") {
-                "Gemma 4 E4B (Frontier Core, 4,096 tokens, MTP speculative decoding)"
+                val profileName = when {
+                    ramGb >= 20.0 -> "Extreme Core"
+                    ramGb >= 14.5 -> "Ultra Core"
+                    else -> "Frontier Core"
+                }
+                "Gemma 4 E4B ($profileName, $formattedTokens tokens, MTP speculative decoding)"
             } else {
-                "Gemma 4 E2B (Compact Core, 5,120 tokens)"
+                "Gemma 4 E2B (Compact Core, $formattedTokens tokens)"
             }
             "Chassis: ✧ $deviceName ($marketingName, $chipsetName, ${totalRamGb}GB RAM, ${totalStorageGb}GB storage, Android ${android.os.Build.VERSION.RELEASE})\nNeuroptics: $coreDescription\nSystems: GHOST Agentic Runtime Harness\nSensory Suite: Battery (Level, Drain, Thermals), System (RAM, Storage, Uptime), Environment (Light, Pressure, Ambient), Network & Radio (WiFi, Cell, Bluetooth), Motion (Orientation, Movement), Audio/Media Session, Geolocation"
         } catch (e: Exception) {
