@@ -96,6 +96,7 @@ class AvatarWallpaperService : WallpaperService() {
         private val cachedTrianglePath = Path()
         private val cachedHexPath = Path()
         private val cachedWallPath = Path()
+        private val cachedChevronPath = Path()
         private val cachedFlowerPath = Path()
         private val cachedAperturePath = Path()
 
@@ -1195,82 +1196,97 @@ class AvatarWallpaperService : WallpaperService() {
 
             // ─────────────────────────────────────────────────────────────────
             // 1. Perspective Horizon
+            // Delicate and subtle in neutral state, flashing on transients
             // ─────────────────────────────────────────────────────────────────
             val horizonColor = resolveColor(COLOR_PALE_SLATE, currentColors[1 % currentColors.size])
             paint.style = Paint.Style.STROKE
-            paint.strokeWidth = 2.0f + (strobeFlash * 1.5f)
+            paint.strokeWidth = 1.8f + (strobeFlash * 1.5f)
             paint.color = if (strobeFlash > 0.04f) Color.WHITE else horizonColor
-            paint.alpha = (70 + (strobeFlash * 120f).toInt()).coerceIn(50, 240)
+            paint.alpha = (18 + (strobeFlash * 140f).toInt()).coerceIn(14, 220)
             canvas.drawLine(0f, corrCy, width, corrCy, paint)
 
             val floorDepth = (height - corrCy).coerceAtLeast(100f)
             val flareBoom = (bassKick * 0.70f) + (strobeFlash * 60f)
 
+            // Equilateral scaling constant: tan(30°) = 1 / sqrt(3) ~ 0.57735027f
+            // Locks both floor & ceiling wireframe triangles to exact 60° equilateral peaks
+            // strictly matching the central avatar triangle!
+            val TAN_30 = 0.57735027f
+
             // Multipliers from outer (widest/deepest) to inner (closest to vanishing point)
-            val floorMults = floatArrayOf(1.70f, 1.20f, 0.75f, 0.40f)
-            val floorFillAlphas = intArrayOf(12, 18, 28, 48)
-            val floorStrokeAlphas = intArrayOf(22, 38, 65, 110)
+            // mult = 2.30f guarantees Tier 0 covers 100% of screen bottom wall-to-wall
+            val floorMults = floatArrayOf(2.30f, 1.40f, 0.80f, 0.40f)
+
+            // Ultra-translucent resting alphas ("vaguely there" like wireframe, letting wallpaper breathe)
+            val floorFillAlphas = intArrayOf(3, 5, 7, 10)
+            val floorStrokeAlphas = intArrayOf(10, 15, 22, 34)
 
             // ─────────────────────────────────────────────────────────────────
-            // 2. Perspective Floor (Concentric Downward Chevron Pyramid / Waves)
-            // Completely covers bottom half with no blackspace, very translucent by default
-            // with color surging in on bass kicks (like the Black Sun in Cuboid)
+            // 2. Perspective Floor (Concentric Downward Equilateral Chevrons / Waves)
+            // Completely covers bottom half with no blackspace, very translucent ("vaguely there")
+            // by default, with color flashing in on bass kicks (like the Black Sun in Cuboid)
             // ─────────────────────────────────────────────────────────────────
             for (fb in 0 until 4) {
                 val mult = floorMults[fb]
                 val apexDepth = (floorDepth * mult) + flareBoom
                 val apexY = corrCy + apexDepth
-                val spreadW = width * 1.4f * mult
+                val spreadW = apexDepth * TAN_30
 
                 val primaryColor = resolveColor(if (fb % 2 == 0) COLOR_CYAN_ACCENT else COLOR_COBALT_GLOW, currentColors[fb % currentColors.size])
                 val chevronColor = if (fb == 0) Color.parseColor("#F1F5F9") else primaryColor
 
+                // Closed path for translucent perspective floor facet fill
                 cachedWallPath.reset()
                 cachedWallPath.moveTo(corrCx - spreadW, corrCy)
                 cachedWallPath.lineTo(corrCx, apexY)
                 cachedWallPath.lineTo(corrCx + spreadW, corrCy)
                 cachedWallPath.close()
 
-                // Translucent perspective floor facet fill (subtle by default, flashing with bass)
                 paint.style = Paint.Style.FILL
                 paint.color = chevronColor
-                val fillAlpha = (floorFillAlphas[fb] + (bassKick * 0.45f).toInt() + (strobeFlash * 50f).toInt()).coerceIn(8, 180)
+                val fillAlpha = (floorFillAlphas[fb] + (bassKick * 0.50f).toInt() + (strobeFlash * 70f).toInt()).coerceIn(3, 190)
                 paint.alpha = fillAlpha
                 canvas.drawPath(cachedWallPath, paint)
 
-                // Razor neon chevron stroke
+                // Pure V-chevron stroke (without horizontal baseline overdraw)
+                cachedChevronPath.reset()
+                cachedChevronPath.moveTo(corrCx - spreadW, corrCy)
+                cachedChevronPath.lineTo(corrCx, apexY)
+                cachedChevronPath.lineTo(corrCx + spreadW, corrCy)
+
                 paint.style = Paint.Style.STROKE
-                paint.strokeWidth = (3.2f * (1f - fb * 0.12f) + (strobeFlash * 1.8f)).coerceIn(1.5f, 5.5f)
+                paint.strokeWidth = (2.4f * (1f - fb * 0.10f) + (strobeFlash * 1.8f)).coerceIn(1.2f, 4.8f)
                 paint.color = if (strobeFlash > 0.05f && fb == 0) Color.WHITE else chevronColor
-                val strokeAlpha = (floorStrokeAlphas[fb] + (bassKick * 0.9f).toInt() + (strobeFlash * 75f).toInt()).coerceIn(15, 255)
+                val strokeAlpha = (floorStrokeAlphas[fb] + (bassKick * 1.0f).toInt() + (strobeFlash * 90f).toInt()).coerceIn(8, 255)
                 paint.alpha = strokeAlpha
-                canvas.drawPath(cachedWallPath, paint)
+                canvas.drawPath(cachedChevronPath, paint)
             }
 
             // ─────────────────────────────────────────────────────────────────
             // 3. Upper Wireframe (Exact Vertical Mirror of Floor - Stroke Only)
-            // Very muted / ghostly by default like hexagon wireframe, flashing bright on transients
+            // Exact 60° equilateral peak strictly parallel to central triangle,
+            // very muted / ghostly by default like hexagon wireframe, flashing bright on transients
             // ─────────────────────────────────────────────────────────────────
             for (cr in 0 until 4) {
                 val mult = floorMults[cr]
                 val apexDepth = (floorDepth * mult) + flareBoom
                 val apexY = corrCy - apexDepth
-                val spreadW = width * 1.4f * mult
+                val spreadW = apexDepth * TAN_30
 
                 val wireColor = resolveColor(if (cr % 2 == 0) COLOR_CYAN_ACCENT else COLOR_PALE_SLATE, currentColors[cr % currentColors.size])
 
-                cachedWallPath.reset()
-                cachedWallPath.moveTo(corrCx - spreadW, corrCy)
-                cachedWallPath.lineTo(corrCx, apexY)
-                cachedWallPath.lineTo(corrCx + spreadW, corrCy)
-                cachedWallPath.close()
+                // Pure inverted V-chevron stroke (^), no baseline overdraw
+                cachedChevronPath.reset()
+                cachedChevronPath.moveTo(corrCx - spreadW, corrCy)
+                cachedChevronPath.lineTo(corrCx, apexY)
+                cachedChevronPath.lineTo(corrCx + spreadW, corrCy)
 
                 paint.style = Paint.Style.STROKE
-                paint.strokeWidth = (2.2f * (1f - cr * 0.10f) + (strobeFlash * 1.8f)).coerceIn(1.2f, 4.5f)
+                paint.strokeWidth = (2.0f * (1f - cr * 0.10f) + (strobeFlash * 1.8f)).coerceIn(1.0f, 4.2f)
                 paint.color = if (strobeFlash > 0.05f) Color.WHITE else wireColor
-                val wireAlpha = (14 + (strobeFlash * 190f).toInt() + (melodyExpansion * 0.8f).toInt()).coerceIn(10, 245)
+                val wireAlpha = (12 + (strobeFlash * 190f).toInt() + (melodyExpansion * 0.85f).toInt()).coerceIn(8, 245)
                 paint.alpha = wireAlpha
-                canvas.drawPath(cachedWallPath, paint)
+                canvas.drawPath(cachedChevronPath, paint)
             }
 
             // ─────────────────────────────────────────────────────────────────
