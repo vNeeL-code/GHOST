@@ -1336,16 +1336,19 @@ class AvatarWallpaperService : WallpaperService() {
 
             val innerColor = resolveColor(COLOR_CYAN_ACCENT, currentColors[0])
             if (currentAlbumAlpha > 5) {
-                val boardRadiusC = focalRadius * 1.06f
+                // Scaled down specifically for Prismatic so more of the album art fits inside the triangle window,
+                // and vertically balanced so the artwork is centered inside the equilateral frame
+                val boardRadiusC = focalRadius * 0.80f
+                val artCenterY = triangleNudgeY * 0.20f
                 drawStationaryAlbumArtThroughAperture(
                     canvas = canvas,
                     aperturePath = cachedTrianglePath,
                     apertureLocalCx = 0f,
-                    apertureLocalCy = triangleNudgeY,
+                    apertureLocalCy = artCenterY,
                     apertureGlobalCx = focalCx,
-                    apertureGlobalCy = focalCy + triangleNudgeY,
+                    apertureGlobalCy = focalCy + artCenterY,
                     boardGlobalCx = baseCx,
-                    boardGlobalCy = baseCy + triangleNudgeY,
+                    boardGlobalCy = baseCy + artCenterY,
                     alpha = currentAlbumAlpha,
                     localRotationDegrees = 0f,
                     customBoardRadius = boardRadiusC
