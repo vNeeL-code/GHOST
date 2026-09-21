@@ -1293,8 +1293,8 @@ class AvatarWallpaperService : WallpaperService() {
             // 4. Vanishing Point Focal Core & Central Triangle Housing
             // Centered strictly on true mathematical centroid (0, 0) aligned with widget & horizon
             // ─────────────────────────────────────────────────────────────────
-            val idleFocalRadius = (44f * density) / 1.5f + (5f * density)
-            val focalRadius = (idleFocalRadius + melodyExpansion * 0.70f + bassKick * 0.45f).coerceIn(idleFocalRadius * 0.85f, 180f)
+            val idleFocalRadius = (44f * density) / 1.5f + (10f * density)
+            val focalRadius = (idleFocalRadius + melodyExpansion * 0.70f + bassKick * 0.45f).coerceIn(idleFocalRadius * 0.85f, 195f)
             val focalCx = baseCx + tiltX * 1.25f
             val focalCy = baseCy + tiltY * 1.25f
 
@@ -1336,17 +1336,19 @@ class AvatarWallpaperService : WallpaperService() {
 
             val innerColor = resolveColor(COLOR_CYAN_ACCENT, currentColors[0])
             if (currentAlbumAlpha > 5) {
-                // Scaled down specifically for Prismatic so more album art fits, centered at (0, 0)
-                val boardRadiusC = focalRadius * 0.85f
+                // Scaled down (0.78f) and vertically centered (-0.20f * R) to span from apex (-R) to base (+0.5R)
+                // so the full artwork composition fits cleanly without hard cropping
+                val boardRadiusC = focalRadius * 0.78f
+                val artCenterY = -0.20f * focalRadius
                 drawStationaryAlbumArtThroughAperture(
                     canvas = canvas,
                     aperturePath = cachedTrianglePath,
                     apertureLocalCx = 0f,
-                    apertureLocalCy = 0f,
+                    apertureLocalCy = artCenterY,
                     apertureGlobalCx = focalCx,
-                    apertureGlobalCy = focalCy,
+                    apertureGlobalCy = focalCy + artCenterY,
                     boardGlobalCx = baseCx,
-                    boardGlobalCy = baseCy,
+                    boardGlobalCy = baseCy + artCenterY,
                     alpha = currentAlbumAlpha,
                     localRotationDegrees = 0f,
                     customBoardRadius = boardRadiusC
