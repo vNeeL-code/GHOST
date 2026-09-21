@@ -1205,16 +1205,16 @@ class AvatarWallpaperService : WallpaperService() {
             paint.alpha = (18 + (strobeFlash * 140f).toInt()).coerceIn(14, 220)
             canvas.drawLine(0f, corrCy, width, corrCy, paint)
 
-            val floorDepth = (height - corrCy).coerceAtLeast(100f)
+            val horizonDepth = maxOf(corrCy, height - corrCy).coerceAtLeast(100f)
             val flareBoom = (bassKick * 0.70f) + (strobeFlash * 60f)
 
             // Equilateral scaling constant: tan(30°) = 1 / sqrt(3) ~ 0.57735027f
-            // Locks both floor & ceiling wireframe triangles to exact 60° equilateral peaks
+            // Locks both canopy & floor wireframe triangles to exact 60° equilateral peaks
             // strictly matching the central avatar triangle!
             val TAN_30 = 0.57735027f
 
             // Multipliers from outer (widest/deepest) to inner (closest to vanishing point)
-            // mult = 2.30f guarantees Tier 0 covers 100% of screen bottom wall-to-wall
+            // mult = 2.30f guarantees Tier 0 covers 100% of screen wall-to-wall
             val floorMults = floatArrayOf(2.30f, 1.40f, 0.80f, 0.40f)
 
             // Ultra-translucent resting alphas ("vaguely there" like wireframe, letting wallpaper breathe)
@@ -1222,20 +1222,20 @@ class AvatarWallpaperService : WallpaperService() {
             val floorStrokeAlphas = intArrayOf(10, 15, 22, 34)
 
             // ─────────────────────────────────────────────────────────────────
-            // 2. Perspective Floor (Concentric Downward Equilateral Chevrons / Waves)
-            // Completely covers bottom half with no blackspace, very translucent ("vaguely there")
-            // by default, with color flashing in on bass kicks (like the Black Sun in Cuboid)
+            // 2. Perspective Canopy (Upper Half: Concentric Upward Equilateral Chevrons / Waves)
+            // Translucent colored facets pointing UP (matching central triangle),
+            // flashing in color and wireframe accents on sub-bass kicks & transients
             // ─────────────────────────────────────────────────────────────────
             for (fb in 0 until 4) {
                 val mult = floorMults[fb]
-                val apexDepth = (floorDepth * mult) + flareBoom
-                val apexY = corrCy + apexDepth
+                val apexDepth = (horizonDepth * mult) + flareBoom
+                val apexY = corrCy - apexDepth
                 val spreadW = apexDepth * TAN_30
 
                 val primaryColor = resolveColor(if (fb % 2 == 0) COLOR_CYAN_ACCENT else COLOR_COBALT_GLOW, currentColors[fb % currentColors.size])
                 val chevronColor = if (fb == 0) Color.parseColor("#F1F5F9") else primaryColor
 
-                // Closed path for translucent perspective floor facet fill
+                // Closed path for translucent perspective canopy facet fill
                 cachedWallPath.reset()
                 cachedWallPath.moveTo(corrCx - spreadW, corrCy)
                 cachedWallPath.lineTo(corrCx, apexY)
@@ -1248,7 +1248,7 @@ class AvatarWallpaperService : WallpaperService() {
                 paint.alpha = fillAlpha
                 canvas.drawPath(cachedWallPath, paint)
 
-                // Pure V-chevron stroke (without horizontal baseline overdraw)
+                // Pure inverted V-chevron stroke (^), pointing UP, without horizontal baseline overdraw
                 cachedChevronPath.reset()
                 cachedChevronPath.moveTo(corrCx - spreadW, corrCy)
                 cachedChevronPath.lineTo(corrCx, apexY)
@@ -1263,19 +1263,19 @@ class AvatarWallpaperService : WallpaperService() {
             }
 
             // ─────────────────────────────────────────────────────────────────
-            // 3. Upper Wireframe (Exact Vertical Mirror of Floor - Stroke Only)
-            // Exact 60° equilateral peak strictly parallel to central triangle,
-            // very muted / ghostly by default like hexagon wireframe, flashing bright on transients
+            // 3. Lower Wireframe Floor (Bottom Half: Concentric Downward Chevrons - Stroke Only)
+            // Exact 60° equilateral peak pointing DOWN, subtle/ghostly wireframe on obsidian black,
+            // leaving the lower screen dark under dock/search bar while pulsing with transients
             // ─────────────────────────────────────────────────────────────────
             for (cr in 0 until 4) {
                 val mult = floorMults[cr]
-                val apexDepth = (floorDepth * mult) + flareBoom
-                val apexY = corrCy - apexDepth
+                val apexDepth = (horizonDepth * mult) + flareBoom
+                val apexY = corrCy + apexDepth
                 val spreadW = apexDepth * TAN_30
 
                 val wireColor = resolveColor(if (cr % 2 == 0) COLOR_CYAN_ACCENT else COLOR_PALE_SLATE, currentColors[cr % currentColors.size])
 
-                // Pure inverted V-chevron stroke (^), no baseline overdraw
+                // Pure downward V-chevron stroke (v), no baseline overdraw
                 cachedChevronPath.reset()
                 cachedChevronPath.moveTo(corrCx - spreadW, corrCy)
                 cachedChevronPath.lineTo(corrCx, apexY)
