@@ -1171,90 +1171,133 @@ class AvatarWallpaperService : WallpaperService() {
          * 4. Central Glyph (✧): Clean, centered, crisp white core.
          */
         /**
-         * Option C: Delta Tunnel & Prisms (Prismatic Delta Geometry)
+         * Option C: Seven Nation Army (Perspective Corridor & Prismatic Delta)
          * Upgraded with stereoscopic parallax:
-         * - Corner laser guide rails: 0.08x depth (ultra-slow vanishing point anchor)
-         * - Corkscrewing tunnel triangles: 0.20x - 0.70x progressive depth
-         * - Focal triangle housing: 0.90x depth (avatar chamber container)
-         * - Central ✧ Sparkle: 0.96x jewel depth (cannot breach container)
+         * - Floor: Downward-expanding perspective chevron ripple tiers driven by sub-bass/kicks (like Cuboid's Sun)
+         * - Ceiling / Walls: Wireframe perspective lasers (vertical spine + corner rails + contour arches)
+         * - Focal triangle housing: 0.90x–1.25x depth (avatar chamber container)
+         * - Central ✧ Sparkle: Optically centered in the triangle centroid
          */
         private fun drawOptionCDeltaTunnel(canvas: Canvas, baseCx: Float, baseCy: Float, baseRadius: Float) {
             val bassKick = (smoothedBass * 1.5f).coerceAtLeast(0f)
             val melodyExpansion = (smoothedMelody * 1.3f).coerceAtLeast(0f)
-            val numTriangles = 9
-            val baseSize = (baseRadius * 0.75f + melodyExpansion * 0.35f).coerceIn(30f, 180f)
+            val density = resources.displayMetrics.density
 
             val tiltX = rollOffset * PARALLAX_MAX
             val tiltY = pitchOffset * PARALLAX_MAX
 
+            // Anchored vanishing point (0.08x depth)
             val corrCx = baseCx + tiltX * 0.08f
             val corrCy = baseCy + tiltY * 0.08f
 
-            // 1. Perspective Corner Laser Guide Rails (Shooting through the 3 vertices into deep space)
-            // Ultra-slow vanishing point anchor (0.08x depth)
-            if (strobeFlash > 0.03f) {
-                canvas.save()
-                canvas.translate(corrCx, corrCy)
-                val reach = (canvas.width + canvas.height) * 0.95f
-                val wallFlashAlpha = (strobeFlash * 255f).toInt().coerceIn(0, 255)
-                val primaryColor = resolveColor(COLOR_CYAN_ACCENT, currentColors[0])
+            val width = canvas.width.toFloat()
+            val height = canvas.height.toFloat()
 
+            // ─────────────────────────────────────────────────────────────────
+            // 1. Perspective Walls & Ceiling (Wireframe Lasers into deep space)
+            // ─────────────────────────────────────────────────────────────────
+            val ceilingColor = resolveColor(COLOR_CYAN_ACCENT, currentColors[0])
+            val horizonColor = resolveColor(COLOR_PALE_SLATE, currentColors[1 % currentColors.size])
+
+            // Horizon dividing line across screen at vanishing point
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 2.4f + (strobeFlash * 2.0f)
+            paint.color = if (strobeFlash > 0.04f) Color.WHITE else horizonColor
+            paint.alpha = (140 + (strobeFlash * 100f).toInt()).coerceIn(100, 255)
+            canvas.drawLine(0f, corrCy, width, corrCy, paint)
+
+            // Central vertical spine shooting straight up to the top
+            paint.strokeWidth = 2.8f + (strobeFlash * 2.5f)
+            paint.color = if (strobeFlash > 0.04f) Color.WHITE else ceilingColor
+            paint.alpha = (160 + (strobeFlash * 90f).toInt()).coerceIn(120, 255)
+            canvas.drawLine(corrCx, corrCy, corrCx, 0f, paint)
+
+            // Diagonal corner wall guide rails
+            val leftWallX = 0f
+            val leftWallY = 0f
+            val rightWallX = width
+            val rightWallY = 0f
+            paint.strokeWidth = 2.2f + (strobeFlash * 2.0f)
+            paint.color = ceilingColor
+            paint.alpha = (110 + (strobeFlash * 80f).toInt()).coerceIn(80, 220)
+            canvas.drawLine(corrCx, corrCy, leftWallX, leftWallY, paint)
+            canvas.drawLine(corrCx, corrCy, rightWallX, rightWallY, paint)
+
+            // Mid-wall perspective guide rails (shooting to upper-left and upper-right side edges)
+            val midWallY = corrCy * 0.40f
+            paint.strokeWidth = 1.6f
+            paint.alpha = (70 + (strobeFlash * 60f).toInt()).coerceIn(50, 160)
+            canvas.drawLine(corrCx, corrCy, 0f, midWallY, paint)
+            canvas.drawLine(corrCx, corrCy, width, midWallY, paint)
+
+            // Arched / chevron ceiling contour ribs bridging between the wall rails across the ceiling
+            val ceilingDepth = corrCy
+            val numCeilingRibs = 3
+            for (cr in 1..numCeilingRibs) {
+                val p = cr.toFloat() / (numCeilingRibs + 1)
+                val ribY = corrCy - (ceilingDepth * p) - (melodyExpansion * 0.15f)
+                val spreadX = (corrCx * p * 1.05f) + (melodyExpansion * 0.20f)
+                val wallRibY = corrCy - (ceilingDepth * p * 0.65f)
+
+                cachedWallPath.reset()
+                cachedWallPath.moveTo(corrCx - spreadX, wallRibY)
+                cachedWallPath.lineTo(corrCx, ribY)
+                cachedWallPath.lineTo(corrCx + spreadX, wallRibY)
+
+                val ribColor = resolveColor(if (cr % 2 == 0) COLOR_CYAN_ACCENT else COLOR_COBALT_GLOW, currentColors[cr % currentColors.size])
                 paint.style = Paint.Style.STROKE
-                paint.strokeWidth = 3.2f + (strobeFlash * 3.0f)
-                paint.color = primaryColor
-                paint.alpha = wallFlashAlpha
-                for (v in 0..2) {
-                    val railAngle = (v * Math.PI * 2.0 / 3.0 - Math.PI / 2.0).toFloat()
-                    val rx = (cos(railAngle) * reach).toFloat()
-                    val ry = (sin(railAngle) * reach).toFloat()
-                    canvas.drawLine(0f, 0f, rx, ry, paint)
-                }
-                canvas.restore()
+                paint.strokeWidth = 2.0f + (strobeFlash * 1.5f)
+                paint.color = ribColor
+                paint.alpha = (120 + (melodyExpansion * 1.5f).toInt() + (strobeFlash * 60f).toInt()).coerceIn(80, 240)
+                canvas.drawPath(cachedWallPath, paint)
             }
 
-            // 2. Continuous Corkscrewing Infinite Triangular Tunnel (Seven Nation Army Corridor)
-            // Vanishing point anchored steadily to corrCx, corrCy so corridor perspective is rock-solid and never jiggles on tilt
-            val triangleStep = (Math.PI * 2.0 / 3.0).toFloat() // 120° rotational symmetry
-            for (i in 0 until numTriangles) {
-                val rawP = (tunnelPhase + (i.toFloat() / numTriangles))
-                val p = (rawP % 1.0f + 1.0f) % 1.0f // strictly [0, 1)
-                val scale = (baseSize * exp(p * 3.4f)).toFloat()
+            // ─────────────────────────────────────────────────────────────────
+            // 2. Perspective Floor (Concentric Downward Chevron Pyramid / Waves)
+            // ─────────────────────────────────────────────────────────────────
+            // Nested inverted chevrons expanding downwards from horizon, pulsing with sub-bass (like Cuboid's Sun)
+            val floorDepth = (height - corrCy).coerceAtLeast(100f)
+            val flareBoom = (bassKick * 0.70f) + (strobeFlash * 60f)
 
-                val window = sin(p * Math.PI.toFloat())
-                val smoothEnvelope = (window * window).coerceIn(0f, 1f)
-                val totalAlpha = (smoothEnvelope * 255f).toInt().coerceIn(0, 255)
+            // Multipliers from outer (widest/deepest) to inner (closest to vanishing point)
+            val floorMults = floatArrayOf(1.05f, 0.78f, 0.52f, 0.28f)
+            val floorAlphas = intArrayOf(55, 95, 140, 190)
+            val floorFillAlphas = intArrayOf(15, 25, 40, 65)
 
-                val cycleIdx = ((rawP * numTriangles).toInt() % currentColors.size + currentColors.size) % currentColors.size
-                val defaultBaseColor = if (i % 2 == 0) COLOR_CYAN_ACCENT else COLOR_PALE_SLATE
-                val baseColor = resolveColor(defaultBaseColor, currentColors[cycleIdx])
+            for (fb in 0 until 4) {
+                val mult = floorMults[fb]
+                val apexDepth = (floorDepth * mult) + flareBoom
+                val apexY = (corrCy + apexDepth).coerceAtMost(height + 50f)
+                val spreadW = (width * 0.52f * mult) + (flareBoom * 0.65f)
 
-                val corkscrewAngle = (p * triangleStep * 2f) + (animTime * 0.5f)
+                val primaryColor = resolveColor(if (fb % 2 == 0) COLOR_CYAN_ACCENT else COLOR_COBALT_GLOW, currentColors[fb % currentColors.size])
+                val chevronColor = if (fb == 0) Color.parseColor("#F1F5F9") else primaryColor
 
-                val baseFacetAlpha = (14f * smoothEnvelope).toInt()
-                val flashFacetAlpha = if (strobeFlash > 0.04f) ((strobeFlash * 95f) * smoothEnvelope).toInt() else 0
-                val facetAlpha = (baseFacetAlpha + flashFacetAlpha).coerceIn(0, 115)
+                cachedWallPath.reset()
+                cachedWallPath.moveTo(corrCx - spreadW, corrCy)
+                cachedWallPath.lineTo(corrCx, apexY)
+                cachedWallPath.lineTo(corrCx + spreadW, corrCy)
+                cachedWallPath.close()
 
-                if (facetAlpha > 0) {
-                    paint.style = Paint.Style.FILL
-                    paint.color = baseColor
-                    paint.alpha = facetAlpha
-                    drawEquilateralTriangle(canvas, corrCx, corrCy, scale, corkscrewAngle, paint)
-                }
+                // Translucent perspective floor facet fill
+                paint.style = Paint.Style.FILL
+                paint.color = chevronColor
+                val fillAlpha = (floorFillAlphas[fb] + (bassKick * 0.40f).toInt() + (strobeFlash * 35f).toInt()).coerceIn(10, 140)
+                paint.alpha = fillAlpha
+                canvas.drawPath(cachedWallPath, paint)
 
+                // Razor neon chevron stroke
                 paint.style = Paint.Style.STROKE
-                paint.strokeWidth = (3.5f * (1f - p * 0.4f) + (strobeFlash * 1.5f)).coerceIn(1.5f, 6.0f)
-                paint.color = baseColor
-                paint.alpha = totalAlpha
-                drawEquilateralTriangle(canvas, corrCx, corrCy, scale, corkscrewAngle, paint)
+                paint.strokeWidth = (3.6f * (1f - fb * 0.12f) + (strobeFlash * 2.0f)).coerceIn(1.8f, 6.0f)
+                paint.color = if (strobeFlash > 0.05f && fb == 0) Color.WHITE else chevronColor
+                val strokeAlpha = (floorAlphas[fb] + (bassKick * 0.8f).toInt() + (strobeFlash * 60f).toInt()).coerceIn(50, 255)
+                paint.alpha = strokeAlpha
+                canvas.drawPath(cachedWallPath, paint)
             }
 
+            // ─────────────────────────────────────────────────────────────────
             // 3. Vanishing Point Focal Core & Central Triangle Housing
-            // Strong foreground parallax (1.25x depth vs 0.08x background): dramatic 3D float!
-            val density = resources.displayMetrics.density
-            // Mathematical vertical centering:
-            // For an equilateral triangle with circumradius R, apex is at -R and baseline is at +0.5R.
-            // Shifting by +0.25R perfectly centers the triangle bounding box (apex at -0.75R, base at +0.75R).
-            // Resting height scaled up for clear prominence (+5dp focal radius), free to grow and bloom on music beats!
+            // ─────────────────────────────────────────────────────────────────
             val idleFocalRadius = (44f * density) / 1.5f + (5f * density)
             val focalRadius = (idleFocalRadius + melodyExpansion * 0.70f + bassKick * 0.45f).coerceIn(idleFocalRadius * 0.85f, 180f)
             val focalCx = baseCx + tiltX * 1.25f
@@ -1334,7 +1377,7 @@ class AvatarWallpaperService : WallpaperService() {
             drawEquilateralTriangle(canvas, 0f, triangleNudgeY, focalRadius * 0.80f, 0f, paint)
 
             // 4. Center Model Unicode Glyph: Clean, Crisp, Centered Core
-            // Jewel depth 0.96f (subtle float, cannot breach container)
+            // Nudged upward by 5.5dp so it sits in the optical centroid of the triangle!
             if (currentGlyphAlpha > 5 && currentAlbumAlpha <= 5 && !SystemVisualizer.isMediaPlaying) {
                 val glyphSize = focalRadius * 1.15f
                 logoPaint.clearShadowLayer()
@@ -1344,7 +1387,8 @@ class AvatarWallpaperService : WallpaperService() {
                 val off = (logoPaint.descent() + logoPaint.ascent()) / 2f
                 val shiftX = tiltX * 0.06f
                 val shiftY = tiltY * 0.06f
-                canvas.drawText(activeGlyph, shiftX, -off + shiftY + triangleNudgeY, logoPaint)
+                val glyphNudgeUp = 5.5f * density
+                canvas.drawText(activeGlyph, shiftX, -off + shiftY + triangleNudgeY - glyphNudgeUp, logoPaint)
             }
 
             canvas.restore()

@@ -496,9 +496,9 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
             canvas.drawLine(0f, rimY, width.toFloat(), rimY, paint)
         }
 
-        // 3. STYLE_WIREFRAME (Glowing Diamonds & Shooting Fading Chevrons):
-        // Prominent "Christmas lights" diamonds hugging both sides with fading checkmarks / diamond clones
-        // shooting upward/downward into the screen. Zero baseline rail underline.
+        // 3. STYLE_WIREFRAME (Bezel Half-Embedded Cubes & Holographic Shooting Chevrons):
+        // Cubes are half-submerged in the bezel rim (sawtooth teeth), leaving ample room for bright
+        // chromatic chevrons to shoot into the screen. Cubes flash white on beats while chevrons flash vivid color.
         private fun drawWireframe(canvas: Canvas, isTop: Boolean, histFft: List<ByteArray>, histBass: List<Float>) {
             val fft = histFft[0]
             val layBass = histBass.getOrElse(0) { smoothedBass }
@@ -506,11 +506,12 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
             val totalH = height.toFloat()
             val density = resources.displayMetrics.density
 
-            // 1. Glowing Diamonds with Shooting Fading Chevrons (No baseline underline stroke)
-            val count = 16
+            // 1. Spacing and Geometry: 10 clean nodes with breathing room
+            val count = 10
             val stepX = width.toFloat() / count
-            val diamondRadius = 12.0f * density
-            val dy = if (isTop) (diamondRadius + 3f) else (totalH - diamondRadius - 3f)
+            val diamondRadius = 13.0f * density
+            // Bezel half-embedding: center placed right on the display edge so only the inward tooth is visible
+            val dy = if (isTop) 0f else totalH
 
             for (i in 0 until count) {
                 val dx = i * stepX + (stepX / 2f)
@@ -520,8 +521,13 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
                 val edgeBias = 0.25f + (distFromCenter * 0.75f)
                 val nodeColor = currentColors[i % currentColors.size]
 
+                // Audio-reactive flash: Cubes flash white like the wallpaper satellites, chevrons flash vivid theme color
+                val cubeFlash = (mag / 16f + bassPower / 10f).coerceIn(0f, 1f)
+                val cubeFillColor = ColorUtils.blendARGB(nodeColor, Color.WHITE, cubeFlash * 0.80f)
+                val cubeStrokeColor = ColorUtils.blendARGB(nodeColor, Color.WHITE, cubeFlash)
+
                 // --- SHOOTING FADING CHECKMARKS / CHEVRONS (^) ---
-                // Fading holographic corner projections shooting outward from glass cubes.
+                // Fading holographic corner projections shooting outward from the bezel cubes.
                 // Outer flanks project up to 3 tiers high, mid-flanks project 1-2, center remains calm.
                 val maxClones = when {
                     distFromCenter > 0.50f -> 3
@@ -531,21 +537,21 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
                 }
 
                 val activeClones = if (maxClones > 0) {
-                    val energy = (mag / 5.0f + bassPower * 0.38f).coerceIn(0f, 1.5f)
-                    val count = (energy * maxClones).toInt()
-                    val minFlank = if (distFromCenter > 0.50f && (mag > 5f || bassPower > 3.5f)) 1 else 0
-                    count.coerceIn(minFlank, maxClones)
+                    val energy = (mag / 4.8f + bassPower * 0.40f).coerceIn(0f, 1.6f)
+                    val countClones = (energy * maxClones).toInt()
+                    val minFlank = if (distFromCenter > 0.50f && (mag > 4f || bassPower > 3.0f)) 1 else 0
+                    countClones.coerceIn(minFlank, maxClones)
                 } else 0
 
                 paint.strokeCap = Paint.Cap.ROUND
                 paint.strokeJoin = Paint.Join.ROUND
 
-                val wingSpread = diamondRadius * 0.85f
+                val wingSpread = diamondRadius * 0.95f
                 val wingH = diamondRadius * 0.75f
 
                 for (k in 1..activeClones) {
-                    // Exact corner clone projection: 3 evenly spaced tiers outside the diamond body
-                    val offset = diamondRadius * (1.30f + (k - 1) * 0.55f)
+                    // Exact corner clone projection: 3 evenly spaced tiers projecting into screen
+                    val offset = diamondRadius * (1.15f + (k - 1) * 0.60f)
                     val alphaRatio = 1f - ((k - 1f) / 3.2f)
 
                     cachedPath.reset()
@@ -565,24 +571,25 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
                         cachedPath.lineTo(dx + wingSpread, wingY)
                     }
 
-                    // Outer neon aura for lead chevron
+                    // Outer neon aura for lead chevron (bright chromatic color)
                     if (k == 1) {
                         paint.style = Paint.Style.STROKE
-                        paint.strokeWidth = 4.5f
+                        paint.strokeWidth = 4.8f
                         paint.color = nodeColor
-                        paint.alpha = (50 * alphaRatio).toInt().coerceIn(20, 120)
+                        paint.alpha = (75 * alphaRatio + mag * 1.5f).toInt().coerceIn(25, 160)
                         canvas.drawPath(cachedPath, paint)
                     }
 
-                    // Razor chevron stroke
+                    // Razor chevron stroke (bright chromatic color)
                     paint.style = Paint.Style.STROKE
-                    paint.strokeWidth = 2.2f
+                    paint.strokeWidth = 2.4f
                     paint.color = nodeColor
-                    paint.alpha = (215 * alphaRatio + mag * 1.8f).toInt().coerceIn(45, 255)
+                    paint.alpha = (220 * alphaRatio + mag * 2.2f).toInt().coerceIn(60, 255)
                     canvas.drawPath(cachedPath, paint)
                 }
 
-                // --- GLOWING CHRISTMAS LIGHTS DIAMOND ---
+                // --- BEZEL HALF-EMBEDDED CUBE DIAMOND ---
+                // Clipped naturally by display bounds: only the inward-facing triangular tooth is drawn
                 cachedPath.reset()
                 cachedPath.moveTo(dx, dy - diamondRadius)
                 cachedPath.lineTo(dx + diamondRadius, dy)
@@ -590,17 +597,18 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
                 cachedPath.lineTo(dx - diamondRadius, dy)
                 cachedPath.close()
 
-                // Translucent neon aura fill
+                // Translucent neon aura fill (flashing white on peaks)
                 paint.style = Paint.Style.FILL
-                paint.color = nodeColor
-                paint.alpha = (40 + (mag * 3.0f * edgeBias).toInt()).coerceIn(25, 200)
+                paint.color = cubeFillColor
+                val baseCubeAlpha = (50 + (mag * 3.5f * edgeBias) + (cubeFlash * 90f)).toInt().coerceIn(35, 230)
+                paint.alpha = baseCubeAlpha
                 canvas.drawPath(cachedPath, paint)
 
-                // Razor diamond stroke
+                // Razor diamond stroke (flashing crisp white on peaks)
                 paint.style = Paint.Style.STROKE
-                paint.strokeWidth = 2.4f
-                paint.color = nodeColor
-                paint.alpha = (160 + (mag * 2f).toInt()).coerceIn(120, 255)
+                paint.strokeWidth = 2.6f + (cubeFlash * 1.2f)
+                paint.color = cubeStrokeColor
+                paint.alpha = (180 + (mag * 2.5f) + (cubeFlash * 75f)).toInt().coerceIn(140, 255)
                 canvas.drawPath(cachedPath, paint)
             }
         }
