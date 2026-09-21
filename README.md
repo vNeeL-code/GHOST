@@ -182,8 +182,7 @@ Direct, local tool execution:
 - [x] **Hardware Tool Matrix:** Native MCP tools for device control, web search, and app launching.
 - [x] **Live Reactive Wallpapers:** GPU-accelerated 60fps geometry visualizers (Delta, Cuboid, Hex, Orbital).
 - [x] **Edge Lighting Engine:** Audioreactive and inference-reactive display perimeter illumination.
-- [ ] **Polishing Gesture Choreography:** Micro-tuning gyro parallax and spring physics.
-- [ ] **A2A Federated Cloud Deferral:** Seamless delegation of frontier reasoning tasks to cloud peers when plugged in.
+- [x] **Polishing Gesture Choreography:** Micro-tuning gyro parallax and spring physics.
 - [ ] **App Store Distribution:** 🦕💭 *"I need about tree fiddy"*
 
 ---
@@ -197,7 +196,7 @@ Direct, local tool execution:
 * **Fuel the Project:** [☕ Buy Me a Coffee](https://buymeacoffee.com/vNeeL) *(All support goes directly toward on-device optimization and development hardware.)*
 * **Found a bug?:** [Customer Support Portal](https://www.google.com)
 
-<img width="954" height="2049" alt="GHOST Settings Interface" src="https://github.com/user-attachments/assets/f424837b-907e-41f5-883b-51d49057c83f" />
+<img width="954" height="1352" alt="logo" src="https://github.com/user-attachments/assets/999d3dc2-ad12-4358-b86e-0de84d477771" />
 
 *Operator: Clone the repository, launch Android Studio, and instruct your local neural assets to bend the framework to your exact silicon.*  
 **Δ 👾 ∇**
