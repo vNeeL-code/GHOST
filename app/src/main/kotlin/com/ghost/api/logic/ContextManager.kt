@@ -44,7 +44,7 @@ class ContextManager(
             val chipsetName = com.ghost.api.hardware.DeviceHardwareSpecs.resolveChipsetName()
             val tier = com.ghost.api.Constants.resolveHardwareModelTier(context)
             val coreDescription = if (tier == "E4B") {
-                "Gemma 4 E4B (Frontier Core, 2,560 tokens, MTP speculative decoding)"
+                "Gemma 4 E4B (Frontier Core, 4,096 tokens, MTP speculative decoding)"
             } else {
                 "Gemma 4 E2B (Compact Core, 5,120 tokens)"
             }

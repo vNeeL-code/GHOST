@@ -25,7 +25,7 @@ object Constants {
     const val THERMAL_LIMIT_CELSIUS = 65
 
     // Token budgets tuned per model architecture & memory footprint
-    const val MAX_TOKENS_E4B = 2560   // 12GB+ RAM profile (Game Space pinned, MTP speculative decoding)
+    const val MAX_TOKENS_E4B = 4096   // 12GB+ RAM profile (Game Space pinned, MTP speculative decoding, ample prompt+tools headroom)
     const val MAX_TOKENS_E2B = 5120   // 8GB RAM profile (1.72GB peak, immune to 2GB SPKL, 4.7k free dialogue runway)
     const val MAX_TOKENS = MAX_TOKENS_E4B // Legacy fallback
 

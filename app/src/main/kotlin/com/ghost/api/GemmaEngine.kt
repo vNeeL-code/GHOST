@@ -320,7 +320,17 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                     override fun onError(throwable: Throwable) {
                         if (isLoopDetected) return
                         try {
-                            onError(throwable.message ?: "Stream error")
+                            val errMsg = throwable.message ?: "Stream error"
+                            if (errMsg.contains("token", ignoreCase = true) || errMsg.contains("Status Code: 3", ignoreCase = true)) {
+                                Timber.w("GemmaEngine: Resetting native conversation due to token limit breach: $errMsg")
+                                try {
+                                    activeConv.close()
+                                } catch (e: Exception) {
+                                    Timber.w(e, "Failed to close conversation on error")
+                                }
+                                conversation = null
+                            }
+                            onError(errMsg)
                         } finally {
                             isBusy.set(false)
                             deferred.complete(Unit)

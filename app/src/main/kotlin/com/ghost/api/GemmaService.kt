@@ -592,6 +592,10 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             .apply()
 
         serviceScope.launch {
+            cancelThinking()
+            isInferencing = false
+            currentInFlightQuery = null
+
             if (backend == "OFF") {
                 unloadEngine()
                 _isSystemReady.value = true
@@ -603,8 +607,11 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             } else {
                 updateNotification("Switching to $backend...")
                 initialize()
+                val ready = isGemmaLoaded() && ::ghostAgent.isInitialized && ghostAgent.isReady
+                _isSystemReady.value = ready
                 withContext(Dispatchers.Main) {
-                    android.widget.Toast.makeText(this@GemmaService, "Engine online on $backend 🚀", android.widget.Toast.LENGTH_SHORT).show()
+                    val msg = if (ready) "Engine online on $backend 🚀" else "Engine failed to initialize on $backend ⚠️"
+                    android.widget.Toast.makeText(this@GemmaService, msg, android.widget.Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -623,10 +630,16 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             .apply()
 
         serviceScope.launch {
+            cancelThinking()
+            isInferencing = false
+            currentInFlightQuery = null
             updateNotification("Loading Gemma $modelCore...")
             initialize()
+            val ready = isGemmaLoaded() && ::ghostAgent.isInitialized && ghostAgent.isReady
+            _isSystemReady.value = ready
             withContext(Dispatchers.Main) {
-                android.widget.Toast.makeText(this@GemmaService, "Active model core: $modelCore 🧠", android.widget.Toast.LENGTH_SHORT).show()
+                val msg = if (ready) "Active model core: $modelCore 🧠" else "Failed to load $modelCore ⚠️"
+                android.widget.Toast.makeText(this@GemmaService, msg, android.widget.Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -919,6 +932,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 
                 if (error != null) {
                     engineInstance.cleanup()
+                    _isSystemReady.value = false
                     val hint = when {
                         error.contains("memory", ignoreCase = true) || error.contains("OOM", ignoreCase = true) ->
                             " (Try quantizing device backend)"
@@ -971,9 +985,12 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 .putInt("init_crash_count", 0)
                 .apply()
 
+            _isSystemReady.value = true
+            reportStatus("Running on ${newEngine.activeBackend} Backend")
             updateNotification("System Ready - localhost:${Constants.API_PORT}")
 
         } catch (e: Exception) {
+            _isSystemReady.value = false
             Timber.e(e)
             updateNotification("Crash: ${e.message}")
         }
@@ -2055,8 +2072,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             }
         }
 
-        val compactedMemory = try { memoryManager.getCompactedSessionMemory().take(300) } catch (e: Exception) { "" }
-        val recentTurns = try { memoryManager.getSessionHistory(5) } catch (e: Exception) { emptyList() }
+        val compactedMemory = try { memoryManager.getCompactedSessionMemory().take(200) } catch (e: Exception) { "" }
+        val recentTurns = try { memoryManager.getSessionHistory(4) } catch (e: Exception) { emptyList() }
         val lastTurn = recentTurns.firstOrNull()
 
         // Compute interaction recency delta
@@ -2077,8 +2094,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         }
 
         val historyText = if (recentTurns.isNotEmpty()) {
-            recentTurns.reversed().takeLast(3).joinToString("\n") {
-                "User: ${it.userMessage.take(80)}\nGemma: ${it.assistantResponse.take(80)}"
+            recentTurns.reversed().takeLast(2).joinToString("\n") {
+                "User: ${it.userMessage.take(50)}\nGemma: ${it.assistantResponse.take(50)}"
             }
         } else {
             "No active conversation turns in this period."
@@ -2148,17 +2165,22 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 cleanContent = cleanContent.replace(Regex("<think>.*?</think>", RegexOption.DOT_MATCHES_ALL), "").trim()
             }
 
-            val isBoilerplateGreeting = cleanContent.isBlank() ||
+            val isErrorOrDegenerate = cleanContent.isBlank() ||
                 cleanContent.length < 25 ||
+                cleanContent.startsWith("Error:", ignoreCase = true) ||
+                cleanContent.contains("stumbled while executing", ignoreCase = true) ||
+                cleanContent.contains("Status Code:", ignoreCase = true) ||
+                cleanContent.contains("Input token ids are too long", ignoreCase = true) ||
+                cleanContent.contains("Exceeding the maximum number of tokens", ignoreCase = true) ||
+                cleanContent.contains("Exception", ignoreCase = true) ||
                 cleanContent.contains("How can I help", ignoreCase = true) ||
                 cleanContent.contains("I'm here to help", ignoreCase = true) ||
                 cleanContent.contains("What can I do for you", ignoreCase = true) ||
                 cleanContent.contains("How may I assist", ignoreCase = true) ||
-                cleanContent.equals("I'm here.", ignoreCase = true) ||
-                cleanContent.startsWith("Error:")
+                cleanContent.equals("I'm here.", ignoreCase = true)
 
-            if (isBoilerplateGreeting) {
-                Timber.w("📔 Diary generation returned degenerate greeting ('$cleanContent'). Generating autonomous fallback reflection.")
+            if (isErrorOrDegenerate) {
+                Timber.w("📔 Diary generation returned error or degenerate output ('$cleanContent'). Generating autonomous fallback reflection.")
                 val summaryPeriod = if (recentTurns.isNotEmpty()) "Active session period with operator interactions." else "Quiet substrate stretch across cycles."
                 cleanContent = "**MEMORY LOG**\n$summaryPeriod Substrates nominal at $thermal with battery standing at ${if (batteryLevel >= 0) "$batteryLevel% ($chargeStatus)" else "nominal"}. Background media: $mediaTelemetry. Idling smoothly in low-power state."
             } else if (!cleanContent.startsWith("**MEMORY LOG**", ignoreCase = true)) {

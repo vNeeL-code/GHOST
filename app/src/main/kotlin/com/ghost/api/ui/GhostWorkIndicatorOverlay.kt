@@ -326,6 +326,9 @@ class GhostWorkIndicatorOverlay(
         if (durationMs > 0) {
             val safeDuration = durationMs.coerceAtLeast(minDisplayDurationMs)
             postDelayed(autoHideRunnable, safeDuration)
+        } else {
+            // Unconditional 30s failsafe: Never remain stuck on screen even if host callbacks crash
+            postDelayed(autoHideRunnable, 30000L)
         }
     }
 
@@ -333,9 +336,19 @@ class GhostWorkIndicatorOverlay(
         hide()
     }
 
-    fun hide() {
+    fun hide(force: Boolean = false) {
         removeCallbacks(autoHideRunnable)
         if (!isAttachedToWindow) return
+
+        if (force) {
+            openAnimator?.cancel()
+            alphaAnimator?.cancel()
+            currentAlpha = 0f
+            openProgress = 0f
+            stopAnimationLoop()
+            detachSafely()
+            return
+        }
 
         // Ensure the indicator stays visible long enough to be appreciated even on sub-second operations
         val elapsed = System.currentTimeMillis() - showTimestamp

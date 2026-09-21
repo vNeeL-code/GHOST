@@ -277,7 +277,7 @@ class OverlayManager(private val context: Context) {
         if (count <= 0) {
             activeWorkCounter.set(0)
             android.os.Handler(android.os.Looper.getMainLooper()).post {
-                ghostWorkIndicator?.hide()
+                ghostWorkIndicator?.hide(force)
             }
         }
     }

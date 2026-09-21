@@ -289,6 +289,25 @@ class GhostAgent(
             append(historyContent)
         }
 
+        // Hard token safety guard: Estimate sequence tokens before passing to native engine
+        val maxTokens = llmEngine.maxNumTokens
+        val historyChars = synchronized(_conversationHistory) { _conversationHistory.sumOf { it.content.length } }
+        val historyTokens = historyChars / 3
+        val promptTokens = promptForModel.length / 3
+        val estimatedTotal = 1200 + historyTokens + promptTokens // 1200 tokens baseline for system prompt + MCP tool schemas
+
+        if (estimatedTotal > maxTokens - 400 && turnsSinceKvFlush > 0) {
+            Timber.w("GhostAgent: Estimated tokens ($estimatedTotal) near ceiling ($maxTokens). Forcing KV cache flush & compaction.")
+            compactMemory(force = true)
+        }
+
+        val boundedPrompt = if (promptForModel.length > 3500) {
+            Timber.w("GhostAgent: Truncating overly long prompt (${promptForModel.length} chars) to 3500 chars")
+            promptForModel.take(3500)
+        } else {
+            promptForModel
+        }
+
         callbacks?.showThinking()
 
         val responseBuffer = StringBuilder()
@@ -300,7 +319,7 @@ class GhostAgent(
 
         try {
             llmEngine.streamResponse(
-                prompt = promptForModel,
+                prompt = boundedPrompt,
                 images = images,
                 audioData = audio,
                 onToken = { rawToken ->
@@ -403,6 +422,11 @@ class GhostAgent(
                     _conversationHistory.add(AgentMessage(role = "assistant", content = errorMsg))
                     callbacks?.onMessageAdded(errorMsg, isUser = false, isComplete = true)
                 }
+                if (streamError!!.contains("token", ignoreCase = true) || streamError!!.contains("Status Code: 3", ignoreCase = true)) {
+                    agentScope.launch {
+                        try { softReset() } catch (_: Exception) {}
+                    }
+                }
                 return errorMsg
             }
 
@@ -461,6 +485,11 @@ class GhostAgent(
             if (!isDream) {
                 _conversationHistory.add(AgentMessage(role = "assistant", content = errorMsg))
                 callbacks?.onMessageAdded(errorMsg, isUser = false, isComplete = true)
+            }
+            if (e.message?.contains("token", ignoreCase = true) == true || e.message?.contains("Status Code: 3", ignoreCase = true) == true) {
+                agentScope.launch {
+                    try { softReset() } catch (_: Exception) {}
+                }
             }
             return errorMsg
         } finally {
@@ -546,8 +575,8 @@ class GhostAgent(
         val estTokens = historyChars / 3
 
         val maxTokens = llmEngine.maxNumTokens
-        val tokenThreshold = if (maxTokens > 3000) 4200 else 1800
-        val turnThreshold = if (maxTokens > 3000) 24 else 8
+        val tokenThreshold = if (maxTokens > 3000) 2200 else 1400
+        val turnThreshold = if (maxTokens > 3000) 10 else 6
         val kvFlushTurnThreshold = turnThreshold / 2
 
         if (count >= turnThreshold || turnsSinceKvFlush >= kvFlushTurnThreshold || estTokens > tokenThreshold) {
