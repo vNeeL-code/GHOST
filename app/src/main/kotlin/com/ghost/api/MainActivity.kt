@@ -335,9 +335,8 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
 
     override fun onThinkingStateChanged(isThinking: Boolean) {
         lifecycleScope.launch(Dispatchers.Main) {
-            val ts = java.time.LocalDateTime.now()
-                .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
-            chatViewModel.setThinking(isThinking, if (isThinking) "Thinking... $ts" else "")
+            val flavor = if (isThinking) com.ghost.api.ui.GhostWorkIndicatorOverlay.FlavorTexts.pick("THINK") else ""
+            chatViewModel.setThinking(isThinking, flavor)
         }
     }
 
