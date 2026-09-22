@@ -47,17 +47,39 @@ class ModelDownloader(
 
         val url = "https://huggingface.co/$hfRepo/resolve/main/$fileName?download=true"
         
-        val modelsDir = context.getExternalFilesDir("models") ?: File(context.getExternalFilesDir(null), "models")
+        val modelsDir = context.getExternalFilesDir("models") 
+            ?: context.getExternalFilesDir(null)?.let { File(it, "models") }
+            ?: File(context.filesDir, "models")
         modelsDir.mkdirs()
 
-        val existingFile = File(modelsDir, fileName)
-        if (existingFile.exists() && existingFile.length() > 200 * 1024 * 1024L) {
-            Timber.i("Model $fileName already exists in protected storage (${existingFile.length()} bytes)")
-            _downloadStatus.value = DownloadState.Success(existingFile)
+        // 1. Check all candidate search directories for the requested model file
+        val allSearchDirs = listOfNotNull(
+            modelsDir,
+            context.getExternalFilesDir(null),
+            File(context.filesDir, "models"),
+            context.filesDir,
+            File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "models"),
+            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+        )
+
+        for (dir in allSearchDirs) {
+            val candidate = File(dir, fileName)
+            if (candidate.exists() && candidate.length() > 200 * 1024 * 1024L) {
+                Timber.i("Model $fileName already exists in ${candidate.absolutePath} (${candidate.length()} bytes)")
+                _downloadStatus.value = DownloadState.Success(candidate)
+                return
+            }
+        }
+
+        // 2. Fallback check: If ANY valid model exists on disk (>200MB), adopt it instead of downloading
+        val anyModel = findAnyLocalModel(context)
+        if (anyModel != null) {
+            Timber.i("Found local alternative model: ${anyModel.absolutePath} (${anyModel.length()} bytes). Adopting instead of redundant download.")
+            _downloadStatus.value = DownloadState.Success(anyModel)
             return
         }
 
-        // 2. Check DownloadManager for existing downloads of the same file
+        // 3. Check DownloadManager for existing downloads of the same file
         val existingId = findExistingDownloadId(fileName)
         if (existingId != -1L) {
             Timber.i("Found existing download for $fileName (ID: $existingId). Attaching...")
@@ -192,11 +214,42 @@ class ModelDownloader(
     }
 
     fun isModelDownloaded(fileName: String): Boolean {
-        val modelsDir = context.getExternalFilesDir("models") ?: File(context.getExternalFilesDir(null), "models")
-        val protectedFile = File(modelsDir, fileName)
-        if (protectedFile.exists() && protectedFile.length() > 200 * 1024 * 1024L) return true
-        val publicDownloadDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
-        val publicFile = File(publicDownloadDir, fileName)
-        return publicFile.exists() && publicFile.length() > 200 * 1024 * 1024L
+        val allSearchDirs = listOfNotNull(
+            context.getExternalFilesDir("models"),
+            context.getExternalFilesDir(null)?.let { File(it, "models") },
+            context.getExternalFilesDir(null),
+            File(context.filesDir, "models"),
+            context.filesDir,
+            File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "models"),
+            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+        )
+        return allSearchDirs.any { dir ->
+            val f = File(dir, fileName)
+            f.exists() && f.length() > 200 * 1024 * 1024L
+        }
+    }
+
+    companion object {
+        fun findAnyLocalModel(context: Context): File? {
+            val allSearchDirs = listOfNotNull(
+                context.getExternalFilesDir("models"),
+                context.getExternalFilesDir(null)?.let { File(it, "models") },
+                context.getExternalFilesDir(null),
+                File(context.filesDir, "models"),
+                context.filesDir,
+                File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "models"),
+                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+            )
+
+            return allSearchDirs.flatMap { dir ->
+                dir.listFiles { file ->
+                    val name = file.name
+                    (name.endsWith(".litertlm", ignoreCase = true) ||
+                     name.endsWith(".gguf", ignoreCase = true) ||
+                     name.endsWith(".nexa", ignoreCase = true)) &&
+                    file.length() > 200 * 1024 * 1024L
+                }?.toList() ?: emptyList()
+            }.sortedByDescending { it.length() }.firstOrNull()
+        }
     }
 }

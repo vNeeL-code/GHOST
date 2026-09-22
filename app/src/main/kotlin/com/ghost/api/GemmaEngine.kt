@@ -112,7 +112,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
             maxNumTokens = modelMaxTokens
             Timber.i("Configuring GemmaEngine with maxNumTokens=$modelMaxTokens for model: $modelPath")
 
-            var lastError: Exception? = null
+            var lastError: Throwable? = null
             for ((backendName, preferredBackend) in backendsToTry) {
                 val isGpu = backendName == "GPU"
                 val visionBackend = if (enableVision) {
@@ -161,9 +161,12 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                     activeBackend = "LiteRT-LM ($backendName${if (supportsSpeculativeDecoding && isGpu) " + MTP" else ""})"
                     Timber.i("GemmaEngine initialized successfully on $backendName (MTP=$supportsSpeculativeDecoding)")
                     return null // Success!
-                } catch (e: Exception) {
-                    Timber.w(e, "Native Engine Initialization Failed for $backendName")
+                } catch (e: Throwable) {
+                    Timber.w(e, "Native Engine Initialization Failed for $backendName: ${e.message}")
                     lastError = e
+                    // Force GC after failed GPU allocation to free native buffers before trying CPU
+                    System.gc()
+                    Runtime.getRuntime().gc()
                     // Continue to the next backend in the loop
                 }
             }

@@ -114,6 +114,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         try { it.activeBackend != null } catch(e: Exception) { false }
     } ?: false
 
+    // RAM Suspension State: Tracks when engine was proactively suspended to free memory for games
+    val isSuspendedDueToRam = java.util.concurrent.atomic.AtomicBoolean(false)
+    fun isEngineSuspendedDueToRam(): Boolean = isSuspendedDueToRam.get()
 
     // Thermal Safety State
     private val isCoolingDown = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -682,13 +685,30 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     private suspend fun initialize() {
         val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
 
+        // 1. EARLY CHECK: If user set backend to OFF, enter standalone mode immediately. Never search or download.
+        val userBackend = prefs.getString(Constants.PREF_USER_BACKEND, "AUTO")
+        if (userBackend == "OFF") {
+            Timber.i("🛑 User selected backend: OFF. Entering standalone mode (RAM freed).")
+            unloadEngine()
+            _isSystemReady.value = true
+            isSuspendedDueToRam.set(false)
+            prefs.edit().putBoolean("is_initializing", false).apply()
+            updateNotification("GHOST Online (Engine OFF)")
+            reportStatus("Standby: Engine OFF")
+            return
+        }
+
         // WATCHDOG: Detect previous crash
         // NOTE: Counter is already incremented in onCreate(). Do NOT double-increment here.
         val crashCount = prefs.getInt("init_crash_count", 0)
         val defaultModel = Constants.resolveHardwareModelTier(this)
         val selectedModel = prefs.getString(Constants.PREF_SELECTED_MODEL, defaultModel) ?: defaultModel
 
-        val protectedModelsDir = File(getExternalFilesDir(null), "models").apply { mkdirs() }
+        val protectedModelsDir = getExternalFilesDir("models") 
+            ?: getExternalFilesDir(null)?.let { File(it, "models") }
+            ?: File(filesDir, "models")
+        protectedModelsDir.mkdirs()
+
         val appFilesDir = getExternalFilesDir(null)
         val downloadDir = android.os.Environment.getExternalStoragePublicDirectory(
             android.os.Environment.DIRECTORY_DOWNLOADS
@@ -697,6 +717,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         val searchDirs = listOfNotNull(
             protectedModelsDir,
             appFilesDir,
+            File(filesDir, "models"),
+            filesDir,
+            File(downloadDir, "models"),
             downloadDir
         )
 
@@ -759,21 +782,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
             // FALLBACK SAFETY: If requested variant is missing on disk, adopt ANY valid local model before downloading
             if (candidateFile == null) {
-                val fallbackModel = searchDirs.flatMap { dir ->
-                    dir.listFiles { file ->
-                        val name = file.name
-                        (name.endsWith(".litertlm", ignoreCase = true) ||
-                         name.endsWith(".gguf", ignoreCase = true) ||
-                         name.endsWith(".nexa", ignoreCase = true)) &&
-                        file.length() > 200 * 1024 * 1024L
-                    }?.toList() ?: emptyList()
-                }.sortedByDescending { file ->
-                    var score = 0
-                    if (file.parentFile?.canonicalPath == protectedModelsDir.canonicalPath) score += 100
-                    if (file.name.endsWith(".litertlm", ignoreCase = true)) score += 50
-                    score
-                }.firstOrNull()
-
+                val fallbackModel = ModelDownloader.findAnyLocalModel(this)
                 if (fallbackModel != null) {
                     val detectedVariant = if (fallbackModel.name.contains("e4b", ignoreCase = true)) "E4B" else "E2B"
                     Timber.w("Targeted model $activeModel not found on disk, but found existing ${fallbackModel.name}. Adopting $detectedVariant to prevent redundant download.")
@@ -782,7 +791,13 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 }
             }
 
-            // AUTO-MIGRATION: If found outside protectedModelsDir, migrate to protected storage!
+            // Storage Delay Guard: Wait 500ms and re-check once in case storage volume was momentarily busy
+            if (candidateFile == null) {
+                delay(500)
+                candidateFile = ModelDownloader.findAnyLocalModel(this)
+            }
+
+            // AUTO-MIGRATION / SAFE ADOPTION: Ensure file is accessible
             val modelFile: File? = if (candidateFile != null && candidateFile.parentFile?.canonicalPath != protectedModelsDir.canonicalPath) {
                 val targetFile = File(protectedModelsDir, candidateFile.name)
                 Timber.i("📦 Auto-migrating model from ${candidateFile.parent} to protected storage: ${targetFile.absolutePath}")
@@ -814,6 +829,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 } else if (targetFile.exists() && targetFile.length() == candidateFile.length()) {
                     targetFile
                 } else {
+                    Timber.i("Using model in-place at ${candidateFile.absolutePath}")
                     candidateFile
                 }
             } else {
@@ -827,11 +843,11 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                     modelFile.name.contains("E2B", ignoreCase = true) -> "E2B (Compact)"
                     else -> "unknown variant"
                 }
-                Timber.i("\uD83D\uDCE6 Found model: ${modelFile.name} ($variant) in ${modelFile.parent}")
+                Timber.i("📦 Found model: ${modelFile.name} ($variant) in ${modelFile.parent}")
             }
 
             if (modelFile == null) {
-                val searchedPaths = searchDirs.mapNotNull { it?.absolutePath }
+                val searchedPaths = searchDirs.mapNotNull { it.absolutePath }
                 Timber.e("No model found! Searched: $searchedPaths")
                 val hfRepo = if (selectedModel.equals("E2B", ignoreCase = true)) Constants.MODEL_REPO_E2B else Constants.MODEL_REPO_E4B
                 val hfFileName = if (selectedModel.equals("E2B", ignoreCase = true)) Constants.MODEL_NAME_E2B else Constants.MODEL_NAME_E4B
@@ -872,19 +888,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             }
 
             // Determine backend: User override > Watchdog > Auto waterfall
-            val userBackend = prefs.getString(Constants.PREF_USER_BACKEND, "AUTO")
-            if (userBackend == "OFF") {
-                Timber.i("🛑 User selected backend: OFF. Entering standalone mode (RAM freed).")
-                unloadEngine()
-                _isSystemReady.value = true
-                prefs.edit().putBoolean("is_initializing", false).apply()
-                updateNotification("GHOST Online (Engine OFF)")
-                reportStatus("Standby: Engine OFF")
-                return
-            }
-
             val forcedBackend = if (userBackend != null && userBackend != "AUTO") {
-                Timber.i("\uD83C\uDFAE User backend override: $userBackend")
+                Timber.i("🎮 User backend override: $userBackend")
                 when (userBackend.uppercase()) {
                     "GPU" -> updateNotification("✧ Running GPU systems diagnostic")
                     "CPU" -> updateNotification("✧ Running CPU systems diagnostic")
@@ -892,7 +897,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 }
                 userBackend
             } else if (prefs.getInt("init_crash_count", 0) >= 4) {
-                Timber.w("\uD83D\uDEA8 Forcing CPU backend due to repeated crashes (threshold 4)")
+                Timber.w("🚨 Forcing CPU backend due to repeated crashes (threshold 4)")
                 updateNotification("✧ Running CPU systems diagnostic")
                 "CPU"
             } else if (prefs.getBoolean("force_cpu", false)) {
@@ -938,19 +943,42 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 
                 if (error != null) {
                     engineInstance.cleanup()
-                    _isSystemReady.value = false
-                    val hint = when {
-                        error.contains("memory", ignoreCase = true) || error.contains("OOM", ignoreCase = true) ->
-                            " (Try quantizing device backend)"
-                        error.contains("GPU", ignoreCase = true) ->
-                            " (GPU init failed ⚠️ device may not support this model natively)"
-                        else -> ""
+                    if (forcedBackend != "CPU") {
+                        Timber.w("⚠️ Primary engine init error ($error). Automatically falling back to CPU backend to ensure GHOST stays alive!")
+                        updateNotification("Memory Pressure: Recovering on CPU...")
+                        System.gc()
+                        Runtime.getRuntime().gc()
+
+                        val cpuEngine = GemmaEngine(applicationContext)
+                        val cpuError = try {
+                            cpuEngine.initialize(
+                                modelFile.absolutePath, 
+                                "", 
+                                toolSets = adkTools, 
+                                forcedBackend = "CPU"
+                            )
+                        } catch (t: Throwable) {
+                            t.message
+                        }
+                        if (cpuError == null) {
+                            Timber.i("✅ Cleanly recovered on CPU backend!")
+                            cpuEngine
+                        } else {
+                            cpuEngine.cleanup()
+                            _isSystemReady.value = false
+                            Timber.e("CPU fallback also failed: $cpuError")
+                            updateNotification("Load Error: ${cpuError.take(80)}")
+                            return@initialize
+                        }
+                    } else {
+                        _isSystemReady.value = false
+                        Timber.e("Model load failed on CPU: $error")
+                        updateNotification("Load Error: ${error.take(80)}")
+                        return@initialize
                     }
-                    Timber.e("Model load failed: $error")
-                    updateNotification("Load Error: ${error.take(80)}$hint")
-                    return@initialize
+                } else {
+                    engineInstance
                 }
-                engineInstance
             }
 
             engineRef.set(newEngine)
@@ -995,6 +1023,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 .putInt("init_crash_count", 0)
                 .apply()
 
+            isSuspendedDueToRam.set(false)
             _isSystemReady.value = true
             reportStatus("Running on ${newEngine.activeBackend} Backend")
             updateNotification("✧ Machine Status: Fully operational")
@@ -1435,9 +1464,34 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                     updateNotification(" $frame")
                 }
 
-                // RAM Safety Valve: Check if system is under critical memory pressure (>= 95% or < 500MB free)
+                // RAM Safety Valve: Check if system is under critical memory pressure (>= 94% or < 400MB free)
                 if (isIdle()) {
                     checkRamPressureAndSuspendIfNeeded()
+                }
+
+                // Auto-Reload Safety Valve: If engine was suspended due to memory pressure,
+                // check if system memory utilization has cooled below 50% (< 0.50 utilization & >= 2.5GB free).
+                // Automatically re-initializes engine weights back into RAM without user intervention!
+                val userBackend = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+                    .getString(Constants.PREF_USER_BACKEND, "AUTO")
+                if (isSuspendedDueToRam.get() && userBackend != "OFF" && !isInferencing) {
+                    val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+                    if (activityManager != null) {
+                        val memInfo = ActivityManager.MemoryInfo()
+                        activityManager.getMemoryInfo(memInfo)
+                        val usedMem = memInfo.totalMem - memInfo.availMem
+                        val utilization = usedMem.toDouble() / memInfo.totalMem.toDouble()
+
+                        if (utilization < Constants.RAM_RELOAD_UTILIZATION_THRESHOLD && 
+                            memInfo.availMem >= Constants.RAM_RELOAD_MIN_FREE_BYTES && 
+                            !memInfo.lowMemory) {
+                            Timber.i("♻️ System RAM cooled to ${(utilization * 100).toInt()}% (${memInfo.availMem / (1024 * 1024)}MB free). Auto-reloading suspended engine weights...")
+                            updateNotification("✧ Memory calm: Reloading Gemma...")
+                            serviceScope.launch {
+                                ensureEngineReady()
+                            }
+                        }
+                    }
                 }
 
                 val now = System.currentTimeMillis()
@@ -1499,11 +1553,12 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
     /**
      * RAM Safety Valve: Proactively suspends Gemma engine weights if system memory utilization
-     * reaches >= 95% or available memory drops below 500MB while GHOST is idle.
+     * reaches >= 94% or available memory drops below 400MB while GHOST is idle.
      * Prevents OEM LMK / ZTE SPKL terminations when memory-heavy apps (camera, games) are launched.
      */
     fun checkRamPressureAndSuspendIfNeeded(): Boolean {
-        if (isInferencing || isSpeaking() || !isGemmaLoaded()) return false
+        if (isInferencing || isSpeaking() || !isGemmaLoaded() || isSuspendedDueToRam.get()) return false
+        if (::overlayManager.isInitialized && overlayManager.isAppInForeground) return false
         val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return false
         val memInfo = ActivityManager.MemoryInfo()
         activityManager.getMemoryInfo(memInfo)
@@ -1534,6 +1589,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                     Timber.w(e, "Failed to checkpoint GhostAgent before suspend")
                 }
             }
+            isSuspendedDueToRam.set(true)
             unloadEngine()
             updateNotification("✧ Gemma: Suspended (Freed RAM for other apps)")
             Timber.i("✧ Gemma engine weights unloaded due to: $reason")
@@ -1546,6 +1602,10 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL || 
             level >= ComponentCallbacks2.TRIM_MEMORY_COMPLETE) {
             if (!isInferencing && !isSpeaking() && isGemmaLoaded()) {
+                if (::overlayManager.isInitialized && overlayManager.isAppInForeground) {
+                    Timber.i("Ignoring onTrimMemory: GHOST is currently active in foreground")
+                    return
+                }
                 Timber.w("🚨 TRIM_MEMORY critical pressure ($level). Suspending engine weights...")
                 suspendEngineWeights("System TRIM_MEMORY ($level)")
             }
@@ -1556,6 +1616,10 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         super.onLowMemory()
         Timber.w("🚨 onLowMemory received from OS! Suspending engine weights immediately...")
         if (!isInferencing && !isSpeaking() && isGemmaLoaded()) {
+            if (::overlayManager.isInitialized && overlayManager.isAppInForeground) {
+                Timber.i("Ignoring onLowMemory: GHOST is currently active in foreground")
+                return
+            }
             suspendEngineWeights("System onLowMemory")
         }
     }
@@ -1566,12 +1630,33 @@ class GemmaService : Service(), AgentPlatformCallbacks {
      */
     suspend fun ensureEngineReady(): Boolean {
         if (isGemmaLoaded() && ::ghostAgent.isInitialized && ghostAgent.isReady) {
+            isSuspendedDueToRam.set(false)
             return true
         }
         Timber.i("Engine not loaded or agent not ready. Waking up engine weights...")
         updateNotification("Waking up Gemma...")
         initialize()
-        return isGemmaLoaded() && ::ghostAgent.isInitialized && ghostAgent.isReady
+        val ready = isGemmaLoaded() && ::ghostAgent.isInitialized && ghostAgent.isReady
+        if (ready) {
+            isSuspendedDueToRam.set(false)
+        }
+        return ready
+    }
+
+    /**
+     * Wakes up engine weights if they were suspended due to RAM pressure
+     * or if user returned to the app. Non-blocking call for UI/activity resumes.
+     */
+    fun resumeEngineIfNeeded() {
+        val userBackend = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(Constants.PREF_USER_BACKEND, "AUTO")
+        if (userBackend == "OFF") return
+        if (isSuspendedDueToRam.get() || !isGemmaLoaded()) {
+            Timber.i("Resuming engine from suspension / inactive state...")
+            serviceScope.launch {
+                ensureEngineReady()
+            }
+        }
     }
 
     /**

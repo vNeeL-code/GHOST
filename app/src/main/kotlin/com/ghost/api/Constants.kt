@@ -33,8 +33,12 @@ object Constants {
     const val MAX_TOKENS = MAX_TOKENS_E4B // Legacy fallback
 
     // Memory suspension safety valve thresholds (avoids false-positive unloads at 85-89% idle)
-    const val RAM_CRITICAL_UTILIZATION_THRESHOLD = 0.95f // 95% RAM utilization
-    const val RAM_CRITICAL_MIN_FREE_BYTES = 500L * 1024 * 1024 // 500 MB free memory floor
+    const val RAM_CRITICAL_UTILIZATION_THRESHOLD = 0.94f // 94% RAM utilization
+    const val RAM_CRITICAL_MIN_FREE_BYTES = 400L * 1024 * 1024 // 400 MB free memory floor
+
+    // Auto-reload safety valve: automatically boots suspended engine back up when memory is calm (<50% utilization)
+    const val RAM_RELOAD_UTILIZATION_THRESHOLD = 0.50f // 50% RAM utilization floor for automatic wake-up
+    const val RAM_RELOAD_MIN_FREE_BYTES = 2500L * 1024 * 1024 // 2.5 GB free memory required to auto-reload
 
     /**
      * Reads total physical RAM in GB.

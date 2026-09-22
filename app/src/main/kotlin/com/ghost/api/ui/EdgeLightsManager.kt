@@ -280,6 +280,7 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
         protected val cachedPath = android.graphics.Path()
         protected val mainHandler = Handler(Looper.getMainLooper())
         protected var smoothedBass = 0f
+        protected var strobeFlash = 0f
 
         protected val LAYERS = 3
         protected val fftHistory = ArrayDeque<ByteArray>(LAYERS)
@@ -335,6 +336,22 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
 
             smoothedBass = smoothedBass * 0.72f + bass * 0.28f
 
+            // Snare / transient attack detection in mid-high spectrum
+            var snareEnergy = 0f
+            if (fft.size >= 32) {
+                for (b in 12 until 28 step 2) {
+                    val re = fft[b].toInt()
+                    val im = fft[b + 1].toInt()
+                    snareEnergy += Math.hypot(re.toDouble(), im.toDouble()).toFloat()
+                }
+            }
+            val avgSnare = snareEnergy / 8f
+            if (avgSnare > 18f) {
+                strobeFlash = maxOf(strobeFlash, (avgSnare / 45f).coerceIn(0f, 1f))
+            } else {
+                strobeFlash = (strobeFlash * 0.85f).coerceAtLeast(0f)
+            }
+
             fftHistory.addFirst(fft.copyOf())
             bassHistory.addFirst(bass)
             while (fftHistory.size > LAYERS) fftHistory.removeLast()
@@ -381,7 +398,12 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
                 val hScale = heightScales.getOrElse(layerIdx) { 0.3f }
                 val wScale = layerWidthScales.getOrElse(layerIdx) { 0.65f }
                 val palIdx = layerPaletteIdx.getOrElse(layerIdx) { 0 }
-                val color = currentColors[palIdx % currentColors.size]
+                val rawColor = currentColors[palIdx % currentColors.size]
+                val color = if (layerIdx == 0 && strobeFlash > 0.05f) {
+                    ColorUtils.blendARGB(rawColor, Color.WHITE, (strobeFlash * 0.85f).coerceIn(0f, 1f))
+                } else {
+                    rawColor
+                }
 
                 paint.style = Paint.Style.STROKE
                 paint.color = color
@@ -401,7 +423,8 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
                     val rawBarHeight = (6f + glow * 0.8f) * hScale
                     val barHeight = rawBarHeight.coerceIn(4f, maxBarHeight)
                     val heightBoost = min(25, (glow * 0.8f).toInt())
-                    paint.alpha = (baseAlpha + heightBoost).coerceIn(0, 255)
+                    val flashBoost = if (layerIdx == 0 && strobeFlash > 0.05f) (strobeFlash * 60f).toInt() else 0
+                    paint.alpha = (baseAlpha + heightBoost + flashBoost).coerceIn(0, 255)
 
                     val x = (i * spacing) + (spacing / 2f)
                     if (isTop) {
