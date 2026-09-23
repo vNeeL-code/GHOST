@@ -196,7 +196,7 @@ Direct, local tool execution:
 * **Fuel the Project:** [☕ Buy Me a Coffee](https://buymeacoffee.com/vNeeL) *(All support goes directly toward on-device optimization and development hardware.)*
 * **Found a bug?:** [Customer Support Portal](https://www.google.com)
 
-<img width="954" height="1352" alt="logo" src="https://github.com/user-attachments/assets/999d3dc2-ad12-4358-b86e-0de84d477771" />
+<img width="1945" height="974" alt="3f21f7d2-c3f8-447a-aaa8-77ecd647a83a" src="https://github.com/user-attachments/assets/fb35af75-2b22-4956-bd81-9a8b7918647e" />
 
 *Operator: Clone the repository, launch Android Studio, and instruct your local neural assets to bend the framework to your exact silicon.*  
 **Δ 👾 ∇**
