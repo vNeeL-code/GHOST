@@ -99,6 +99,7 @@ class AvatarWallpaperService : WallpaperService() {
         private val cachedChevronPath = Path()
         private val cachedFlowerPath = Path()
         private val cachedAperturePath = Path()
+        private val cachedStarPath = Path()
         private val cachedGlyphBounds = Rect()
 
         // Album Art Persona Mask Drawing Assets
@@ -107,6 +108,7 @@ class AvatarWallpaperService : WallpaperService() {
         private val albumArtSrcRect = Rect()
         private var glyphAlpha = 255f
         private var albumArtAlpha = 0f
+        private var ringsAlpha = 0f
 
         private fun drawStationaryAlbumArtThroughAperture(
             canvas: Canvas,
@@ -485,9 +487,6 @@ class AvatarWallpaperService : WallpaperService() {
                     val baseCx = width / 2f
                     val baseCy = height / 2f - overlayCenterOffsetY
 
-                    // Legacy Option A baseline for 1250px star aperture offset
-                    val optABaseCx = width / 2f - 15f
-                    val optABaseCy = height / 2f - 75f
                     interpolateColors()
 
                     // Dynamic Album Art & Central Glyph Transitions
@@ -510,6 +509,10 @@ class AvatarWallpaperService : WallpaperService() {
                     glyphAlpha += (targetGlyphAlpha - glyphAlpha) * 0.08f
                     albumArtAlpha += (targetAlbumArtAlpha - albumArtAlpha) * 0.08f
 
+                    val hasAudio = isMedia || smoothedIntensity > 3f || smoothedBass > 3f
+                    val targetRingsAlpha = if (hasAudio) 1f else 0f
+                    ringsAlpha += (targetRingsAlpha - ringsAlpha) * 0.08f
+
                     canvas.drawColor(COLOR_BACKGROUND)
                     
                     rotationAngle += 0.2f + (smoothedBass / 100f)
@@ -529,7 +532,7 @@ class AvatarWallpaperService : WallpaperService() {
                             drawOptionDCubeLattice(canvas, baseCx, baseCy, dynamicBaseRadius, width, height)
                         }
                         else -> {
-                            drawOptionAOrbitalStar(canvas, optABaseCx, optABaseCy, dynamicBaseRadius, width, height, isNoisy)
+                            drawOptionAOrbitalStar(canvas, baseCx, baseCy, dynamicBaseRadius, width, height, isNoisy)
                         }
                     }
                 }
@@ -552,7 +555,8 @@ class AvatarWallpaperService : WallpaperService() {
             }
         }
 
-        private fun drawOscilloscopeFlower(canvas: Canvas, baseRadius: Float) {
+        private fun drawOscilloscopeFlower(canvas: Canvas, baseRadius: Float, alphaMultiplier: Float = 1f) {
+            if (alphaMultiplier <= 0.01f) return
             val numPoints = 64
             val currentRadius = baseRadius + (smoothedBass * 2.5f)
             
@@ -563,7 +567,7 @@ class AvatarWallpaperService : WallpaperService() {
             for (c in currentColors.indices) {
                 val color = currentColors[c]
                 paint.color = color
-                paint.alpha = max(0, 220 - (c * 15))
+                paint.alpha = (max(0, 220 - (c * 15)) * alphaMultiplier).toInt().coerceIn(0, 255)
                 
                 cachedFlowerPath.reset()
                 for (i in 0..numPoints) {
@@ -590,7 +594,8 @@ class AvatarWallpaperService : WallpaperService() {
             }
         }
 
-        private fun drawIris(canvas: Canvas, baseRadius: Float) {
+        private fun drawIris(canvas: Canvas, baseRadius: Float, alphaMultiplier: Float = 1f) {
+            if (alphaMultiplier <= 0.01f) return
             val startRadius = baseRadius * 0.2f + smoothedBass * 1.5f
             
             paint.style = Paint.Style.STROKE
@@ -600,11 +605,12 @@ class AvatarWallpaperService : WallpaperService() {
                 val color = currentColors[i % currentColors.size]
                 paint.color = color
                 paint.strokeWidth = 20f + (smoothedIntensity / 8f) - (i * 1.5f)
+                paint.alpha = (255 * alphaMultiplier).toInt().coerceIn(0, 255)
                 
                 val radius = startRadius + (i * 130f) + (smoothedBass * (i * 0.6f))
                 
                 if (i == 0) {
-                    drawOscilloscopeFlower(canvas, startRadius)
+                    drawOscilloscopeFlower(canvas, startRadius, alphaMultiplier)
                 } else {
                     canvas.drawCircle(0f, 0f, radius, paint)
                 }
@@ -612,23 +618,110 @@ class AvatarWallpaperService : WallpaperService() {
         }
 
         /**
-         * Option A: Orbital Star / Iris (Radial Baseline)
-         * Enhanced with:
-         * 1. Theatrical Square Cyber Corridor & Corner Laser Guide Rails flashing on snare drum attacks
-         * 2. High-definition wireframe contour outlines around the glow corona and central white sparkle
-         * 3. Geometric wireframe diamond cage framing the star core
-         * 4. Dynamic booming bass expansion, ambient grounding pool, and harmonic breathing
+         * Builds an analytically symmetric 4-pointed sparkle flare vector path centered at (cx, cy).
+         * Constructs a true "✧" (Gemma) hollow star: an outer 4-pointed star with a concentric
+         * inner 4-pointed star cutout that hugs the central aperture/album art.
+         *
+         * @param path The cached Path object to reset and populate.
+         * @param cx Horizontal center coordinate.
+         * @param cy Vertical center coordinate.
+         * @param outerRadius Outer prong reach (from center to tip).
+         * @param waistFactor Cubic Bézier control-point factor for outer star (0.36f).
+         * @param innerTipRadius Reach of the inner star cutout tips (along Top, Right, Bottom, Left).
+         * @param innerWaistRadius Reach of the inner star cutout waists (at 45°), hugging apertureRadius.
          */
+        private fun buildSacredStarPath(
+            path: Path,
+            cx: Float,
+            cy: Float,
+            outerRadius: Float,
+            waistFactor: Float = 0.36f,
+            innerTipRadius: Float = 0f,
+            innerWaistRadius: Float = 0f
+        ) {
+            path.reset()
+            val c = waistFactor
+
+            // 1. Outer 4-pointed sparkle flare contour:
+            // Pinned with 100% 4-fold rotational and reflectional symmetry
+            path.moveTo(cx, cy - outerRadius) // Top apex
+            // Top to Right
+            path.cubicTo(
+                cx, cy - (outerRadius * c),
+                cx + (outerRadius * c), cy,
+                cx + outerRadius, cy
+            )
+            // Right to Bottom
+            path.cubicTo(
+                cx + (outerRadius * c), cy,
+                cx, cy + (outerRadius * c),
+                cx, cy + outerRadius
+            )
+            // Bottom to Left
+            path.cubicTo(
+                cx, cy + (outerRadius * c),
+                cx - (outerRadius * c), cy,
+                cx - outerRadius, cy
+            )
+            // Left to Top
+            path.cubicTo(
+                cx - (outerRadius * c), cy,
+                cx, cy - (outerRadius * c),
+                cx, cy - outerRadius
+            )
+            path.close()
+
+            // 2. Inner 4-pointed star cutout (Gemma "✧" hollow core hugging album art):
+            if (innerTipRadius > 10f && innerWaistRadius > 5f) {
+                // Compute cInner analytically so the waist at 45° hits innerWaistRadius exactly:
+                // r45 = innerTipRadius * (3 * cInner + 1) / 8 * sqrt(2) == innerWaistRadius
+                val cInner = ((4.0f * 1.41421356f * innerWaistRadius / innerTipRadius) - 1.0f) / 3.0f
+                val clampedCInner = cInner.coerceIn(0.15f, 0.75f)
+
+                path.moveTo(cx, cy - innerTipRadius) // Inner Top apex
+                // Top to Right
+                path.cubicTo(
+                    cx, cy - (innerTipRadius * clampedCInner),
+                    cx + (innerTipRadius * clampedCInner), cy,
+                    cx + innerTipRadius, cy
+                )
+                // Right to Bottom
+                path.cubicTo(
+                    cx + (innerTipRadius * clampedCInner), cy,
+                    cx, cy + (innerTipRadius * clampedCInner),
+                    cx, cy + innerTipRadius
+                )
+                // Bottom to Left
+                path.cubicTo(
+                    cx, cy + (innerTipRadius * clampedCInner),
+                    cx - (innerTipRadius * clampedCInner), cy,
+                    cx - innerTipRadius, cy
+                )
+                // Left to Top
+                path.cubicTo(
+                    cx - (innerTipRadius * clampedCInner), cy,
+                    cx, cy - (innerTipRadius * clampedCInner),
+                    cx, cy - innerTipRadius
+                )
+                path.close()
+
+                path.fillType = Path.FillType.EVEN_ODD
+            } else {
+                path.fillType = Path.FillType.WINDING
+            }
+        }
+
         /**
          * Option A: Orbital Star / Iris (Radial Baseline)
          * Upgraded Architecture:
          * 1. Multi-Layer Stereoscopic Parallax:
          *    - Corridor Background: 0.08x depth (ultra-slow vanishing point)
-         *    - Oscilloscope Flower / Iris: 0.55x depth (mid-field harmonics)
+         *    - Oscilloscope Flower / Iris: 0.55x depth (mid-field harmonics, hides completely when idle)
          *    - Diamond Cage & Bloom Corona: 0.90x depth (avatar chamber container)
-         *    - Central ✧ Sparkle: 0.96x depth (floating jewel, cannot breach container)
+         *    - Central Pure Vector Sparkle: 0.96x depth (floating jewel, cannot breach container)
          * 2. Concentric Zero-Offset Alignment:
-         *    - Bloom layers, diamond cage, and star core aligned with exact font metrics
+         *    - Pure mathematical Vector Path eliminates typography font engine drift
+         *    - Inner 4-pointed star cutout bridges ✦ Gemini and ✧ Gemma, hugging the circular album art
          */
         private fun drawOptionAOrbitalStar(canvas: Canvas, baseCx: Float, baseCy: Float, dynamicBaseRadius: Float, width: Float, height: Float, isNoisy: Boolean) {
             val bassBoost = smoothedBass * 3.2f // Booming expansion on audio beats!
@@ -641,36 +734,44 @@ class AvatarWallpaperService : WallpaperService() {
             val starCx = baseCx + tiltX * 0.96f
             val starCy = baseCy + tiltY * 0.96f
 
-            // 2. Harmonic Oscilloscope Flower / Iris centered inside the ✧ glyph aperture
-            canvas.save()
-            // True mathematical centering aligned with the ✧ glyph physical core
-            canvas.translate(starCx, starCy)
-            canvas.rotate(rotationAngle)
-            
-            // Faint idle celestial resonance ring (gives ambient life even in silence)
-            paint.style = Paint.Style.STROKE
-            paint.strokeWidth = 1.2f
-            paint.color = resolveColor(COLOR_CYAN_ACCENT, currentColors[1 % currentColors.size])
-            paint.alpha = 25
-            canvas.drawCircle(0f, 0f, dynamicBaseRadius * 2.8f + (sin(rotationAngle * 0.3f) * 12f), paint)
+            // 2. Harmonic Oscilloscope Flower / Iris centered inside the star aperture
+            // When idle, rings hide completely into pure OLED black
+            if (ringsAlpha > 0.01f) {
+                canvas.save()
+                canvas.translate(starCx, starCy)
+                canvas.rotate(rotationAngle)
+                
+                // Faint idle celestial resonance ring
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = 1.2f
+                paint.color = resolveColor(COLOR_CYAN_ACCENT, currentColors[1 % currentColors.size])
+                paint.alpha = (25 * ringsAlpha).toInt().coerceIn(0, 255)
+                canvas.drawCircle(0f, 0f, dynamicBaseRadius * 2.8f + (sin(rotationAngle * 0.3f) * 12f), paint)
 
-            if (isNoisy) {
-                drawIris(canvas, dynamicBaseRadius)
-            } else {
-                drawOscilloscopeFlower(canvas, dynamicBaseRadius)
+                if (isNoisy) {
+                    drawIris(canvas, dynamicBaseRadius, ringsAlpha)
+                } else {
+                    drawOscilloscopeFlower(canvas, dynamicBaseRadius, ringsAlpha)
+                }
+                
+                canvas.restore()
             }
-            
-            canvas.restore()
 
-            val baseStarSize = 1250f
+            val baseStarRadius = minOf(width, height) * 0.472f
+            val coreRadius = baseStarRadius + (smoothedBass * 0.25f)
             val activeGlyph = SystemVisualizer.activeAgentGlyph
             val currentGlyphAlpha = glyphAlpha.toInt().coerceIn(0, 255)
             val currentAlbumAlpha = albumArtAlpha.toInt().coerceIn(0, 255)
+            val apertureRadius = (dynamicBaseRadius * 1.35f + (smoothedBass * 0.25f)).coerceIn(80f, 160f)
+
+            // Inner star cutout dimensions: hugs the circular aperture at the waists,
+            // flares outward into the 4 prongs to create the iconic hollow Gemma ✧ geometry
+            val innerWaistRadius = apertureRadius * 1.02f
+            val coreInnerTip = coreRadius * 0.54f
 
             // Album Art Persona Mask for Option A (Ouija Board stationary under star aperture)
             if (currentAlbumAlpha > 5) {
                 cachedAperturePath.reset()
-                val apertureRadius = (dynamicBaseRadius * 1.35f + (smoothedBass * 0.25f)).coerceIn(80f, 160f)
                 val apX = starCx
                 val apY = starCy
                 cachedAperturePath.addCircle(apX, apY, apertureRadius, Path.Direction.CW)
@@ -698,57 +799,76 @@ class AvatarWallpaperService : WallpaperService() {
             }
 
             // 3. Multi-pass bloom glow:
-            // The sacred ✧ star core always remains present in the visualizer architecture
+            // Big volumetric bloom layers expanding far out into space
             if (currentGlyphAlpha > 5) {
                 logoPaint.clearShadowLayer()
                 logoPaint.style = Paint.Style.FILL
-                logoPaint.textAlign = Paint.Align.LEFT
-                try {
-                    for (i in 0 until 4) {
-                        val bloomSize = when (i) {
-                            0 -> baseStarSize + 550f + bassBoost + idleBreath         // 0: Outermost Corona
-                            1 -> baseStarSize + 340f + bassBoost + (idleBreath * 0.6f) // 1: Mid-Outer Halo
-                            2 -> baseStarSize + 170f + (bassBoost * 0.7f)              // 2: Mid-Inner Aura
-                            else -> baseStarSize + 50f + (bassBoost * 0.3f)            // 3: Inner (Closest to Star)
-                        }
-                        val swatchIndex = when (i) {
-                            3 -> 1 % currentColors.size // Vibrant
-                            2 -> 0 % currentColors.size // Dominant
-                            1 -> 2 % currentColors.size // Muted
-                            else -> 3 % currentColors.size // Dark Vibrant
-                        }
-                        val rawColor = resolveColor(COLOR_COBALT_GLOW, currentColors[swatchIndex])
-                        val layerColor = ensureVisibleBloomColor(rawColor, COLOR_COBALT_GLOW)
-
-                        logoPaint.color = layerColor
-                        logoPaint.textSize = bloomSize
-                        logoPaint.alpha = (BLOOM_ALPHAS_OPTION_A[i] * (currentGlyphAlpha / 255f)).toInt().coerceIn(0, 255)
-                        logoPaint.getTextBounds("✧", 0, 1, cachedGlyphBounds)
-                        canvas.drawText("✧", starCx - cachedGlyphBounds.exactCenterX(), starCy - cachedGlyphBounds.exactCenterY(), logoPaint)
+                for (i in 0 until 4) {
+                    val bloomRadius = when (i) {
+                        0 -> coreRadius + 440f + (bassBoost * 0.7f) + idleBreath         // 0: Outermost Corona
+                        1 -> coreRadius + 290f + (bassBoost * 0.5f) + (idleBreath * 0.6f) // 1: Mid-Outer Halo
+                        2 -> coreRadius + 160f + (bassBoost * 0.35f)                     // 2: Mid-Inner Aura
+                        else -> coreRadius + 50f + (bassBoost * 0.2f)                    // 3: Inner Halo
                     }
+                    val bloomInnerTip = when (i) {
+                        0 -> coreInnerTip + 120f
+                        1 -> coreInnerTip + 70f
+                        2 -> coreInnerTip + 30f
+                        else -> coreInnerTip
+                    }
+                    val swatchIndex = when (i) {
+                        3 -> 1 % currentColors.size // Vibrant
+                        2 -> 0 % currentColors.size // Dominant
+                        1 -> 2 % currentColors.size // Muted
+                        else -> 3 % currentColors.size // Dark Vibrant
+                    }
+                    val rawColor = resolveColor(COLOR_COBALT_GLOW, currentColors[swatchIndex])
+                    val layerColor = ensureVisibleBloomColor(rawColor, COLOR_COBALT_GLOW)
 
-                    // 4. Crisp Core star (pure solid white sparkle)
+                    logoPaint.color = layerColor
+                    logoPaint.alpha = (BLOOM_ALPHAS_OPTION_A[i] * (currentGlyphAlpha / 255f)).toInt().coerceIn(0, 255)
+                    buildSacredStarPath(
+                        path = cachedStarPath,
+                        cx = starCx,
+                        cy = starCy,
+                        outerRadius = bloomRadius,
+                        waistFactor = 0.36f,
+                        innerTipRadius = bloomInnerTip,
+                        innerWaistRadius = innerWaistRadius
+                    )
+                    canvas.drawPath(cachedStarPath, logoPaint)
+                }
+
+                // 4. Crisp Core star (pure solid white sparkle)
+                logoPaint.style = Paint.Style.FILL
+                logoPaint.color = COLOR_STAR_CORE
+                logoPaint.alpha = currentGlyphAlpha
+                buildSacredStarPath(
+                    path = cachedStarPath,
+                    cx = starCx,
+                    cy = starCy,
+                    outerRadius = coreRadius,
+                    waistFactor = 0.36f,
+                    innerTipRadius = coreInnerTip,
+                    innerWaistRadius = innerWaistRadius
+                )
+                canvas.drawPath(cachedStarPath, logoPaint)
+
+                // 5. Agent Persona Emoji: Slapped directly on top of the sparkle core, sized to match avatar aperture
+                // STRICT ALBUM ART PROTECTION: Never render emoji on top of album artwork!
+                if (activeGlyph.isNotBlank() && activeGlyph != "✧" && currentAlbumAlpha <= 5 && !SystemVisualizer.isMediaPlaying) {
+                    val emojiSize = apertureRadius * 1.6f
                     logoPaint.style = Paint.Style.FILL
-                    logoPaint.color = COLOR_STAR_CORE
+                    logoPaint.color = Color.WHITE
                     logoPaint.alpha = currentGlyphAlpha
-                    logoPaint.textSize = baseStarSize
-                    logoPaint.getTextBounds("✧", 0, 1, cachedGlyphBounds)
-                    canvas.drawText("✧", starCx - cachedGlyphBounds.exactCenterX(), starCy - cachedGlyphBounds.exactCenterY(), logoPaint)
-
-                    // 5. Agent Persona Emoji: Slapped directly on top of the sparkle core, sized to match avatar aperture
-                    // STRICT ALBUM ART PROTECTION: Never render emoji on top of album artwork!
-                    if (activeGlyph.isNotBlank() && activeGlyph != "✧" && currentAlbumAlpha <= 5 && !SystemVisualizer.isMediaPlaying) {
-                        val apertureRadius = (dynamicBaseRadius * 1.35f + (smoothedBass * 0.25f)).coerceIn(80f, 160f)
-                        val emojiSize = apertureRadius * 1.6f
-                        logoPaint.style = Paint.Style.FILL
-                        logoPaint.color = Color.WHITE
-                        logoPaint.alpha = currentGlyphAlpha
-                        logoPaint.textSize = emojiSize
+                    logoPaint.textSize = emojiSize
+                    logoPaint.textAlign = Paint.Align.LEFT
+                    try {
                         logoPaint.getTextBounds(activeGlyph, 0, activeGlyph.length, cachedGlyphBounds)
                         canvas.drawText(activeGlyph, starCx - cachedGlyphBounds.exactCenterX(), starCy - cachedGlyphBounds.exactCenterY(), logoPaint)
+                    } finally {
+                        logoPaint.textAlign = Paint.Align.CENTER
                     }
-                } finally {
-                    logoPaint.textAlign = Paint.Align.CENTER
                 }
             }
         }
