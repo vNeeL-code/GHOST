@@ -260,23 +260,30 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
                 val history = gemmaService?.getRecentTurns(50) ?: return@launch
                 val messages = history.sortedBy { it.timestamp }.flatMap { turn ->
                     val list = mutableListOf<ChatMessage>()
-                    val imageBitmap = if (!turn.imageUri.isNullOrEmpty() && java.io.File(turn.imageUri).exists()) {
-                        decodeSampledBitmap(turn.imageUri, 1024)
-                    } else null
-                    if (turn.userMessage.isNotEmpty() || imageBitmap != null) {
+                    val imagePaths = turn.imageUri?.split("|")?.filter { it.isNotBlank() } ?: emptyList()
+                    val bitmaps = imagePaths.mapNotNull { path ->
+                        if (java.io.File(path).exists()) decodeSampledBitmap(path, 1024) else null
+                    }
+                    val imageBitmap = bitmaps.firstOrNull()
+                    if (turn.userMessage.isNotEmpty() || bitmaps.isNotEmpty()) {
                         list.add(ChatMessage(
                             content = turn.userMessage,
                             isFromUser = true,
                             timestamp = turn.timestamp,
                             image = imageBitmap,
-                            imageUri = turn.imageUri
+                            imageUri = turn.imageUri,
+                            images = bitmaps
                         ))
                     }
                     if (turn.assistantResponse.isNotEmpty()) {
+                        val parts = turn.tokenHash.split("|")
+                        val assistantTimestamp = parts.getOrNull(0)?.toLongOrNull() ?: (turn.timestamp + 5000L)
+                        val durationMs = parts.getOrNull(1)?.toLongOrNull()
                         list.add(ChatMessage(
                             content = turn.assistantResponse,
                             isFromUser = false,
-                            timestamp = turn.timestamp + 1
+                            timestamp = assistantTimestamp,
+                            durationMs = durationMs
                         ))
                     }
                     list
@@ -330,7 +337,9 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
                 if (last != null && !last.isFromUser && !last.isComplete) {
                     chatViewModel.updateLastMessage(message, isComplete = isComplete)
                 } else {
-                    chatViewModel.addMessage(ChatMessage(message, isFromUser = false, isComplete = isComplete))
+                    val prevUserMsg = current.lastOrNull { it.isFromUser }
+                    val durationMs = if (prevUserMsg != null) System.currentTimeMillis() - prevUserMsg.timestamp else null
+                    chatViewModel.addMessage(ChatMessage(message, isFromUser = false, isComplete = isComplete, durationMs = durationMs))
                 }
             }
         }
@@ -353,9 +362,7 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
         val bitmaps = chatViewModel.attachedImages.value
         val imagePaths = chatViewModel.attachedImagePaths.value
         chatViewModel.clearAttachedImages()
-        val promptText = if (text.isBlank() && bitmaps.isNotEmpty()) {
-            if (bitmaps.size > 1) "Analyze and compare the attached images." else "Analyze and describe what you see in the attached image."
-        } else text
+        val promptText = text.trim()
         if (bitmaps.isNotEmpty()) {
             scope.launch {
                 gemmaService?.processMultimodalFromUi(promptText, bitmaps, imageUris = imagePaths)

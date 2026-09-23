@@ -14,5 +14,6 @@ data class ChatMessage(
     val webviewAspectRatio: Float? = null,
     val image: android.graphics.Bitmap? = null,
     val imageUri: String? = null,
-    val images: List<android.graphics.Bitmap> = emptyList()
+    val images: List<android.graphics.Bitmap> = emptyList(),
+    val durationMs: Long? = null
 )

@@ -507,8 +507,13 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
             }
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 3.5f
-            paint.color = if (bassPower > 8f) Color.WHITE else currentColors[0]
-            paint.alpha = (180 + (bassPower * 4f).toInt()).coerceIn(160, 255)
+            val baseCrestColor = currentColors[0]
+            val crestColor = if (strobeFlash > 0.05f) {
+                ColorUtils.blendARGB(baseCrestColor, Color.WHITE, (strobeFlash * 0.90f).coerceIn(0f, 1f))
+            } else if (bassPower > 8f) Color.WHITE else baseCrestColor
+            val crestFlashBoost = if (strobeFlash > 0.05f) (strobeFlash * 60f).toInt() else 0
+            paint.color = crestColor
+            paint.alpha = (180 + (bassPower * 4f).toInt() + crestFlashBoost).coerceIn(160, 255)
             canvas.drawPath(cachedPath, paint)
 
             // Layer 4: Razor bezel rim glow
@@ -544,8 +549,9 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
                 val edgeBias = 0.25f + (distFromCenter * 0.75f)
                 val nodeColor = currentColors[i % currentColors.size]
 
-                // Audio-reactive flash: Cubes flash white like the wallpaper satellites, chevrons flash vivid theme color
-                val cubeFlash = (mag / 16f + bassPower / 10f).coerceIn(0f, 1f)
+                // Audio-reactive flash: Snare transient strobe flashes cubes and lead chevrons crisp white
+                val isStrobe = strobeFlash > 0.05f
+                val cubeFlash = if (isStrobe) (strobeFlash * 0.90f).coerceIn(0f, 1f) else (mag / 16f + bassPower / 10f).coerceIn(0f, 1f)
                 val cubeFillColor = ColorUtils.blendARGB(nodeColor, Color.WHITE, cubeFlash * 0.80f)
                 val cubeStrokeColor = ColorUtils.blendARGB(nodeColor, Color.WHITE, cubeFlash)
 
@@ -598,20 +604,26 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
                         cachedPath.lineTo(dx + wingSpan, wingY)
                     }
 
+                    val leadChevronColor = if (k == 1 && isStrobe) {
+                        ColorUtils.blendARGB(nodeColor, Color.WHITE, (strobeFlash * 0.85f).coerceIn(0f, 1f))
+                    } else nodeColor
+
                     // Outer neon aura for lead chevron (bright chromatic color)
                     if (k == 1) {
                         paint.style = Paint.Style.STROKE
                         paint.strokeWidth = 4.8f
-                        paint.color = nodeColor
-                        paint.alpha = (75 * alphaRatio + mag * 1.5f).toInt().coerceIn(25, 160)
+                        paint.color = leadChevronColor
+                        val strobeAuraBoost = if (isStrobe) (strobeFlash * 60f).toInt() else 0
+                        paint.alpha = (75 * alphaRatio + mag * 1.5f + strobeAuraBoost).toInt().coerceIn(25, 230)
                         canvas.drawPath(cachedPath, paint)
                     }
 
                     // Razor chevron stroke (bright chromatic color)
                     paint.style = Paint.Style.STROKE
                     paint.strokeWidth = 2.4f
-                    paint.color = nodeColor
-                    paint.alpha = (220 * alphaRatio + mag * 2.2f).toInt().coerceIn(60, 255)
+                    paint.color = leadChevronColor
+                    val strobeLeadBoost = if (k == 1 && isStrobe) (strobeFlash * 50f).toInt() else 0
+                    paint.alpha = (220 * alphaRatio + mag * 2.2f + strobeLeadBoost).toInt().coerceIn(60, 255)
                     canvas.drawPath(cachedPath, paint)
                 }
 
@@ -711,19 +723,29 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
             bassPower: Float,
             popThreshold: Float
         ) {
+            val isStrobe = strobeFlash > 0.05f
             val effMag = mag * edgeBias
-            val pops = effMag > popThreshold || bassPower > (popThreshold / 2.5f)
+            val pops = effMag > popThreshold || bassPower > (popThreshold / 2.5f) || isStrobe
 
             if (pops) {
+                val fillColor = if (isStrobe) {
+                    ColorUtils.blendARGB(color, Color.WHITE, (strobeFlash * 0.60f).coerceIn(0f, 1f))
+                } else color
+                val strokeColor = if (isStrobe) {
+                    ColorUtils.blendARGB(color, Color.WHITE, (strobeFlash * 0.85f).coerceIn(0f, 1f))
+                } else if (effMag > 24f || bassPower > 7f) Color.WHITE else color
+
                 paint.style = Paint.Style.FILL
-                paint.color = color
-                paint.alpha = (25 + (effMag * 2.2f + bassPower * 3f).toInt()).coerceIn(20, 175)
+                paint.color = fillColor
+                val strobeFillBoost = if (isStrobe) (strobeFlash * 45f).toInt() else 0
+                paint.alpha = (25 + (effMag * 2.2f + bassPower * 3f).toInt() + strobeFillBoost).coerceIn(20, 200)
                 drawHexagon(canvas, cx, cy, radius * 0.88f, paint)
 
                 paint.style = Paint.Style.STROKE
-                paint.strokeWidth = 1.6f
-                paint.color = if (effMag > 24f || bassPower > 7f) Color.WHITE else color
-                paint.alpha = (75 + (effMag * 2.0f).toInt()).coerceIn(50, 240)
+                paint.strokeWidth = if (isStrobe) 2.2f else 1.6f
+                paint.color = strokeColor
+                val strobeStrokeBoost = if (isStrobe) (strobeFlash * 60f).toInt() else 0
+                paint.alpha = (75 + (effMag * 2.0f).toInt() + strobeStrokeBoost).coerceIn(50, 255)
                 drawHexagon(canvas, cx, cy, radius, paint)
             } else {
                 paint.style = Paint.Style.STROKE

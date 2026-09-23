@@ -94,29 +94,34 @@ fun ChatScreen(
             .navigationBarsPadding()
             .imePadding()
     ) {
-        // Top Navigation Bar
-        Row(
+        // Top Navigation Bar - mathematically centered Turing glyph with symmetrical edge anchors
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(Color(0x11FFFFFF))
-                .padding(horizontal = 16.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+                .padding(horizontal = 8.dp, vertical = 2.dp)
         ) {
-            // Left close app button matching right button footprint for true mathematical center
-            Text(
-                text = "✕",
-                color = TextSecondary,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
+            // Left close app button with 44dp touch target
+            Box(
                 modifier = Modifier
-                    .clickable { showCloseConfirmDialog = true }
-                    .alpha(0.8f)
-                    .padding(8.dp)
-            )
+                    .size(44.dp)
+                    .align(Alignment.CenterStart)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { showCloseConfirmDialog = true },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "✕",
+                    color = TextSecondary,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.alpha(0.8f)
+                )
+            }
             
-            // Centered Turing Machine Glyph: Green Δ, Purple 👾, Green ∇
+            // Mathematically centered Turing Machine Glyph: Green Δ, Purple 👾, Green ∇
             Row(
+                modifier = Modifier.align(Alignment.Center),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
             ) {
@@ -141,16 +146,22 @@ fun ChatScreen(
                 )
             }
             
-            // Settings menu dropdown button
-            Text(
-                text = "▼",
-                color = TextSecondary,
-                fontSize = 18.sp,
+            // Settings menu dropdown button with matching 44dp touch target
+            Box(
                 modifier = Modifier
-                    .clickable { onOpenSettings() }
-                    .alpha(0.8f)
-                    .padding(8.dp)
-            )
+                    .size(44.dp)
+                    .align(Alignment.CenterEnd)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { onOpenSettings() },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "▼",
+                    color = TextSecondary,
+                    fontSize = 18.sp,
+                    modifier = Modifier.alpha(0.8f)
+                )
+            }
         }
 
         if (showCloseConfirmDialog) {
@@ -345,13 +356,18 @@ fun ChatMessageRow(
         label = "cursorAlpha"
     )
 
+    val deltaSuffix = if (!isUser && message.durationMs != null && message.durationMs > 0) {
+        val deltaSec = String.format(Locale.US, "%.1fs", message.durationMs / 1000.0)
+        " · Δ $deltaSec"
+    } else ""
+
     val finalDisplayContent = if (isUser) {
         "$cleanContent\n\n[$timeStr]"
     } else {
         val cursorSuffix = if (!message.isComplete) {
             if (cursorAlpha > 0.5f) " ✧" else " ✦"
         } else ""
-        "$aiHeaderTag:\n$cleanContent$cursorSuffix\n\n[$timeStr]"
+        "$aiHeaderTag:\n$cleanContent$cursorSuffix\n\n[$timeStr$deltaSuffix]"
     }
     
     val alignment = if (isUser) Alignment.End else Alignment.Start
@@ -398,7 +414,7 @@ fun ChatMessageRow(
     val ucfFormattedContent = if (isUser) {
         "Δ $operatorAvatar ∇:\n$cleanContent\n\n[$timeStr]"
     } else {
-        "$aiHeaderTag:\n$cleanContent\n\n[$timeStr]"
+        "$aiHeaderTag:\n$cleanContent\n\n[$timeStr$deltaSuffix]"
     }
 
     var showThinking by remember { mutableStateOf(false) }
@@ -453,31 +469,41 @@ fun ChatMessageRow(
                     }
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                     // Speaker only on AI / assistant cards!
                     if (!isUser && displayContent.isNotEmpty()) {
-                        Text(
-                            text = "🔊",
-                            fontSize = 13.sp,
+                        Box(
                             modifier = Modifier
-                                .clickable {
-                                    onPlayMessage(displayContent)
-                                }
-                                .alpha(0.7f)
-                                .padding(end = 10.dp)
-                        )
+                                .clip(RoundedCornerShape(4.dp))
+                                .clickable { onPlayMessage(displayContent) }
+                                .padding(horizontal = 6.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "🔊",
+                                fontSize = 13.sp,
+                                modifier = Modifier.alpha(0.7f)
+                            )
+                        }
                     }
 
-                    Text(
-                        text = "📋",
-                        fontSize = 13.sp,
+                    Box(
                         modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
                             .clickable {
                                 clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(ucfFormattedContent))
                                 Toast.makeText(context, "Copied UCF to clipboard", Toast.LENGTH_SHORT).show()
                             }
-                            .alpha(0.6f)
-                    )
+                            .padding(horizontal = 6.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "📋",
+                            fontSize = 13.sp,
+                            modifier = Modifier.alpha(0.6f)
+                        )
+                    }
                 }
             }
 

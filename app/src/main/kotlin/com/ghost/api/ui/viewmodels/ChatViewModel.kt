@@ -73,12 +73,27 @@ class ChatViewModel : ViewModel() {
         _messages.value = _messages.value + message
     }
 
-    fun updateLastMessage(content: String, thought: String? = null, isComplete: Boolean = true) {
+    fun updateLastMessage(
+        content: String,
+        thought: String? = null,
+        isComplete: Boolean = true,
+        durationMs: Long? = null
+    ) {
         val current = _messages.value
         if (current.isNotEmpty() && !current.last().isFromUser) {
             val last = current.last()
+            val now = System.currentTimeMillis()
+            val prevUserMsg = current.dropLast(1).lastOrNull { it.isFromUser }
+            val computedDuration = durationMs ?: if (isComplete && prevUserMsg != null) (now - prevUserMsg.timestamp) else last.durationMs
+            val updatedTimestamp = if (isComplete && !last.isComplete) now else last.timestamp
             val updated = current.toMutableList().apply {
-                this[size - 1] = last.copy(content = content, thought = thought, isComplete = isComplete)
+                this[size - 1] = last.copy(
+                    content = content,
+                    thought = thought ?: last.thought,
+                    isComplete = isComplete,
+                    timestamp = updatedTimestamp,
+                    durationMs = computedDuration
+                )
             }
             _messages.value = updated
         }

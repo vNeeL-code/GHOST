@@ -1881,14 +1881,24 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         if (::ttsManager.isInitialized) ttsManager.stop()
     }
 
-    override fun storeConversationTurn(userMessage: String, response: String, sessionId: String, imageUri: String?) {
+    override fun storeConversationTurn(
+        userMessage: String,
+        response: String,
+        sessionId: String,
+        imageUri: String?,
+        userTimestamp: Long,
+        durationMs: Long?
+    ) {
+        val completionEpoch = System.currentTimeMillis()
+        val tokenHashVal = if (durationMs != null) "$completionEpoch|$durationMs" else "$completionEpoch"
         scope.launch(Dispatchers.IO) {
             memoryManager.storeTurn(com.ghost.api.database.ConversationTurn(
-                timestamp = System.currentTimeMillis(),
+                timestamp = userTimestamp,
                 userMessage = userMessage,
                 assistantResponse = response,
                 tokensUsed = 0,
                 sessionId = sessionId,
+                tokenHash = tokenHashVal,
                 imageUri = imageUri
             ))
         }

@@ -99,6 +99,7 @@ class AvatarWallpaperService : WallpaperService() {
         private val cachedChevronPath = Path()
         private val cachedFlowerPath = Path()
         private val cachedAperturePath = Path()
+        private val cachedGlyphBounds = Rect()
 
         // Album Art Persona Mask Drawing Assets
         private val albumArtPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
@@ -642,8 +643,8 @@ class AvatarWallpaperService : WallpaperService() {
 
             // 2. Harmonic Oscilloscope Flower / Iris centered inside the ✧ glyph aperture
             canvas.save()
-            // Nudge rings slightly right and down (+12f, +40f) to optically align with the ✧ glyph aperture (exact vanilla alignment)
-            canvas.translate(starCx + 12f, starCy + 40f)
+            // True mathematical centering aligned with the ✧ glyph physical core
+            canvas.translate(starCx, starCy)
             canvas.rotate(rotationAngle)
             
             // Faint idle celestial resonance ring (gives ambient life even in silence)
@@ -670,8 +671,8 @@ class AvatarWallpaperService : WallpaperService() {
             if (currentAlbumAlpha > 5) {
                 cachedAperturePath.reset()
                 val apertureRadius = (dynamicBaseRadius * 1.35f + (smoothedBass * 0.25f)).coerceIn(80f, 160f)
-                val apX = starCx + 12f
-                val apY = starCy + 40f
+                val apX = starCx
+                val apY = starCy
                 cachedAperturePath.addCircle(apX, apY, apertureRadius, Path.Direction.CW)
                 val boardRadiusA = apertureRadius * 1.15f
                 drawStationaryAlbumArtThroughAperture(
@@ -681,8 +682,8 @@ class AvatarWallpaperService : WallpaperService() {
                     apertureLocalCy = apY,
                     apertureGlobalCx = apX,
                     apertureGlobalCy = apY,
-                    boardGlobalCx = baseCx + 12f,
-                    boardGlobalCy = baseCy + 40f,
+                    boardGlobalCx = baseCx,
+                    boardGlobalCy = baseCy,
                     alpha = currentAlbumAlpha,
                     localRotationDegrees = 0f,
                     customBoardRadius = boardRadiusA
@@ -717,12 +718,11 @@ class AvatarWallpaperService : WallpaperService() {
                     val rawColor = resolveColor(COLOR_COBALT_GLOW, currentColors[swatchIndex])
                     val layerColor = ensureVisibleBloomColor(rawColor, COLOR_COBALT_GLOW)
 
-                    // Set textSize BEFORE calculating descent/ascent so optical center is EXACT!
                     logoPaint.color = layerColor
                     logoPaint.textSize = bloomSize
                     logoPaint.alpha = (BLOOM_ALPHAS_OPTION_A[i] * (currentGlyphAlpha / 255f)).toInt().coerceIn(0, 255)
-                    val bloomCenterOffset = (logoPaint.descent() + logoPaint.ascent()) / 2f
-                    canvas.drawText("✧", starCx, starCy - bloomCenterOffset, logoPaint)
+                    logoPaint.getTextBounds("✧", 0, 1, cachedGlyphBounds)
+                    canvas.drawText("✧", starCx - cachedGlyphBounds.exactCenterX(), starCy - cachedGlyphBounds.exactCenterY(), logoPaint)
                 }
 
                 // 4. Crisp Core star (pure solid white sparkle)
@@ -730,8 +730,8 @@ class AvatarWallpaperService : WallpaperService() {
                 logoPaint.color = COLOR_STAR_CORE
                 logoPaint.alpha = currentGlyphAlpha
                 logoPaint.textSize = baseStarSize
-                val starCenterOffset = (logoPaint.descent() + logoPaint.ascent()) / 2f
-                canvas.drawText("✧", starCx, starCy - starCenterOffset, logoPaint)
+                logoPaint.getTextBounds("✧", 0, 1, cachedGlyphBounds)
+                canvas.drawText("✧", starCx - cachedGlyphBounds.exactCenterX(), starCy - cachedGlyphBounds.exactCenterY(), logoPaint)
 
                 // 5. Agent Persona Emoji: Slapped directly on top of the sparkle core, sized to match avatar aperture
                 // STRICT ALBUM ART PROTECTION: Never render emoji on top of album artwork!
@@ -742,9 +742,8 @@ class AvatarWallpaperService : WallpaperService() {
                     logoPaint.color = Color.WHITE
                     logoPaint.alpha = currentGlyphAlpha
                     logoPaint.textSize = emojiSize
-                    val emojiCenterOffset = (logoPaint.descent() + logoPaint.ascent()) / 2f
-                    // Centered precisely over the aperture optical origin (starCx + 12f, starCy + 40f)
-                    canvas.drawText(activeGlyph, starCx + 12f, (starCy + 40f) - emojiCenterOffset, logoPaint)
+                    logoPaint.getTextBounds(activeGlyph, 0, activeGlyph.length, cachedGlyphBounds)
+                    canvas.drawText(activeGlyph, starCx - cachedGlyphBounds.exactCenterX(), starCy - cachedGlyphBounds.exactCenterY(), logoPaint)
                 }
             }
         }

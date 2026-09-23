@@ -342,9 +342,20 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                 }
             )
             
-            // Wait for completion outside the mutex - using await() instead of polling
-            kotlinx.coroutines.withTimeout(240000) {
-                deferred.await()
+            // Wait for completion outside the mutex - using await() with graceful recovery
+            try {
+                kotlinx.coroutines.withTimeout(90000) {
+                    deferred.await()
+                }
+            } catch (te: kotlinx.coroutines.TimeoutCancellationException) {
+                Timber.w("GemmaEngine: Inference timed out after 90s, recovering conversation state...")
+                try {
+                    activeConv.close()
+                } catch (e: Exception) {
+                    Timber.w(e, "Failed to close conversation after timeout")
+                }
+                conversation = null
+                onError("Inference timed out after 90s.")
             }
         } finally {
             isBusy.set(false)

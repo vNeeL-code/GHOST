@@ -248,6 +248,8 @@ class GhostAgent(
         turnsSinceKvFlush++
         Timber.i("🧠 GhostAgent: Turn $currentTurn - Starting (turnsSinceKvFlush=$turnsSinceKvFlush, historySize=${_conversationHistory.size})...")
 
+        val turnStartTime = System.currentTimeMillis()
+
         // 1. Proactive Memory Compaction
         maybeCompactHistory()
 
@@ -257,7 +259,7 @@ class GhostAgent(
         // 3. Drain media
         val (queuedImages, audio) = drainMedia()
         val images = queuedImages.map { it.bitmap }
-        val turnImageUri = queuedImages.firstOrNull()?.uri
+        val turnImageUri = queuedImages.mapNotNull { it.uri }.joinToString("|").takeIf { it.isNotBlank() }
 
         // 4. Assemble turn input
         val operatorAvatar = getOperatorAvatar()
@@ -293,8 +295,10 @@ class GhostAgent(
         val maxTokens = llmEngine.maxNumTokens
         val historyChars = synchronized(_conversationHistory) { _conversationHistory.sumOf { it.content.length } }
         val historyTokens = historyChars / 3
+        val pastVisionTokens = synchronized(_conversationHistory) { _conversationHistory.count { it.hadImage } * 512 }
+        val currentVisionTokens = images.size * 512
         val promptTokens = promptForModel.length / 3
-        val estimatedTotal = 1200 + historyTokens + promptTokens // 1200 tokens baseline for system prompt + MCP tool schemas
+        val estimatedTotal = 1200 + historyTokens + promptTokens + pastVisionTokens + currentVisionTokens // 1200 tokens baseline for system prompt + MCP tool schemas
 
         if (estimatedTotal > maxTokens - 400 && turnsSinceKvFlush > 0) {
             Timber.w("GhostAgent: Estimated tokens ($estimatedTotal) near ceiling ($maxTokens). Forcing KV cache flush & compaction.")
@@ -471,7 +475,15 @@ class GhostAgent(
                 if (!spokenAnyStreamingTts) {
                     callbacks?.speak(cleanForTTS(finalOutput))
                 }
-                callbacks?.storeConversationTurn(message, finalOutput, sessionId, turnImageUri)
+                val durationMs = System.currentTimeMillis() - turnStartTime
+                callbacks?.storeConversationTurn(
+                    userMessage = message,
+                    response = finalOutput,
+                    sessionId = sessionId,
+                    imageUri = turnImageUri,
+                    userTimestamp = turnStartTime,
+                    durationMs = durationMs
+                )
             }
 
             checkpoint()
@@ -573,7 +585,8 @@ class GhostAgent(
     private suspend fun maybeCompactHistory() {
         val count = _conversationHistory.size
         val historyChars = synchronized(_conversationHistory) { _conversationHistory.sumOf { it.content.length } }
-        val estTokens = historyChars / 3
+        val visionTokens = synchronized(_conversationHistory) { _conversationHistory.count { it.hadImage } * 512 }
+        val estTokens = (historyChars / 3) + visionTokens
 
         val maxTokens = llmEngine.maxNumTokens
         val tokenThreshold = if (maxTokens > 3000) 2200 else 1400
