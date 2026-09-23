@@ -702,48 +702,53 @@ class AvatarWallpaperService : WallpaperService() {
             if (currentGlyphAlpha > 5) {
                 logoPaint.clearShadowLayer()
                 logoPaint.style = Paint.Style.FILL
-                for (i in 0 until 4) {
-                    val bloomSize = when (i) {
-                        0 -> baseStarSize + 550f + bassBoost + idleBreath         // 0: Outermost Corona
-                        1 -> baseStarSize + 340f + bassBoost + (idleBreath * 0.6f) // 1: Mid-Outer Halo
-                        2 -> baseStarSize + 170f + (bassBoost * 0.7f)              // 2: Mid-Inner Aura
-                        else -> baseStarSize + 50f + (bassBoost * 0.3f)            // 3: Inner (Closest to Star)
-                    }
-                    val swatchIndex = when (i) {
-                        3 -> 1 % currentColors.size // Vibrant
-                        2 -> 0 % currentColors.size // Dominant
-                        1 -> 2 % currentColors.size // Muted
-                        else -> 3 % currentColors.size // Dark Vibrant
-                    }
-                    val rawColor = resolveColor(COLOR_COBALT_GLOW, currentColors[swatchIndex])
-                    val layerColor = ensureVisibleBloomColor(rawColor, COLOR_COBALT_GLOW)
+                logoPaint.textAlign = Paint.Align.LEFT
+                try {
+                    for (i in 0 until 4) {
+                        val bloomSize = when (i) {
+                            0 -> baseStarSize + 550f + bassBoost + idleBreath         // 0: Outermost Corona
+                            1 -> baseStarSize + 340f + bassBoost + (idleBreath * 0.6f) // 1: Mid-Outer Halo
+                            2 -> baseStarSize + 170f + (bassBoost * 0.7f)              // 2: Mid-Inner Aura
+                            else -> baseStarSize + 50f + (bassBoost * 0.3f)            // 3: Inner (Closest to Star)
+                        }
+                        val swatchIndex = when (i) {
+                            3 -> 1 % currentColors.size // Vibrant
+                            2 -> 0 % currentColors.size // Dominant
+                            1 -> 2 % currentColors.size // Muted
+                            else -> 3 % currentColors.size // Dark Vibrant
+                        }
+                        val rawColor = resolveColor(COLOR_COBALT_GLOW, currentColors[swatchIndex])
+                        val layerColor = ensureVisibleBloomColor(rawColor, COLOR_COBALT_GLOW)
 
-                    logoPaint.color = layerColor
-                    logoPaint.textSize = bloomSize
-                    logoPaint.alpha = (BLOOM_ALPHAS_OPTION_A[i] * (currentGlyphAlpha / 255f)).toInt().coerceIn(0, 255)
+                        logoPaint.color = layerColor
+                        logoPaint.textSize = bloomSize
+                        logoPaint.alpha = (BLOOM_ALPHAS_OPTION_A[i] * (currentGlyphAlpha / 255f)).toInt().coerceIn(0, 255)
+                        logoPaint.getTextBounds("✧", 0, 1, cachedGlyphBounds)
+                        canvas.drawText("✧", starCx - cachedGlyphBounds.exactCenterX(), starCy - cachedGlyphBounds.exactCenterY(), logoPaint)
+                    }
+
+                    // 4. Crisp Core star (pure solid white sparkle)
+                    logoPaint.style = Paint.Style.FILL
+                    logoPaint.color = COLOR_STAR_CORE
+                    logoPaint.alpha = currentGlyphAlpha
+                    logoPaint.textSize = baseStarSize
                     logoPaint.getTextBounds("✧", 0, 1, cachedGlyphBounds)
                     canvas.drawText("✧", starCx - cachedGlyphBounds.exactCenterX(), starCy - cachedGlyphBounds.exactCenterY(), logoPaint)
-                }
 
-                // 4. Crisp Core star (pure solid white sparkle)
-                logoPaint.style = Paint.Style.FILL
-                logoPaint.color = COLOR_STAR_CORE
-                logoPaint.alpha = currentGlyphAlpha
-                logoPaint.textSize = baseStarSize
-                logoPaint.getTextBounds("✧", 0, 1, cachedGlyphBounds)
-                canvas.drawText("✧", starCx - cachedGlyphBounds.exactCenterX(), starCy - cachedGlyphBounds.exactCenterY(), logoPaint)
-
-                // 5. Agent Persona Emoji: Slapped directly on top of the sparkle core, sized to match avatar aperture
-                // STRICT ALBUM ART PROTECTION: Never render emoji on top of album artwork!
-                if (activeGlyph.isNotBlank() && activeGlyph != "✧" && currentAlbumAlpha <= 5 && !SystemVisualizer.isMediaPlaying) {
-                    val apertureRadius = (dynamicBaseRadius * 1.35f + (smoothedBass * 0.25f)).coerceIn(80f, 160f)
-                    val emojiSize = apertureRadius * 1.6f
-                    logoPaint.style = Paint.Style.FILL
-                    logoPaint.color = Color.WHITE
-                    logoPaint.alpha = currentGlyphAlpha
-                    logoPaint.textSize = emojiSize
-                    logoPaint.getTextBounds(activeGlyph, 0, activeGlyph.length, cachedGlyphBounds)
-                    canvas.drawText(activeGlyph, starCx - cachedGlyphBounds.exactCenterX(), starCy - cachedGlyphBounds.exactCenterY(), logoPaint)
+                    // 5. Agent Persona Emoji: Slapped directly on top of the sparkle core, sized to match avatar aperture
+                    // STRICT ALBUM ART PROTECTION: Never render emoji on top of album artwork!
+                    if (activeGlyph.isNotBlank() && activeGlyph != "✧" && currentAlbumAlpha <= 5 && !SystemVisualizer.isMediaPlaying) {
+                        val apertureRadius = (dynamicBaseRadius * 1.35f + (smoothedBass * 0.25f)).coerceIn(80f, 160f)
+                        val emojiSize = apertureRadius * 1.6f
+                        logoPaint.style = Paint.Style.FILL
+                        logoPaint.color = Color.WHITE
+                        logoPaint.alpha = currentGlyphAlpha
+                        logoPaint.textSize = emojiSize
+                        logoPaint.getTextBounds(activeGlyph, 0, activeGlyph.length, cachedGlyphBounds)
+                        canvas.drawText(activeGlyph, starCx - cachedGlyphBounds.exactCenterX(), starCy - cachedGlyphBounds.exactCenterY(), logoPaint)
+                    }
+                } finally {
+                    logoPaint.textAlign = Paint.Align.CENTER
                 }
             }
         }
