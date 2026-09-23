@@ -56,7 +56,7 @@ class AvatarWallpaperService : WallpaperService() {
             Color.parseColor("#EA4335")  // 5: Google Red
         )
 
-        private val BLOOM_ALPHAS_OPTION_A = intArrayOf(18, 32, 52, 80)
+        private val BLOOM_ALPHAS_OPTION_A = intArrayOf(24, 42, 68, 105)
 
         private val HEX_HALO_RADII_MULTS = floatArrayOf(1.80f, 2.80f, 4.20f, 6.00f)
         private val HEX_HALO_BASS_MULTS = floatArrayOf(0.50f, 1.10f, 2.00f, 3.20f)
@@ -100,6 +100,7 @@ class AvatarWallpaperService : WallpaperService() {
         private val cachedFlowerPath = Path()
         private val cachedAperturePath = Path()
         private val cachedStarPath = Path()
+        private val cachedBackdropStarPath = Path()
         private val cachedGlyphBounds = Rect()
 
         // Album Art Persona Mask Drawing Assets
@@ -558,10 +559,13 @@ class AvatarWallpaperService : WallpaperService() {
         private fun drawOscilloscopeFlower(canvas: Canvas, baseRadius: Float, alphaMultiplier: Float = 1f) {
             if (alphaMultiplier <= 0.01f) return
             val numPoints = 64
-            val currentRadius = baseRadius + (smoothedBass * 2.5f)
+            // Radial contraction factor: expands outward to 1.0f on audio hits,
+            // contracts tightly inward behind the star body when idle/quiet
+            val spreadScale = 0.20f + (0.80f * alphaMultiplier)
+            val currentRadius = (baseRadius * spreadScale) + (smoothedBass * 2.5f)
             
             paint.style = Paint.Style.STROKE
-            paint.strokeWidth = 8f
+            paint.strokeWidth = (8f * (0.5f + 0.5f * alphaMultiplier)).coerceAtLeast(1.5f)
             paint.clearShadowLayer()
             
             for (c in currentColors.indices) {
@@ -580,7 +584,7 @@ class AvatarWallpaperService : WallpaperService() {
                         Math.hypot(r, i_comp).toFloat()
                     } else 0f
                     
-                    val rOffset = mag * 5f + (c * 45f)
+                    val rOffset = (mag * 5f) + (c * 45f * spreadScale)
                     val r = currentRadius + rOffset
                     
                     val x = cos(angle) * r
@@ -596,7 +600,8 @@ class AvatarWallpaperService : WallpaperService() {
 
         private fun drawIris(canvas: Canvas, baseRadius: Float, alphaMultiplier: Float = 1f) {
             if (alphaMultiplier <= 0.01f) return
-            val startRadius = baseRadius * 0.2f + smoothedBass * 1.5f
+            val spreadScale = 0.20f + (0.80f * alphaMultiplier)
+            val startRadius = (baseRadius * 0.2f + smoothedBass * 1.5f) * spreadScale
             
             paint.style = Paint.Style.STROKE
             paint.clearShadowLayer()
@@ -604,10 +609,10 @@ class AvatarWallpaperService : WallpaperService() {
             for (i in 0 until 7) {
                 val color = currentColors[i % currentColors.size]
                 paint.color = color
-                paint.strokeWidth = 20f + (smoothedIntensity / 8f) - (i * 1.5f)
+                paint.strokeWidth = (20f + (smoothedIntensity / 8f) - (i * 1.5f)) * spreadScale
                 paint.alpha = (255 * alphaMultiplier).toInt().coerceIn(0, 255)
                 
-                val radius = startRadius + (i * 130f) + (smoothedBass * (i * 0.6f))
+                val radius = startRadius + ((i * 130f) + (smoothedBass * (i * 0.6f))) * spreadScale
                 
                 if (i == 0) {
                     drawOscilloscopeFlower(canvas, startRadius, alphaMultiplier)
@@ -731,22 +736,78 @@ class AvatarWallpaperService : WallpaperService() {
             val tiltX = rollOffset * PARALLAX_MAX
             val tiltY = pitchOffset * PARALLAX_MAX
 
+            // ─────────────────────────────────────────────────────────────────
+            // 1. Giant Monolithic Star Backdrop (0.08x Stereoscopic Depth)
+            // Barely visible architectural wireframe & translucent facet backdrop
+            // Anchors Option A with deep cybernetic scale on par with Option C
+            // ─────────────────────────────────────────────────────────────────
+            val corrCx = baseCx + tiltX * 0.08f
+            val corrCy = baseCy + tiltY * 0.08f
+
+            val maxDim = maxOf(width, height)
+            val backdropMults = floatArrayOf(0.85f, 0.52f, 0.32f)
+            val backdropFillAlphas = intArrayOf(4, 7, 10)
+            val backdropStrokeAlphas = intArrayOf(12, 18, 26)
+
+            for (b in 0 until 3) {
+                val mult = backdropMults[b]
+                val bRadius = (maxDim * mult) + (smoothedBass * 0.35f) + (strobeFlash * 35f)
+                val strokeColor = resolveColor(
+                    if (b % 2 == 0) COLOR_CYAN_ACCENT else COLOR_COBALT_GLOW,
+                    currentColors[b % currentColors.size]
+                )
+                val fillColor = if (b == 0) Color.parseColor("#F1F5F9") else strokeColor
+
+                buildSacredStarPath(
+                    path = cachedBackdropStarPath,
+                    cx = corrCx,
+                    cy = corrCy,
+                    outerRadius = bRadius,
+                    waistFactor = 0.36f
+                )
+
+                // Translucent facet fill
+                paint.style = Paint.Style.FILL
+                paint.color = fillColor
+                val fillAlpha = (backdropFillAlphas[b] + (smoothedBass * 0.15f).toInt() + (strobeFlash * 40f).toInt()).coerceIn(3, 90)
+                paint.alpha = fillAlpha
+                canvas.drawPath(cachedBackdropStarPath, paint)
+
+                // Wireframe stroke
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = 1.4f + (strobeFlash * 1.6f) + (b * 0.2f)
+                paint.color = if (strobeFlash > 0.05f && b == 0) Color.WHITE else strokeColor
+                val strokeAlpha = (backdropStrokeAlphas[b] + (smoothedBass * 0.25f).toInt() + (strobeFlash * 65f).toInt()).coerceIn(8, 160)
+                paint.alpha = strokeAlpha
+                canvas.drawPath(cachedBackdropStarPath, paint)
+            }
+
+            // Delicate cardinal horizon & vertical guide axes through vanishing point
+            val horizonColor = resolveColor(COLOR_PALE_SLATE, currentColors[1 % currentColors.size])
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 1.2f + (strobeFlash * 1.2f)
+            paint.color = if (strobeFlash > 0.05f) Color.WHITE else horizonColor
+            paint.alpha = (14 + (strobeFlash * 90f).toInt()).coerceIn(10, 160)
+            canvas.drawLine(0f, corrCy, width, corrCy, paint)
+            canvas.drawLine(corrCx, 0f, corrCx, height, paint)
+
             val starCx = baseCx + tiltX * 0.96f
             val starCy = baseCy + tiltY * 0.96f
 
             // 2. Harmonic Oscilloscope Flower / Iris centered inside the star aperture
-            // When idle, rings hide completely into pure OLED black
+            // When idle, rings contract behind star and hide completely into pure OLED black
             if (ringsAlpha > 0.01f) {
                 canvas.save()
                 canvas.translate(starCx, starCy)
                 canvas.rotate(rotationAngle)
                 
-                // Faint idle celestial resonance ring
+                // Faint celestial resonance ring (contracts and expands with flower rings)
+                val ringSpread = 0.30f + (0.70f * ringsAlpha)
                 paint.style = Paint.Style.STROKE
                 paint.strokeWidth = 1.2f
                 paint.color = resolveColor(COLOR_CYAN_ACCENT, currentColors[1 % currentColors.size])
                 paint.alpha = (25 * ringsAlpha).toInt().coerceIn(0, 255)
-                canvas.drawCircle(0f, 0f, dynamicBaseRadius * 2.8f + (sin(rotationAngle * 0.3f) * 12f), paint)
+                canvas.drawCircle(0f, 0f, (dynamicBaseRadius * 2.8f + (sin(rotationAngle * 0.3f) * 12f)) * ringSpread, paint)
 
                 if (isNoisy) {
                     drawIris(canvas, dynamicBaseRadius, ringsAlpha)
