@@ -669,21 +669,25 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
             val deltaY = (kotlin.math.sqrt(3.0) / 2.0 * hexR).toFloat()
             val totalH = height.toFloat()
 
-            val cols = (width.toFloat() / deltaX).toInt() + 2
+            val midX = width.toFloat() / 2f
+            val maxK = (midX / deltaX).toInt() + 2
 
-            for (c in 0 until cols) {
-                val cx = c * deltaX
-                val distFromCenter = kotlin.math.abs((cx / width.toFloat()) - 0.5f) * 2f
+            for (k in -maxK..maxK) {
+                val cx = midX + (k * deltaX)
+                if (cx < -hexR * 1.5f || cx > width.toFloat() + hexR * 1.5f) continue
+
+                val absK = kotlin.math.abs(k)
+                val distFromCenter = ((absK * deltaX) / midX).coerceIn(0f, 1f)
                 val bin = (((1.0f - distFromCenter) * (fft.size / 4f)).toInt() * 2).coerceIn(0, max(1, fft.size / 2 - 2))
                 val mag = if (fft.size > bin + 1) Math.hypot(fft[bin].toDouble(), fft[bin + 1].toDouble()).toFloat() else 0f
                 val edgeBias = 0.35f + (distFromCenter * 0.65f)
 
-                val color0 = currentColors[c % currentColors.size]
-                val color1 = currentColors[(c + 1) % currentColors.size]
-                val color2 = currentColors[(c + 2) % currentColors.size]
-                val color3 = currentColors[(c + 3) % currentColors.size]
+                val color0 = currentColors[absK % currentColors.size]
+                val color1 = currentColors[(absK + 1) % currentColors.size]
+                val color2 = currentColors[(absK + 2) % currentColors.size]
+                val color3 = currentColors[(absK + 3) % currentColors.size]
 
-                val isEven = (c % 2 == 0)
+                val isEven = (absK % 2 == 0)
 
                 if (isEven) {
                     // --- ROW 0 (Even columns, cy = 0 / totalH): Half-hexagons along bezel ---
