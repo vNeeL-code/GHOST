@@ -782,14 +782,6 @@ class AvatarWallpaperService : WallpaperService() {
                 canvas.drawPath(cachedBackdropStarPath, paint)
             }
 
-            // Delicate cardinal horizon & vertical guide axes through vanishing point
-            val horizonColor = resolveColor(COLOR_PALE_SLATE, currentColors[1 % currentColors.size])
-            paint.style = Paint.Style.STROKE
-            paint.strokeWidth = 1.2f + (strobeFlash * 1.2f)
-            paint.color = if (strobeFlash > 0.05f) Color.WHITE else horizonColor
-            paint.alpha = (14 + (strobeFlash * 90f).toInt()).coerceIn(10, 160)
-            canvas.drawLine(0f, corrCy, width, corrCy, paint)
-            canvas.drawLine(corrCx, 0f, corrCx, height, paint)
 
             val starCx = baseCx + tiltX * 0.96f
             val starCy = baseCy + tiltY * 0.96f
