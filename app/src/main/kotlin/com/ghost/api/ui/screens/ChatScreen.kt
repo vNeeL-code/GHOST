@@ -167,42 +167,70 @@ fun ChatScreen(
         if (showCloseConfirmDialog) {
             AlertDialog(
                 onDismissRequest = { showCloseConfirmDialog = false },
+                modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .border(1.dp, Color(0x338BB4F6), RoundedCornerShape(20.dp)),
+                containerColor = Color(0xFF14141E),
                 title = {
-                    Text(
-                        text = "Close GHOST?",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "✧ ",
+                            color = Color(0xFF8BB4F6),
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Close GHOST?",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        )
+                    }
                 },
                 text = {
                     Text(
                         text = "This will terminate background AI inference, audio visualizers, and edge listeners until reopened.",
-                        color = TextSecondary,
-                        fontSize = 14.sp
+                        color = Color(0x99FFFFFF),
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp
                     )
                 },
                 confirmButton = {
-                    TextButton(
-                        onClick = {
-                            showCloseConfirmDialog = false
-                            onCloseApp()
-                        },
-                        colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFEF4444))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0x26EF4444))
+                            .border(1.dp, Color(0x66EF4444), RoundedCornerShape(8.dp))
+                            .clickable {
+                                showCloseConfirmDialog = false
+                                onCloseApp()
+                            }
+                            .padding(horizontal = 14.dp, vertical = 8.dp)
                     ) {
-                        Text("Close", fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "Terminate",
+                            color = Color(0xFFFF6B6B),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
                     }
                 },
                 dismissButton = {
-                    TextButton(
-                        onClick = { showCloseConfirmDialog = false },
-                        colors = ButtonDefaults.textButtonColors(contentColor = TextSecondary)
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0x14FFFFFF))
+                            .clickable { showCloseConfirmDialog = false }
+                            .padding(horizontal = 14.dp, vertical = 8.dp)
                     ) {
-                        Text("Cancel")
+                        Text(
+                            text = "Cancel",
+                            color = Color(0xCCFFFFFF),
+                            fontSize = 13.sp
+                        )
                     }
                 },
-                containerColor = Color(0xFF1E293B),
-                shape = RoundedCornerShape(16.dp)
+                shape = RoundedCornerShape(20.dp)
             )
         }
 
@@ -215,8 +243,8 @@ fun ChatScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 shape = RoundedCornerShape(12.dp),
-                color = Color(0xFF0F172A),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.6f))
+                color = Color(0xFF14141E),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x338BB4F6))
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
@@ -224,7 +252,7 @@ fun ChatScreen(
                 ) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(16.dp),
-                        color = Color(0xFF38BDF8),
+                        color = Color(0xFF8BB4F6),
                         strokeWidth = 2.dp
                     )
                     Spacer(modifier = Modifier.width(10.dp))
@@ -882,7 +910,7 @@ fun CompactToolCard(tool: ToolInvocation) {
             ) {
                 Text(
                     text = "Copy Payload",
-                    color = Color(0xFF38BDF8),
+                    color = Color(0xFF8BB4F6),
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier
