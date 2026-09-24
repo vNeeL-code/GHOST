@@ -273,12 +273,22 @@ class AppReelOverlay(
     }
 
     private var currentVelocity: Float = 0f
+    private var lastFrameTimeNanos: Long = 0L
     private val frameCallback = object : android.view.Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
             if (currentVelocity != 0f && appItems.isNotEmpty()) {
-                scrollOffset += currentVelocity
+                val dt = if (lastFrameTimeNanos > 0L) {
+                    ((frameTimeNanos - lastFrameTimeNanos) / 1_000_000_000f).coerceIn(0.001f, 0.05f)
+                } else {
+                    0.016f
+                }
+                lastFrameTimeNanos = frameTimeNanos
+                // currentVelocity is calibrated in cards/sec, completely frame-rate normalized
+                scrollOffset += currentVelocity * stride * dt
                 invalidate()
                 android.view.Choreographer.getInstance().postFrameCallback(this)
+            } else {
+                lastFrameTimeNanos = 0L
             }
         }
     }
@@ -288,9 +298,11 @@ class AppReelOverlay(
         currentVelocity = vx
         if (vx != 0f) {
             if (wasZero) {
+                lastFrameTimeNanos = 0L
                 android.view.Choreographer.getInstance().postFrameCallback(frameCallback)
             }
         } else {
+            lastFrameTimeNanos = 0L
             android.view.Choreographer.getInstance().removeFrameCallback(frameCallback)
             val nearestVirtual = Math.round(scrollOffset / stride).toInt()
             animateSnapTo(nearestVirtual * stride)
@@ -342,9 +354,8 @@ class AppReelOverlay(
                         return true
                     }
 
-                    // Distance-accelerated horizontal scrolling
-                    val acceleration = 1.0f + (abs(event.x - startTouchX) / (width * 0.5f)).coerceIn(0f, 1.5f)
-                    scrollOffset -= dx * 1.25f * acceleration
+                    // 1:1 direct finger tracking with zero artificial acceleration
+                    scrollOffset -= dx
                     totalDragDistance += abs(dx)
                     lastTouchX = event.x
                     invalidate()

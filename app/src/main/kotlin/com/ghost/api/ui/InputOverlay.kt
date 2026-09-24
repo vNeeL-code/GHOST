@@ -467,8 +467,11 @@ class InputOverlay(
                             if (Math.abs(dx) > threshold && Math.abs(dx) > Math.abs(dy) * 0.7f) {
                                 val deflection = dx - (Math.signum(dx) * threshold)
                                 val norm = (deflection / dpToPx(24).toFloat()).coerceIn(-1.5f, 1.5f)
-                                val speed = -Math.signum(norm) * Math.pow(Math.abs(norm).toDouble(), 1.4).toFloat() * dpToPx(9).toFloat()
-                                overlayMgr.setAppReelJoystickVelocity(speed)
+                                // Calibrated speed in cards/sec:
+                                // Gentle tilt: ~1.2 cards/sec. Max hold: ~3.8 cards/sec.
+                                // Fully readable, completely controllable, and stops on a dime!
+                                val cardsPerSecond = -Math.signum(norm) * (1.0f + Math.pow(Math.abs(norm).toDouble(), 1.3).toFloat() * 2.8f)
+                                overlayMgr.setAppReelJoystickVelocity(cardsPerSecond)
                             } else {
                                 overlayMgr.setAppReelJoystickVelocity(0f)
                             }
