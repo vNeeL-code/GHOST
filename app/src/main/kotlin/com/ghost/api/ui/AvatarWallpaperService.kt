@@ -77,6 +77,9 @@ class AvatarWallpaperService : WallpaperService() {
         private val CUBE_BLOOM_BASS_MULTS = floatArrayOf(1.30f, 0.90f, 0.55f, 0.25f)
         private val CUBE_BLOOM_ALPHAS = intArrayOf(35, 70, 115, 160)
         private val CUBE_BLOOM_WIDTHS = floatArrayOf(5.5f, 4.2f, 3.2f, 2.2f)
+
+        @Volatile
+        var isOverlayShowing: Boolean = false
     }
 
     override fun onCreateEngine(): Engine {
@@ -231,6 +234,16 @@ class AvatarWallpaperService : WallpaperService() {
         private val frameCallback = object : android.view.Choreographer.FrameCallback {
             override fun doFrame(frameTimeNanos: Long) {
                 if (isVisible) {
+                    // When GHOST overlay (App Reel / Input) is active in foreground, pause wallpaper rendering
+                    // to grant 100% CPU/GPU cycles to the overlay, eliminating scrolling stutter on the home screen.
+                    // The surface automatically retains the last drawn frame buffer.
+                    if (isOverlayShowing) {
+                        try {
+                            android.view.Choreographer.getInstance().postFrameCallback(this)
+                        } catch (e: Exception) {}
+                        return
+                    }
+
                     val backend = cachedBackend
                     val isInferencing = GemmaService.isInferencing
 

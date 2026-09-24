@@ -110,6 +110,7 @@ class OverlayManager(private val context: Context) {
         lastTextQueryCallback = onQuery
 
         try {
+            AvatarWallpaperService.isOverlayShowing = true
             when (currentStyle) {
                 OverlayStyle.CLASSIC -> showClassicOverlay(onQuery)
                 OverlayStyle.PILL -> showPillOverlay(onQuery)
@@ -119,6 +120,7 @@ class OverlayManager(private val context: Context) {
             Timber.e(e, "Failed to show overlay")
             // CRITICAL: Reset state if show*() failed, preventing stuck isShowing flag
             isShowing = false
+            AvatarWallpaperService.isOverlayShowing = false
             overlayView = null
             pillView = null
             inputOverlay = null
@@ -366,11 +368,13 @@ class OverlayManager(private val context: Context) {
             hideScratchpad()
 
             isShowing = false
+            AvatarWallpaperService.isOverlayShowing = false
             edgeNubOverlay?.setNubVisibility(true)
             Timber.i("Overlay hidden")
         } catch (e: Exception) {
             Timber.e(e, "Failed to hide overlay")
             isShowing = false
+            AvatarWallpaperService.isOverlayShowing = false
             overlayView = null
             pillView = null
             inputOverlay = null

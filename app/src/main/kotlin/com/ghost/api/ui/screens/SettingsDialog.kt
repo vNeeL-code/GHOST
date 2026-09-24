@@ -333,7 +333,7 @@ fun SettingsDialog(
                                 )
                                 val summonOptions = listOf(
                                     Constants.SUMMON_METHOD_SHAKE to "Shake",
-                                    Constants.SUMMON_METHOD_EDGE_NUB to "Edge Nub",
+                                    Constants.SUMMON_METHOD_EDGE_NUB to "Edge",
                                     Constants.SUMMON_METHOD_BOTH to "Both"
                                 )
                                 Row(

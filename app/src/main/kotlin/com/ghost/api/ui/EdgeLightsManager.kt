@@ -154,7 +154,8 @@ object EdgeLightsManager : SystemVisualizer.AudioListener {
             WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-            WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR
+            WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR or
+            WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
 
         val topParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
