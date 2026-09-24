@@ -34,6 +34,7 @@ class OverlayManager(private val context: Context) {
     private var pillView: PillOverlayView? = null
     private var inputOverlay: InputOverlay? = null
     private var ghostWorkIndicator: GhostWorkIndicatorOverlay? = null
+    private var edgeNubOverlay: EdgeNubOverlay? = null
     private val activeWorkCounter = java.util.concurrent.atomic.AtomicInteger(0)
     private var currentStyle: OverlayStyle = OverlayStyle.SPARKLE
     private var isShowing = false
@@ -66,6 +67,33 @@ class OverlayManager(private val context: Context) {
         return Settings.canDrawOverlays(context)
     }
 
+    fun attachEdgeNub(onSummon: () -> Unit) {
+        if (!canDrawOverlay()) return
+        val wm = windowManager ?: return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            if (edgeNubOverlay == null) {
+                edgeNubOverlay = EdgeNubOverlay(context, wm, onSummon)
+            }
+            edgeNubOverlay?.attach()
+            if (isShowing) {
+                edgeNubOverlay?.setNubVisibility(false)
+            }
+        }
+    }
+
+    fun detachEdgeNub() {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            edgeNubOverlay?.detach()
+            edgeNubOverlay = null
+        }
+    }
+
+    fun setEdgeNubVisible(visible: Boolean) {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            edgeNubOverlay?.setNubVisibility(visible)
+        }
+    }
+
     private var lastTextQueryCallback: ((String) -> Unit)? = null
 
     fun showOverlay(onQuery: (String) -> Unit) {
@@ -94,6 +122,7 @@ class OverlayManager(private val context: Context) {
             overlayView = null
             pillView = null
             inputOverlay = null
+            edgeNubOverlay?.setNubVisibility(true)
         }
     }
 
@@ -337,6 +366,7 @@ class OverlayManager(private val context: Context) {
             hideScratchpad()
 
             isShowing = false
+            edgeNubOverlay?.setNubVisibility(true)
             Timber.i("Overlay hidden")
         } catch (e: Exception) {
             Timber.e(e, "Failed to hide overlay")
@@ -346,6 +376,7 @@ class OverlayManager(private val context: Context) {
             inputOverlay = null
             hideAppReel()
             hideScratchpad()
+            edgeNubOverlay?.setNubVisibility(true)
         }
     }
 
@@ -386,7 +417,8 @@ class OverlayManager(private val context: Context) {
         // Focus is granted on-demand via requestOverlayFocus() when the user taps the input field.
         val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                     WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
         
         return WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,

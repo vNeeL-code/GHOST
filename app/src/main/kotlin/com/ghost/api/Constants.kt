@@ -36,8 +36,8 @@ object Constants {
     const val RAM_CRITICAL_UTILIZATION_THRESHOLD = 0.94f // 94% RAM utilization
     const val RAM_CRITICAL_MIN_FREE_BYTES = 400L * 1024 * 1024 // 400 MB free memory floor
 
-    // Auto-reload safety valve: automatically boots suspended engine back up when memory is calm (<50% utilization)
-    const val RAM_RELOAD_UTILIZATION_THRESHOLD = 0.50f // 50% RAM utilization floor for automatic wake-up
+    // Auto-reload safety valve: automatically boots suspended engine back up when memory is calm (<54% utilization)
+    const val RAM_RELOAD_UTILIZATION_THRESHOLD = 0.54f // 54% RAM utilization floor for automatic wake-up (tuned for zRAM idle)
     const val RAM_RELOAD_MIN_FREE_BYTES = 2500L * 1024 * 1024 // 2.5 GB free memory required to auto-reload
 
     /**
@@ -119,6 +119,16 @@ object Constants {
     const val EDGE_STYLE_BOOM = "STYLE_BOOM"
     const val EDGE_STYLE_WIREFRAME = "STYLE_WIREFRAME"
     const val EDGE_STYLE_HEX = "STYLE_HEX"
+
+    // Model Persistence & Storage Protection
+    const val PREF_LAST_KNOWN_MODEL_PATH = "last_known_model_path"
+
+    // Summon Controls
+    const val PREF_SUMMON_METHOD = "summon_method" // "SHAKE", "EDGE_NUB", "BOTH"
+    const val SUMMON_METHOD_SHAKE = "SHAKE"
+    const val SUMMON_METHOD_EDGE_NUB = "EDGE_NUB"
+    const val SUMMON_METHOD_BOTH = "BOTH"
+    const val PREF_EDGE_NUB_Y = "edge_nub_y_pos"
 
     // Token estimation (multimodal tuned for Gemma 4 / LiteRT-LM)
     const val CHARS_PER_TOKEN = 4

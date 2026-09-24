@@ -418,7 +418,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                     overlayManager = OverlayManager(this@GemmaService)
                     setupOverlayManager()
 
-                    reportStatus("Init: ShakeDetector...")
+                    reportStatus("Init: ShakeDetector & EdgeNub...")
                     shakeDetector = ShakeDetector(this@GemmaService) {
                         android.os.Handler(android.os.Looper.getMainLooper()).post {
                             if (::overlayManager.isInitialized) {
@@ -431,10 +431,10 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                             }
                         }
                     }
-                    shakeDetector.start()
-                    Timber.d("Shake detector initialized")
+                    updateSummonControls()
+                    Timber.d("Summon controls initialized (Shake & Edge Nub)")
                 } catch (e: Exception) {
-                    Timber.e(e, "Failed to init shake detector")
+                    Timber.e(e, "Failed to init summon controls")
                 }
             }
             
@@ -497,7 +497,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
             scope.launch {
                 reportStatus("Loading Model...")
-                initialize()
+                initialize(allowDownload = true)
                 reportStatus("Model Loaded & Ready (${engine?.activeBackend})")
 
                 // FINAL: System Ready
@@ -637,7 +637,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             isInferencing = false
             currentInFlightQuery = null
             updateNotification("Loading Gemma $modelCore...")
-            initialize()
+            initialize(allowDownload = true)
             val ready = isGemmaLoaded() && ::ghostAgent.isInitialized && ghostAgent.isReady
             _isSystemReady.value = ready
             withContext(Dispatchers.Main) {
@@ -662,6 +662,45 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     }
 
     /**
+     * Updates summon triggers (Shake, Edge Nub, or Both) based on user preference.
+     */
+    fun updateSummonControls() {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            val prefs = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+            val method = prefs.getString(Constants.PREF_SUMMON_METHOD, Constants.SUMMON_METHOD_BOTH) ?: Constants.SUMMON_METHOD_BOTH
+
+            val allowShake = method == Constants.SUMMON_METHOD_SHAKE || method == Constants.SUMMON_METHOD_BOTH
+            val allowNub = method == Constants.SUMMON_METHOD_EDGE_NUB || method == Constants.SUMMON_METHOD_BOTH
+
+            if (::shakeDetector.isInitialized) {
+                if (allowShake) {
+                    shakeDetector.start()
+                } else {
+                    shakeDetector.stop()
+                }
+            }
+
+            if (::overlayManager.isInitialized) {
+                if (allowNub) {
+                    overlayManager.attachEdgeNub {
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            overlayManager.toggle { query ->
+                                scope.launch {
+                                    val sessionId = UUID.randomUUID().toString()
+                                    processQuery(query, sessionId)
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    overlayManager.detachEdgeNub()
+                }
+            }
+            Timber.i("🎚️ Summon controls updated: method=$method, shake=$allowShake, edgeNub=$allowNub")
+        }
+    }
+
+    /**
      * Records tool execution output length into GhostAgent's KV cache budget tracker.
      */
     fun recordToolOutput(charCount: Int) {
@@ -682,7 +721,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     // Diary cycle: setupDiaryCron() → DiaryAlarmReceiver → startDiaryCycle() → generateOneShot → writeDiaryEntry + Calendar
 
     private var initAttempts = 0
-    private suspend fun initialize() {
+    private suspend fun initialize(allowDownload: Boolean = false) {
         val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
 
         // 1. EARLY CHECK: If user set backend to OFF, enter standalone mode immediately. Never search or download.
@@ -717,17 +756,21 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         val searchDirs = listOfNotNull(
             protectedModelsDir,
             appFilesDir,
+            File("/storage/emulated/0/Android/data/$packageName/files/models"),
+            File("/sdcard/Android/data/$packageName/files/models"),
             File(filesDir, "models"),
             filesDir,
             File(downloadDir, "models"),
             downloadDir
-        )
+        ).distinct()
 
         if (prefs.getBoolean("is_initializing", false)) {
             Timber.e("🚨 WATCHDOG: Previous native initialization crashed! (Count: $crashCount, Model: $selectedModel)")
             
             // Check if lightweight E2B actually exists locally before attempting fallback
             val hasLocalE2B = searchDirs.any { dir ->
+                val directE2b = File(dir, Constants.MODEL_NAME_E2B)
+                (directE2b.exists() && directE2b.length() > 200 * 1024 * 1024L) ||
                 dir.listFiles { f -> f.name.contains("e2b", ignoreCase = true) && f.length() > 200 * 1024 * 1024L }?.isNotEmpty() == true
             }
 
@@ -762,23 +805,55 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             val activeModel = prefs.getString(Constants.PREF_SELECTED_MODEL, defaultModel) ?: defaultModel
             val targetVariant = activeModel.lowercase()
 
-            var candidateFile = searchDirs.flatMap { dir ->
-                dir.listFiles { file ->
-                    val name = file.name
-                    (name.endsWith(".litertlm", ignoreCase = true) ||
-                     name.endsWith(".gguf", ignoreCase = true) ||
-                     name.endsWith(".nexa", ignoreCase = true)) &&
-                    file.length() > 200 * 1024 * 1024L // Must be > 200MB to avoid partial/corrupted downloads
-                }?.toList() ?: emptyList()
-            }.filter { file ->
-                file.name.contains(targetVariant, ignoreCase = true)
-            }.sortedByDescending { file ->
-                val name = file.name.lowercase()
-                var score = 0
-                if (file.parentFile?.canonicalPath == protectedModelsDir.canonicalPath) score += 100 // Prefer protected models dir
-                if (name.endsWith(".litertlm")) score += 50
-                score
-            }.firstOrNull()
+            // 0. Check cached model path from SharedPreferences first (fast-path bypasses directory listing)
+            val cachedPath = prefs.getString(Constants.PREF_LAST_KNOWN_MODEL_PATH, null)
+            var candidateFile: File? = if (!cachedPath.isNullOrBlank()) {
+                val cached = File(cachedPath)
+                if (cached.exists() && cached.length() > 200 * 1024 * 1024L) {
+                    Timber.i("📦 Fast-path: Found cached model at ${cached.absolutePath} (${cached.length()} bytes)")
+                    cached
+                } else null
+            } else null
+
+            // 1. Check direct file candidates in search dirs before relying on directory listing
+            if (candidateFile == null) {
+                val candidateNames = listOf(
+                    if (targetVariant.contains("e2b")) Constants.MODEL_NAME_E2B else Constants.MODEL_NAME_E4B,
+                    if (targetVariant.contains("e2b")) Constants.MODEL_NAME_E4B else Constants.MODEL_NAME_E2B
+                )
+                for (name in candidateNames) {
+                    for (dir in searchDirs) {
+                        val directFile = File(dir, name)
+                        if (directFile.exists() && directFile.length() > 200 * 1024 * 1024L) {
+                            candidateFile = directFile
+                            Timber.i("📦 Direct candidate match: ${directFile.absolutePath} (${directFile.length()} bytes)")
+                            break
+                        }
+                    }
+                    if (candidateFile != null) break
+                }
+            }
+
+            // 2. Directory listing scan if direct checks missed
+            if (candidateFile == null) {
+                candidateFile = searchDirs.flatMap { dir ->
+                    dir.listFiles { file ->
+                        val name = file.name
+                        (name.endsWith(".litertlm", ignoreCase = true) ||
+                         name.endsWith(".gguf", ignoreCase = true) ||
+                         name.endsWith(".nexa", ignoreCase = true)) &&
+                        file.length() > 200 * 1024 * 1024L // Must be > 200MB to avoid partial/corrupted downloads
+                    }?.toList() ?: emptyList()
+                }.filter { file ->
+                    file.name.contains(targetVariant, ignoreCase = true)
+                }.sortedByDescending { file ->
+                    val name = file.name.lowercase()
+                    var score = 0
+                    if (file.parentFile?.canonicalPath == protectedModelsDir.canonicalPath) score += 100 // Prefer protected models dir
+                    if (name.endsWith(".litertlm")) score += 50
+                    score
+                }.firstOrNull()
+            }
 
             // FALLBACK SAFETY: If requested variant is missing on disk, adopt ANY valid local model before downloading
             if (candidateFile == null) {
@@ -791,10 +866,16 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 }
             }
 
-            // Storage Delay Guard: Wait 500ms and re-check once in case storage volume was momentarily busy
-            if (candidateFile == null) {
-                delay(500)
+            // Storage Delay Guard: Retry up to 3 times with backoff in case storage volume was busy or mounting
+            var retryCount = 0
+            while (candidateFile == null && retryCount < 3) {
+                retryCount++
+                delay(retryCount * 500L)
                 candidateFile = ModelDownloader.findAnyLocalModel(this)
+                if (candidateFile != null) {
+                    Timber.i("📦 Storage Delay Guard recovered model on attempt $retryCount: ${candidateFile.name}")
+                    break
+                }
             }
 
             // AUTO-MIGRATION / SAFE ADOPTION: Ensure file is accessible
@@ -837,6 +918,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             }
 
             if (modelFile != null) {
+                prefs.edit().putString(Constants.PREF_LAST_KNOWN_MODEL_PATH, modelFile.absolutePath).apply()
                 uiCallback?.onDownloadProgress(null)
                 val variant = when {
                     modelFile.name.contains("E4B", ignoreCase = true) -> "E4B (Frontier)"
@@ -848,7 +930,18 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
             if (modelFile == null) {
                 val searchedPaths = searchDirs.mapNotNull { it.absolutePath }
-                Timber.e("No model found! Searched: $searchedPaths")
+                Timber.w("Model not found! Searched: $searchedPaths")
+                if (!allowDownload) {
+                    Timber.w("🛡️ SAFETY LOCK: Automatic background model download prohibited. Halting initialization safely.")
+                    updateNotification("✧ GHOST: Model weights offline")
+                    reportStatus("Standby: Storage Offline")
+                    _isSystemReady.value = false
+                    isSuspendedDueToRam.set(false)
+                    prefs.edit().putBoolean("is_initializing", false).apply()
+                    return
+                }
+
+                Timber.e("Initiating authorized model download...")
                 val hfRepo = if (selectedModel.equals("E2B", ignoreCase = true)) Constants.MODEL_REPO_E2B else Constants.MODEL_REPO_E4B
                 val hfFileName = if (selectedModel.equals("E2B", ignoreCase = true)) Constants.MODEL_NAME_E2B else Constants.MODEL_NAME_E4B
                 updateNotification("Downloading $selectedModel model...")
@@ -869,7 +962,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                                 is ModelDownloader.DownloadState.Success -> {
                                     updateNotification("Download complete! Initializing...")
                                     uiCallback?.onDownloadProgress(null)
-                                    initialize()
+                                    initialize(allowDownload = false)
                                     throw kotlinx.coroutines.CancellationException("Done")
                                 }
                                 is ModelDownloader.DownloadState.Error -> {
@@ -1721,6 +1814,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                     if (::apiServer.isInitialized) apiServer.stop()
                     if (::sensorFusionManager.isInitialized) sensorFusionManager.stop()
                     if (::shakeDetector.isInitialized) shakeDetector.stop()
+                    if (::overlayManager.isInitialized) overlayManager.detachEdgeNub()
                 }
             }
             Timber.i("✅ GemmaService: Shutdown complete")

@@ -15,8 +15,8 @@ android {
         applicationId = "com.ghost.api"
         minSdk = 31
         targetSdk = 35
-        versionCode = 10
-        versionName = "4.25"
+        versionCode = 11
+        versionName = "4.28"
 
         ndk {
             abiFilters.addAll(listOf("arm64-v8a"))

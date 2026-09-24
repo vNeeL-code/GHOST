@@ -55,6 +55,7 @@ fun SettingsDialog(
     val hardwareTier = remember { Constants.resolveHardwareModelTier(context) }
     var selectedModel by remember { mutableStateOf(prefs.getString(Constants.PREF_SELECTED_MODEL, hardwareTier) ?: hardwareTier) }
     var visualizerPreset by remember { mutableStateOf(prefs.getString(Constants.PREF_VISUALIZER_PRESET, "OPTION_A") ?: "OPTION_A") }
+    var summonMethod by remember { mutableStateOf(prefs.getString(Constants.PREF_SUMMON_METHOD, Constants.SUMMON_METHOD_BOTH) ?: Constants.SUMMON_METHOD_BOTH) }
 
     val tokenManager = remember { com.ghost.api.logic.HFTokenManager(context) }
     val webSessionManager = remember { com.ghost.api.logic.WebSessionManager.getInstance(context) }
@@ -299,6 +300,74 @@ fun SettingsDialog(
                                                     color = if (isSelected) Color.Black else Color.White
                                                 )
                                             }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // === Summon & Gesture Controls ===
+                        item {
+                            SettingsSectionHeader(title = "Summon & Gesture Controls")
+                        }
+                        item {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 4.dp, vertical = 4.dp)
+                                    .background(cardBg, RoundedCornerShape(12.dp))
+                                    .border(1.dp, Color(0x1AFFFFFF), RoundedCornerShape(12.dp))
+                                    .padding(12.dp)
+                            ) {
+                                Text(
+                                    text = "Summon Trigger",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                                Text(
+                                    text = "Choose how to invoke GHOST overlay from anywhere",
+                                    fontSize = 11.sp,
+                                    color = textDim,
+                                    modifier = Modifier.padding(bottom = 10.dp)
+                                )
+                                val summonOptions = listOf(
+                                    Constants.SUMMON_METHOD_SHAKE to "Shake",
+                                    Constants.SUMMON_METHOD_EDGE_NUB to "Edge Nub",
+                                    Constants.SUMMON_METHOD_BOTH to "Both"
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    for ((key, label) in summonOptions) {
+                                        val isSelected = summonMethod == key
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(if (isSelected) accentColor else Color(0x1AFFFFFF))
+                                                .clickable {
+                                                    summonMethod = key
+                                                    prefs.edit().putString(Constants.PREF_SUMMON_METHOD, key).apply()
+                                                    val svc = gemmaService ?: GemmaService.instance
+                                                    svc?.updateSummonControls()
+                                                    val desc = when (key) {
+                                                        Constants.SUMMON_METHOD_SHAKE -> "Phone shake active 📳"
+                                                        Constants.SUMMON_METHOD_EDGE_NUB -> "Right bezel handle active 🎚️"
+                                                        else -> "Shake & Edge handle active ✨"
+                                                    }
+                                                    Toast.makeText(context, desc, Toast.LENGTH_SHORT).show()
+                                                }
+                                                .padding(vertical = 10.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = label,
+                                                fontSize = 12.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                color = if (isSelected) Color.Black else Color.White
+                                            )
                                         }
                                     }
                                 }

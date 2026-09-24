@@ -47,6 +47,18 @@ class ModelDownloader(
 
         val url = "https://huggingface.co/$hfRepo/resolve/main/$fileName?download=true"
         
+        // 0. Check cached model path from SharedPreferences first
+        val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+        val cachedPath = prefs.getString(Constants.PREF_LAST_KNOWN_MODEL_PATH, null)
+        if (!cachedPath.isNullOrBlank()) {
+            val cachedFile = File(cachedPath)
+            if (cachedFile.exists() && cachedFile.length() > 200 * 1024 * 1024L) {
+                Timber.i("Model already exists at cached path: ${cachedFile.absolutePath} (${cachedFile.length()} bytes)")
+                _downloadStatus.value = DownloadState.Success(cachedFile)
+                return
+            }
+        }
+
         val modelsDir = context.getExternalFilesDir("models") 
             ?: context.getExternalFilesDir(null)?.let { File(it, "models") }
             ?: File(context.filesDir, "models")
@@ -56,16 +68,19 @@ class ModelDownloader(
         val allSearchDirs = listOfNotNull(
             modelsDir,
             context.getExternalFilesDir(null),
+            File("/storage/emulated/0/Android/data/${context.packageName}/files/models"),
+            File("/sdcard/Android/data/${context.packageName}/files/models"),
             File(context.filesDir, "models"),
             context.filesDir,
             File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "models"),
             android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
-        )
+        ).distinct()
 
         for (dir in allSearchDirs) {
             val candidate = File(dir, fileName)
             if (candidate.exists() && candidate.length() > 200 * 1024 * 1024L) {
                 Timber.i("Model $fileName already exists in ${candidate.absolutePath} (${candidate.length()} bytes)")
+                prefs.edit().putString(Constants.PREF_LAST_KNOWN_MODEL_PATH, candidate.absolutePath).apply()
                 _downloadStatus.value = DownloadState.Success(candidate)
                 return
             }
@@ -214,15 +229,27 @@ class ModelDownloader(
     }
 
     fun isModelDownloaded(fileName: String): Boolean {
+        val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+        val cachedPath = prefs.getString(Constants.PREF_LAST_KNOWN_MODEL_PATH, null)
+        if (!cachedPath.isNullOrBlank()) {
+            val cachedFile = File(cachedPath)
+            if (cachedFile.exists() && cachedFile.length() > 200 * 1024 * 1024L && cachedFile.name.equals(fileName, ignoreCase = true)) {
+                return true
+            }
+        }
+
         val allSearchDirs = listOfNotNull(
             context.getExternalFilesDir("models"),
             context.getExternalFilesDir(null)?.let { File(it, "models") },
             context.getExternalFilesDir(null),
+            File("/storage/emulated/0/Android/data/${context.packageName}/files/models"),
+            File("/sdcard/Android/data/${context.packageName}/files/models"),
             File(context.filesDir, "models"),
             context.filesDir,
             File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "models"),
             android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
-        )
+        ).distinct()
+
         return allSearchDirs.any { dir ->
             val f = File(dir, fileName)
             f.exists() && f.length() > 200 * 1024 * 1024L
@@ -231,17 +258,40 @@ class ModelDownloader(
 
     companion object {
         fun findAnyLocalModel(context: Context): File? {
+            val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+            val cachedPath = prefs.getString(Constants.PREF_LAST_KNOWN_MODEL_PATH, null)
+            if (!cachedPath.isNullOrBlank()) {
+                val cachedFile = File(cachedPath)
+                if (cachedFile.exists() && cachedFile.length() > 200 * 1024 * 1024L) {
+                    return cachedFile
+                }
+            }
+
             val allSearchDirs = listOfNotNull(
                 context.getExternalFilesDir("models"),
                 context.getExternalFilesDir(null)?.let { File(it, "models") },
                 context.getExternalFilesDir(null),
+                File("/storage/emulated/0/Android/data/${context.packageName}/files/models"),
+                File("/sdcard/Android/data/${context.packageName}/files/models"),
                 File(context.filesDir, "models"),
                 context.filesDir,
                 File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "models"),
                 android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
-            )
+            ).distinct()
 
-            return allSearchDirs.flatMap { dir ->
+            // Check standard file names directly first
+            val standardNames = listOf(Constants.MODEL_NAME_E4B, Constants.MODEL_NAME_E2B)
+            for (name in standardNames) {
+                for (dir in allSearchDirs) {
+                    val candidate = File(dir, name)
+                    if (candidate.exists() && candidate.length() > 200 * 1024 * 1024L) {
+                        prefs.edit().putString(Constants.PREF_LAST_KNOWN_MODEL_PATH, candidate.absolutePath).apply()
+                        return candidate
+                    }
+                }
+            }
+
+            val found = allSearchDirs.flatMap { dir ->
                 dir.listFiles { file ->
                     val name = file.name
                     (name.endsWith(".litertlm", ignoreCase = true) ||
@@ -250,6 +300,11 @@ class ModelDownloader(
                     file.length() > 200 * 1024 * 1024L
                 }?.toList() ?: emptyList()
             }.sortedByDescending { it.length() }.firstOrNull()
+
+            if (found != null) {
+                prefs.edit().putString(Constants.PREF_LAST_KNOWN_MODEL_PATH, found.absolutePath).apply()
+            }
+            return found
         }
     }
 }

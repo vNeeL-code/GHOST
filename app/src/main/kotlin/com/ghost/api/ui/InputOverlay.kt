@@ -341,8 +341,8 @@ class InputOverlay(
         setupRadialButton(colorGGreen, -horizontalOffset.toFloat(), verticalOffset.toFloat(), "Green (Diary)")
         setupRadialButton(colorGYellow, horizontalOffset.toFloat(), verticalOffset.toFloat(), "Yellow (Tools)")
         
-        // Ensure parent FrameLayout doesn't block children
-        isClickable = false
+        // Tap outside to dismiss (children consume their own touch events)
+        isClickable = true
         isFocusable = false
     }
 
