@@ -121,6 +121,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     // Thermal Safety State
     private val isCoolingDown = java.util.concurrent.atomic.AtomicBoolean(false)
     private val criticalCount = java.util.concurrent.atomic.AtomicInteger(0)
+    private var lastAutoReloadAttemptTime = 0L
 
 
     // ==========================================
@@ -497,16 +498,18 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
             scope.launch {
                 reportStatus("Loading Model...")
-                initialize(allowDownload = true)
-                reportStatus("Model Loaded & Ready (${engine?.activeBackend})")
-
-                // FINAL: System Ready
-                _isSystemReady.value = true
-                Timber.i("GHOST: All systems online \uD83D\uDFE2")
-
-                // Re-broadcast backend status after a short delay to ensure UI sees it
-                kotlinx.coroutines.delay(2000)
-                reportStatus("Running on ${engine?.activeBackend} Backend")
+                initialize(allowDownload = false)
+                if (isGemmaLoaded() && ::ghostAgent.isInitialized && ghostAgent.isReady) {
+                    reportStatus("Model Loaded & Ready (${engine?.activeBackend})")
+                    _isSystemReady.value = true
+                    Timber.i("GHOST: All systems online \uD83D\uDFE2")
+                    kotlinx.coroutines.delay(2000)
+                    reportStatus("Running on ${engine?.activeBackend} Backend")
+                } else {
+                    _isSystemReady.value = false
+                    reportStatus("Standby: Engine weights offline")
+                    Timber.w("GHOST: Model not loaded on startup")
+                }
 
                 // Start Life Processes
                 checkPermissions()
@@ -648,6 +651,23 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     }
 
     /**
+     * Explicitly starts a user-requested download of the active or specified model core.
+     */
+    fun triggerModelDownload(modelCore: String? = null) {
+        serviceScope.launch {
+            if (modelDownloader.downloadStatus.value is ModelDownloader.DownloadState.Downloading) {
+                Timber.w("Model download already in progress")
+                return@launch
+            }
+            val prefs = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+            val targetCore = modelCore ?: prefs.getString(Constants.PREF_SELECTED_MODEL, "E4B") ?: "E4B"
+            prefs.edit().putString(Constants.PREF_SELECTED_MODEL, targetCore).apply()
+            Timber.i("Manual model download initiated by user for: $targetCore")
+            initialize(allowDownload = true)
+        }
+    }
+
+    /**
      * Compacts session conversation history into semantic memory and resets the KV cache.
      */
     fun flushSessionMemory() {
@@ -753,6 +773,13 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             android.os.Environment.DIRECTORY_DOWNLOADS
         )
 
+        // Storage readiness check: wait up to 2.5s if external storage is still mounting
+        var mountWait = 0
+        while (android.os.Environment.getExternalStorageState() != android.os.Environment.MEDIA_MOUNTED && mountWait < 5) {
+            mountWait++
+            delay(500)
+        }
+
         val searchDirs = listOfNotNull(
             protectedModelsDir,
             appFilesDir,
@@ -769,6 +796,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             
             // Check if lightweight E2B actually exists locally before attempting fallback
             val hasLocalE2B = searchDirs.any { dir ->
+                if (!dir.exists() || !dir.isDirectory) return@any false
                 val directE2b = File(dir, Constants.MODEL_NAME_E2B)
                 (directE2b.exists() && directE2b.length() > 200 * 1024 * 1024L) ||
                 dir.listFiles { f -> f.name.contains("e2b", ignoreCase = true) && f.length() > 200 * 1024 * 1024L }?.isNotEmpty() == true
@@ -815,7 +843,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 } else null
             } else null
 
-            // 1. Check direct file candidates in search dirs before relying on directory listing
+            // 1. Check direct file candidates in search dirs before relying on directory listing (case-insensitive)
             if (candidateFile == null) {
                 val candidateNames = listOf(
                     if (targetVariant.contains("e2b")) Constants.MODEL_NAME_E2B else Constants.MODEL_NAME_E4B,
@@ -823,10 +851,19 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 )
                 for (name in candidateNames) {
                     for (dir in searchDirs) {
+                        if (!dir.exists() || !dir.isDirectory) continue
                         val directFile = File(dir, name)
                         if (directFile.exists() && directFile.length() > 200 * 1024 * 1024L) {
                             candidateFile = directFile
                             Timber.i("📦 Direct candidate match: ${directFile.absolutePath} (${directFile.length()} bytes)")
+                            break
+                        }
+                        val ciFile = dir.listFiles { f ->
+                            f.name.equals(name, ignoreCase = true) && f.length() > 200 * 1024 * 1024L
+                        }?.firstOrNull()
+                        if (ciFile != null) {
+                            candidateFile = ciFile
+                            Timber.i("📦 Case-insensitive candidate match: ${ciFile.absolutePath} (${ciFile.length()} bytes)")
                             break
                         }
                     }
@@ -836,7 +873,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
             // 2. Directory listing scan if direct checks missed
             if (candidateFile == null) {
-                candidateFile = searchDirs.flatMap { dir ->
+                candidateFile = searchDirs.filter { it.exists() && it.isDirectory }.flatMap { dir ->
                     dir.listFiles { file ->
                         val name = file.name
                         (name.endsWith(".litertlm", ignoreCase = true) ||
@@ -866,9 +903,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 }
             }
 
-            // Storage Delay Guard: Retry up to 3 times with backoff in case storage volume was busy or mounting
+            // Storage Delay Guard: Retry up to 5 times with backoff in case storage volume was busy or mounting
             var retryCount = 0
-            while (candidateFile == null && retryCount < 3) {
+            while (candidateFile == null && retryCount < 5) {
                 retryCount++
                 delay(retryCount * 500L)
                 candidateFile = ModelDownloader.findAnyLocalModel(this)
@@ -878,44 +915,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 }
             }
 
-            // AUTO-MIGRATION / SAFE ADOPTION: Ensure file is accessible
-            val modelFile: File? = if (candidateFile != null && candidateFile.parentFile?.canonicalPath != protectedModelsDir.canonicalPath) {
-                val targetFile = File(protectedModelsDir, candidateFile.name)
-                Timber.i("📦 Auto-migrating model from ${candidateFile.parent} to protected storage: ${targetFile.absolutePath}")
-                updateNotification("Securing model weights...")
-                val moved = try {
-                    candidateFile.renameTo(targetFile)
-                } catch (e: Exception) {
-                    Timber.w(e, "renameTo failed during model migration")
-                    false
-                }
-
-                if (moved && targetFile.exists() && targetFile.length() > 0) {
-                    Timber.i("✅ Model migrated to ${targetFile.absolutePath}")
-                    // Also migrate companion cache files if they exist in source directory
-                    try {
-                        val sourceName = candidateFile.name
-                        candidateFile.parentFile?.listFiles { _, name ->
-                            name.startsWith(sourceName)
-                        }?.forEach { cacheFile ->
-                            val targetCache = File(protectedModelsDir, cacheFile.name)
-                            if (!targetCache.exists()) {
-                                try { cacheFile.renameTo(targetCache) } catch (_: Exception) {}
-                            }
-                        }
-                    } catch (e: Exception) {
-                        Timber.w(e, "Failed to migrate some companion cache files")
-                    }
-                    targetFile
-                } else if (targetFile.exists() && targetFile.length() == candidateFile.length()) {
-                    targetFile
-                } else {
-                    Timber.i("Using model in-place at ${candidateFile.absolutePath}")
-                    candidateFile
-                }
-            } else {
-                candidateFile
-            }
+            // IN-PLACE RETENTION: Never move or delete the user's model file!
+            val modelFile: File? = candidateFile
 
             if (modelFile != null) {
                 prefs.edit().putString(Constants.PREF_LAST_KNOWN_MODEL_PATH, modelFile.absolutePath).apply()
@@ -1562,12 +1563,14 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                     checkRamPressureAndSuspendIfNeeded()
                 }
 
+                val now = System.currentTimeMillis()
+
                 // Auto-Reload Safety Valve: If engine was suspended due to memory pressure,
-                // check if system memory utilization has cooled below 50% (< 0.50 utilization & >= 2.5GB free).
+                // check if system memory utilization has cooled below 54% (< 0.54 utilization & >= 2.5GB free).
                 // Automatically re-initializes engine weights back into RAM without user intervention!
                 val userBackend = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
                     .getString(Constants.PREF_USER_BACKEND, "AUTO")
-                if (isSuspendedDueToRam.get() && userBackend != "OFF" && !isInferencing) {
+                if (isSuspendedDueToRam.get() && userBackend != "OFF" && !isInferencing && (now - lastAutoReloadAttemptTime > 45000L)) {
                     val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
                     if (activityManager != null) {
                         val memInfo = ActivityManager.MemoryInfo()
@@ -1578,16 +1581,18 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                         if (utilization < Constants.RAM_RELOAD_UTILIZATION_THRESHOLD && 
                             memInfo.availMem >= Constants.RAM_RELOAD_MIN_FREE_BYTES && 
                             !memInfo.lowMemory) {
+                            lastAutoReloadAttemptTime = now
                             Timber.i("♻️ System RAM cooled to ${(utilization * 100).toInt()}% (${memInfo.availMem / (1024 * 1024)}MB free). Auto-reloading suspended engine weights...")
                             updateNotification("✧ Memory calm: Reloading Gemma...")
                             serviceScope.launch {
-                                ensureEngineReady()
+                                val ready = ensureEngineReady()
+                                if (!ready) {
+                                    Timber.w("Auto-reload attempt failed; cooling down for 45s")
+                                }
                             }
                         }
                     }
                 }
-
-                val now = System.currentTimeMillis()
                 // Audit 3.0: Reduced refresh rate to 5s to slash IPC overhead
                 val delayMs = if (isInteractive) 5000L else 30000L 
                 

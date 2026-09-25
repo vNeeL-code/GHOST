@@ -139,9 +139,12 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                     Timber.d("Speculative decoding capability check skipped/unsupported: ${e.message}")
                 }
 
+                var candidateEngine: Engine? = null
+                var candidateConversation: Conversation? = null
                 try {
                     ExperimentalFlags.enableSpeculativeDecoding = (isGpu && supportsSpeculativeDecoding)
                     val newEngine = Engine(engineConfig)
+                    candidateEngine = newEngine
                     newEngine.initialize()
                     ExperimentalFlags.enableSpeculativeDecoding = false
 
@@ -152,6 +155,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                     )
 
                     val newConversation = newEngine.createConversation(conversationConfig)
+                    candidateConversation = newConversation
 
                     engine?.close()
                     conversation?.close()
@@ -164,6 +168,11 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                 } catch (e: Throwable) {
                     Timber.w(e, "Native Engine Initialization Failed for $backendName: ${e.message}")
                     lastError = e
+                    ExperimentalFlags.enableSpeculativeDecoding = false
+                    try { candidateConversation?.close() } catch (_: Throwable) {}
+                    try { candidateEngine?.close() } catch (_: Throwable) {}
+                    candidateConversation = null
+                    candidateEngine = null
                     // Force GC after failed GPU allocation to free native buffers before trying CPU
                     System.gc()
                     Runtime.getRuntime().gc()

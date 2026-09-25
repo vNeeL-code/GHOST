@@ -76,12 +76,40 @@ class ModelDownloader(
             android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
         ).distinct()
 
+        // 1A. DESTINATION OVERWRITE GUARD: Under no circumstances allow DownloadManager to enqueue
+        // over an existing valid model file (>200MB), which would truncate it to 0 bytes!
+        val destFile = File(modelsDir, fileName)
+        val existingInDest = if (destFile.exists() && destFile.length() > 200 * 1024 * 1024L) {
+            destFile
+        } else {
+            modelsDir.listFiles { f ->
+                f.name.equals(fileName, ignoreCase = true) && f.length() > 200 * 1024 * 1024L
+            }?.firstOrNull()
+        }
+        if (existingInDest != null) {
+            Timber.i("🛡️ OVERWRITE GUARD: Valid model already exists at ${existingInDest.absolutePath} (${existingInDest.length()} bytes). Halting download and adopting.")
+            prefs.edit().putString(Constants.PREF_LAST_KNOWN_MODEL_PATH, existingInDest.absolutePath).apply()
+            _downloadStatus.value = DownloadState.Success(existingInDest)
+            return
+        }
+
+        // 1B. Search across all candidate storage directories
         for (dir in allSearchDirs) {
+            if (!dir.exists() || !dir.isDirectory) continue
             val candidate = File(dir, fileName)
             if (candidate.exists() && candidate.length() > 200 * 1024 * 1024L) {
                 Timber.i("Model $fileName already exists in ${candidate.absolutePath} (${candidate.length()} bytes)")
                 prefs.edit().putString(Constants.PREF_LAST_KNOWN_MODEL_PATH, candidate.absolutePath).apply()
                 _downloadStatus.value = DownloadState.Success(candidate)
+                return
+            }
+            val ciMatch = dir.listFiles { f ->
+                f.name.equals(fileName, ignoreCase = true) && f.length() > 200 * 1024 * 1024L
+            }?.firstOrNull()
+            if (ciMatch != null) {
+                Timber.i("Model $fileName (case-insensitive) already exists in ${ciMatch.absolutePath} (${ciMatch.length()} bytes)")
+                prefs.edit().putString(Constants.PREF_LAST_KNOWN_MODEL_PATH, ciMatch.absolutePath).apply()
+                _downloadStatus.value = DownloadState.Success(ciMatch)
                 return
             }
         }
@@ -251,8 +279,10 @@ class ModelDownloader(
         ).distinct()
 
         return allSearchDirs.any { dir ->
+            if (!dir.exists() || !dir.isDirectory) return@any false
             val f = File(dir, fileName)
-            f.exists() && f.length() > 200 * 1024 * 1024L
+            (f.exists() && f.length() > 200 * 1024 * 1024L) ||
+            dir.listFiles { file -> file.name.equals(fileName, ignoreCase = true) && file.length() > 200 * 1024 * 1024L }?.isNotEmpty() == true
         }
     }
 
@@ -279,14 +309,22 @@ class ModelDownloader(
                 android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
             ).distinct()
 
-            // Check standard file names directly first
+            // Check standard file names directly first (with case-insensitive fallback)
             val standardNames = listOf(Constants.MODEL_NAME_E4B, Constants.MODEL_NAME_E2B)
             for (name in standardNames) {
                 for (dir in allSearchDirs) {
+                    if (!dir.exists() || !dir.isDirectory) continue
                     val candidate = File(dir, name)
                     if (candidate.exists() && candidate.length() > 200 * 1024 * 1024L) {
                         prefs.edit().putString(Constants.PREF_LAST_KNOWN_MODEL_PATH, candidate.absolutePath).apply()
                         return candidate
+                    }
+                    val ciMatch = dir.listFiles { file ->
+                        file.name.equals(name, ignoreCase = true) && file.length() > 200 * 1024 * 1024L
+                    }?.firstOrNull()
+                    if (ciMatch != null) {
+                        prefs.edit().putString(Constants.PREF_LAST_KNOWN_MODEL_PATH, ciMatch.absolutePath).apply()
+                        return ciMatch
                     }
                 }
             }

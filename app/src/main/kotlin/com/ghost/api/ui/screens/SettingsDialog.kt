@@ -695,6 +695,57 @@ fun SettingsDialog(
                             }
                         }
                         item {
+                            SettingsSectionHeader(title = "Local Inference Engine")
+                        }
+                        item {
+                            Column {
+                                Text(
+                                    text = "Model Architecture & Weights",
+                                    fontSize = 12.sp,
+                                    color = textDim,
+                                    modifier = Modifier.padding(bottom = 8.dp)
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    val models = listOf(
+                                        "E4B" to "E4B Frontier (3.4GB)",
+                                        "E2B" to "E2B Compact (1.7GB)"
+                                    )
+                                    for ((mCore, label) in models) {
+                                        val isSelected = selectedModel.equals(mCore, ignoreCase = true)
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(if (isSelected) accentColor else cardBg)
+                                                .clickable {
+                                                    selectedModel = mCore
+                                                    prefs.edit().putString(Constants.PREF_SELECTED_MODEL, mCore).apply()
+                                                    val svc = gemmaService ?: GemmaService.instance
+                                                    if (svc != null) {
+                                                        svc.reloadWithModel(mCore)
+                                                    } else {
+                                                        Toast.makeText(context, "Active model core: $mCore", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
+                                                .padding(vertical = 10.dp, horizontal = 4.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = label,
+                                                fontSize = 11.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                color = if (isSelected) Color.Black else Color.White,
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        item {
                             Column {
                                 Text(
                                     text = "Active Hardware Acceleration",
