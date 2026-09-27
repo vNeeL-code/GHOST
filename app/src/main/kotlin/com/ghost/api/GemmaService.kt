@@ -174,6 +174,12 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
+            Constants.ACTION_RECOVER_MODEL, "com.ghost.api.ACTION_DOWNLOAD_MODEL" -> {
+                Timber.i("Manual model download / recovery requested by operator")
+                serviceScope.launch {
+                    initialize(allowDownload = true)
+                }
+            }
             Constants.ACTION_QUERY -> {
                 val query = intent.getStringExtra(Constants.EXTRA_QUERY)
                 if (!query.isNullOrEmpty()) {
@@ -498,13 +504,16 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
             scope.launch {
                 reportStatus("Loading Model...")
-                initialize(allowDownload = false)
+                initialize(allowDownload = true)
                 if (isGemmaLoaded() && ::ghostAgent.isInitialized && ghostAgent.isReady) {
                     reportStatus("Model Loaded & Ready (${engine?.activeBackend})")
                     _isSystemReady.value = true
-                    Timber.i("GHOST: All systems online \uD83D\uDFE2")
+                    Timber.i("GHOST: All systems online 🟢")
                     kotlinx.coroutines.delay(2000)
                     reportStatus("Running on ${engine?.activeBackend} Backend")
+                } else if (modelDownloader.downloadStatus.value is ModelDownloader.DownloadState.Downloading) {
+                    Timber.i("GHOST: Model download in progress on startup")
+                    reportStatus("Downloading Weights...")
                 } else {
                     _isSystemReady.value = false
                     reportStatus("Standby: Engine weights offline")
@@ -640,11 +649,11 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             isInferencing = false
             currentInFlightQuery = null
             updateNotification("Loading Gemma $modelCore...")
-            initialize(allowDownload = false)
+            initialize(allowDownload = true)
             val ready = isGemmaLoaded() && ::ghostAgent.isInitialized && ghostAgent.isReady
             _isSystemReady.value = ready
             withContext(Dispatchers.Main) {
-                val msg = if (ready) "Active model core: $modelCore 🧠" else "Model $modelCore weights not found on device ⚠️"
+                val msg = if (ready) "Active model core: $modelCore 🧠" else if (modelDownloader.downloadStatus.value is ModelDownloader.DownloadState.Downloading) "Downloading $modelCore weights... 📥" else "Model $modelCore weights offline ⚠️"
                 android.widget.Toast.makeText(this@GemmaService, msg, android.widget.Toast.LENGTH_SHORT).show()
             }
         }
@@ -741,7 +750,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     // Diary cycle: setupDiaryCron() → DiaryAlarmReceiver → startDiaryCycle() → generateOneShot → writeDiaryEntry + Calendar
 
     private var initAttempts = 0
-    private suspend fun initialize(allowDownload: Boolean = false) {
+    private suspend fun initialize(allowDownload: Boolean = true) {
         val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
 
         // 1. EARLY CHECK: If user set backend to OFF, enter standalone mode immediately. Never search or download.
@@ -1448,7 +1457,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
              text
         }
 
-        return Notification.Builder(this, CHANNEL_ID)
+        val builder = Notification.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(text)
             .setSmallIcon(iconRes)
@@ -1458,7 +1467,23 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 .bigText(if (::sensorFusionManager.isInitialized) sensorFusionManager.getContextString() else telemetry)
                 .setBigContentTitle("Δ \uD83D\uDC7E ∇")
                 .setSummaryText("Agentic Gemma Inference"))
-            .build()
+
+        if (text.contains("offline", ignoreCase = true) || text.contains("Model weights offline", ignoreCase = true)) {
+            val downloadIntent = Intent(this, GemmaService::class.java).apply {
+                action = Constants.ACTION_RECOVER_MODEL
+            }
+            val pendingIntent = android.app.PendingIntent.getService(
+                this, 102, downloadIntent,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+            val downloadIcon = android.graphics.drawable.Icon.createWithResource(this, android.R.drawable.stat_sys_download)
+            val action = Notification.Action.Builder(
+                downloadIcon, "Download Weights", pendingIntent
+            ).build()
+            builder.addAction(action)
+        }
+
+        return builder.build()
     }
 
     private val animations = listOf(
@@ -1643,6 +1668,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     }
 
     private fun isIdle(): Boolean {
+        if (!isGemmaLoaded() || modelDownloader.downloadStatus.value is ModelDownloader.DownloadState.Downloading) {
+            return false
+        }
         // Idle if no activity for 30 seconds
         return (System.currentTimeMillis() - lastActivityTime) > (30 * 1000)
     }
