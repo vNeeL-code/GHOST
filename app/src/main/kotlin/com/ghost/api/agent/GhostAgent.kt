@@ -136,7 +136,8 @@ class GhostAgent(
             val candidates = _conversationHistory.takeLast(maxTurns * 2)
             var expectedRole = "user"
             for (msg in candidates) {
-                val clean = msg.content.trim()
+                val rawContent = msg.content.trim()
+                val clean = if (msg.role == "assistant") sanitizeAgentOutput(rawContent) else rawContent
                 if (clean.isBlank()) continue
                 val role = if (msg.role == "user") "user" else if (msg.role == "assistant") "model" else continue
                 if (role == expectedRole) {
@@ -391,22 +392,33 @@ class GhostAgent(
 
                         // Streaming sentence-by-sentence TTS for instant speech onset (~1.5s TTFT)
                         if (!isToolInvocation(responseBuffer)) {
-                            ttsSentenceBuffer.append(cleanToken)
-                            while (true) {
-                                val currentText = ttsSentenceBuffer.toString()
-                                val match = sentenceBoundaryRegex.find(currentText) ?: break
-                                val punctuationEnd = match.range.first + match.groupValues[1].length
-                                val sentence = currentText.substring(0, punctuationEnd).trim()
-                                val remainder = currentText.substring(match.range.last + 1).trimStart()
+                            val trimmedBuf = responseBuffer.trimStart()
+                            val inContextBlock = (trimmedBuf.startsWith("[Context", ignoreCase = true) ||
+                                    trimmedBuf.startsWith("[Sensory", ignoreCase = true) ||
+                                    trimmedBuf.startsWith("[Telemetry", ignoreCase = true) ||
+                                    trimmedBuf.startsWith("[Perception", ignoreCase = true)) &&
+                                    !trimmedBuf.contains("[/", ignoreCase = true)
 
-                                val ttsChunk = cleanForTTS(sentence)
-                                if (ttsChunk.isNotBlank() && ttsChunk.length >= 10) {
-                                    callbacks?.speak(ttsChunk)
-                                    spokenAnyStreamingTts = true
-                                    ttsSentenceBuffer.clear()
-                                    ttsSentenceBuffer.append(remainder)
-                                } else {
-                                    break
+                            if (inContextBlock) {
+                                ttsSentenceBuffer.clear()
+                            } else {
+                                ttsSentenceBuffer.append(cleanToken)
+                                while (true) {
+                                    val currentText = ttsSentenceBuffer.toString()
+                                    val match = sentenceBoundaryRegex.find(currentText) ?: break
+                                    val punctuationEnd = match.range.first + match.groupValues[1].length
+                                    val sentence = currentText.substring(0, punctuationEnd).trim()
+                                    val remainder = currentText.substring(match.range.last + 1).trimStart()
+
+                                    val ttsChunk = cleanForTTS(sentence)
+                                    if (ttsChunk.isNotBlank() && ttsChunk.length >= 10) {
+                                        callbacks?.speak(ttsChunk)
+                                        spokenAnyStreamingTts = true
+                                        ttsSentenceBuffer.clear()
+                                        ttsSentenceBuffer.append(remainder)
+                                    } else {
+                                        break
+                                    }
                                 }
                             }
                         }
@@ -441,15 +453,7 @@ class GhostAgent(
                 }
             }
 
-            // Clean callsign prefix and echoed prompt header if model emitted it
-            val assistantCallSign = getAssistantCallSign()
-            var cleanResponse = rawResponse
-                .replace(Regex("""^(?:\[.*?\]|[\w\s:·-]*?\]:?)\s*"""), "") // Strips echoed timestamp/prefix e.g. "pm]:", "[9:31 pm]:", "]:"
-                .replace(Regex("""^Δ\s*.*?\s*∇\s*"""), "")
-                .replace(Regex("""^✧\s*.*?:?\s*"""), "")
-                .replace(Regex("""^$assistantCallSign:\s*"""), "")
-                .replace(Regex("""<\|channel>thought.*?<channel\|>""", RegexOption.DOT_MATCHES_ALL), "")
-                .trim()
+            var cleanResponse = sanitizeAgentOutput(rawResponse)
 
             // 5B. Tool Continuation Pass:
             // When LiteRT-LM executes a tool in sendMessageAsync, C++ appends tool results to context
@@ -495,13 +499,7 @@ class GhostAgent(
                     rawResponse = lastExecutedToolResult!!
                 }
 
-                cleanResponse = rawResponse
-                    .replace(Regex("""^(?:\[.*?\]|[\w\s:·-]*?\]:?)\s*"""), "")
-                    .replace(Regex("""^Δ\s*.*?\s*∇\s*"""), "")
-                    .replace(Regex("""^✧\s*.*?:?\s*"""), "")
-                    .replace(Regex("""^$assistantCallSign:\s*"""), "")
-                    .replace(Regex("""<\|channel>thought.*?<channel\|>""", RegexOption.DOT_MATCHES_ALL), "")
-                    .trim()
+                cleanResponse = sanitizeAgentOutput(rawResponse)
             }
 
             val isStub = cleanResponse.length < 5 || cleanResponse == "I'" || cleanResponse.endsWith("]:")
@@ -627,7 +625,7 @@ class GhostAgent(
                 }
             },
             onComplete = {
-                val clean = fullResponse.toString().trim()
+                val clean = sanitizeAgentOutput(fullResponse.toString())
                 synchronized(_conversationHistory) {
                     _conversationHistory.add(AgentMessage("user", message))
                     _conversationHistory.add(AgentMessage("assistant", clean))
@@ -793,12 +791,16 @@ class GhostAgent(
             val json = checkpointFile.readText()
             val state = gson.fromJson(json, AgentState::class.java)
             if (state != null) {
+                val sanitizedHistory = state.conversationHistory.mapNotNull { msg ->
+                    val clean = if (msg.role == "assistant") sanitizeAgentOutput(msg.content) else msg.content.trim()
+                    if (clean.isBlank()) null else msg.copy(content = clean)
+                }
                 synchronized(_conversationHistory) {
                     _conversationHistory.clear()
-                    _conversationHistory.addAll(state.conversationHistory)
+                    _conversationHistory.addAll(sanitizedHistory)
                 }
                 turnCount.set(state.turnCount)
-                rollingMemory = state.rollingMemory
+                rollingMemory = sanitizeAgentOutput(state.rollingMemory)
                 Timber.i("GhostAgent: Restored checkpoint with ${_conversationHistory.size} messages (Turn: ${state.turnCount})")
             }
         } catch (e: Exception) {
@@ -817,16 +819,53 @@ class GhostAgent(
 
     private fun getOperatorAvatar(): String = "Operator"
 
-    private fun wrapResponse(raw: String): String {
-        return raw.replace(Regex("""<\|channel>thought.*?<channel\|>""", RegexOption.DOT_MATCHES_ALL), "")
+    fun sanitizeAgentOutput(raw: String): String {
+        var text = raw
+        // 1. Strip thought channels (completed or trailing)
+        text = text
+            .replace(Regex("""<\|channel>thought.*?<channel\|>""", RegexOption.DOT_MATCHES_ALL), "")
             .replace(Regex("""<think>.*?</think>""", RegexOption.DOT_MATCHES_ALL), "")
-            .trim()
+            .replace(Regex("""<\|channel>thought.*""", RegexOption.DOT_MATCHES_ALL), "")
+
+        // 2. Strip any sensory telemetry preamble ending in closing tags [/Context], [/Sensory Grounding], [/Telemetry], [/Perception]
+        text = text.replace(Regex("""^[\s\S]*?\[/(?:Context|Live Sensory Grounding|Sensory Grounding|Telemetry|Perception)\]\s*""", RegexOption.IGNORE_CASE), "")
+
+        // 3. Strip any full [Context: ...] ... [/Context] blocks anywhere in text
+        text = text.replace(Regex("""\[(?:Context|Live Sensory Grounding|Sensory Grounding|Telemetry|Perception):?[\s\S]*?\[/(?:Context|Live Sensory Grounding|Sensory Grounding|Telemetry|Perception)\]\s*""", RegexOption.IGNORE_CASE), "")
+
+        // 4. Strip any standalone opening or closing context/telemetry/perception tags
+        text = text.replace(Regex("""\[/?(?:Context|Live Sensory Grounding|Sensory Grounding|Telemetry|Perception|Internal hardware perception|Internal perception)(?::[^\]]*)?\]\s*""", RegexOption.IGNORE_CASE), "")
+
+        // 5. Clean callsign prefix and echoed prompt header if model emitted it
+        val assistantCallSign = getAssistantCallSign()
+        text = text
+            .replace(Regex("""^(?:\[.*?\]|[\w\s:·-]*?\]:?)\s*"""), "") // Strips echoed timestamp/prefix e.g. "pm]:", "[9:31 pm]:", "]:"
+            .replace(Regex("""^Δ\s*.*?\s*∇\s*"""), "")
+            .replace(Regex("""^✧\s*.*?:?\s*"""), "")
+            .replace(Regex("""^${Regex.escape(assistantCallSign)}:\s*"""), "")
+
+        return text.trim()
+    }
+
+    private fun wrapResponse(raw: String): String {
+        val trimmed = raw.trimStart()
+        if (trimmed.startsWith("[Context", ignoreCase = true) ||
+            trimmed.startsWith("[Sensory", ignoreCase = true) ||
+            trimmed.startsWith("[Telemetry", ignoreCase = true) ||
+            trimmed.startsWith("[Perception", ignoreCase = true)) {
+            val hasClosing = trimmed.contains("[/Context]", ignoreCase = true) ||
+                             trimmed.contains("[/Sensory", ignoreCase = true) ||
+                             trimmed.contains("[/Telemetry", ignoreCase = true) ||
+                             trimmed.contains("[/Perception", ignoreCase = true)
+            if (!hasClosing) {
+                return ""
+            }
+        }
+        return sanitizeAgentOutput(raw)
     }
 
     private fun cleanForTTS(text: String): String {
-        return text
-            .replace(Regex("""<think>.*?</think>""", RegexOption.DOT_MATCHES_ALL), "")
-            .replace(Regex("""<\|channel>thought.*?<channel\|>""", RegexOption.DOT_MATCHES_ALL), "")
+        return sanitizeAgentOutput(text)
             .replace(Regex("""call:[a-z_]+\{.*?\}"""), "")
             .replace(Regex("""[#*`_~]"""), "")
             .replace(Regex("""https?://\S+"""), "link")

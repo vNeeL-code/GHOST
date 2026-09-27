@@ -26,6 +26,9 @@ object SessionMemoryCompactor {
         messagesToCompact.forEach { msg ->
             val clean = msg.content
                 .replace(Regex("""--- (?:Perceptual Grounding|Autonomous Event)[\s\S]*?---"""), "")
+                .replace(Regex("""^[\s\S]*?\[/(?:Context|Live Sensory Grounding|Sensory Grounding|Telemetry|Perception)\]\s*""", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("""\[(?:Context|Live Sensory Grounding|Sensory Grounding|Telemetry|Perception):?[\s\S]*?\[/(?:Context|Live Sensory Grounding|Sensory Grounding|Telemetry|Perception)\]\s*""", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("""\[/?(?:Context|Live Sensory Grounding|Sensory Grounding|Telemetry|Perception)(?::[^\]]*)?\]\s*""", RegexOption.IGNORE_CASE), "")
                 .replace(Regex("""\[SYSTEM TELEMETRY.*?\][\s\S]*?\[/SYSTEM TELEMETRY\]"""), "")
                 .replace(Regex("""\[ON-DEVICE SENSORS.*?\][\s\S]*?\[END SENSORS\]"""), "")
                 .replace(Regex("""\[SYSTEM EVENT.*?\][\s\S]*?\[END SENSORS\]"""), "")
