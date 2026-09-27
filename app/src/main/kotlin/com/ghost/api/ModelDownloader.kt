@@ -2,31 +2,32 @@ package com.ghost.api
 
 import android.app.DownloadManager
 import android.content.Context
-import android.net.Uri
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.*
-import kotlinx.coroutines.delay
 import timber.log.Timber
 import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
 
 /**
- * Automates downloading of Gemma .litertlm models from HuggingFace.
- * Replaces manual drag-and-drop workflow.
+ * Automates downloading of Gemma .litertlm models from HuggingFace using in-app coroutines.
+ * Completely eliminates Android's system DownloadManager to prevent external truncation or deletion.
+ *
+ * Downloads stream to an isolated `.tmp` file and only atomically rename upon 100% completion & validation.
  */
 class ModelDownloader(
     private val context: Context,
     private val scope: CoroutineScope
 ) {
-
-    private val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-    
     // UI can observe this state for progress bars
     private val _downloadStatus = MutableStateFlow<DownloadState>(DownloadState.Idle)
     val downloadStatus: StateFlow<DownloadState> = _downloadStatus.asStateFlow()
 
-    private var activeDownloadId: Long = -1L
+    private var downloadJob: Job? = null
 
     sealed class DownloadState {
         object Idle : DownloadState()
@@ -35,20 +36,50 @@ class ModelDownloader(
         data class Error(val message: String) : DownloadState()
     }
 
+    init {
+        // Clean up any stale legacy DownloadManager tasks from previous app versions
+        // so system DownloadProvider never touches our directories.
+        purgeLegacyDownloadManagerTasks()
+    }
+
+    private fun purgeLegacyDownloadManagerTasks() {
+        try {
+            val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager ?: return
+            val query = DownloadManager.Query()
+            val cursor = dm.query(query)
+            if (cursor != null) {
+                while (cursor.moveToNext()) {
+                    val idCol = cursor.getColumnIndex(DownloadManager.COLUMN_ID)
+                    val titleCol = cursor.getColumnIndex(DownloadManager.COLUMN_TITLE)
+                    if (idCol != -1 && titleCol != -1) {
+                        val id = cursor.getLong(idCol)
+                        val title = cursor.getString(titleCol) ?: ""
+                        if (title.contains("GHOST", ignoreCase = true) || title.contains("gemma", ignoreCase = true)) {
+                            dm.remove(id)
+                            Timber.i("🧹 Purged legacy system DownloadManager task #$id ($title)")
+                        }
+                    }
+                }
+                cursor.close()
+            }
+        } catch (e: Exception) {
+            Timber.d("Legacy DownloadManager purge ignored: ${e.message}")
+        }
+    }
+
     /**
-     * Start downloading a model from a HuggingFace repository.
+     * Start downloading a model from a HuggingFace repository directly via coroutines.
+     * Writes to a `.tmp` file to guarantee that live or existing weights are NEVER overwritten or truncated.
      */
     fun startDownload(hfRepo: String, fileName: String, hfToken: String? = null) {
-        // 1. Check internal state first
-        if (activeDownloadId != -1L) {
+        if (downloadJob?.isActive == true) {
             _downloadStatus.value = DownloadState.Error("A download is already in progress.")
             return
         }
 
-        val url = "https://huggingface.co/$hfRepo/resolve/main/$fileName?download=true"
-        
-        // 0. Check cached model path from SharedPreferences first
         val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+
+        // 0. Check cached model path from SharedPreferences first
         val cachedPath = prefs.getString(Constants.PREF_LAST_KNOWN_MODEL_PATH, null)
         if (!cachedPath.isNullOrBlank()) {
             val cachedFile = File(cachedPath)
@@ -76,8 +107,7 @@ class ModelDownloader(
             android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
         ).distinct()
 
-        // 1A. DESTINATION OVERWRITE GUARD: Under no circumstances allow DownloadManager to enqueue
-        // over an existing valid model file (>200MB), which would truncate it to 0 bytes!
+        // 1A. DESTINATION RETENTION GUARD: Under no circumstances download over an existing valid model file (>200MB)
         val destFile = File(modelsDir, fileName)
         val existingInDest = if (destFile.exists() && destFile.length() > 200 * 1024 * 1024L) {
             destFile
@@ -87,7 +117,7 @@ class ModelDownloader(
             }?.firstOrNull()
         }
         if (existingInDest != null) {
-            Timber.i("🛡️ OVERWRITE GUARD: Valid model already exists at ${existingInDest.absolutePath} (${existingInDest.length()} bytes). Halting download and adopting.")
+            Timber.i("🛡️ OVERWRITE GUARD: Valid model already exists at ${existingInDest.absolutePath} (${existingInDest.length()} bytes). Adopting.")
             prefs.edit().putString(Constants.PREF_LAST_KNOWN_MODEL_PATH, existingInDest.absolutePath).apply()
             _downloadStatus.value = DownloadState.Success(existingInDest)
             return
@@ -122,128 +152,140 @@ class ModelDownloader(
             return
         }
 
-        // 3. Check DownloadManager for existing downloads of the same file
-        val existingId = findExistingDownloadId(fileName)
-        if (existingId != -1L) {
-            Timber.i("Found existing download for $fileName (ID: $existingId). Attaching...")
-            activeDownloadId = existingId
-            observeProgress(fileName)
-            return
-        }
+        // 3. Initiate in-app coroutine download writing to .tmp
+        val tmpFile = File(modelsDir, "$fileName.tmp")
+        val initialUrl = "https://huggingface.co/$hfRepo/resolve/main/$fileName?download=true"
 
-        try {
-            // Save to app-specific protected dir (Android/data/com.ghost.api/files/models/)
-            // Survives all app updates and APK patches without being wiped.
-            // Protected from accidental user Downloads purges and requires zero storage permissions.
-            Timber.i("Starting model download → models/$fileName")
-            val uri = Uri.parse(url)
-            val request = DownloadManager.Request(uri).apply {
-                setTitle("GHOST Model: $fileName")
-                setDescription("Downloading $fileName to protected storage")
-                setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                setDestinationInExternalFilesDir(context, "models", fileName)
-                setAllowedOverMetered(true)
-                setAllowedOverRoaming(false)
+        Timber.i("Starting direct streaming download for $fileName -> ${tmpFile.name}")
+        _downloadStatus.value = DownloadState.Downloading(0, 0L, 0L)
 
-                if (!hfToken.isNullOrBlank()) {
-                    addRequestHeader("Authorization", "Bearer $hfToken")
-                }
-            }
+        downloadJob = scope.launch(Dispatchers.IO) {
+            var connection: HttpURLConnection? = null
+            try {
+                var currentUrl = initialUrl
+                var redirectCount = 0
 
-            activeDownloadId = downloadManager.enqueue(request)
-            _downloadStatus.value = DownloadState.Downloading(0, 0L, 0L)
-            
-            observeProgress(fileName)
-        } catch (e: Exception) {
-            Timber.e(e, "Download setup failed")
-            _downloadStatus.value = DownloadState.Error(e.message ?: "Failed to start download")
-        }
-    }
-
-    private fun findExistingDownloadId(fileName: String): Long {
-        val query = DownloadManager.Query().setFilterByStatus(
-            DownloadManager.STATUS_PENDING or 
-            DownloadManager.STATUS_RUNNING or 
-            DownloadManager.STATUS_PAUSED
-        )
-        val cursor = downloadManager.query(query)
-        if (cursor != null) {
-            while (cursor.moveToNext()) {
-                val titleColumn = cursor.getColumnIndex(DownloadManager.COLUMN_TITLE)
-                if (titleColumn != -1) {
-                    val title = cursor.getString(titleColumn)
-                    if (title != null && title.contains(fileName)) {
-                        val idColumn = cursor.getColumnIndex(DownloadManager.COLUMN_ID)
-                        val id = cursor.getLong(idColumn)
-                        cursor.close()
-                        return id
-                    }
-                }
-            }
-            cursor.close()
-        }
-        return -1L
-    }
-
-    private fun observeProgress(expectedFileName: String) {
-        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            var isDownloading = true
-            while (isDownloading && activeDownloadId != -1L) {
-                val query = DownloadManager.Query().setFilterById(activeDownloadId)
-                val cursor = downloadManager.query(query)
-                
-                if (cursor != null && cursor.moveToFirst()) {
-                    val statusColumn = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
-                    val downloadedBytesColumn = cursor.getColumnIndex(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
-                    val totalBytesColumn = cursor.getColumnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
-
-                    if (statusColumn != -1 && downloadedBytesColumn != -1 && totalBytesColumn != -1) {
-                        val status = cursor.getInt(statusColumn)
-                        val bytesDownloaded = cursor.getLong(downloadedBytesColumn)
-                        val bytesTotal = cursor.getLong(totalBytesColumn)
-
-                        when (status) {
-                            DownloadManager.STATUS_RUNNING -> {
-                                val progress = if (bytesTotal > 0) ((bytesDownloaded * 100) / bytesTotal).toInt() else 0
-                                _downloadStatus.value = DownloadState.Downloading(progress, bytesDownloaded, bytesTotal)
-                            }
-                            DownloadManager.STATUS_SUCCESSFUL -> {
-                                isDownloading = false
-                                activeDownloadId = -1L
-                                val destinationFile = File(
-                                    context.getExternalFilesDir("models") ?: File(context.getExternalFilesDir(null), "models"),
-                                    expectedFileName
-                                )
-                                _downloadStatus.value = DownloadState.Success(destinationFile)
-                            }
-                            DownloadManager.STATUS_FAILED -> {
-                                isDownloading = false
-                                activeDownloadId = -1L
-                                val reasonCol = cursor.getColumnIndex(DownloadManager.COLUMN_REASON)
-                                val reason = if (reasonCol != -1) cursor.getInt(reasonCol) else -1
-                                _downloadStatus.value = DownloadState.Error("Download failed with code: $reason")
-                            }
-                            DownloadManager.STATUS_PAUSED -> {
-                                _downloadStatus.value = DownloadState.Downloading(0, bytesDownloaded, bytesTotal)
-                            }
+                // Resolve redirects (HuggingFace -> CDN Cloudfront/S3)
+                while (redirectCount < 10) {
+                    val urlObj = URL(currentUrl)
+                    connection = (urlObj.openConnection() as HttpURLConnection).apply {
+                        connectTimeout = 30000
+                        readTimeout = 60000
+                        instanceFollowRedirects = false
+                        setRequestProperty("User-Agent", "GHOST-Android-Agent/1.0")
+                        if (!hfToken.isNullOrBlank() && currentUrl.contains("huggingface.co")) {
+                            setRequestProperty("Authorization", "Bearer $hfToken")
+                        }
+                        // Resume support if partial .tmp exists
+                        if (tmpFile.exists() && tmpFile.length() > 0) {
+                            setRequestProperty("Range", "bytes=${tmpFile.length()}-")
                         }
                     }
-                    cursor.close()
-                } else {
-                    cursor?.close()
-                    isDownloading = false
-                    activeDownloadId = -1L
-                    _downloadStatus.value = DownloadState.Error("Download cancelled or interrupted")
+                    connection.connect()
+
+                    val code = connection.responseCode
+                    if (code == HttpURLConnection.HTTP_MOVED_PERM ||
+                        code == HttpURLConnection.HTTP_MOVED_TEMP ||
+                        code == 307 || code == 308) {
+                        val location = connection.getHeaderField("Location")
+                        connection.disconnect()
+                        if (location.isNullOrBlank()) {
+                            throw IOException("Redirect received with empty Location header")
+                        }
+                        currentUrl = if (location.startsWith("http")) location else URL(urlObj, location).toString()
+                        redirectCount++
+                        continue
+                    }
+                    break
                 }
-                kotlinx.coroutines.delay(1000)
+
+                val conn = connection ?: throw IOException("Failed to establish HTTP connection")
+                val responseCode = conn.responseCode
+
+                val isPartial = (responseCode == HttpURLConnection.HTTP_PARTIAL)
+                if (responseCode != HttpURLConnection.HTTP_OK && !isPartial) {
+                    if (responseCode == 416) {
+                        // Range Not Satisfiable: partial file corrupt or complete, reset and restart
+                        tmpFile.delete()
+                        throw IOException("HTTP 416: Partial file corrupt, reset. Please retry download.")
+                    }
+                    throw IOException("HTTP error $responseCode: ${conn.responseMessage}")
+                }
+
+                val totalBytes = if (isPartial) {
+                    val rangeHeader = conn.getHeaderField("Content-Range")
+                    val totalFromRange = rangeHeader?.substringAfterLast('/')?.toLongOrNull()
+                    totalFromRange ?: (conn.contentLengthLong.takeIf { it > 0 }?.plus(tmpFile.length()) ?: 0L)
+                } else {
+                    conn.contentLengthLong.takeIf { it > 0 } ?: 0L
+                }
+
+                val input = conn.inputStream.buffered(128 * 1024)
+                val output = FileOutputStream(tmpFile, isPartial).buffered(128 * 1024)
+                var downloadedBytes = if (isPartial) tmpFile.length() else 0L
+                val buffer = ByteArray(64 * 1024)
+                var lastProgressUpdate = System.currentTimeMillis()
+
+                try {
+                    var bytesRead: Int
+                    while (input.read(buffer).also { bytesRead = it } != -1) {
+                        ensureActive()
+                        output.write(buffer, 0, bytesRead)
+                        downloadedBytes += bytesRead
+
+                        val now = System.currentTimeMillis()
+                        if (now - lastProgressUpdate >= 500) {
+                            lastProgressUpdate = now
+                            val pct = if (totalBytes > 0) ((downloadedBytes * 100) / totalBytes).toInt() else 0
+                            _downloadStatus.value = DownloadState.Downloading(pct, downloadedBytes, totalBytes)
+                        }
+                    }
+                    output.flush()
+                } finally {
+                    try { output.close() } catch (_: Exception) {}
+                    try { input.close() } catch (_: Exception) {}
+                    try { conn.disconnect() } catch (_: Exception) {}
+                }
+
+                // Verify downloaded file integrity
+                if (tmpFile.length() < 200 * 1024 * 1024L) {
+                    throw IOException("Downloaded model weights corrupted or too small (${tmpFile.length()} bytes)")
+                }
+                if (totalBytes > 0 && downloadedBytes < totalBytes) {
+                    throw IOException("Download incomplete ($downloadedBytes / $totalBytes bytes)")
+                }
+
+                // Atomic swap to final file
+                if (destFile.exists()) {
+                    destFile.delete()
+                }
+                val renamed = tmpFile.renameTo(destFile)
+                val finalFile = if (renamed) destFile else {
+                    tmpFile.copyTo(destFile, overwrite = true)
+                    tmpFile.delete()
+                    destFile
+                }
+
+                prefs.edit().putString(Constants.PREF_LAST_KNOWN_MODEL_PATH, finalFile.absolutePath).apply()
+                Timber.i("🎉 Model download completed successfully: ${finalFile.absolutePath} (${finalFile.length()} bytes)")
+                _downloadStatus.value = DownloadState.Success(finalFile)
+
+            } catch (ce: CancellationException) {
+                Timber.w("Model download cancelled by user")
+                _downloadStatus.value = DownloadState.Error("Download manually cancelled")
+            } catch (e: Exception) {
+                Timber.e(e, "Model download failed")
+                _downloadStatus.value = DownloadState.Error(e.message ?: "Download failed")
+            } finally {
+                connection?.disconnect()
             }
         }
     }
 
     fun cancelDownload() {
-        if (activeDownloadId != -1L) {
-            downloadManager.remove(activeDownloadId)
-            activeDownloadId = -1L
+        if (downloadJob?.isActive == true) {
+            downloadJob?.cancel()
+            downloadJob = null
             _downloadStatus.value = DownloadState.Error("Download manually cancelled")
         }
     }

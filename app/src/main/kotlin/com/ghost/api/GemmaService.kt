@@ -640,11 +640,11 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             isInferencing = false
             currentInFlightQuery = null
             updateNotification("Loading Gemma $modelCore...")
-            initialize(allowDownload = true)
+            initialize(allowDownload = false)
             val ready = isGemmaLoaded() && ::ghostAgent.isInitialized && ghostAgent.isReady
             _isSystemReady.value = ready
             withContext(Dispatchers.Main) {
-                val msg = if (ready) "Active model core: $modelCore 🧠" else "Failed to load $modelCore ⚠️"
+                val msg = if (ready) "Active model core: $modelCore 🧠" else "Model $modelCore weights not found on device ⚠️"
                 android.widget.Toast.makeText(this@GemmaService, msg, android.widget.Toast.LENGTH_SHORT).show()
             }
         }

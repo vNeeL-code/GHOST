@@ -208,6 +208,10 @@ class FileToolSet(private val context: Context) : ToolSet {
                 return mapOf("result" to "error", "message" to "Source file does not exist: $sourcePath")
             }
 
+            if (isProtectedModelFile(src)) {
+                return mapOf("result" to "error", "message" to "Permission denied: Cannot move protected AI model weights.")
+            }
+
             var dest = File(destinationPath.trim())
             if (dest.isDirectory) {
                 dest = File(dest, src.name)
@@ -267,6 +271,9 @@ class FileToolSet(private val context: Context) : ToolSet {
             if (file.isDirectory) {
                 return mapOf("result" to "error", "message" to "Cannot delete directories with delete_file")
             }
+            if (isProtectedModelFile(file)) {
+                return mapOf("result" to "error", "message" to "Permission denied: Cannot delete protected AI model weights.")
+            }
 
             val fileName = file.name
             val deleted = file.delete()
@@ -279,6 +286,16 @@ class FileToolSet(private val context: Context) : ToolSet {
             Timber.e(e, "delete_file failed")
             mapOf("result" to "error", "message" to "Failed to delete file: ${e.message}")
         }
+    }
+
+    private fun isProtectedModelFile(file: File): Boolean {
+        val name = file.name.lowercase()
+        val path = file.absolutePath.lowercase()
+        return name.endsWith(".litertlm") ||
+               name.endsWith(".gguf") ||
+               name.endsWith(".nexa") ||
+               path.contains("/models/") ||
+               path.contains("\\models\\")
     }
 
     @Tool(description = "Gets detailed metadata for a file (size, modified date, MIME type, existence)")

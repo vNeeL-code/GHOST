@@ -112,6 +112,10 @@ class GhostAgent(
     private val imageQueue = ConcurrentLinkedQueue<QueuedImage>()
     private val audioQueue = ConcurrentLinkedQueue<ByteArray>()
 
+    @Volatile private var lastExecutedToolName: String? = null
+    @Volatile private var lastExecutedToolResult: String? = null
+    @Volatile private var toolExecutedInCurrentTurn = false
+
     init {
         // Wire tool lifecycle hooks
         mcpTool.onToolExecuting = { toolName, params ->
@@ -120,6 +124,9 @@ class GhostAgent(
         }
         mcpTool.onToolExecuted = { toolName, params, result ->
             callbacks?.onThoughtUpdated("Completed: $toolName")
+            lastExecutedToolName = toolName
+            lastExecutedToolResult = result
+            toolExecutedInCurrentTurn = true
         }
     }
 
@@ -243,6 +250,10 @@ class GhostAgent(
 
         // Interrupt any ongoing speech when operator sends a new turn
         callbacks?.stopSpeaking()
+
+        lastExecutedToolName = null
+        lastExecutedToolResult = null
+        toolExecutedInCurrentTurn = false
 
         val currentTurn = turnCount.incrementAndGet()
         turnsSinceKvFlush++
@@ -420,21 +431,6 @@ class GhostAgent(
                 }
             )
 
-            if (streamError != null && responseBuffer.isEmpty()) {
-                val errorMsg = "I stumbled while executing that: $streamError"
-                callbacks?.showResponse(errorMsg)
-                if (!isDream) {
-                    _conversationHistory.add(AgentMessage(role = "assistant", content = errorMsg))
-                    callbacks?.onMessageAdded(errorMsg, isUser = false, isComplete = true)
-                }
-                if (streamError!!.contains("token", ignoreCase = true) || streamError!!.contains("Status Code: 3", ignoreCase = true)) {
-                    agentScope.launch {
-                        try { softReset() } catch (_: Exception) {}
-                    }
-                }
-                return errorMsg
-            }
-
             var rawResponse = responseBuffer.toString().trim()
 
             // 5. Fallback un-executed tool call check (ANTLR recovery)
@@ -445,16 +441,103 @@ class GhostAgent(
                 }
             }
 
-            // Clean callsign prefix if model emitted it
+            // Clean callsign prefix and echoed prompt header if model emitted it
             val assistantCallSign = getAssistantCallSign()
-            val cleanResponse = rawResponse
+            var cleanResponse = rawResponse
+                .replace(Regex("""^(?:\[.*?\]|[\w\s:·-]*?\]:?)\s*"""), "") // Strips echoed timestamp/prefix e.g. "pm]:", "[9:31 pm]:", "]:"
+                .replace(Regex("""^Δ\s*.*?\s*∇\s*"""), "")
                 .replace(Regex("""^✧\s*.*?:?\s*"""), "")
                 .replace(Regex("""^$assistantCallSign:\s*"""), "")
                 .replace(Regex("""<\|channel>thought.*?<channel\|>""", RegexOption.DOT_MATCHES_ALL), "")
                 .trim()
 
+            // 5B. Tool Continuation Pass:
+            // When LiteRT-LM executes a tool in sendMessageAsync, C++ appends tool results to context
+            // but does not resume token streaming. If a tool was executed and the model emitted only a stub (<25 chars),
+            // run a continuation pass or adopt the tool result!
+            if (toolExecutedInCurrentTurn && (cleanResponse.length < 25 || cleanResponse == "I'")) {
+                Timber.i("GhostAgent: Tool was executed ($lastExecutedToolName). Running continuation decode pass...")
+                val continuationBuffer = StringBuilder()
+                try {
+                    llmEngine.streamResponse(
+                        prompt = "Synthesize the findings from the tool result above.",
+                        images = emptyList(),
+                        audioData = null,
+                        onToken = { contToken ->
+                            val cleanCont = contToken
+                                .replace("<|\"|>", "")
+                                .replace(Regex("<\\|[a-z_]+\\|?>"), "")
+                                .replace(Regex("<[a-z_]+\\|>"), "")
+                            if (cleanCont.isNotEmpty()) {
+                                continuationBuffer.append(cleanCont)
+                                callbacks?.onMessageAdded(
+                                    wrapResponse(continuationBuffer.toString()),
+                                    isUser = false,
+                                    isComplete = false
+                                )
+                            }
+                        },
+                        onComplete = {
+                            Timber.i("GhostAgent: Tool continuation decode completed (${continuationBuffer.length} chars)")
+                        },
+                        onError = { err ->
+                            Timber.w("GhostAgent: Continuation decode error: $err")
+                        }
+                    )
+                } catch (e: Exception) {
+                    Timber.w(e, "Continuation decode exception")
+                }
+
+                val contResult = continuationBuffer.toString().trim()
+                if (contResult.isNotBlank() && contResult.length >= 10) {
+                    rawResponse = contResult
+                } else if (!lastExecutedToolResult.isNullOrBlank()) {
+                    rawResponse = lastExecutedToolResult!!
+                }
+
+                cleanResponse = rawResponse
+                    .replace(Regex("""^(?:\[.*?\]|[\w\s:·-]*?\]:?)\s*"""), "")
+                    .replace(Regex("""^Δ\s*.*?\s*∇\s*"""), "")
+                    .replace(Regex("""^✧\s*.*?:?\s*"""), "")
+                    .replace(Regex("""^$assistantCallSign:\s*"""), "")
+                    .replace(Regex("""<\|channel>thought.*?<channel\|>""", RegexOption.DOT_MATCHES_ALL), "")
+                    .trim()
+            }
+
+            val isStub = cleanResponse.length < 5 || cleanResponse == "I'" || cleanResponse.endsWith("]:")
+            if (streamError != null || (isStub && !toolExecutedInCurrentTurn)) {
+                Timber.w("GhostAgent: Stream error or stub detected (error=$streamError, stub=$isStub, response='$cleanResponse')")
+                if (streamError?.contains("token", ignoreCase = true) == true ||
+                    streamError?.contains("Status Code: 3", ignoreCase = true) == true ||
+                    isStub) {
+                    agentScope.launch {
+                        try {
+                            compactMemory(force = true)
+                        } catch (e: Exception) {
+                            Timber.w(e, "Soft reset after stream failure")
+                        }
+                    }
+                }
+
+                if (toolExecutedInCurrentTurn && !lastExecutedToolResult.isNullOrBlank()) {
+                    cleanResponse = lastExecutedToolResult!!
+                } else {
+                    val errorMsg = if (streamError != null) {
+                        "Processing interrupted. Substrate reset completed."
+                    } else {
+                        "Processing cycle completed. What would you like to check?"
+                    }
+                    callbacks?.showResponse(errorMsg)
+                    if (!isDream) {
+                        _conversationHistory.add(AgentMessage(role = "assistant", content = errorMsg))
+                        callbacks?.onMessageAdded(errorMsg, isUser = false, isComplete = true)
+                    }
+                    return errorMsg
+                }
+            }
+
             val finalOutput = if (cleanResponse.isBlank()) {
-                "I'm here. How can I help?"
+                "Processing complete."
             } else cleanResponse
 
             // 6. Check for webview side-effects
