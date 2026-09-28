@@ -164,9 +164,7 @@ class GhostAgent(
             restoreCheckpoint()
 
             val initialPrompt = buildSystemPrompt()
-            val recentMessages = getSanitizedRecentMessages(2)
-
-            llmEngine.softReset(initialPrompt, listOf(mcpTool), recentMessages)
+            llmEngine.softReset(initialPrompt, listOf(mcpTool))
             isReady = true
             Timber.i("GhostAgent: Ready (Battery: ${getBatteryLevel()}%)")
         } catch (e: Exception) {
@@ -186,9 +184,8 @@ class GhostAgent(
         inferenceMutex.withLock {
             turnsSinceKvFlush = 0
             val prompt = buildSystemPrompt()
-            val recentMessages = getSanitizedRecentMessages(2)
-            llmEngine.softReset(prompt, listOf(mcpTool), recentMessages)
-            Timber.i("GhostAgent: Soft reset complete with ${recentMessages.size} history msgs preserved")
+            llmEngine.softReset(prompt, listOf(mcpTool))
+            Timber.i("GhostAgent: Soft reset complete")
         }
     }
 
@@ -504,23 +501,60 @@ class GhostAgent(
 
             val isStub = cleanResponse.length < 5 || cleanResponse == "I'" || cleanResponse.endsWith("]:")
             if (streamError != null || (isStub && !toolExecutedInCurrentTurn)) {
-                Timber.w("GhostAgent: Stream error or stub detected (error=$streamError, stub=$isStub, response='$cleanResponse')")
-                if (streamError?.contains("token", ignoreCase = true) == true ||
-                    streamError?.contains("Status Code: 3", ignoreCase = true) == true ||
-                    isStub) {
-                    agentScope.launch {
-                        try {
-                            compactMemory(force = true)
-                        } catch (e: Exception) {
-                            Timber.w(e, "Soft reset after stream failure")
-                        }
-                    }
+                Timber.w("GhostAgent: Stream error or stub detected (error=$streamError, stub=$isStub, response='$cleanResponse'). Attempting single-shot auto-recovery retry...")
+
+                // 1. Force a clean conversation reset immediately
+                try {
+                    compactMemory(force = true)
+                } catch (e: Exception) {
+                    Timber.w(e, "Soft reset during recovery retry failed")
                 }
 
-                if (toolExecutedInCurrentTurn && !lastExecutedToolResult.isNullOrBlank()) {
+                // 2. Retry the inference once on the fresh clean conversation
+                val retryBuffer = StringBuilder()
+                var retryError: String? = null
+                try {
+                    llmEngine.streamResponse(
+                        prompt = boundedPrompt,
+                        images = images,
+                        audioData = audio,
+                        onToken = { contToken ->
+                            val cleanCont = contToken
+                                .replace("<|\"|>", "")
+                                .replace(Regex("<\\|[a-z_]+\\|?>"), "")
+                                .replace(Regex("<[a-z_]+\\|>"), "")
+                            if (cleanCont.isNotEmpty()) {
+                                retryBuffer.append(cleanCont)
+                                callbacks?.onMessageAdded(
+                                    wrapResponse(retryBuffer.toString()),
+                                    isUser = false,
+                                    isComplete = false
+                                )
+                            }
+                        },
+                        onComplete = {
+                            Timber.i("GhostAgent: Auto-recovery retry decode completed (${retryBuffer.length} chars)")
+                        },
+                        onError = { err ->
+                            retryError = err
+                            Timber.w("GhostAgent: Auto-recovery retry error: $err")
+                        }
+                    )
+                } catch (e: Exception) {
+                    retryError = e.message
+                    Timber.w(e, "Auto-recovery retry exception")
+                }
+
+                val retryClean = sanitizeAgentOutput(retryBuffer.toString())
+                val retryStub = retryClean.length < 5 || retryClean == "I'" || retryClean.endsWith("]:")
+
+                if (retryError == null && !retryStub) {
+                    Timber.i("✅ GhostAgent: Auto-recovery retry SUCCEEDED! User prompt preserved.")
+                    cleanResponse = retryClean
+                } else if (toolExecutedInCurrentTurn && !lastExecutedToolResult.isNullOrBlank()) {
                     cleanResponse = lastExecutedToolResult!!
                 } else {
-                    val errorMsg = if (streamError != null) {
+                    val errorMsg = if (retryError != null || streamError != null) {
                         "Processing interrupted. Substrate reset completed."
                     } else {
                         "Processing cycle completed. What would you like to check?"
@@ -670,12 +704,11 @@ class GhostAgent(
         val estTokens = (historyChars / 3) + visionTokens
 
         val maxTokens = llmEngine.maxNumTokens
-        val tokenThreshold = if (maxTokens > 3000) 2200 else 1400
-        val turnThreshold = if (maxTokens > 3000) 10 else 6
-        val kvFlushTurnThreshold = turnThreshold / 2
+        val tokenThreshold = if (maxTokens > 6000) 5000 else if (maxTokens > 3000) 2800 else 1400
+        val turnThreshold = if (maxTokens > 6000) 24 else if (maxTokens > 3000) 16 else 8
 
-        if (count >= turnThreshold || turnsSinceKvFlush >= kvFlushTurnThreshold || estTokens > tokenThreshold) {
-            Timber.i("GhostAgent: Triggering compaction (count=$count/$turnThreshold, turnsSinceFlush=$turnsSinceKvFlush/$kvFlushTurnThreshold, estTokens=$estTokens/$tokenThreshold)")
+        if (count >= turnThreshold || turnsSinceKvFlush >= turnThreshold || estTokens > tokenThreshold) {
+            Timber.i("GhostAgent: Triggering compaction (count=$count/$turnThreshold, turnsSinceFlush=$turnsSinceKvFlush/$turnThreshold, estTokens=$estTokens/$tokenThreshold)")
             compactMemory(force = true)
         }
     }
@@ -707,8 +740,7 @@ class GhostAgent(
             if (toCompact.isNotEmpty() || force) {
                 turnsSinceKvFlush = 0
                 val newPrompt = buildSystemPrompt()
-                val recentMessages = getSanitizedRecentMessages(2)
-                llmEngine.softReset(newPrompt, listOf(mcpTool), recentMessages)
+                llmEngine.softReset(newPrompt, listOf(mcpTool))
                 Timber.i("GhostAgent: KV cache flushed & compacted (${toCompact.size} msgs into memory). Active history: ${_conversationHistory.size}")
             }
         } catch (e: Exception) {
@@ -727,10 +759,36 @@ class GhostAgent(
     }
 
     private suspend fun buildSystemPrompt(): String {
+        val recentDialogue = synchronized(_conversationHistory) {
+            val completedMessages = _conversationHistory.filterIndexed { index, msg ->
+                !(index == _conversationHistory.lastIndex && msg.role == "user")
+            }
+            if (completedMessages.isEmpty()) ""
+            else {
+                val assistantCallSign = getAssistantCallSign()
+                val lines = completedMessages.takeLast(4).mapNotNull { msg ->
+                    val clean = if (msg.role == "assistant") sanitizeAgentOutput(msg.content) else msg.content.trim()
+                    if (clean.isBlank()) return@mapNotNull null
+                    val roleLabel = if (msg.role == "user") "Operator" else assistantCallSign
+                    val contentWithoutPrefix = clean
+                        .removePrefix("Δ 👾 ∇ GHOST:")
+                        .replace(Regex("""^Δ\s*.*?\s*∇(\s*\[.*?\])?:\s*"""), "")
+                        .replace(Regex("""^✧\s*.*?:"""), "")
+                        .trim()
+                    val singleLine = contentWithoutPrefix.replace(Regex("""\s+"""), " ")
+                    val snippet = if (singleLine.length > 200) singleLine.take(197) + "..." else singleLine
+                    "• $roleLabel: $snippet"
+                }
+                if (lines.isNotEmpty()) {
+                    "\n\n## Recent Conversation Context\n" + lines.joinToString("\n")
+                } else ""
+            }
+        }
+
         val basePrompt = contextManager.buildSystemPrompt(context, rollingMemory.ifBlank { null }, skillManager)
         val oldMemory = memoryManager.getCompactedSessionMemory().take(600).trim()
         val longTermMemoryPatch = if (oldMemory.isNotBlank()) "## Long-Term Memory\n$oldMemory\n\n" else ""
-        return longTermMemoryPatch + basePrompt
+        return longTermMemoryPatch + basePrompt + recentDialogue
     }
 
     private suspend fun tryExecuteFallbackTool(rawResponse: String): String? {

@@ -353,18 +353,18 @@ class GemmaEngine(private val context: Context) : LlmBackend {
             
             // Wait for completion outside the mutex - using await() with graceful recovery
             try {
-                kotlinx.coroutines.withTimeout(90000) {
+                kotlinx.coroutines.withTimeout(45000) {
                     deferred.await()
                 }
             } catch (te: kotlinx.coroutines.TimeoutCancellationException) {
-                Timber.w("GemmaEngine: Inference timed out after 90s, recovering conversation state...")
+                Timber.w("GemmaEngine: Inference timed out after 45s, recovering conversation state...")
                 try {
                     activeConv.close()
                 } catch (e: Exception) {
                     Timber.w(e, "Failed to close conversation after timeout")
                 }
                 conversation = null
-                onError("Inference timed out after 90s.")
+                onError("Inference timed out after 45s.")
             }
         } finally {
             isBusy.set(false)
@@ -374,7 +374,6 @@ class GemmaEngine(private val context: Context) : LlmBackend {
 
 
 
-    @OptIn(ExperimentalApi::class)
     override suspend fun softReset(systemPrompt: String, newToolSets: List<ToolSet>?, initialMessages: List<com.google.ai.edge.litertlm.Message>?) {
         lastSystemPrompt = systemPrompt
         if (newToolSets != null) {
@@ -386,33 +385,15 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                 conversation?.close()
                 conversation = null
 
-                var newConv: Conversation? = null
-                if (!initialMessages.isNullOrEmpty()) {
-                    try {
-                        val config = ConversationConfig(
-                            samplerConfig = samplerConfig,
-                            systemInstruction = if (systemPrompt.isNotBlank()) Contents.of(systemPrompt) else null,
-                            tools = toolSets.map { tool(it) },
-                            initialMessages = initialMessages
-                        )
-                        newConv = eng.createConversation(config)
-                        Timber.i("Soft reset with ${initialMessages.size} initial messages succeeded.")
-                    } catch (e: Exception) {
-                        Timber.w(e, "Soft reset with initial messages failed; falling back to clean conversation.")
-                    }
-                }
-
-                if (newConv == null) {
-                    val fallbackConfig = ConversationConfig(
-                        samplerConfig = samplerConfig,
-                        systemInstruction = if (systemPrompt.isNotBlank()) Contents.of(systemPrompt) else null,
-                        tools = toolSets.map { tool(it) }
-                    )
-                    newConv = eng.createConversation(fallbackConfig)
-                    Timber.i("Clean conversation soft reset succeeded.")
-                }
-
-                conversation = newConv
+                // Always create a clean conversation config with systemInstruction and tools.
+                // Avoid experimental initialMessages which causes C++ turn-state corruption when combined with tools.
+                val config = ConversationConfig(
+                    samplerConfig = samplerConfig,
+                    systemInstruction = if (systemPrompt.isNotBlank()) Contents.of(systemPrompt) else null,
+                    tools = toolSets.map { tool(it) }
+                )
+                conversation = eng.createConversation(config)
+                Timber.i("Clean conversation soft reset succeeded.")
             } catch (e: Exception) {
                 Timber.e(e, "Soft reset completely failed")
             }
