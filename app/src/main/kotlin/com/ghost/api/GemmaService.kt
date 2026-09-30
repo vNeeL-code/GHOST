@@ -371,11 +371,18 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             Timber.e("Detected crash during last init! Crash count: $newCount")
         }
 
-        // Hardware-tiered default model selection on first run
-        if (!prefs.contains(Constants.PREF_SELECTED_MODEL)) {
-            val defaultModel = Constants.resolveHardwareModelTier(this)
-            prefs.edit().putString(Constants.PREF_SELECTED_MODEL, defaultModel).apply()
-            Timber.i("🎯 First run: Hardware tier resolved default model to $defaultModel")
+        // Hardware-tiered default model selection on first run & RAM-constraint clamping
+        val hardwareTier = Constants.resolveHardwareModelTier(this)
+        val currentModel = prefs.getString(Constants.PREF_SELECTED_MODEL, null)
+        if (hardwareTier == "E2B" && currentModel != "E2B") {
+            Timber.w("🛡️ Hardware constraint: Device RAM requires E2B tier. Enforcing E2B (was $currentModel)")
+            prefs.edit()
+                .putString(Constants.PREF_SELECTED_MODEL, "E2B")
+                .remove(Constants.PREF_LAST_KNOWN_MODEL_PATH)
+                .apply()
+        } else if (currentModel == null) {
+            prefs.edit().putString(Constants.PREF_SELECTED_MODEL, hardwareTier).apply()
+            Timber.i("🎯 First run: Hardware tier resolved default model to $hardwareTier")
         }
 
 
@@ -636,9 +643,17 @@ class GemmaService : Service(), AgentPlatformCallbacks {
      * Hot-swaps the active model core (E4B or E2B) live.
      */
     fun reloadWithModel(modelCore: String) {
+        val hardwareTier = Constants.resolveHardwareModelTier(this)
+        val targetCore = if (hardwareTier == "E2B" && !modelCore.equals("E2B", ignoreCase = true)) {
+            Timber.w("🛡️ Hardware constraint: Denying switch to $modelCore on E2B tier.")
+            "E2B"
+        } else {
+            modelCore
+        }
         val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
         prefs.edit()
-            .putString(Constants.PREF_SELECTED_MODEL, modelCore)
+            .putString(Constants.PREF_SELECTED_MODEL, targetCore)
+            .remove(Constants.PREF_LAST_KNOWN_MODEL_PATH)
             .putBoolean("force_cpu", false)
             .putBoolean("is_initializing", false)
             .putInt("init_crash_count", 0)
@@ -648,12 +663,12 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             cancelThinking()
             isInferencing = false
             currentInFlightQuery = null
-            updateNotification("Loading Gemma $modelCore...")
+            updateNotification("Loading Gemma $targetCore...")
             initialize(allowDownload = true)
             val ready = isGemmaLoaded() && ::ghostAgent.isInitialized && ghostAgent.isReady
             _isSystemReady.value = ready
             withContext(Dispatchers.Main) {
-                val msg = if (ready) "Active model core: $modelCore 🧠" else if (modelDownloader.downloadStatus.value is ModelDownloader.DownloadState.Downloading) "Downloading $modelCore weights... 📥" else "Model $modelCore weights offline ⚠️"
+                val msg = if (ready) "Active model core: $targetCore 🧠" else if (modelDownloader.downloadStatus.value is ModelDownloader.DownloadState.Downloading) "Downloading $targetCore weights... 📥" else "Model $targetCore weights offline ⚠️"
                 android.widget.Toast.makeText(this@GemmaService, msg, android.widget.Toast.LENGTH_SHORT).show()
             }
         }
@@ -668,10 +683,17 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 Timber.w("Model download already in progress")
                 return@launch
             }
+            val hardwareTier = Constants.resolveHardwareModelTier(this@GemmaService)
             val prefs = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-            val targetCore = modelCore ?: prefs.getString(Constants.PREF_SELECTED_MODEL, "E4B") ?: "E4B"
-            prefs.edit().putString(Constants.PREF_SELECTED_MODEL, targetCore).apply()
-            Timber.i("Manual model download initiated by user for: $targetCore")
+            var targetCore = modelCore ?: prefs.getString(Constants.PREF_SELECTED_MODEL, hardwareTier) ?: hardwareTier
+            if (hardwareTier == "E2B") {
+                targetCore = "E2B"
+            }
+            prefs.edit()
+                .putString(Constants.PREF_SELECTED_MODEL, targetCore)
+                .remove(Constants.PREF_LAST_KNOWN_MODEL_PATH)
+                .apply()
+            Timber.i("Manual model download initiated for: $targetCore (Hardware Tier: $hardwareTier)")
             initialize(allowDownload = true)
         }
     }
@@ -769,8 +791,16 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         // WATCHDOG: Detect previous crash
         // NOTE: Counter is already incremented in onCreate(). Do NOT double-increment here.
         val crashCount = prefs.getInt("init_crash_count", 0)
-        val defaultModel = Constants.resolveHardwareModelTier(this)
-        val selectedModel = prefs.getString(Constants.PREF_SELECTED_MODEL, defaultModel) ?: defaultModel
+        val hardwareTier = Constants.resolveHardwareModelTier(this)
+        var selectedModel = prefs.getString(Constants.PREF_SELECTED_MODEL, hardwareTier) ?: hardwareTier
+        if (hardwareTier == "E2B" && !selectedModel.equals("E2B", ignoreCase = true)) {
+            Timber.w("🛡️ Hardware constraint: Enforcing E2B model tier in initialize()")
+            selectedModel = "E2B"
+            prefs.edit()
+                .putString(Constants.PREF_SELECTED_MODEL, "E2B")
+                .remove(Constants.PREF_LAST_KNOWN_MODEL_PATH)
+                .apply()
+        }
 
         val protectedModelsDir = getExternalFilesDir("models") 
             ?: getExternalFilesDir(null)?.let { File(it, "models") }
@@ -839,7 +869,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         try {
             updateNotification("Finding model...")
 
-            val activeModel = prefs.getString(Constants.PREF_SELECTED_MODEL, defaultModel) ?: defaultModel
+            val activeModel = selectedModel
             val targetVariant = activeModel.lowercase()
 
             // 0. Check cached model path from SharedPreferences first (fast-path bypasses directory listing)
@@ -847,17 +877,23 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             var candidateFile: File? = if (!cachedPath.isNullOrBlank()) {
                 val cached = File(cachedPath)
                 if (cached.exists() && cached.length() > 200 * 1024 * 1024L) {
-                    Timber.i("📦 Fast-path: Found cached model at ${cached.absolutePath} (${cached.length()} bytes)")
-                    cached
+                    if (hardwareTier == "E2B" && cached.name.contains("e4b", ignoreCase = true)) {
+                        Timber.w("⚠️ Ignoring cached E4B path on E2B hardware tier: ${cached.absolutePath}")
+                        null
+                    } else {
+                        Timber.i("📦 Fast-path: Found cached model at ${cached.absolutePath} (${cached.length()} bytes)")
+                        cached
+                    }
                 } else null
             } else null
 
             // 1. Check direct file candidates in search dirs before relying on directory listing (case-insensitive)
             if (candidateFile == null) {
-                val candidateNames = listOf(
-                    if (targetVariant.contains("e2b")) Constants.MODEL_NAME_E2B else Constants.MODEL_NAME_E4B,
-                    if (targetVariant.contains("e2b")) Constants.MODEL_NAME_E4B else Constants.MODEL_NAME_E2B
-                )
+                val candidateNames = if (hardwareTier == "E2B" || targetVariant.contains("e2b")) {
+                    listOf(Constants.MODEL_NAME_E2B)
+                } else {
+                    listOf(Constants.MODEL_NAME_E4B, Constants.MODEL_NAME_E2B)
+                }
                 for (name in candidateNames) {
                     for (dir in searchDirs) {
                         if (!dir.exists() || !dir.isDirectory) continue
@@ -885,10 +921,14 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 candidateFile = searchDirs.filter { it.exists() && it.isDirectory }.flatMap { dir ->
                     dir.listFiles { file ->
                         val name = file.name
-                        (name.endsWith(".litertlm", ignoreCase = true) ||
+                        val isCandidate = (name.endsWith(".litertlm", ignoreCase = true) ||
                          name.endsWith(".gguf", ignoreCase = true) ||
                          name.endsWith(".nexa", ignoreCase = true)) &&
                         file.length() > 200 * 1024 * 1024L // Must be > 200MB to avoid partial/corrupted downloads
+
+                        if (!isCandidate) false
+                        else if (hardwareTier == "E2B" && name.contains("e4b", ignoreCase = true)) false
+                        else true
                     }?.toList() ?: emptyList()
                 }.filter { file ->
                     file.name.contains(targetVariant, ignoreCase = true)
@@ -903,12 +943,16 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
             // FALLBACK SAFETY: If requested variant is missing on disk, adopt ANY valid local model before downloading
             if (candidateFile == null) {
-                val fallbackModel = ModelDownloader.findAnyLocalModel(this)
+                val fallbackModel = ModelDownloader.findAnyLocalModel(this, targetVariant = if (hardwareTier == "E2B") "E2B" else null)
                 if (fallbackModel != null) {
                     val detectedVariant = if (fallbackModel.name.contains("e4b", ignoreCase = true)) "E4B" else "E2B"
-                    Timber.w("Targeted model $activeModel not found on disk, but found existing ${fallbackModel.name}. Adopting $detectedVariant to prevent redundant download.")
-                    prefs.edit().putString(Constants.PREF_SELECTED_MODEL, detectedVariant).apply()
-                    candidateFile = fallbackModel
+                    if (hardwareTier == "E2B" && detectedVariant == "E4B") {
+                        Timber.w("🛡️ Hardware constraint: Ignoring existing E4B file ${fallbackModel.name} on E2B hardware tier.")
+                    } else {
+                        Timber.w("Targeted model $activeModel not found on disk, but found existing ${fallbackModel.name}. Adopting $detectedVariant to prevent redundant download.")
+                        prefs.edit().putString(Constants.PREF_SELECTED_MODEL, detectedVariant).apply()
+                        candidateFile = fallbackModel
+                    }
                 }
             }
 
@@ -917,10 +961,16 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             while (candidateFile == null && retryCount < 5) {
                 retryCount++
                 delay(retryCount * 500L)
-                candidateFile = ModelDownloader.findAnyLocalModel(this)
-                if (candidateFile != null) {
-                    Timber.i("📦 Storage Delay Guard recovered model on attempt $retryCount: ${candidateFile.name}")
-                    break
+                val fallback = ModelDownloader.findAnyLocalModel(this, targetVariant = if (hardwareTier == "E2B") "E2B" else null)
+                if (fallback != null) {
+                    val detectedVariant = if (fallback.name.contains("e4b", ignoreCase = true)) "E4B" else "E2B"
+                    if (hardwareTier == "E2B" && detectedVariant == "E4B") {
+                        // ignore E4B on E2B hardware
+                    } else {
+                        candidateFile = fallback
+                        Timber.i("📦 Storage Delay Guard recovered model on attempt $retryCount: ${candidateFile.name}")
+                        break
+                    }
                 }
             }
 

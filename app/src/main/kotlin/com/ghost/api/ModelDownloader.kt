@@ -144,15 +144,7 @@ class ModelDownloader(
             }
         }
 
-        // 2. Fallback check: If ANY valid model exists on disk (>200MB), adopt it instead of downloading
-        val anyModel = findAnyLocalModel(context)
-        if (anyModel != null) {
-            Timber.i("Found local alternative model: ${anyModel.absolutePath} (${anyModel.length()} bytes). Adopting instead of redundant download.")
-            _downloadStatus.value = DownloadState.Success(anyModel)
-            return
-        }
-
-        // 3. Initiate in-app coroutine download writing to .tmp
+        // 2. Initiate in-app coroutine download writing to .tmp
         val tmpFile = File(modelsDir, "$fileName.tmp")
         val initialUrl = "https://huggingface.co/$hfRepo/resolve/main/$fileName?download=true"
 
@@ -329,13 +321,20 @@ class ModelDownloader(
     }
 
     companion object {
-        fun findAnyLocalModel(context: Context): File? {
+        fun findAnyLocalModel(context: Context, targetVariant: String? = null): File? {
+            val tier = Constants.resolveHardwareModelTier(context)
+            val effectiveTarget = targetVariant ?: if (tier == "E2B") "E2B" else null
+
             val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
             val cachedPath = prefs.getString(Constants.PREF_LAST_KNOWN_MODEL_PATH, null)
             if (!cachedPath.isNullOrBlank()) {
                 val cachedFile = File(cachedPath)
                 if (cachedFile.exists() && cachedFile.length() > 200 * 1024 * 1024L) {
-                    return cachedFile
+                    val isE4b = cachedFile.name.contains("e4b", ignoreCase = true)
+                    // If device is strictly E2B tier, never accept E4B cached model
+                    if (tier != "E2B" || !isE4b) {
+                        return cachedFile
+                    }
                 }
             }
 
@@ -352,7 +351,12 @@ class ModelDownloader(
             ).distinct()
 
             // Check standard file names directly first (with case-insensitive fallback)
-            val standardNames = listOf(Constants.MODEL_NAME_E4B, Constants.MODEL_NAME_E2B)
+            val standardNames = when {
+                effectiveTarget?.equals("E2B", ignoreCase = true) == true -> listOf(Constants.MODEL_NAME_E2B)
+                effectiveTarget?.equals("E4B", ignoreCase = true) == true -> listOf(Constants.MODEL_NAME_E4B, Constants.MODEL_NAME_E2B)
+                else -> listOf(Constants.MODEL_NAME_E4B, Constants.MODEL_NAME_E2B)
+            }
+
             for (name in standardNames) {
                 for (dir in allSearchDirs) {
                     if (!dir.exists() || !dir.isDirectory) continue
@@ -374,12 +378,18 @@ class ModelDownloader(
             val found = allSearchDirs.flatMap { dir ->
                 dir.listFiles { file ->
                     val name = file.name
-                    (name.endsWith(".litertlm", ignoreCase = true) ||
+                    val isCandidate = (name.endsWith(".litertlm", ignoreCase = true) ||
                      name.endsWith(".gguf", ignoreCase = true) ||
                      name.endsWith(".nexa", ignoreCase = true)) &&
                     file.length() > 200 * 1024 * 1024L
+
+                    if (!isCandidate) false
+                    else if (tier == "E2B" && name.contains("e4b", ignoreCase = true)) false // Strictly reject E4B on E2B tier
+                    else true
                 }?.toList() ?: emptyList()
-            }.sortedByDescending { it.length() }.firstOrNull()
+            }.sortedWith(compareByDescending<File> { 
+                if (effectiveTarget != null && it.name.contains(effectiveTarget, ignoreCase = true)) 1 else 0
+            }.thenByDescending { it.length() }).firstOrNull()
 
             if (found != null) {
                 prefs.edit().putString(Constants.PREF_LAST_KNOWN_MODEL_PATH, found.absolutePath).apply()

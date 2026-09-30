@@ -26,7 +26,7 @@ object Constants {
 
     // Token budgets tuned per model architecture & memory footprint
     const val MAX_TOKENS_E2B = 5120       // 8GB RAM profile (1.72GB peak, immune to 2GB SPKL, 4.7k free dialogue runway)
-    const val MAX_TOKENS_E4B_12GB = 4096  // 12GB RAM profile (Game Space pinned, MTP speculative decoding, ample prompt+tools headroom)
+    const val MAX_TOKENS_E4B_12GB = 6144  // 12GB RAM profile (Game Space pinned, MTP speculative decoding, ample prompt+tools headroom)
     const val MAX_TOKENS_E4B_16GB = 8192  // 16GB RAM profile (8k native context runway, holds deep conversation history)
     const val MAX_TOKENS_E4B_24GB = 10240 // 24GB RAM profile (10k deep reasoning runway, massive tool execution history)
     const val MAX_TOKENS_E4B = MAX_TOKENS_E4B_12GB

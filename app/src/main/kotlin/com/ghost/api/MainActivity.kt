@@ -75,11 +75,25 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
             svc.overlayManager.setAppInForeground(true)
             svc.resumeEngineIfNeeded()
 
-            val downloadState = svc.modelDownloader.downloadStatus.value
-            if (downloadState is ModelDownloader.DownloadState.Downloading) {
-                val mbDone = downloadState.bytesDownloaded / 1024 / 1024
-                val mbTotal = downloadState.totalBytes / 1024 / 1024
-                chatViewModel.setDownloadProgress("Downloading Weights: ${downloadState.progressPercent}% (${mbDone}MB / ${mbTotal}MB)")
+            scope.launch {
+                svc.modelDownloader.downloadStatus.collect { state ->
+                    when (state) {
+                        is ModelDownloader.DownloadState.Downloading -> {
+                            val mbDone = state.bytesDownloaded / 1024 / 1024
+                            val mbTotal = state.totalBytes / 1024 / 1024
+                            chatViewModel.setDownloadProgress("Downloading Weights: ${state.progressPercent}% (${mbDone}MB / ${mbTotal}MB)")
+                        }
+                        is ModelDownloader.DownloadState.Success -> {
+                            chatViewModel.setDownloadProgress(null)
+                        }
+                        is ModelDownloader.DownloadState.Error -> {
+                            chatViewModel.setDownloadProgress("Download Error: ${state.message}")
+                        }
+                        else -> {
+                            chatViewModel.setDownloadProgress(null)
+                        }
+                    }
+                }
             }
 
             scope.launch {

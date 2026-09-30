@@ -53,6 +53,7 @@ fun SettingsDialog(
     var ttsEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_TTS_ENABLED, true)) }
     var backend by remember { mutableStateOf(prefs.getString(Constants.PREF_USER_BACKEND, "AUTO") ?: "AUTO") }
     val hardwareTier = remember { Constants.resolveHardwareModelTier(context) }
+    val is8GbDevice = remember { hardwareTier == "E2B" }
     var selectedModel by remember { mutableStateOf(prefs.getString(Constants.PREF_SELECTED_MODEL, hardwareTier) ?: hardwareTier) }
     var visualizerPreset by remember { mutableStateOf(prefs.getString(Constants.PREF_VISUALIZER_PRESET, "OPTION_A") ?: "OPTION_A") }
     var summonMethod by remember { mutableStateOf(prefs.getString(Constants.PREF_SUMMON_METHOD, Constants.SUMMON_METHOD_BOTH) ?: Constants.SUMMON_METHOD_BOTH) }
@@ -633,7 +634,6 @@ fun SettingsDialog(
                         item {
                             Column(modifier = Modifier.padding(bottom = 14.dp)) {
                                 val ramGb = Constants.getDeviceRamGb(context)
-                                val is8GbDevice = hardwareTier == "E2B"
                                 val coreTitle = when {
                                     is8GbDevice -> "Gemma 4 E2B • 8GB Compact"
                                     ramGb >= 20.0 -> "Gemma 4 E4B • 24GB Extreme"
@@ -644,7 +644,7 @@ fun SettingsDialog(
                                     is8GbDevice -> "5,120 token dialogue runway (Hardware Locked)"
                                     ramGb >= 20.0 -> "10,240 token massive runway (MTP Speculative Decoding)"
                                     ramGb >= 14.5 -> "8,192 token extended runway (MTP Speculative Decoding)"
-                                    else -> "4,096 token reasoning (MTP Speculative Decoding)"
+                                    else -> "6,144 token dialogue runway (MTP Speculative Decoding)"
                                 }
 
                                 Box(
@@ -721,6 +721,10 @@ fun SettingsDialog(
                                                 .clip(RoundedCornerShape(8.dp))
                                                 .background(if (isSelected) accentColor else cardBg)
                                                 .clickable {
+                                                    if (mCore == "E4B" && is8GbDevice) {
+                                                        Toast.makeText(context, "E4B requires >=12GB RAM (Hardware locked to E2B)", Toast.LENGTH_SHORT).show()
+                                                        return@clickable
+                                                    }
                                                     selectedModel = mCore
                                                     prefs.edit().putString(Constants.PREF_SELECTED_MODEL, mCore).apply()
                                                     val svc = gemmaService ?: GemmaService.instance

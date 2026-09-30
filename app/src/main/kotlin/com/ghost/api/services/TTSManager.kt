@@ -189,15 +189,36 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
     }
 
     private var audioFocusRequest: android.media.AudioFocusRequest? = null
-    @Volatile private var wasMusicPlayingBeforeSpeech = false
+    private var activePlayingController: android.media.session.MediaController? = null
+    private val mediaSessionManager = context.getSystemService(Context.MEDIA_SESSION_SERVICE) as? android.media.session.MediaSessionManager
     var utteranceFinishedListener: ((String) -> Unit)? = null
+
+    private fun getActivePlayingController(): android.media.session.MediaController? {
+        try {
+            val component = android.content.ComponentName(context, com.ghost.api.GemmaNotificationListener::class.java)
+            val controllers = mediaSessionManager?.getActiveSessions(component) ?: return null
+            return controllers.firstOrNull { controller ->
+                controller.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+            }
+        } catch (e: SecurityException) {
+            // Notification listener access not granted
+            return null
+        } catch (e: Exception) {
+            Timber.w(e, "TTS: Failed to query active media sessions")
+            return null
+        }
+    }
 
     private fun requestAudioDucking() {
         try {
-            if (audioManager.isMusicActive) {
-                wasMusicPlayingBeforeSpeech = true
-                dispatchMediaKey(android.view.KeyEvent.KEYCODE_MEDIA_PAUSE)
-                Timber.i("⏸ Active media detected — dispatched KEYCODE_MEDIA_PAUSE for TTS")
+            // Target only actively playing media sessions if not already paused for this speech chain
+            if (activePlayingController == null) {
+                val playing = getActivePlayingController()
+                if (playing != null) {
+                    activePlayingController = playing
+                    playing.transportControls.pause()
+                    Timber.i("⏸ Paused active media session [${playing.packageName}] for TTS")
+                }
             }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -235,25 +256,21 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
                 audioManager.abandonAudioFocus(null)
             }
 
-            if (wasMusicPlayingBeforeSpeech) {
-                wasMusicPlayingBeforeSpeech = false
+            val controllerToResume = activePlayingController
+            activePlayingController = null
+            if (controllerToResume != null) {
                 android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                    dispatchMediaKey(android.view.KeyEvent.KEYCODE_MEDIA_PLAY)
-                    Timber.i("▶ Dispatched KEYCODE_MEDIA_PLAY — resumed media after TTS")
-                }, 350)
+                    try {
+                        controllerToResume.transportControls.play()
+                        Timber.i("▶ Resumed media session [${controllerToResume.packageName}] after TTS")
+                    } catch (e: Exception) {
+                        Timber.w(e, "Failed to resume media controller [${controllerToResume.packageName}]")
+                    }
+                }, 300)
             }
             Timber.d("🔊 Audio focus abandoned — media playback restored")
         } catch (e: Exception) {
             Timber.w(e, "Failed to abandon audio focus")
-        }
-    }
-
-    private fun dispatchMediaKey(keyCode: Int) {
-        try {
-            audioManager.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, keyCode))
-            audioManager.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, keyCode))
-        } catch (e: Exception) {
-            Timber.w(e, "Failed to dispatch media key $keyCode")
         }
     }
 

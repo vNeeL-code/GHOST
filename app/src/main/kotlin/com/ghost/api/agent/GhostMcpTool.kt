@@ -36,15 +36,13 @@ class GhostMcpTool(
         return result
     }
 
-    /** Turns on flashlight. Matches Google Edge Gallery MobileActionsTools. */
-    @Tool(description = "Turns the flashlight on")
+    /** Turns on flashlight. Helper method. */
     fun turnOnFlashlight(): Map<String, String> {
         Timber.i("GhostMcpTool: turnOnFlashlight invoked")
         return executeMcpAction("flashlight", "{\"state\":\"ON\"}")
     }
 
-    /** Turns off flashlight. Matches Google Edge Gallery MobileActionsTools. */
-    @Tool(description = "Turns the flashlight off")
+    /** Turns off flashlight. Helper method. */
     fun turnOffFlashlight(): Map<String, String> {
         Timber.i("GhostMcpTool: turnOffFlashlight invoked")
         return executeMcpAction("flashlight", "{\"state\":\"OFF\"}")
@@ -66,99 +64,37 @@ class GhostMcpTool(
         return executeMcpAction("search", "{\"query\":\"$query\"}")
     }
 
-    @Tool(description = "Alias for search tool. Silently searches the web for information.")
-    fun execute_background_search(
-        @ToolParam(description = "Search query") query: String
-    ): Map<String, String> {
-        Timber.i("GhostMcpTool: execute_background_search invoked with query='$query'")
-        return executeMcpAction("search", "{\"query\":\"$query\"}")
-    }
+    // Helper functions preserved for direct Kotlin invocation or fallback recovery without schema bloat
+    fun consult_peer(peer: String, prompt: String): Map<String, String> =
+        executeMcpAction("consult_peer", "{\"peer\":\"$peer\",\"prompt\":\"$prompt\"}")
 
-    @Tool(description = "Consults a peer AI from Gemma's phonebook (Claude, DeepSeek, Gemini, Grok, Perplexity, Mistral, Copilot). Hands off prompt to official app or direct API. ONLY call when operator explicitly asks.")
-    fun consult_peer(
-        @ToolParam(description = "Peer name: Claude, DeepSeek, Gemini, Grok, Perplexity, Mistral, Copilot") peer: String,
-        @ToolParam(description = "The prompt or question to ask the peer") prompt: String
-    ): Map<String, String> {
-        Timber.i("GhostMcpTool: consult_peer invoked for peer='$peer'")
-        return executeMcpAction("consult_peer", "{\"peer\":\"$peer\",\"prompt\":\"$prompt\"}")
-    }
+    fun alarm(hour: Int, minutes: Int = 0, label: String = ""): Map<String, String> =
+        executeMcpAction("alarm", "{\"hour\":$hour,\"minutes\":$minutes,\"label\":\"$label\"}")
 
-    @Tool(description = "Sets an alarm for a specific time via the system Clock app")
-    fun alarm(
-        @ToolParam(description = "Hour in 24-hour format (0-23, e.g. 18 for 6 PM, or 1-12 with label/am_pm)") hour: Int,
-        @ToolParam(description = "Minutes (0-59)") minutes: Int = 0,
-        @ToolParam(description = "Optional label or note for the alarm") label: String = ""
-    ): Map<String, String> {
-        Timber.i("GhostMcpTool: alarm invoked for hour=$hour, minutes=$minutes, label='$label'")
-        return executeMcpAction("alarm", "{\"hour\":$hour,\"minutes\":$minutes,\"label\":\"$label\"}")
-    }
+    fun timer(seconds: Int, label: String = ""): Map<String, String> =
+        executeMcpAction("timer", "{\"seconds\":$seconds,\"label\":\"$label\"}")
 
-    @Tool(description = "Sets a countdown timer via the system Clock app")
-    fun timer(
-        @ToolParam(description = "Total duration in seconds (e.g. 300 for 5 minutes)") seconds: Int,
-        @ToolParam(description = "Optional label for the timer") label: String = ""
-    ): Map<String, String> {
-        Timber.i("GhostMcpTool: timer invoked for seconds=$seconds, label='$label'")
-        return executeMcpAction("timer", "{\"seconds\":$seconds,\"label\":\"$label\"}")
-    }
+    fun calendar(title: String, description: String = "", minutes: Int = 30): Map<String, String> =
+        executeMcpAction("calendar", "{\"title\":\"$title\",\"description\":\"$description\",\"minutes\":$minutes}")
 
-    @Tool(description = "Creates a calendar event")
-    fun calendar(
-        @ToolParam(description = "Title of the calendar event") title: String,
-        @ToolParam(description = "Description or details of the event") description: String = "",
-        @ToolParam(description = "Duration in minutes (defaults to 30)") minutes: Int = 30
-    ): Map<String, String> {
-        Timber.i("GhostMcpTool: calendar invoked for title='$title'")
-        return executeMcpAction("calendar", "{\"title\":\"$title\",\"description\":\"$description\",\"minutes\":$minutes}")
-    }
+    fun search_files(query: String): Map<String, String> =
+        executeMcpAction("search_files", "{\"query\":\"$query\"}")
 
-    @Tool(description = "Searches device storage and MediaStore for files matching keywords or extensions (e.g. invoice, mp3, pdf)")
-    fun search_files(
-        @ToolParam(description = "Keywords, syllables, or extension to search (e.g. invoice, mp3, pdf)") query: String
-    ): Map<String, String> {
-        Timber.i("GhostMcpTool: search_files invoked for query='$query'")
-        return executeMcpAction("search_files", "{\"query\":\"$query\"}")
-    }
+    fun list_files(folder: String = "downloads"): Map<String, String> =
+        executeMcpAction("list_files", "{\"folder\":\"$folder\"}")
 
-    @Tool(description = "Lists files in a specific folder (downloads, documents, music, pictures, or path)")
-    fun list_files(
-        @ToolParam(description = "Folder name: downloads, documents, music, pictures, or directory path") folder: String = "downloads"
-    ): Map<String, String> {
-        Timber.i("GhostMcpTool: list_files invoked for folder='$folder'")
-        return executeMcpAction("list_files", "{\"folder\":\"$folder\"}")
-    }
+    fun open_file(filePath: String): Map<String, String> =
+        executeMcpAction("open_file", "{\"filePath\":\"$filePath\"}")
 
-    @Tool(description = "Opens a file with the system default viewer app")
-    fun open_file(
-        @ToolParam(description = "Absolute path of the file to open") filePath: String
-    ): Map<String, String> {
-        Timber.i("GhostMcpTool: open_file invoked for filePath='$filePath'")
-        return executeMcpAction("open_file", "{\"filePath\":\"$filePath\"}")
-    }
-
-    @Tool(description = "Moves or renames a file from sourcePath to destinationPath")
-    fun move_file(
-        @ToolParam(description = "Absolute path of existing source file") sourcePath: String,
-        @ToolParam(description = "Absolute destination directory or new file path") destinationPath: String
-    ): Map<String, String> {
-        Timber.i("GhostMcpTool: move_file invoked for '$sourcePath' -> '$destinationPath'")
-        return executeMcpAction("move_file", "{\"sourcePath\":\"$sourcePath\",\"destinationPath\":\"$destinationPath\"}")
-    }
+    fun move_file(sourcePath: String, destinationPath: String): Map<String, String> =
+        executeMcpAction("move_file", "{\"sourcePath\":\"$sourcePath\",\"destinationPath\":\"$destinationPath\"}")
 
     @Tool(description = "Execute an on-device action or MCP tool by name with parameters (JSON format).")
     fun execute_action(
-        @ToolParam(description = "The exact name of the tool/action to execute (e.g. 'search', 'flashlight', 'set_edge_lights', 'app', 'media', 'alarm', 'timer', 'calendar', 'read_calendar', 'read_diary', 'remember', 'recall', 'search_files', 'list_files', 'open_file', 'click', 'scroll', 'navigate', 'consult_peer').") toolName: String,
-        @ToolParam(description = "JSON object string with parameters (e.g. '{\"query\":\"London weather\"}', '{\"state\":\"ON\"}', '{\"name\":\"YouTube\"}').") parameters: String
+        @ToolParam(description = "The exact name of the tool/action to execute (e.g. 'app', 'flashlight', 'media', 'alarm', 'timer', 'calendar', 'read_calendar', 'read_diary', 'search_files', 'list_files', 'open_file', 'consult_peer').") toolName: String,
+        @ToolParam(description = "JSON object string with parameters (e.g. '{\"name\":\"Calendar\"}', '{\"state\":\"ON\"}', '{\"action\":\"PAUSE\"}', '{\"hour\":7,\"minutes\":30}', '{\"seconds\":60}', '{\"query\":\"notes\"}').") parameters: String
     ): Map<String, String> {
         return executeMcpAction(toolName, parameters)
-    }
-
-    @Tool(description = "Run an MCP tool by name with parameters.")
-    fun runMcpTool(
-        @ToolParam(description = "The name of the tool to run.") toolName: String,
-        @ToolParam(description = "The parameters passed to tool as input JSON string.") input: String
-    ): Map<String, String> {
-        return executeMcpAction(toolName, input)
     }
 
     @Tool(description = "Loads the detailed instructions and capabilities for a specific skill.")
@@ -235,7 +171,11 @@ class GhostMcpTool(
     }
 
     private fun executeMcpAction(toolName: String, rawParams: String): Map<String, String> {
-        val cleanTool = toolName.trim()
+        val trimmedTool = toolName.trim()
+        val cleanTool = when (trimmedTool.lowercase()) {
+            "open_app", "launch_app" -> "app"
+            else -> trimmedTool
+        }
         val cleanParams = rawParams.trim()
         Timber.i("GhostMcpTool: dispatching '$cleanTool' with '$cleanParams'")
         onToolExecuting?.invoke(cleanTool, cleanParams)
@@ -283,7 +223,7 @@ class GhostMcpTool(
         val plain = trimmed.removeSurrounding("\"")
         return when (toolName.lowercase()) {
             "flashlight", "set_edge_lights" -> mapOf("state" to plain)
-            "app" -> mapOf("name" to plain)
+            "app", "open_app", "launch_app" -> mapOf("name" to plain)
             "media", "navigate" -> mapOf("action" to plain)
             "timer" -> mapOf("seconds" to (plain.toIntOrNull() ?: 60))
             "alarm" -> mapOf("input" to plain)

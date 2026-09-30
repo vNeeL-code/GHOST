@@ -704,7 +704,7 @@ class GhostAgent(
         val estTokens = (historyChars / 3) + visionTokens
 
         val maxTokens = llmEngine.maxNumTokens
-        val tokenThreshold = if (maxTokens > 6000) 5000 else if (maxTokens > 3000) 2800 else 1400
+        val tokenThreshold = if (maxTokens > 6000) 4200 else if (maxTokens > 3000) 2400 else 1200
         val turnThreshold = if (maxTokens > 6000) 24 else if (maxTokens > 3000) 16 else 8
 
         if (count >= turnThreshold || turnsSinceKvFlush >= turnThreshold || estTokens > tokenThreshold) {
@@ -716,9 +716,15 @@ class GhostAgent(
     private suspend fun compactMemory(force: Boolean = false) {
         try {
             val toCompact = synchronized(_conversationHistory) {
-                if (_conversationHistory.size > 2) {
-                    val old = _conversationHistory.dropLast(2)
-                    val keep = _conversationHistory.takeLast(2)
+                if (_conversationHistory.size > 8) {
+                    val old = _conversationHistory.dropLast(8)
+                    val keep = _conversationHistory.takeLast(8)
+                    _conversationHistory.clear()
+                    _conversationHistory.addAll(keep)
+                    old
+                } else if (force && _conversationHistory.size > 4) {
+                    val old = _conversationHistory.dropLast(4)
+                    val keep = _conversationHistory.takeLast(4)
                     _conversationHistory.clear()
                     _conversationHistory.addAll(keep)
                     old
@@ -766,7 +772,7 @@ class GhostAgent(
             if (completedMessages.isEmpty()) ""
             else {
                 val assistantCallSign = getAssistantCallSign()
-                val lines = completedMessages.takeLast(4).mapNotNull { msg ->
+                val lines = completedMessages.takeLast(6).mapNotNull { msg ->
                     val clean = if (msg.role == "assistant") sanitizeAgentOutput(msg.content) else msg.content.trim()
                     if (clean.isBlank()) return@mapNotNull null
                     val roleLabel = if (msg.role == "user") "Operator" else assistantCallSign
