@@ -20,8 +20,53 @@ class GemmaNotificationListener : NotificationListenerService() {
 
     override fun onDestroy() {
         super.onDestroy()
-        instance = null
+        if (instance == this) instance = null
         Timber.d("NotificationListener destroyed")
+    }
+
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        instance = this
+        Timber.i("NotificationListener connected")
+        syncActiveNotifications()
+    }
+
+    override fun onListenerDisconnected() {
+        super.onListenerDisconnected()
+        if (instance == this) instance = null
+        Timber.d("NotificationListener disconnected")
+    }
+
+    fun syncActiveNotifications() {
+        try {
+            val sbns = activeNotifications ?: return
+            for (sbn in sbns) {
+                val pkg = sbn.packageName
+                if (pkg == packageName || pkg in IGNORED_PACKAGES) continue
+                val extras = sbn.notification.extras
+                val title = extras.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString()?.trim()
+                    ?: extras.getCharSequence("android.title")?.toString()?.trim() ?: ""
+                val text = extras.getCharSequence(android.app.Notification.EXTRA_TEXT)?.toString()?.trim()
+                    ?: extras.getCharSequence(android.app.Notification.EXTRA_BIG_TEXT)?.toString()?.trim()
+                    ?: extras.getCharSequence("android.text")?.toString()?.trim() ?: ""
+                if (title.isBlank() && text.isBlank()) continue
+
+                val entry = NotificationEntry(
+                    packageName = pkg,
+                    title = title.take(80),
+                    text = text.take(160),
+                    timestamp = sbn.postTime
+                )
+                synchronized(recentNotifications) {
+                    if (recentNotifications.none { it.packageName == pkg && it.title == entry.title && it.text == entry.text }) {
+                        recentNotifications.addFirst(entry)
+                    }
+                }
+                storeReplyAction(pkg, sbn)
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "NotificationListener: failed to sync active notifications")
+        }
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
@@ -94,10 +139,15 @@ class GemmaNotificationListener : NotificationListenerService() {
         val timestamp: Long
     ) {
         fun toContextString(): String {
-            val appName = packageName.split('.').lastOrNull() ?: packageName
+            val appLabel = resolveAppLabel(instance, packageName)
             val timeAgo = (System.currentTimeMillis() - timestamp) / 1000 / 60
             val timeStr = if (timeAgo < 1) "just now" else "${timeAgo}m ago"
-            return "[$appName] $title: $text ($timeStr)"
+            val body = if (text.isNotBlank() && title.isNotBlank() && !title.equals(text, ignoreCase = true)) {
+                "$title: $text"
+            } else {
+                title.ifBlank { text }
+            }
+            return "[$appLabel] $body ($timeStr)"
         }
     }
 
@@ -119,6 +169,89 @@ class GemmaNotificationListener : NotificationListenerService() {
             "com.android.systemui",
             "com.android.providers.downloads"
         )
+
+        fun ensureConnected(context: android.content.Context) {
+            if (instance == null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+                try {
+                    val comp = android.content.ComponentName(context, GemmaNotificationListener::class.java)
+                    requestRebind(comp)
+                    Timber.d("GemmaNotificationListener: requested rebind")
+                } catch (e: Exception) {
+                    Timber.w(e, "Failed to request rebind for GemmaNotificationListener")
+                }
+            }
+        }
+
+        fun resolveAppLabel(context: android.content.Context?, pkg: String): String {
+            return when (pkg) {
+                "ai.x.grok" -> "Grok"
+                "com.google.android.youtube" -> "YouTube"
+                "com.whatsapp" -> "WhatsApp"
+                "org.telegram.messenger" -> "Telegram"
+                "com.discord" -> "Discord"
+                "com.google.android.gm" -> "Gmail"
+                "com.google.android.apps.messaging" -> "Messages"
+                else -> {
+                    try {
+                        val pm = context?.packageManager
+                        if (pm != null) {
+                            pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
+                        } else {
+                            pkg.split('.').lastOrNull()?.replaceFirstChar { it.uppercase() } ?: pkg
+                        }
+                    } catch (e: Exception) {
+                        pkg.split('.').lastOrNull()?.replaceFirstChar { it.uppercase() } ?: pkg
+                    }
+                }
+            }
+        }
+
+        fun getActiveNotificationsContext(limit: Int = 6): List<String> {
+            val currentInstance = instance
+            if (currentInstance != null) {
+                try {
+                    val sbns = currentInstance.activeNotifications
+                    if (!sbns.isNullOrEmpty()) {
+                        val activeEntries = mutableListOf<String>()
+                        val sorted = sbns.sortedByDescending { it.postTime }
+                        for (sbn in sorted) {
+                            val pkg = sbn.packageName
+                            if (pkg == currentInstance.packageName || pkg in IGNORED_PACKAGES) continue
+
+                            // Skip ongoing media session since audio tracker covers it
+                            val isMedia = sbn.notification.extras.containsKey(android.app.Notification.EXTRA_MEDIA_SESSION)
+                            if (isMedia && sbn.isOngoing) continue
+
+                            val extras = sbn.notification.extras
+                            val title = extras.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString()?.trim()
+                                ?: extras.getCharSequence("android.title")?.toString()?.trim() ?: ""
+                            val text = extras.getCharSequence(android.app.Notification.EXTRA_TEXT)?.toString()?.trim()
+                                ?: extras.getCharSequence(android.app.Notification.EXTRA_BIG_TEXT)?.toString()?.trim()
+                                ?: extras.getCharSequence("android.text")?.toString()?.trim() ?: ""
+
+                            if (title.isBlank() && text.isBlank()) continue
+
+                            val appLabel = resolveAppLabel(currentInstance, pkg)
+                            val timeAgo = (System.currentTimeMillis() - sbn.postTime) / 1000 / 60
+                            val timeStr = if (timeAgo < 1) "just now" else "${timeAgo}m ago"
+                            val body = if (text.isNotBlank() && title.isNotBlank() && !title.equals(text, ignoreCase = true)) {
+                                "$title: $text"
+                            } else {
+                                title.ifBlank { text }
+                            }
+                            activeEntries.add("[$appLabel] $body ($timeStr)")
+                            storeReplyAction(pkg, sbn)
+                            if (activeEntries.size >= limit) break
+                        }
+                        if (activeEntries.isNotEmpty()) return activeEntries
+                    }
+                } catch (e: Exception) {
+                    Timber.w(e, "Failed to query activeNotifications from service")
+                }
+            }
+
+            return getRecentNotifications(limit)
+        }
 
         fun getRecentNotifications(limit: Int = 5): List<String> {
             return synchronized(recentNotifications) {

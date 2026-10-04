@@ -265,7 +265,15 @@ class MCPServer(
                     val res = networkTools.open_system_browser_bar(queryOrUrl)
                     ToolResult(res["result"] == "success", res["message"] ?: "")
                 }
-                // Messaging
+                // Messaging & Notifications
+                "notifications", "get_notifications", "read_notifications" -> {
+                    val notifs = com.ghost.api.GemmaNotificationListener.getActiveNotificationsContext(10)
+                    if (notifs.isEmpty()) {
+                        ToolResult(true, "No active notifications in status bar.")
+                    } else {
+                        ToolResult(true, notifs.joinToString("\n"))
+                    }
+                }
                 "reply_notification" -> {
                     val pkg = params["packageName"]?.toString() ?: ""
                     val msg = params["message"]?.toString() ?: ""

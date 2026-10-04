@@ -147,7 +147,7 @@ data class MotionState(
 
 // === MANAGER ===
 
-class SensorFusionManager(private val context: Context) : AutoCloseable {
+class SensorFusionManager(val context: Context) : AutoCloseable {
 
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
     private val mediaSessionManager = context.getSystemService(Context.MEDIA_SESSION_SERVICE) as? MediaSessionManager

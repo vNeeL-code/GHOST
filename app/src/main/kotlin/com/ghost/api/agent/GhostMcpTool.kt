@@ -88,9 +88,9 @@ class GhostMcpTool(
     }
 
     @JvmOverloads
-    @Tool(description = "Executes an on-device system or utility command (e.g. 'volume', 'status', 'music', 'calendar', 'timer', 'search_files'). Arguments are passed as key-value pairs (e.g. 'stream=media level=50', 'action=pause', 'seconds=300') or JSON.")
+    @Tool(description = "Executes an on-device system or utility command (e.g. 'volume', 'status', 'notifications', 'music', 'calendar', 'timer', 'search_files'). Arguments are passed as key-value pairs (e.g. 'stream=media level=50', 'action=pause', 'seconds=300') or JSON.")
     fun execute_command(
-        @ToolParam(description = "Command name (e.g. 'volume', 'status', 'music', 'calendar', 'timer', 'search_files', 'read_diary')") command: String,
+        @ToolParam(description = "Command name (e.g. 'volume', 'status', 'notifications', 'music', 'calendar', 'timer', 'search_files', 'read_diary')") command: String,
         @ToolParam(description = "Arguments string, e.g. 'stream=media level=50' or 'action=next'") args: String = ""
     ): Map<String, String> {
         Timber.i("GhostMcpTool: execute_command invoked with command='$command', args='$args'")

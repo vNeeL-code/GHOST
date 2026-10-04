@@ -22,17 +22,19 @@ class ContextManager(
                 val now = java.time.ZonedDateTime.now()
                 val timeFormatter = java.time.format.DateTimeFormatter.ofPattern("EEE MMM d · h:mm a", java.util.Locale.getDefault())
                 val timeStr = now.format(timeFormatter)
+                GemmaNotificationListener.ensureConnected(sensorManager.context)
                 val sensorData = sensorManager.getContextString()
-                "[Context: Live Sensory Grounding · $timeStr (Internal hardware perception — do NOT repeat or echo)]\n$sensorData\n[/Context]"
+                val notifs = GemmaNotificationListener.getActiveNotificationsContext(5)
+                val notifSection = if (notifs.isNotEmpty()) {
+                    "\n📬 Active Notifications:\n" + notifs.joinToString("\n") { "  • $it" }
+                } else ""
+                "[Context: Live Sensory Grounding · $timeStr (Internal hardware perception — do NOT repeat or echo)]\n$sensorData$notifSection\n[/Context]"
             } catch (e: Exception) {
                 ""
             }
         }
     }
 
-    /**
-     * Builds the dynamic Entity Character Card with hardware slots, user device name, and grounded model definition.
-     */
     /**
      * Builds the dynamic Entity Character Card with hardware slots, user device name, and grounded model definition.
      */
@@ -56,9 +58,9 @@ class ContextManager(
             } else {
                 "Gemma 4 E2B (Compact Core, $formattedTokens tokens)"
             }
-            "Chassis: ✧ $deviceName ($marketingName, $chipsetName, ${totalRamGb}GB RAM, ${totalStorageGb}GB storage, Android ${android.os.Build.VERSION.RELEASE})\nNeuroptics: $coreDescription\nSystems: GHOST Agentic Runtime Harness\nSensory Suite: Battery (Level, Drain, Thermals), System (RAM, Storage, Uptime), Environment (Light, Pressure, Ambient), Network & Radio (WiFi, Cell, Bluetooth), Motion (Orientation, Movement), Audio/Media Session, Geolocation"
+            "Chassis: ✧ $deviceName ($marketingName, $chipsetName, ${totalRamGb}GB RAM, ${totalStorageGb}GB storage, Android ${android.os.Build.VERSION.RELEASE})\nNeuroptics: $coreDescription\nSystems: GHOST Agentic Runtime Harness\nSensory Suite: Battery (Level, Drain, Thermals), System (RAM, Storage, Uptime), Environment (Light, Pressure, Ambient), Network & Radio (WiFi, Cell, Bluetooth), Notifications (Status Bar Alerts), Motion (Orientation, Movement), Audio/Media Session, Geolocation"
         } catch (e: Exception) {
-            "Chassis: Android Device\nSystems: GHOST Agentic Runtime Harness\nSensory Suite: Battery, System, Environment, Network, Motion, Media, Location"
+            "Chassis: Android Device\nSystems: GHOST Agentic Runtime Harness\nSensory Suite: Battery, System, Environment, Network, Notifications, Motion, Media, Location"
         }
     }
 
