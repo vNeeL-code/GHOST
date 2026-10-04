@@ -51,7 +51,7 @@ fun SettingsDialog(
     var diaryActive by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_AUTONOMOUS_DIARY, true)) }
     var diaryCadence by remember { mutableStateOf(prefs.getString(Constants.PREF_DIARY_CADENCE, "12") ?: "12") }
     var diarySyncCalendar by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_DIARY_SYNC_CALENDAR, false)) }
-    var isOperatorTier by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_IS_OPERATOR_TIER, false)) }
+    val isOperatorTier = true
     var ttsEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_TTS_ENABLED, true)) }
     var backend by remember { mutableStateOf(prefs.getString(Constants.PREF_USER_BACKEND, "AUTO") ?: "AUTO") }
     val isEngineActive = backend != "OFF"
@@ -80,56 +80,6 @@ fun SettingsDialog(
     val accessCn = remember { ComponentName(context, GemmaAccessibilityService::class.java) }
     val enabledServices = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
     val isAccessibilityGranted = enabledServices != null && enabledServices.contains(accessCn.flattenToString())
-
-    var showOperatorUnlockDialog by remember { mutableStateOf(false) }
-
-    if (showOperatorUnlockDialog) {
-        AlertDialog(
-            onDismissRequest = { showOperatorUnlockDialog = false },
-            title = {
-                Text(
-                    text = "Unlock Operator Pass (£3.50)",
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF8BB4F6)
-                )
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "Support GHOST development! (£3.50 one-time purchase)",
-                        fontSize = 13.sp,
-                        color = Color.White
-                    )
-                    Text(
-                        text = "Perks unlocked:\n• Δ 👾 ∇ elite Turing header glyph (replaces 🦕💭💸)\n• Custom operator avatars & custom emoji input\n• Hexagonal, Prismatic & Cuboid visualizer geometries\n• Reactive edge light styles II, III, IV\n\nFree tier remains 100% uncrippled with full offline local AI & privacy.",
-                        fontSize = 12.sp,
-                        color = Color(0xCCFFFFFF),
-                        lineHeight = 16.sp
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        isOperatorTier = true
-                        prefs.edit().putBoolean(Constants.PREF_IS_OPERATOR_TIER, true).apply()
-                        showOperatorUnlockDialog = false
-                        Toast.makeText(context, "Operator Pass Activated! Δ 👾 ∇ unlocked", Toast.LENGTH_SHORT).show()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E))
-                ) {
-                    Text("Activate (£3.50)", color = Color.Black, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showOperatorUnlockDialog = false }) {
-                    Text("Cancel", color = Color(0x99FFFFFF))
-                }
-            },
-            containerColor = Color(0xFF141418),
-            shape = RoundedCornerShape(16.dp)
-        )
-    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -982,7 +932,7 @@ fun SettingsDialog(
                                     .clip(RoundedCornerShape(12.dp))
                                     .border(
                                         width = 1.dp,
-                                        color = if (isOperatorTier) Color(0xFF22C55E) else Color(0xFF3B82F6),
+                                        color = Color(0xFF22C55E),
                                         shape = RoundedCornerShape(12.dp)
                                     ),
                                 color = cardBg
@@ -998,24 +948,21 @@ fun SettingsDialog(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
-                                            text = if (isOperatorTier) "OPERATOR PASS" else "OPERATOR PASS (£3.50)",
+                                            text = "OPERATOR EDITION",
                                             fontSize = 14.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = if (isOperatorTier) Color(0xFF22C55E) else Color(0xFF8BB4F6)
+                                            color = Color(0xFF22C55E)
                                         )
                                         Box(
                                             modifier = Modifier
-                                                .background(
-                                                    if (isOperatorTier) Color(0x3322C55E) else Color(0x338BB4F6),
-                                                    RoundedCornerShape(6.dp)
-                                                )
+                                                .background(Color(0x3322C55E), RoundedCornerShape(6.dp))
                                                 .padding(horizontal = 8.dp, vertical = 3.dp)
                                         ) {
                                             Text(
-                                                text = if (isOperatorTier) "Δ 👾 ∇ ACTIVE" else "FREE TIER 🦕💭💸",
+                                                text = "Δ 👾 ∇ UNLOCKED",
                                                 fontSize = 10.sp,
                                                 fontWeight = FontWeight.Bold,
-                                                color = if (isOperatorTier) Color(0xFF22C55E) else Color(0xFF8BB4F6)
+                                                color = Color(0xFF22C55E)
                                             )
                                         }
                                     }
@@ -1023,87 +970,40 @@ fun SettingsDialog(
                                     Spacer(modifier = Modifier.height(6.dp))
 
                                     Text(
-                                        text = if (isOperatorTier) {
-                                            "Elite status unlocked. Δ 👾 ∇ Turing glyph, reactive edge lights II-IV, hexagonal/prismatic/cuboid visualizers, and custom operator avatars active."
-                                        } else {
-                                            "100% uncrippled local offline AI & privacy. Unlock Operator status for £3.50 (Tree Fiddy 🦕💭💸) to get the elite Δ 👾 ∇ glyph, custom avatars, visualizer geometries, and edge light styles."
-                                        },
+                                        text = "Full Patron / Sponsor build. All features, Turing glyphs, reactive edge lights, custom avatars, and live wallpaper geometries are 100% unlocked offline without Play Store billing.",
                                         fontSize = 11.sp,
                                         color = textDim,
                                         lineHeight = 16.sp
                                     )
 
-                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Spacer(modifier = Modifier.height(10.dp))
 
-                                    // Avatar-only buttons (no extra text)
                                     Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Color(0x2222C55E))
+                                            .border(1.dp, Color(0x4422C55E), RoundedCornerShape(8.dp))
+                                            .clickable {
+                                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/sponsors/vNeeL-code"))
+                                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                context.startActivity(intent)
+                                            }
+                                            .padding(vertical = 10.dp, horizontal = 12.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        // Free Tier Button: 🦕💭💸
-                                        Box(
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .clip(RoundedCornerShape(10.dp))
-                                                .background(if (!isOperatorTier) Color(0x333B82F6) else Color(0x14FFFFFF))
-                                                .border(
-                                                    1.dp,
-                                                    if (!isOperatorTier) Color(0xFF3B82F6) else Color(0x22FFFFFF),
-                                                    RoundedCornerShape(10.dp)
-                                                )
-                                                .clickable {
-                                                    if (isOperatorTier) {
-                                                        isOperatorTier = false
-                                                        prefs.edit().putBoolean(Constants.PREF_IS_OPERATOR_TIER, false).apply()
-                                                        if (visualizerPreset != "OPTION_A") {
-                                                            visualizerPreset = "OPTION_A"
-                                                            prefs.edit().putString(Constants.PREF_VISUALIZER_PRESET, "OPTION_A").apply()
-                                                        }
-                                                        if (edgeLightsStyle != Constants.EDGE_STYLE_BARS) {
-                                                            edgeLightsStyle = Constants.EDGE_STYLE_BARS
-                                                            prefs.edit().putString(Constants.PREF_EDGE_LIGHT_STYLE, Constants.EDGE_STYLE_BARS).apply()
-                                                            EdgeLightsManager.invalidate()
-                                                        }
-                                                        Toast.makeText(context, "Free Tier active 🦕💭💸", Toast.LENGTH_SHORT).show()
-                                                    }
-                                                }
-                                                .padding(vertical = 12.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                text = "🦕💭💸",
-                                                fontSize = 18.sp
-                                            )
-                                        }
-
-                                        // Operator Tier Button: Δ 👾 ∇
-                                        Box(
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .clip(RoundedCornerShape(10.dp))
-                                                .background(if (isOperatorTier) Color(0x3322C55E) else Color(0x14FFFFFF))
-                                                .border(
-                                                    1.dp,
-                                                    if (isOperatorTier) Color(0xFF22C55E) else Color(0x22FFFFFF),
-                                                    RoundedCornerShape(10.dp)
-                                                )
-                                                .clickable {
-                                                    if (!isOperatorTier) {
-                                                        showOperatorUnlockDialog = true
-                                                    } else {
-                                                        Toast.makeText(context, "Operator Pass active Δ 👾 ∇", Toast.LENGTH_SHORT).show()
-                                                    }
-                                                }
-                                                .padding(vertical = 12.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                text = "Δ 👾 ∇",
-                                                fontSize = 16.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = if (isOperatorTier) Color(0xFF22C55E) else Color.White
-                                            )
-                                        }
+                                        Text(
+                                            text = "Support GHOST on GitHub Sponsors / Patreon 💖",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF22C55E)
+                                        )
+                                        Text(
+                                            text = "↗",
+                                            fontSize = 14.sp,
+                                            color = Color(0xFF22C55E)
+                                        )
                                     }
                                 }
                             }

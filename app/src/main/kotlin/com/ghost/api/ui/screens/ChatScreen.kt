@@ -82,19 +82,7 @@ fun ChatScreen(
 
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE) }
-    var isOperatorTier by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_IS_OPERATOR_TIER, false)) }
-
-    DisposableEffect(prefs) {
-        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { sp, key ->
-            if (key == Constants.PREF_IS_OPERATOR_TIER) {
-                isOperatorTier = sp.getBoolean(Constants.PREF_IS_OPERATOR_TIER, false)
-            }
-        }
-        prefs.registerOnSharedPreferenceChangeListener(listener)
-        onDispose {
-            prefs.unregisterOnSharedPreferenceChangeListener(listener)
-        }
-    }
+    val isOperatorTier = true
 
     LaunchedEffect(messages.size, isImeVisible) {
         if (messages.isNotEmpty()) {
@@ -444,13 +432,11 @@ fun ChatMessageRow(
     val prefs = remember(context) { context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE) }
     var operatorAvatar by remember { mutableStateOf(prefs.getString(Constants.PREF_OPERATOR_AVATAR, "🦑") ?: "🦑") }
     var showAvatarDialog by remember { mutableStateOf(false) }
-    var isOperatorTier by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_IS_OPERATOR_TIER, false)) }
+    val isOperatorTier = true
 
     DisposableEffect(prefs) {
         val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { sp, key ->
-            if (key == Constants.PREF_IS_OPERATOR_TIER) {
-                isOperatorTier = sp.getBoolean(Constants.PREF_IS_OPERATOR_TIER, false)
-            } else if (key == Constants.PREF_OPERATOR_AVATAR) {
+            if (key == Constants.PREF_OPERATOR_AVATAR) {
                 operatorAvatar = sp.getString(Constants.PREF_OPERATOR_AVATAR, "🦑") ?: "🦑"
             }
         }
@@ -1088,7 +1074,7 @@ fun InputBar(
 ) {
     val context = LocalContext.current
     val prefs = remember(context) { context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE) }
-    val isOperatorTier = remember(prefs) { prefs.getBoolean(Constants.PREF_IS_OPERATOR_TIER, false) }
+    val isOperatorTier = true
     val coroutineScope = rememberCoroutineScope()
     val audioRecorder = remember { AudioRecorder(context) }
     
