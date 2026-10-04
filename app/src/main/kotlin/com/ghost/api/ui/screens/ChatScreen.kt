@@ -80,6 +80,22 @@ fun ChatScreen(
     val isImeVisible = imeInsets.getBottom(density) > 0
     var showCloseConfirmDialog by remember { mutableStateOf(false) }
 
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE) }
+    var isOperatorTier by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_IS_OPERATOR_TIER, false)) }
+
+    DisposableEffect(prefs) {
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { sp, key ->
+            if (key == Constants.PREF_IS_OPERATOR_TIER) {
+                isOperatorTier = sp.getBoolean(Constants.PREF_IS_OPERATOR_TIER, false)
+            }
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose {
+            prefs.unregisterOnSharedPreferenceChangeListener(listener)
+        }
+    }
+
     LaunchedEffect(messages.size, isImeVisible) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
@@ -119,31 +135,47 @@ fun ChatScreen(
                 )
             }
             
-            // Mathematically centered Turing Machine Glyph: Green Δ, Purple 👾, Green ∇
-            Row(
-                modifier = Modifier.align(Alignment.Center),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Text(
-                    text = "Δ ",
-                    color = Color(0xFF22C55E), // Terminal/Matrix Green
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.1.sp
-                )
-                Text(
-                    text = "👾",
-                    fontSize = 18.sp,
-                    modifier = Modifier.padding(horizontal = 1.dp)
-                )
-                Text(
-                    text = " ∇",
-                    color = Color(0xFF22C55E), // Terminal/Matrix Green
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.1.sp
-                )
+            // Centered Header Glyph:
+            // Free Tier: 🦕💭💸
+            // Operator Tier ($3.50): Green Δ, Purple 👾, Green ∇
+            if (isOperatorTier) {
+                Row(
+                    modifier = Modifier.align(Alignment.Center),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = "Δ ",
+                        color = Color(0xFF22C55E), // Terminal/Matrix Green
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.1.sp
+                    )
+                    Text(
+                        text = "👾",
+                        fontSize = 18.sp,
+                        modifier = Modifier.padding(horizontal = 1.dp)
+                    )
+                    Text(
+                        text = " ∇",
+                        color = Color(0xFF22C55E), // Terminal/Matrix Green
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.1.sp
+                    )
+                }
+            } else {
+                Row(
+                    modifier = Modifier.align(Alignment.Center),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = "🦕💭💸",
+                        fontSize = 16.sp,
+                        letterSpacing = 2.sp
+                    )
+                }
             }
             
             // Settings menu dropdown button with matching 44dp touch target
@@ -412,8 +444,23 @@ fun ChatMessageRow(
     val prefs = remember(context) { context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE) }
     var operatorAvatar by remember { mutableStateOf(prefs.getString(Constants.PREF_OPERATOR_AVATAR, "🦑") ?: "🦑") }
     var showAvatarDialog by remember { mutableStateOf(false) }
+    var isOperatorTier by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_IS_OPERATOR_TIER, false)) }
 
-    if (showAvatarDialog) {
+    DisposableEffect(prefs) {
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { sp, key ->
+            if (key == Constants.PREF_IS_OPERATOR_TIER) {
+                isOperatorTier = sp.getBoolean(Constants.PREF_IS_OPERATOR_TIER, false)
+            } else if (key == Constants.PREF_OPERATOR_AVATAR) {
+                operatorAvatar = sp.getString(Constants.PREF_OPERATOR_AVATAR, "🦑") ?: "🦑"
+            }
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose {
+            prefs.unregisterOnSharedPreferenceChangeListener(listener)
+        }
+    }
+
+    if (showAvatarDialog && isOperatorTier) {
         OperatorAvatarDialog(
             currentAvatar = operatorAvatar,
             onDismiss = { showAvatarDialog = false },
@@ -426,11 +473,12 @@ fun ChatMessageRow(
         )
     }
 
+    val activeAvatar = if (isOperatorTier) operatorAvatar else "🦑"
     val headerText = when {
         message.eventType == "LOGIC_TRACE" -> "⌬ REASONING TRACE ⌬"
         message.eventType == "DREAM" -> "✧ DREAM STATE ✧"
-        isUser -> "Δ $operatorAvatar ∇"
-        else -> "Δ 👾 ∇"
+        isUser -> "Δ $activeAvatar ∇"
+        else -> if (isOperatorTier) "Δ 👾 ∇" else "🦕💭💸"
     }
     val headerColor = when {
         message.eventType == "LOGIC_TRACE" -> AccentOrange
@@ -440,7 +488,7 @@ fun ChatMessageRow(
     }
 
     val ucfFormattedContent = if (isUser) {
-        "Δ $operatorAvatar ∇:\n$cleanContent\n\n[$timeStr]"
+        "Δ $activeAvatar ∇:\n$cleanContent\n\n[$timeStr]"
     } else {
         "$aiHeaderTag:\n$cleanContent\n\n[$timeStr$deltaSuffix]"
     }
@@ -477,7 +525,13 @@ fun ChatMessageRow(
                     modifier = if (isUser) {
                         Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .clickable { showAvatarDialog = true }
+                            .clickable {
+                                if (isOperatorTier) {
+                                    showAvatarDialog = true
+                                } else {
+                                    Toast.makeText(context, "Operator Pass required (£3.50 🦕💭💸) to customize avatar", Toast.LENGTH_SHORT).show()
+                                }
+                            }
                             .padding(vertical = 2.dp, horizontal = 4.dp)
                     } else Modifier
                 ) {
@@ -490,7 +544,7 @@ fun ChatMessageRow(
                     )
                     if (isUser) {
                         Text(
-                            text = " ▾",
+                            text = if (isOperatorTier) " ▾" else " 🔒",
                             color = headerColor.copy(alpha = 0.6f),
                             fontSize = 11.sp
                         )
@@ -1033,6 +1087,8 @@ fun InputBar(
     onClearImage: () -> Unit
 ) {
     val context = LocalContext.current
+    val prefs = remember(context) { context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE) }
+    val isOperatorTier = remember(prefs) { prefs.getBoolean(Constants.PREF_IS_OPERATOR_TIER, false) }
     val coroutineScope = rememberCoroutineScope()
     val audioRecorder = remember { AudioRecorder(context) }
     
@@ -1208,7 +1264,7 @@ fun InputBar(
                             currentImages.size == 1 -> "[📎 Image attached]"
                             voiceState == VoiceState.RECORDING -> "Recording..."
                             voiceState == VoiceState.CONFIRM -> "Send or tap here to cancel"
-                            else -> "Δ 👾 ∇"
+                            else -> if (isOperatorTier) "Δ 👾 ∇" else "🦕💭💸"
                         }
                         val hintColor = when (voiceState) {
                             VoiceState.RECORDING -> colorRecording

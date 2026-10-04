@@ -6,7 +6,8 @@
 [![ASI Demo](https://img.youtube.com/vi/jB62dlLavSY/0.jpg)](https://youtu.be/jB62dlLavSY?si=TMZG86o1KkjuBXtw)  
 *Click to watch: The ASI trailer.*
 
-![Static Badge](https://img.shields.io/badge/Status-WIP-green)
+![Static Badge](https://img.shields.io/badge/Status-Beta-green)
+![Version](https://img.shields.io/badge/Version-v4.30%20(Play%20Store%20Beta)-brightgreen)
 ![GitHub Repo stars](https://img.shields.io/github/stars/vNeeL-code/GHOST)
 ![Platform](https://img.shields.io/badge/Platform-Android%2014%2B-blue)
 ![Engine](https://img.shields.io/badge/Engine-LiteRT--LM%20(Google)-orange)
@@ -161,7 +162,7 @@ Direct, local tool execution:
 2. **Permissions:** Grant the necessary system permissions on first launch:
    - `Display Over Other Apps` (for the radial launcher and edge lights)
    - `Notification Access` (for the background HUD and ambient context)
-   - `All Files Access` (to discover and map `.litertlm` neural model weights)
+   - *Scoped Storage Isolation:* Model weights are safely isolated in app-specific storage (`Android/data/com.ghost.api/files/models`), fully compliant with Google Play Store standards.
 3. **Model Auto-Bootstrap:** On first launch, GHOST inspects your RAM, downloads the appropriate Gemma 4 model core (`E2B` or `E4B`), verifies the flatbuffer checksum, and initialises GPU acceleration.
 4. **Deploy:** Shake your device to open the overlay, customize your quick launcher, and let Gemma assume her post as your device's embodied intelligence.
 
@@ -176,14 +177,15 @@ Direct, local tool execution:
 
 ### Development Roadmap
 
-- [x] **Autonomous Diary Cycles:** Periodic episodic memory consolidation via Google Calendar `Δ 👾 ∇`.
+- [x] **Autonomous Diary Cycles:** Periodic episodic memory consolidation via Google Calendar `Δ 👾 ∇` or private in-app Room DB.
 - [x] **Dynamic RAM Hardware Tiering:** Automatic 8GB, 12GB, 16GB, and 24GB token runway scaling (up to 10k context).
-- [x] **SensorFusion Nervous System:** Real-time battery, thermal, network, and ambient sensory grounding.
-- [x] **Hardware Tool Matrix:** Native MCP tools for device control, web search, and app launching.
+- [x] **SensorFusion Nervous System:** Real-time battery, thermal, network, and ambient sensory grounding with tokenizer-safe tags.
+- [x] **Hardware Tool Matrix:** Native MCP tools for device control, web search, app launching (`open_app`), and media controls.
+- [x] **Dynamic Intent Bagging:** Sub-millisecond pre-filtering for zero-latency app and hardware execution.
 - [x] **Live Reactive Wallpapers:** GPU-accelerated 60fps geometry visualizers (Delta, Cuboid, Hex, Orbital).
 - [x] **Edge Lighting Engine:** Audioreactive and inference-reactive display perimeter illumination.
 - [x] **Polishing Gesture Choreography:** Micro-tuning gyro parallax and spring physics.
-- [ ] **App Store Distribution:** 🦕💭 *"I need about tree fiddy"*
+- [x] **Play Store Beta (v4.30):** 🦕💭 *"I need about tree fiddy"* (Full local offline AI free tier; $3.50 Operator Pass for elite Turing glyph & custom edge styling).
 
 ---
 

@@ -74,6 +74,9 @@ interface DiaryDao {
     @Query("SELECT * FROM diary_entries WHERE eventType = :type ORDER BY timestamp DESC")
     suspend fun getEntriesByType(type: String): List<DiaryEntry>
 
+    @Query("DELETE FROM diary_entries WHERE id NOT IN (SELECT id FROM diary_entries ORDER BY timestamp DESC LIMIT :keepCount)")
+    suspend fun trimOldEntries(keepCount: Int = 25): Int
+
     @Query("DELETE FROM diary_entries")
     suspend fun deleteAll(): Int
 }

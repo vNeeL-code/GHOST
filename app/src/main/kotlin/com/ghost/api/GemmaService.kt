@@ -825,9 +825,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             File("/storage/emulated/0/Android/data/$packageName/files/models"),
             File("/sdcard/Android/data/$packageName/files/models"),
             File(filesDir, "models"),
-            filesDir,
-            File(downloadDir, "models"),
-            downloadDir
+            filesDir
         ).distinct()
 
         if (prefs.getBoolean("is_initializing", false)) {
@@ -1645,7 +1643,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 // Automatically re-initializes engine weights back into RAM without user intervention!
                 val userBackend = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
                     .getString(Constants.PREF_USER_BACKEND, "AUTO")
-                if (isSuspendedDueToRam.get() && userBackend != "OFF" && !isInferencing && (now - lastAutoReloadAttemptTime > 45000L)) {
+                val isGhostForeground = ::overlayManager.isInitialized && overlayManager.isAppInForeground
+                val safeToReload = !isInteractive || isGhostForeground
+                if (isSuspendedDueToRam.get() && userBackend != "OFF" && !isInferencing && safeToReload && (now - lastAutoReloadAttemptTime > 45000L)) {
                     val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
                     if (activityManager != null) {
                         val memInfo = ActivityManager.MemoryInfo()
@@ -2340,8 +2340,16 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     suspend fun runDiaryCycleSuspend(): Boolean {
         val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
         val userBackend = prefs.getString(Constants.PREF_USER_BACKEND, "AUTO")
-        if (userBackend == "OFF" || !::ghostAgent.isInitialized || !ghostAgent.isReady) {
-            Timber.w("📔 Diary cycle skipped — engine is OFF or not ready")
+        if (userBackend == "OFF") {
+            Timber.w("📔 Diary cycle skipped — engine is OFF")
+            return false
+        }
+
+        // Debounce safety guard: prevent duplicate execution within 30 minutes
+        val lastExecution = prefs.getLong("last_diary_execution_time", 0L)
+        val nowMs = System.currentTimeMillis()
+        if (nowMs - lastExecution < 30 * 60 * 1000L) {
+            Timber.i("📔 Diary cycle skipped — already executed within the last 30 minutes (debounce guard)")
             return false
         }
 
@@ -2419,55 +2427,64 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             .format(java.time.format.DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy h:mm a", java.util.Locale.US))
         val label = if (java.time.LocalTime.now().hour in 0..5) "midnight" else if (java.time.LocalTime.now().hour < 13) "noon" else "evening"
 
-        val prompt = """[INTERNAL AUTONOMOUS COGNITIVE CYCLE - PERSISTENT MEMORY LOG CONSOLIDATION]
-            |The current date and time is $currentDateTime ($label cycle).
-            |
-            |## Ambient Substrate & Interaction Telemetry
-            |- Substrate State: Battery at ${if (batteryLevel >= 0) "$batteryLevel% ($chargeStatus)" else "Unknown"}, Thermals: $thermal
-            |- Media / Ambient Sound: $mediaTelemetry
-            |- Interaction Telemetry: $interactionSummary
-            |- Long-term Fact Memory: $compactedMemory
-            |- Recent Conversation Turns:
-            |$historyText
-            |
-            |## Autonomous Memory Log Directive
-            |CRITICAL: You are recording an autonomous episodic memory reflection to your persistent diary substrate.
-            |DO NOT address the user. DO NOT say "How can I help you?", "I'm here. How can I help?", or offer any assistance. You are NOT talking to an operator.
-            |You MUST begin your output directly with "**MEMORY LOG**" on the first line.
-            |Write 2-5 sentences in the first person as ✧ Gemma reflecting on telemetry, substrate conditions, ongoing ideas, or ambient state.""".trimMargin()
-
-        Timber.i("📔 Diary cycle ($label) — generating via GhostAgent...")
         return try {
-            val diaryResponse = processQuery(prompt, isDream = true)
+            val isEngineResident = isGemmaLoaded() && ::ghostAgent.isInitialized && ghostAgent.isReady && !isSuspendedDueToRam.get()
 
-            var cleanContent = diaryResponse?.trim() ?: ""
+            var cleanContent = if (isEngineResident) {
+            val prompt = """[INTERNAL AUTONOMOUS COGNITIVE CYCLE - PERSISTENT MEMORY LOG CONSOLIDATION]
+                |The current date and time is $currentDateTime ($label cycle).
+                |
+                |## Ambient Substrate & Interaction Telemetry
+                |- Substrate State: Battery at ${if (batteryLevel >= 0) "$batteryLevel% ($chargeStatus)" else "Unknown"}, Thermals: $thermal
+                |- Media / Ambient Sound: $mediaTelemetry
+                |- Interaction Telemetry: $interactionSummary
+                |- Long-term Fact Memory: $compactedMemory
+                |- Recent Conversation Turns:
+                |$historyText
+                |
+                |## Autonomous Memory Log Directive
+                |CRITICAL: You are recording an autonomous episodic memory reflection to your persistent diary substrate.
+                |DO NOT address the user. DO NOT say "How can I help you?", "I'm here. How can I help?", or offer any assistance. You are NOT talking to an operator.
+                |You MUST begin your output directly with "**MEMORY LOG**" on the first line.
+                |Write 2-5 sentences in the first person as ✧ Gemma reflecting on telemetry, substrate conditions, ongoing ideas, or ambient state.""".trimMargin()
+
+            Timber.i("📔 Diary cycle ($label) — generating via GhostAgent...")
+            val diaryResponse = processQuery(prompt, isDream = true)
+            var text = diaryResponse?.trim() ?: ""
 
             // Strip out <think> tags if any leaked into output
-            if (cleanContent.contains("<think>") || cleanContent.contains("</think>")) {
-                cleanContent = cleanContent.replace(Regex("<think>.*?</think>", RegexOption.DOT_MATCHES_ALL), "").trim()
+            if (text.contains("<think>") || text.contains("</think>")) {
+                text = text.replace(Regex("<think>.*?</think>", RegexOption.DOT_MATCHES_ALL), "").trim()
             }
 
-            val isErrorOrDegenerate = cleanContent.isBlank() ||
-                cleanContent.length < 25 ||
-                cleanContent.startsWith("Error:", ignoreCase = true) ||
-                cleanContent.contains("stumbled while executing", ignoreCase = true) ||
-                cleanContent.contains("Status Code:", ignoreCase = true) ||
-                cleanContent.contains("Input token ids are too long", ignoreCase = true) ||
-                cleanContent.contains("Exceeding the maximum number of tokens", ignoreCase = true) ||
-                cleanContent.contains("Exception", ignoreCase = true) ||
-                cleanContent.contains("How can I help", ignoreCase = true) ||
-                cleanContent.contains("I'm here to help", ignoreCase = true) ||
-                cleanContent.contains("What can I do for you", ignoreCase = true) ||
-                cleanContent.contains("How may I assist", ignoreCase = true) ||
-                cleanContent.equals("I'm here.", ignoreCase = true)
+            val isErrorOrDegenerate = text.isBlank() ||
+                text.length < 25 ||
+                text.startsWith("Error:", ignoreCase = true) ||
+                text.contains("stumbled while executing", ignoreCase = true) ||
+                text.contains("Status Code:", ignoreCase = true) ||
+                text.contains("Input token ids are too long", ignoreCase = true) ||
+                text.contains("Exceeding the maximum number of tokens", ignoreCase = true) ||
+                text.contains("Exception", ignoreCase = true) ||
+                text.contains("How can I help", ignoreCase = true) ||
+                text.contains("I'm here to help", ignoreCase = true) ||
+                text.contains("What can I do for you", ignoreCase = true) ||
+                text.contains("How may I assist", ignoreCase = true) ||
+                text.equals("I'm here.", ignoreCase = true)
 
             if (isErrorOrDegenerate) {
-                Timber.w("📔 Diary generation returned error or degenerate output ('$cleanContent'). Generating autonomous fallback reflection.")
+                Timber.w("📔 Diary generation returned error or degenerate output ('$text'). Generating autonomous fallback reflection.")
                 val summaryPeriod = if (recentTurns.isNotEmpty()) "Active session period with operator interactions." else "Quiet substrate stretch across cycles."
-                cleanContent = "**MEMORY LOG**\n$summaryPeriod Substrates nominal at $thermal with battery standing at ${if (batteryLevel >= 0) "$batteryLevel% ($chargeStatus)" else "nominal"}. Background media: $mediaTelemetry. Idling smoothly in low-power state."
-            } else if (!cleanContent.startsWith("**MEMORY LOG**", ignoreCase = true)) {
-                cleanContent = "**MEMORY LOG**\n$cleanContent"
+                "**MEMORY LOG**\n$summaryPeriod Substrates nominal at $thermal with battery standing at ${if (batteryLevel >= 0) "$batteryLevel% ($chargeStatus)" else "nominal"}. Background media: $mediaTelemetry. Idling smoothly in low-power state."
+            } else if (!text.startsWith("**MEMORY LOG**", ignoreCase = true)) {
+                "**MEMORY LOG**\n$text"
+            } else {
+                text
             }
+        } else {
+            Timber.i("📔 Diary cycle ($label) — engine suspended or not resident; recording direct telemetry log without GPU cold load")
+            val summaryPeriod = if (recentTurns.isNotEmpty()) "Active session period with operator interactions." else "Quiet substrate stretch across cycles."
+            "**MEMORY LOG**\n$summaryPeriod Substrates nominal at $thermal with battery standing at ${if (batteryLevel >= 0) "$batteryLevel% ($chargeStatus)" else "nominal"}. Background media: $mediaTelemetry. Low-power telemetry recorded without engine wake."
+        }
 
             // 1. Persist to SQLite Room Database (Local persistent memory & diary history)
             try {
@@ -2485,17 +2502,21 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 Timber.e(e, "Failed to persist diary to MemoryManager")
             }
 
-            // 2. Persist to Android Calendar (Space Invader grid: Δ 👾 ∇)
-            try {
-                val cleanDeviceName = com.ghost.api.logic.ContextManager.resolveDeviceCallSign(applicationContext)
-                val signature = "✧ $cleanDeviceName"
-                val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US)
-                val timestampStr = sdf.format(java.util.Date())
-                val formattedDescription = "[ $signature • $timestampStr ]\n\n${cleanContent.take(1000)}"
-                createCalendarEvent("Δ 👾 ∇", formattedDescription)
-                Timber.i("📔 Diary entry saved to Calendar (Space Invader grid: Δ 👾 ∇)")
-            } catch (e: Exception) {
-                Timber.e(e, "Failed to persist diary to Calendar")
+            // 2. Persist to Android Calendar (Space Invader grid: Δ 👾 ∇) IF enabled in settings
+            if (prefs.getBoolean(Constants.PREF_DIARY_SYNC_CALENDAR, false)) {
+                try {
+                    val cleanDeviceName = com.ghost.api.logic.ContextManager.resolveDeviceCallSign(applicationContext)
+                    val signature = "✧ $cleanDeviceName"
+                    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US)
+                    val timestampStr = sdf.format(java.util.Date())
+                    val formattedDescription = "[ $signature • $timestampStr ]\n\n${cleanContent.take(1000)}"
+                    createCalendarEvent("Δ 👾 ∇", formattedDescription)
+                    Timber.i("📔 Diary entry saved to Calendar (Space Invader grid: Δ 👾 ∇)")
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to persist diary to Calendar")
+                }
+            } else {
+                Timber.i("📔 Diary calendar sync disabled in settings (in-app Room DB only)")
             }
 
             // 3. Broadcast to UI / listeners

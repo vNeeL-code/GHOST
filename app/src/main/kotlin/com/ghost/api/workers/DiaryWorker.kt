@@ -33,6 +33,12 @@ class DiaryWorker(
             return Result.success()
         }
 
+        val userBackend = prefs.getString(Constants.PREF_USER_BACKEND, "AUTO")
+        if (userBackend == "OFF") {
+            Timber.i("📔 DiaryWorker skipped: Engine backend is set to OFF")
+            return Result.success()
+        }
+
         val lastRun = prefs.getLong("last_diary_execution_time", 0L)
         val cadenceHours = when (cadence) {
             "1" -> 1L

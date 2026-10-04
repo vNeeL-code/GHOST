@@ -109,6 +109,8 @@ object Constants {
     const val PREF_PASSIVE_TTS = "passive_notification_tts"
     const val PREF_AUTONOMOUS_DIARY = "autonomous_diary_enabled"
     const val PREF_DIARY_CADENCE = "autonomous_diary_cadence" // "1", "3", "12", "OFF"
+    const val PREF_DIARY_SYNC_CALENDAR = "diary_sync_calendar"
+    const val PREF_IS_OPERATOR_TIER = "is_operator_tier"
     const val PREF_USER_BACKEND = "user_backend_override"  // "AUTO", "CPU", "GPU"
     const val PREF_SELECTED_MODEL = "selected_model_core"   // "E4B", "E2B"
     const val PREF_VISUALIZER_PRESET = "visualizer_preset"  // "OPTION_A", "OPTION_B", "OPTION_C", "OPTION_D"
@@ -124,10 +126,11 @@ object Constants {
     const val PREF_LAST_KNOWN_MODEL_PATH = "last_known_model_path"
 
     // Summon Controls
-    const val PREF_SUMMON_METHOD = "summon_method" // "SHAKE", "EDGE_NUB", "BOTH"
+    const val PREF_SUMMON_METHOD = "summon_method" // "SHAKE", "EDGE_NUB", "BOTH", "OFF"
     const val SUMMON_METHOD_SHAKE = "SHAKE"
     const val SUMMON_METHOD_EDGE_NUB = "EDGE_NUB"
     const val SUMMON_METHOD_BOTH = "BOTH"
+    const val SUMMON_METHOD_OFF = "OFF"
     const val PREF_EDGE_NUB_Y = "edge_nub_y_pos"
 
     // Token estimation (multimodal tuned for Gemma 4 / LiteRT-LM)

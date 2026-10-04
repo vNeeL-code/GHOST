@@ -904,12 +904,31 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
             battLevel <= 20 -> "🔋"
             else -> "🔋"
         }
-        sb.append("$battIcon $battLevel%")
+        val isFull = (ctx.battery.isCharging && battLevel >= 95) || battLevel >= 98
+        val battCategory = when {
+            isFull -> "FULL"
+            battLevel <= 5 -> "CRITICAL"
+            battLevel <= 20 -> "LOW"
+            battLevel <= 65 -> "MID"
+            else -> "HIGH"
+        }
+        sb.append("$battIcon $battLevel% [$battCategory]")
         if (ctx.battery.isCharging) sb.append("⚡")
-        if (ctx.battery.currentNow < 0) sb.append(" (${ctx.battery.currentNow}mA drain)")
+        if (ctx.battery.currentNow < 0) {
+            sb.append(" (${Math.abs(ctx.battery.currentNow)}mA drain)")
+        } else if (ctx.battery.currentNow > 0 && ctx.battery.isCharging) {
+            sb.append(" (${ctx.battery.currentNow}mA charge)")
+        }
 
         sb.append(" | 🌡️ ${Math.round(ctx.battery.temperature)}°C")
-        sb.append(" | 🧠 RAM: ${ctx.system.ramUsedPercent}%")
+        val ramUsed = ctx.system.ramUsedPercent
+        val ramCategory = when {
+            ramUsed < 50 -> "LIGHT"
+            ramUsed < 75 -> "MODERATE"
+            ramUsed < 90 -> "HIGH"
+            else -> "CRITICAL"
+        }
+        sb.append(" | 🧠 RAM: $ramUsed% [$ramCategory]")
         sb.append(" | 💿 ${String.format(java.util.Locale.US, "%.1f", ctx.system.storageFreeGB)}GB free")
         sb.append("\n")
 

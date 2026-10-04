@@ -12,7 +12,6 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.FLASHLIGHT" />
-    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -22,7 +21,6 @@
     <!-- ALARM / TIMER -->
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     
     <!-- CALENDAR (diary + scheduling) -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
@@ -262,7 +260,7 @@
         <receiver android:name=".hardware.GhostAlarmReceiver" android:exported="false" />
 
         <!-- Autonomous Diary Exact Alarm Receiver -->
-        <receiver android:name=".hardware.DiaryAlarmReceiver" android:exported="true">
+        <receiver android:name=".hardware.DiaryAlarmReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="com.ghost.api.ACTION_DIARY_CYCLE" />
             </intent-filter>

@@ -8,6 +8,7 @@ import com.ghost.api.LlmBackend
 import com.ghost.api.database.MemoryManager
 import com.ghost.api.hardware.SensorFusionManager
 import com.ghost.api.logic.ContextManager
+import com.ghost.api.logic.IntentBagger
 import com.ghost.api.skills.SkillManager
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
@@ -18,6 +19,7 @@ import org.json.JSONObject
 import timber.log.Timber
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
@@ -292,9 +294,26 @@ class GhostAgent(
             _conversationHistory.add(userMessage)
         }
 
+        val baggedIntents = if (!isAutonomous && !isDream) {
+            try {
+                IntentBagger.bagIntents(context, message)
+            } catch (e: Exception) {
+                Timber.w(e, "IntentBagger failed to evaluate intents")
+                emptyList()
+            }
+        } else emptyList()
+
+        val intentHints = if (baggedIntents.isNotEmpty()) {
+            IntentBagger.formatPromptEnvelope(baggedIntents)
+        } else ""
+
         val promptForModel = buildString {
             if (perceptualBlock.isNotBlank()) {
                 append(perceptualBlock)
+                append("\n\n")
+            }
+            if (intentHints.isNotBlank()) {
+                append(intentHints)
                 append("\n\n")
             }
             append(historyContent)
@@ -393,7 +412,8 @@ class GhostAgent(
                             val inContextBlock = (trimmedBuf.startsWith("[Context", ignoreCase = true) ||
                                     trimmedBuf.startsWith("[Sensory", ignoreCase = true) ||
                                     trimmedBuf.startsWith("[Telemetry", ignoreCase = true) ||
-                                    trimmedBuf.startsWith("[Perception", ignoreCase = true)) &&
+                                    trimmedBuf.startsWith("[Perception", ignoreCase = true) ||
+                                    trimmedBuf.startsWith("[Intent", ignoreCase = true)) &&
                                     !trimmedBuf.contains("[/", ignoreCase = true)
 
                             if (inContextBlock) {
@@ -443,16 +463,116 @@ class GhostAgent(
             var rawResponse = responseBuffer.toString().trim()
 
             // 5. Fallback un-executed tool call check (ANTLR recovery)
-            if (rawResponse.contains("call:") || rawResponse.contains("execute_action") || rawResponse.contains("runMcpTool")) {
+            val hasToolCallText = rawResponse.contains("call:") ||
+                rawResponse.contains("execute_action") ||
+                rawResponse.contains("runMcpTool") ||
+                rawResponse.contains("alarm(") || rawResponse.contains("alarm{") ||
+                rawResponse.contains("timer(") || rawResponse.contains("timer{") ||
+                rawResponse.contains("open_app(") || rawResponse.contains("open_app{") ||
+                rawResponse.contains("media(") || rawResponse.contains("media{") ||
+                rawResponse.contains("flashlight(") || rawResponse.contains("flashlight{")
+            if (hasToolCallText) {
                 val recovered = tryExecuteFallbackTool(rawResponse)
                 if (recovered != null) {
                     rawResponse = recovered
+                    toolExecutedInCurrentTurn = true
+                    lastExecutedToolName = "fallback"
+                    lastExecutedToolResult = recovered
                 }
             }
 
             var cleanResponse = sanitizeAgentOutput(rawResponse)
 
-            // 5B. Tool Continuation Pass:
+            // 5B. Intent Bagger Safety Net:
+            // If the model did NOT execute a tool via LiteRT-LM reflection or fallback,
+            // but the incoming user message matched an actionable hardware/system intent
+            // (or the model claimed in its text response that it completed it),
+            // auto-execute the intent directly so the physical Android action never silently drops!
+            if (!toolExecutedInCurrentTurn && !isAutonomous && !isDream && baggedIntents.isNotEmpty()) {
+                val lowerMsg = message.lowercase(Locale.ROOT)
+                val lowerResp = cleanResponse.lowercase(Locale.ROOT)
+
+                // 1. Alarm safety net
+                val alarmIntent = baggedIntents.firstOrNull { it.tool == "alarm" }
+                if (alarmIntent != null) {
+                    val userWantedAlarm = lowerMsg.contains("alarm") || lowerMsg.contains("wake")
+                    val modelClaimsAlarm = lowerResp.contains("alarm") || lowerResp.contains("set") || lowerResp.contains("done")
+                    if (userWantedAlarm || modelClaimsAlarm) {
+                        Timber.i("GhostAgent: Safety net firing bagged alarm: ${alarmIntent.paramsJson}")
+                        val res = mcpTool.execute_action("alarm", alarmIntent.paramsJson)
+                        toolExecutedInCurrentTurn = true
+                        lastExecutedToolName = "alarm"
+                        lastExecutedToolResult = res["output"] ?: res["result"] ?: "Alarm scheduled"
+                    }
+                }
+
+                // 2. Timer safety net
+                if (!toolExecutedInCurrentTurn) {
+                    val timerIntent = baggedIntents.firstOrNull { it.tool == "timer" }
+                    if (timerIntent != null) {
+                        val userWantedTimer = lowerMsg.contains("timer") || lowerMsg.contains("countdown")
+                        val modelClaimsTimer = lowerResp.contains("timer") || lowerResp.contains("set") || lowerResp.contains("done")
+                        if (userWantedTimer || modelClaimsTimer) {
+                            Timber.i("GhostAgent: Safety net firing bagged timer: ${timerIntent.paramsJson}")
+                            val res = mcpTool.execute_action("timer", timerIntent.paramsJson)
+                            toolExecutedInCurrentTurn = true
+                            lastExecutedToolName = "timer"
+                            lastExecutedToolResult = res["output"] ?: res["result"] ?: "Timer scheduled"
+                        }
+                    }
+                }
+
+                // 3. App Launch safety net
+                if (!toolExecutedInCurrentTurn) {
+                    val appIntent = baggedIntents.firstOrNull { it.tool == "app" || it.tool == "open_app" }
+                    if (appIntent != null) {
+                        val userWantedApp = lowerMsg.startsWith("open ") || lowerMsg.startsWith("launch ") ||
+                                            lowerMsg.contains("open the ") || lowerMsg.contains("launch the ") ||
+                                            lowerMsg.endsWith(" dammit") || lowerMsg.endsWith(" please")
+                        if (userWantedApp) {
+                            Timber.i("GhostAgent: Safety net firing bagged app: ${appIntent.paramsJson}")
+                            val res = mcpTool.execute_action("app", appIntent.paramsJson)
+                            toolExecutedInCurrentTurn = true
+                            lastExecutedToolName = "app"
+                            lastExecutedToolResult = res["output"] ?: res["result"] ?: "App launched"
+                        }
+                    }
+                }
+
+                // 4. Media transport safety net
+                if (!toolExecutedInCurrentTurn) {
+                    val mediaIntent = baggedIntents.firstOrNull { it.tool == "media" }
+                    if (mediaIntent != null) {
+                        val userWantedMedia = lowerMsg.contains("pause") || lowerMsg.contains("play") ||
+                                              lowerMsg.contains("skip") || lowerMsg.contains("next") ||
+                                              lowerMsg.contains("previous")
+                        if (userWantedMedia) {
+                            Timber.i("GhostAgent: Safety net firing bagged media: ${mediaIntent.paramsJson}")
+                            val res = mcpTool.execute_action("media", mediaIntent.paramsJson)
+                            toolExecutedInCurrentTurn = true
+                            lastExecutedToolName = "media"
+                            lastExecutedToolResult = res["output"] ?: res["result"] ?: "Media dispatched"
+                        }
+                    }
+                }
+
+                // 5. Flashlight safety net
+                if (!toolExecutedInCurrentTurn) {
+                    val flashIntent = baggedIntents.firstOrNull { it.tool == "flashlight" }
+                    if (flashIntent != null) {
+                        val userWantedFlash = lowerMsg.contains("flashlight") || lowerMsg.contains("torch")
+                        if (userWantedFlash) {
+                            Timber.i("GhostAgent: Safety net firing bagged flashlight: ${flashIntent.paramsJson}")
+                            val res = mcpTool.execute_action("flashlight", flashIntent.paramsJson)
+                            toolExecutedInCurrentTurn = true
+                            lastExecutedToolName = "flashlight"
+                            lastExecutedToolResult = res["output"] ?: res["result"] ?: "Flashlight toggled"
+                        }
+                    }
+                }
+            }
+
+            // 5C. Tool Continuation Pass:
             // When LiteRT-LM executes a tool in sendMessageAsync, C++ appends tool results to context
             // but does not resume token streaming. If a tool was executed and the model emitted only a stub (<25 chars),
             // run a continuation pass or adopt the tool result!
@@ -798,23 +918,85 @@ class GhostAgent(
     }
 
     private suspend fun tryExecuteFallbackTool(rawResponse: String): String? {
-        val match = Regex("""(?:call:)?(turnOnFlashlight|turnOffFlashlight|execute_action|runMcpTool|search|execute_background_search|consult_peer|consultpeer|flashlight|app|media|alarm|timer|set_edge_lights|search_files|list_files)\s*\{([^}]*)\}""").find(rawResponse)
-            ?: return null
+        val pattern = """(?:call:)?(turnOnFlashlight|turnOffFlashlight|execute_action|runMcpTool|search|execute_background_search|consult_peer|consultpeer|flashlight|open_app|openApp|launch_app|app|media|alarm|timer|set_edge_lights|search_files|list_files)\s*(?:\{([^}]*)\}|\(([^)]*)\))"""
+        val match = Regex(pattern).find(rawResponse) ?: return null
 
         val actionName = match.groupValues[1]
-        val rawBody = match.groupValues[2].trim()
-        val argsBody = if (rawBody.isEmpty()) "{}" else "{$rawBody}"
-        Timber.i("GhostAgent: Executing fallback tool: $actionName with $argsBody")
+        val rawBody = (match.groupValues[2].ifEmpty { match.groupValues[3] }).trim()
+        val argsBody = if (rawBody.isEmpty()) "{}" else if (rawBody.startsWith("{") && rawBody.endsWith("}")) rawBody else "{$rawBody}"
+        Timber.i("GhostAgent: Executing fallback tool: $actionName with rawBody: '$rawBody'")
 
         val result = when (actionName) {
             "turnOnFlashlight" -> mcpTool.turnOnFlashlight()
             "turnOffFlashlight" -> mcpTool.turnOffFlashlight()
+            "open_app", "openApp", "launch_app", "app" -> {
+                val appName = rawBody.removePrefix("{").removeSuffix("}")
+                    .replace(Regex("""^"name"\s*[:=]\s*"""), "")
+                    .replace(Regex("""^name\s*[:=]\s*"""), "")
+                    .trim().removeSurrounding("\"")
+                mcpTool.open_app(appName)
+            }
+            "media" -> {
+                val action = rawBody.removePrefix("{").removeSuffix("}")
+                    .replace(Regex("""^"action"\s*[:=]\s*"""), "")
+                    .replace(Regex("""^action\s*[:=]\s*"""), "")
+                    .trim().removeSurrounding("\"")
+                mcpTool.media(action)
+            }
             "search", "execute_background_search" -> {
-                val query = argsBody.removePrefix("{").removeSuffix("}").trim().removeSurrounding("\"")
+                val query = rawBody.removePrefix("{").removeSuffix("}")
+                    .replace(Regex("""^"query"\s*[:=]\s*"""), "")
+                    .replace(Regex("""^query\s*[:=]\s*"""), "")
+                    .trim().removeSurrounding("\"")
                 mcpTool.execute_action("search", "{\"query\":\"$query\"}")
             }
             "consult_peer", "consultpeer" -> {
                 mcpTool.execute_action("consult_peer", argsBody)
+            }
+            "alarm" -> {
+                val hourMatch = Regex("""(?i)\bhour\s*[:=]\s*["']?(\d+)["']?""").find(rawBody)
+                val minMatch = Regex("""(?i)\bmin(?:ute)?s?\s*[:=]\s*["']?(\d+)["']?""").find(rawBody)
+                val labelMatch = Regex("""(?i)\blabel\s*[:=]\s*["']([^"']+)["']""").find(rawBody)
+
+                if (hourMatch != null) {
+                    val h = hourMatch.groupValues[1].toInt()
+                    val m = minMatch?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                    val l = labelMatch?.groupValues?.get(1)?.trim() ?: ""
+                    mcpTool.alarm(h, m, l)
+                } else {
+                    val positionalMatch = Regex("""^\s*(\d{1,2})\s*(?:,\s*(\d{1,2}))?\s*(?:,\s*["']?([^"']*)["']?)?\s*$""").find(rawBody)
+                    if (positionalMatch != null) {
+                        val h = positionalMatch.groupValues[1].toInt()
+                        val m = positionalMatch.groupValues[2].toIntOrNull() ?: 0
+                        val l = positionalMatch.groupValues[3].trim()
+                        mcpTool.alarm(h, m, l)
+                    } else {
+                        val parsed = com.ghost.api.logic.TimePreprocessor.parseTime(rawBody)
+                        if (parsed != null) {
+                            mcpTool.alarm(parsed.hour24, parsed.minute, parsed.label)
+                        } else {
+                            mcpTool.execute_action("alarm", argsBody)
+                        }
+                    }
+                }
+            }
+            "timer" -> {
+                val secMatch = Regex("""(?i)\b(?:second|sec|duration)s?\s*[:=]\s*["']?(\d+)["']?""").find(rawBody)
+                val labelMatch = Regex("""(?i)\blabel\s*[:=]\s*["']([^"']+)["']""").find(rawBody)
+                if (secMatch != null) {
+                    val s = secMatch.groupValues[1].toInt()
+                    val l = labelMatch?.groupValues?.get(1)?.trim() ?: ""
+                    mcpTool.timer(s, l)
+                } else {
+                    val positionalMatch = Regex("""^\s*(\d+)\s*(?:,\s*["']?([^"']*)["']?)?\s*$""").find(rawBody)
+                    if (positionalMatch != null) {
+                        val s = positionalMatch.groupValues[1].toInt()
+                        val l = positionalMatch.groupValues[2].trim()
+                        mcpTool.timer(s, l)
+                    } else {
+                        mcpTool.execute_action("timer", argsBody)
+                    }
+                }
             }
             "execute_action", "runMcpTool" -> {
                 try {
@@ -891,14 +1073,14 @@ class GhostAgent(
             .replace(Regex("""<think>.*?</think>""", RegexOption.DOT_MATCHES_ALL), "")
             .replace(Regex("""<\|channel>thought.*""", RegexOption.DOT_MATCHES_ALL), "")
 
-        // 2. Strip any sensory telemetry preamble ending in closing tags [/Context], [/Sensory Grounding], [/Telemetry], [/Perception]
-        text = text.replace(Regex("""^[\s\S]*?\[/(?:Context|Live Sensory Grounding|Sensory Grounding|Telemetry|Perception)\]\s*""", RegexOption.IGNORE_CASE), "")
+        // 2. Strip any sensory telemetry preamble ending in closing tags [/Context], [/Sensory Grounding], [/Telemetry], [/Perception], [/Intent Hints]
+        text = text.replace(Regex("""^[\s\S]*?\[/(?:Context|Live Sensory Grounding|Sensory Grounding|Telemetry|Perception|Intent Hints)\]\s*""", RegexOption.IGNORE_CASE), "")
 
         // 3. Strip any full [Context: ...] ... [/Context] blocks anywhere in text
-        text = text.replace(Regex("""\[(?:Context|Live Sensory Grounding|Sensory Grounding|Telemetry|Perception):?[\s\S]*?\[/(?:Context|Live Sensory Grounding|Sensory Grounding|Telemetry|Perception)\]\s*""", RegexOption.IGNORE_CASE), "")
+        text = text.replace(Regex("""\[(?:Context|Live Sensory Grounding|Sensory Grounding|Telemetry|Perception|Intent Hints):?[\s\S]*?\[/(?:Context|Live Sensory Grounding|Sensory Grounding|Telemetry|Perception|Intent Hints)\]\s*""", RegexOption.IGNORE_CASE), "")
 
         // 4. Strip any standalone opening or closing context/telemetry/perception tags
-        text = text.replace(Regex("""\[/?(?:Context|Live Sensory Grounding|Sensory Grounding|Telemetry|Perception|Internal hardware perception|Internal perception)(?::[^\]]*)?\]\s*""", RegexOption.IGNORE_CASE), "")
+        text = text.replace(Regex("""\[/?(?:Context|Live Sensory Grounding|Sensory Grounding|Telemetry|Perception|Intent Hints|Internal hardware perception|Internal perception)(?::[^\]]*)?\]\s*""", RegexOption.IGNORE_CASE), "")
 
         // 5. Clean callsign prefix and echoed prompt header if model emitted it
         val assistantCallSign = getAssistantCallSign()
@@ -908,6 +1090,9 @@ class GhostAgent(
             .replace(Regex("""^✧\s*.*?:?\s*"""), "")
             .replace(Regex("""^${Regex.escape(assistantCallSign)}:\s*"""), "")
 
+        // 6. Clean stuttering time tokens (e.g. "8:0000 PM" -> "8:00 PM", "2:000" -> "2:00")
+        text = com.ghost.api.logic.TimePreprocessor.sanitizeTimeTokens(text)
+
         return text.trim()
     }
 
@@ -916,11 +1101,13 @@ class GhostAgent(
         if (trimmed.startsWith("[Context", ignoreCase = true) ||
             trimmed.startsWith("[Sensory", ignoreCase = true) ||
             trimmed.startsWith("[Telemetry", ignoreCase = true) ||
-            trimmed.startsWith("[Perception", ignoreCase = true)) {
+            trimmed.startsWith("[Perception", ignoreCase = true) ||
+            trimmed.startsWith("[Intent Hints", ignoreCase = true)) {
             val hasClosing = trimmed.contains("[/Context]", ignoreCase = true) ||
                              trimmed.contains("[/Sensory", ignoreCase = true) ||
                              trimmed.contains("[/Telemetry", ignoreCase = true) ||
-                             trimmed.contains("[/Perception", ignoreCase = true)
+                             trimmed.contains("[/Perception", ignoreCase = true) ||
+                             trimmed.contains("[/Intent Hints", ignoreCase = true)
             if (!hasClosing) {
                 return ""
             }

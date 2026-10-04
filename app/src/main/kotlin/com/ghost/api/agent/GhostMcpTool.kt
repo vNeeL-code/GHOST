@@ -64,15 +64,51 @@ class GhostMcpTool(
         return executeMcpAction("search", "{\"query\":\"$query\"}")
     }
 
+    @Tool(description = "Launches an installed Android application by name or label (e.g. 'Spotify', 'Calendar', 'Camera', 'Chrome', 'Clock', 'Settings', 'Files').")
+    fun open_app(
+        @ToolParam(description = "Name or label of the application to launch") name: String
+    ): Map<String, String> {
+        Timber.i("GhostMcpTool: open_app invoked with name='$name'")
+        return executeMcpAction("app", "{\"name\":\"$name\"}")
+    }
+
+    @Tool(description = "Alias for open_app. Launches an installed application by name.")
+    fun app(
+        @ToolParam(description = "Name or label of the application to launch") name: String
+    ): Map<String, String> = open_app(name)
+
+    @Tool(description = "Controls media playback (PLAY, PAUSE, NEXT, PREV).")
+    fun media(
+        @ToolParam(description = "Playback action: PLAY, PAUSE, NEXT, or PREV") action: String
+    ): Map<String, String> {
+        Timber.i("GhostMcpTool: media invoked with action='$action'")
+        return executeMcpAction("media", "{\"action\":\"$action\"}")
+    }
+
     // Helper functions preserved for direct Kotlin invocation or fallback recovery without schema bloat
     fun consult_peer(peer: String, prompt: String): Map<String, String> =
         executeMcpAction("consult_peer", "{\"peer\":\"$peer\",\"prompt\":\"$prompt\"}")
 
-    fun alarm(hour: Int, minutes: Int = 0, label: String = ""): Map<String, String> =
-        executeMcpAction("alarm", "{\"hour\":$hour,\"minutes\":$minutes,\"label\":\"$label\"}")
+    @JvmOverloads
+    @Tool(description = "Sets an alarm for a specific time via the system Clock app. Hour must strictly be in 24-hour format 0-23 (e.g. 20 for 8 PM, 8 for 8 AM, 0 for midnight).")
+    fun alarm(
+        @ToolParam(description = "Strictly 24-hour format hour (0 to 23, e.g. 20 for 8 PM, 8 for 8 AM)") hour: Int,
+        @ToolParam(description = "Minute (0 to 59, default: 0)") minutes: Int = 0,
+        @ToolParam(description = "Optional alarm label") label: String = ""
+    ): Map<String, String> {
+        Timber.i("GhostMcpTool: alarm invoked with hour=$hour, minutes=$minutes, label='$label'")
+        return executeMcpAction("alarm", "{\"hour\":$hour,\"minutes\":$minutes,\"label\":\"$label\"}")
+    }
 
-    fun timer(seconds: Int, label: String = ""): Map<String, String> =
-        executeMcpAction("timer", "{\"seconds\":$seconds,\"label\":\"$label\"}")
+    @JvmOverloads
+    @Tool(description = "Sets a countdown timer for the specified duration in seconds via the system Clock app.")
+    fun timer(
+        @ToolParam(description = "Duration in seconds (e.g. 300 for 5 minutes, 60 for 1 minute)") seconds: Int,
+        @ToolParam(description = "Optional timer label") label: String = ""
+    ): Map<String, String> {
+        Timber.i("GhostMcpTool: timer invoked with seconds=$seconds, label='$label'")
+        return executeMcpAction("timer", "{\"seconds\":$seconds,\"label\":\"$label\"}")
+    }
 
     fun calendar(title: String, description: String = "", minutes: Int = 30): Map<String, String> =
         executeMcpAction("calendar", "{\"title\":\"$title\",\"description\":\"$description\",\"minutes\":$minutes}")
@@ -218,6 +254,12 @@ class GhostMcpTool(
                     return recovered
                 }
             }
+        } else if (trimmed.contains("=") || trimmed.contains(":")) {
+            val recovered = parseRawToolArgs(trimmed)
+            if (recovered.isNotEmpty()) {
+                Timber.i("GhostMcpTool: Successfully parsed ${recovered.size} unbracketed parameters for $toolName")
+                return recovered
+            }
         }
 
         val plain = trimmed.removeSurrounding("\"")
@@ -245,14 +287,14 @@ class GhostMcpTool(
     }
 
     /**
-     * Auto-heals malformed/unquoted tool call arguments (e.g. `{hour: 18, label: Debug GHOST}`)
+     * Auto-heals malformed/unquoted tool call arguments (e.g. `{hour: 18, label: Debug GHOST}` or `hour = 20, minutes = 0`)
      * when standard JSON parsers fail.
      */
     private fun parseRawToolArgs(rawArgs: String): MutableMap<String, Any> {
         val params = mutableMapOf<String, Any>()
         if (rawArgs.isBlank()) return params
 
-        val keyPattern = Regex("""([a-zA-Z0-9_]+)\s*:\s*""")
+        val keyPattern = Regex("""([a-zA-Z0-9_]+)\s*[:=]\s*""")
         val matches = keyPattern.findAll(rawArgs).toList()
 
         for (i in matches.indices) {

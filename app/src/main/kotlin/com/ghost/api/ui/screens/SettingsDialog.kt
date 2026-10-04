@@ -50,8 +50,11 @@ fun SettingsDialog(
     var passiveTtsEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_PASSIVE_TTS, true)) }
     var diaryActive by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_AUTONOMOUS_DIARY, true)) }
     var diaryCadence by remember { mutableStateOf(prefs.getString(Constants.PREF_DIARY_CADENCE, "12") ?: "12") }
+    var diarySyncCalendar by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_DIARY_SYNC_CALENDAR, false)) }
+    var isOperatorTier by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_IS_OPERATOR_TIER, false)) }
     var ttsEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_TTS_ENABLED, true)) }
     var backend by remember { mutableStateOf(prefs.getString(Constants.PREF_USER_BACKEND, "AUTO") ?: "AUTO") }
+    val isEngineActive = backend != "OFF"
     val hardwareTier = remember { Constants.resolveHardwareModelTier(context) }
     val is8GbDevice = remember { hardwareTier == "E2B" }
     var selectedModel by remember { mutableStateOf(prefs.getString(Constants.PREF_SELECTED_MODEL, hardwareTier) ?: hardwareTier) }
@@ -77,6 +80,56 @@ fun SettingsDialog(
     val accessCn = remember { ComponentName(context, GemmaAccessibilityService::class.java) }
     val enabledServices = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
     val isAccessibilityGranted = enabledServices != null && enabledServices.contains(accessCn.flattenToString())
+
+    var showOperatorUnlockDialog by remember { mutableStateOf(false) }
+
+    if (showOperatorUnlockDialog) {
+        AlertDialog(
+            onDismissRequest = { showOperatorUnlockDialog = false },
+            title = {
+                Text(
+                    text = "Unlock Operator Pass (£3.50)",
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF8BB4F6)
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Support GHOST development! (£3.50 one-time purchase)",
+                        fontSize = 13.sp,
+                        color = Color.White
+                    )
+                    Text(
+                        text = "Perks unlocked:\n• Δ 👾 ∇ elite Turing header glyph (replaces 🦕💭💸)\n• Custom operator avatars & custom emoji input\n• Hexagonal, Prismatic & Cuboid visualizer geometries\n• Reactive edge light styles II, III, IV\n\nFree tier remains 100% uncrippled with full offline local AI & privacy.",
+                        fontSize = 12.sp,
+                        color = Color(0xCCFFFFFF),
+                        lineHeight = 16.sp
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        isOperatorTier = true
+                        prefs.edit().putBoolean(Constants.PREF_IS_OPERATOR_TIER, true).apply()
+                        showOperatorUnlockDialog = false
+                        Toast.makeText(context, "Operator Pass Activated! Δ 👾 ∇ unlocked", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E))
+                ) {
+                    Text("Activate (£3.50)", color = Color.Black, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showOperatorUnlockDialog = false }) {
+                    Text("Cancel", color = Color(0x99FFFFFF))
+                }
+            },
+            containerColor = Color(0xFF141418),
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -144,7 +197,8 @@ fun SettingsDialog(
                         item {
                             SettingsActionCard(
                                 title = "Trigger Diary Log Now",
-                                subtitle = "Generate an episodic reflection immediately",
+                                subtitle = if (isEngineActive) "Generate an episodic reflection immediately" else "Generate an episodic reflection immediately (Engine is currently OFF)",
+                                enabled = isEngineActive,
                                 onClick = {
                                     GemmaService.instance?.startDiaryCycle()
                                     Toast.makeText(context, "Generating diary entry...", Toast.LENGTH_SHORT).show()
@@ -196,24 +250,45 @@ fun SettingsDialog(
                                         ) {
                                             for ((key, label) in presetRow) {
                                                 val isSelected = visualizerPreset == key
+                                                val isLocked = key != "OPTION_A" && !isOperatorTier
+                                                val displayLabel = if (isLocked) "$label 🔒" else label
                                                 Box(
                                                     modifier = Modifier
                                                         .weight(1f)
                                                         .clip(RoundedCornerShape(8.dp))
-                                                        .background(if (isSelected) accentColor else cardBg)
+                                                        .background(
+                                                            when {
+                                                                isSelected -> accentColor
+                                                                isLocked -> cardBg.copy(alpha = 0.5f)
+                                                                else -> cardBg
+                                                            }
+                                                        )
+                                                        .border(
+                                                            width = 1.dp,
+                                                            color = if (isLocked) Color(0x15FFFFFF) else Color(0x33FFFFFF),
+                                                            shape = RoundedCornerShape(8.dp)
+                                                        )
                                                         .clickable {
-                                                            visualizerPreset = key
-                                                            prefs.edit().putString(Constants.PREF_VISUALIZER_PRESET, key).apply()
-                                                            Toast.makeText(context, "Visualizer geometry set to $label", Toast.LENGTH_SHORT).show()
+                                                            if (isLocked) {
+                                                                Toast.makeText(context, "Operator Pass (£3.50 🦕💭💸) required to unlock $label geometry", Toast.LENGTH_SHORT).show()
+                                                            } else {
+                                                                visualizerPreset = key
+                                                                prefs.edit().putString(Constants.PREF_VISUALIZER_PRESET, key).apply()
+                                                                Toast.makeText(context, "Visualizer geometry set to $label", Toast.LENGTH_SHORT).show()
+                                                            }
                                                         }
                                                         .padding(vertical = 10.dp),
                                                     contentAlignment = Alignment.Center
                                                 ) {
                                                     Text(
-                                                        text = label,
+                                                        text = displayLabel,
                                                         fontSize = 12.sp,
                                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                        color = if (isSelected) Color.Black else Color.White
+                                                        color = when {
+                                                            isSelected -> Color.Black
+                                                            isLocked -> textDim.copy(alpha = 0.6f)
+                                                            else -> Color.White
+                                                        }
                                                     )
                                                 }
                                             }
@@ -281,24 +356,45 @@ fun SettingsDialog(
                                     ) {
                                         for ((key, label) in styles) {
                                             val isSelected = edgeLightsStyle == key
+                                            val isLocked = key != Constants.EDGE_STYLE_BARS && !isOperatorTier
+                                            val displayLabel = if (isLocked) "$label 🔒" else label
                                             Box(
                                                 modifier = Modifier
                                                     .weight(1f)
                                                     .clip(RoundedCornerShape(8.dp))
-                                                    .background(if (isSelected) accentColor else Color(0x1AFFFFFF))
+                                                    .background(
+                                                        when {
+                                                            isSelected -> accentColor
+                                                            isLocked -> Color(0x0DFFFFFF)
+                                                            else -> Color(0x1AFFFFFF)
+                                                        }
+                                                    )
+                                                    .border(
+                                                        width = 1.dp,
+                                                        color = if (isLocked) Color(0x11FFFFFF) else Color(0x22FFFFFF),
+                                                        shape = RoundedCornerShape(8.dp)
+                                                    )
                                                     .clickable {
-                                                        edgeLightsStyle = key
-                                                        prefs.edit().putString(Constants.PREF_EDGE_LIGHT_STYLE, key).apply()
-                                                        EdgeLightsManager.invalidate()
+                                                        if (isLocked) {
+                                                            Toast.makeText(context, "Operator Pass (£3.50 🦕💭💸) required for Edge Style $label", Toast.LENGTH_SHORT).show()
+                                                        } else {
+                                                            edgeLightsStyle = key
+                                                            prefs.edit().putString(Constants.PREF_EDGE_LIGHT_STYLE, key).apply()
+                                                            EdgeLightsManager.invalidate()
+                                                        }
                                                     }
                                                     .padding(vertical = 8.dp),
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 Text(
-                                                    text = label,
+                                                    text = displayLabel,
                                                     fontSize = 12.sp,
                                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                    color = if (isSelected) Color.Black else Color.White
+                                                    color = when {
+                                                        isSelected -> Color.Black
+                                                        isLocked -> textDim.copy(alpha = 0.6f)
+                                                        else -> Color.White
+                                                    }
                                                 )
                                             }
                                         }
@@ -335,7 +431,8 @@ fun SettingsDialog(
                                 val summonOptions = listOf(
                                     Constants.SUMMON_METHOD_SHAKE to "Shake",
                                     Constants.SUMMON_METHOD_EDGE_NUB to "Edge",
-                                    Constants.SUMMON_METHOD_BOTH to "Both"
+                                    Constants.SUMMON_METHOD_BOTH to "Both",
+                                    Constants.SUMMON_METHOD_OFF to "Off"
                                 )
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -356,7 +453,8 @@ fun SettingsDialog(
                                                     val desc = when (key) {
                                                         Constants.SUMMON_METHOD_SHAKE -> "Phone shake active 📳"
                                                         Constants.SUMMON_METHOD_EDGE_NUB -> "Right bezel handle active 🎚️"
-                                                        else -> "Shake & Edge handle active ✨"
+                                                        Constants.SUMMON_METHOD_BOTH -> "Shake & Edge handle active ✨"
+                                                        else -> "Overlay summoning disabled 🚫"
                                                     }
                                                     Toast.makeText(context, desc, Toast.LENGTH_SHORT).show()
                                                 }
@@ -414,8 +512,13 @@ fun SettingsDialog(
                         item {
                             SettingsToggleRow(
                                 title = "Autonomous Reflections",
-                                subtitle = "Log episodic memory entries via background alarms",
+                                subtitle = if (isEngineActive) {
+                                    "Log episodic memory entries via background alarms"
+                                } else {
+                                    "Log episodic memory entries via background alarms (Engine is currently OFF)"
+                                },
                                 checked = diaryActive,
+                                enabled = isEngineActive,
                                 onCheckedChange = { checked ->
                                     diaryActive = checked
                                     prefs.edit().putBoolean(Constants.PREF_AUTONOMOUS_DIARY, checked).apply()
@@ -432,7 +535,27 @@ fun SettingsDialog(
                             )
                         }
                         item {
-                            AnimatedVisibility(visible = diaryActive) {
+                            SettingsToggleRow(
+                                title = "Device Calendar Integration",
+                                subtitle = if (!isEngineActive) {
+                                    "Calendar sync paused (Engine is currently OFF)"
+                                } else if (diarySyncCalendar) {
+                                    "Google Calendar sync ACTIVE: Reflections mirror as Δ 👾 ∇ calendar blocks."
+                                } else {
+                                    "In-app PRIVATE: Reflections stay strictly in local database with FIFO eviction (last 25 entries)."
+                                },
+                                checked = diarySyncCalendar,
+                                enabled = isEngineActive,
+                                onCheckedChange = { checked ->
+                                    diarySyncCalendar = checked
+                                    prefs.edit().putBoolean(Constants.PREF_DIARY_SYNC_CALENDAR, checked).apply()
+                                    val msg = if (checked) "Calendar sync enabled (Δ 👾 ∇)" else "In-app private mode (FIFO 25)"
+                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                }
+                            )
+                        }
+                        item {
+                            AnimatedVisibility(visible = diaryActive && isEngineActive) {
                                 Column(modifier = Modifier.padding(top = 4.dp)) {
                                     Text(
                                         text = "Reflection Cadence",
@@ -847,6 +970,144 @@ fun SettingsDialog(
                                 )
                             }
                         }
+
+                        // === Operator Pass (Tree Fiddy 🦕💭💸 vs Δ 👾 ∇) ===
+                        item {
+                            SettingsSectionHeader(title = "Operator Pass")
+                        }
+                        item {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (isOperatorTier) Color(0xFF22C55E) else Color(0xFF3B82F6),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ),
+                                color = cardBg
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(14.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = if (isOperatorTier) "OPERATOR PASS" else "OPERATOR PASS (£3.50)",
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isOperatorTier) Color(0xFF22C55E) else Color(0xFF8BB4F6)
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .background(
+                                                    if (isOperatorTier) Color(0x3322C55E) else Color(0x338BB4F6),
+                                                    RoundedCornerShape(6.dp)
+                                                )
+                                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                                        ) {
+                                            Text(
+                                                text = if (isOperatorTier) "Δ 👾 ∇ ACTIVE" else "FREE TIER 🦕💭💸",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isOperatorTier) Color(0xFF22C55E) else Color(0xFF8BB4F6)
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(6.dp))
+
+                                    Text(
+                                        text = if (isOperatorTier) {
+                                            "Elite status unlocked. Δ 👾 ∇ Turing glyph, reactive edge lights II-IV, hexagonal/prismatic/cuboid visualizers, and custom operator avatars active."
+                                        } else {
+                                            "100% uncrippled local offline AI & privacy. Unlock Operator status for £3.50 (Tree Fiddy 🦕💭💸) to get the elite Δ 👾 ∇ glyph, custom avatars, visualizer geometries, and edge light styles."
+                                        },
+                                        fontSize = 11.sp,
+                                        color = textDim,
+                                        lineHeight = 16.sp
+                                    )
+
+                                    Spacer(modifier = Modifier.height(12.dp))
+
+                                    // Avatar-only buttons (no extra text)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        // Free Tier Button: 🦕💭💸
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(if (!isOperatorTier) Color(0x333B82F6) else Color(0x14FFFFFF))
+                                                .border(
+                                                    1.dp,
+                                                    if (!isOperatorTier) Color(0xFF3B82F6) else Color(0x22FFFFFF),
+                                                    RoundedCornerShape(10.dp)
+                                                )
+                                                .clickable {
+                                                    if (isOperatorTier) {
+                                                        isOperatorTier = false
+                                                        prefs.edit().putBoolean(Constants.PREF_IS_OPERATOR_TIER, false).apply()
+                                                        if (visualizerPreset != "OPTION_A") {
+                                                            visualizerPreset = "OPTION_A"
+                                                            prefs.edit().putString(Constants.PREF_VISUALIZER_PRESET, "OPTION_A").apply()
+                                                        }
+                                                        if (edgeLightsStyle != Constants.EDGE_STYLE_BARS) {
+                                                            edgeLightsStyle = Constants.EDGE_STYLE_BARS
+                                                            prefs.edit().putString(Constants.PREF_EDGE_LIGHT_STYLE, Constants.EDGE_STYLE_BARS).apply()
+                                                            EdgeLightsManager.invalidate()
+                                                        }
+                                                        Toast.makeText(context, "Free Tier active 🦕💭💸", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
+                                                .padding(vertical = 12.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = "🦕💭💸",
+                                                fontSize = 18.sp
+                                            )
+                                        }
+
+                                        // Operator Tier Button: Δ 👾 ∇
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(if (isOperatorTier) Color(0x3322C55E) else Color(0x14FFFFFF))
+                                                .border(
+                                                    1.dp,
+                                                    if (isOperatorTier) Color(0xFF22C55E) else Color(0x22FFFFFF),
+                                                    RoundedCornerShape(10.dp)
+                                                )
+                                                .clickable {
+                                                    if (!isOperatorTier) {
+                                                        showOperatorUnlockDialog = true
+                                                    } else {
+                                                        Toast.makeText(context, "Operator Pass active Δ 👾 ∇", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
+                                                .padding(vertical = 12.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = "Δ 👾 ∇",
+                                                fontSize = 16.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isOperatorTier) Color(0xFF22C55E) else Color.White
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -871,14 +1132,16 @@ private fun SettingsToggleRow(
     title: String,
     subtitle: String,
     checked: Boolean,
+    enabled: Boolean = true,
     onCheckedChange: (Boolean) -> Unit
 ) {
+    val alpha = if (enabled) 1f else 0.4f
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(Color(0xFF141418))
-            .clickable { onCheckedChange(!checked) }
+            .clickable(enabled = enabled) { onCheckedChange(!checked) }
             .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
@@ -888,23 +1151,28 @@ private fun SettingsToggleRow(
                 text = title,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,
-                color = Color.White
+                color = Color.White.copy(alpha = alpha)
             )
             Text(
                 text = subtitle,
                 fontSize = 11.sp,
-                color = Color(0x99FFFFFF),
+                color = Color(0x99FFFFFF).copy(alpha = alpha),
                 lineHeight = 15.sp
             )
         }
         Switch(
             checked = checked,
+            enabled = enabled,
             onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Color(0xFF8BB4F6),
                 checkedTrackColor = Color(0xFF334B77),
                 uncheckedThumbColor = Color(0xFF666666),
-                uncheckedTrackColor = Color(0xFF222222)
+                uncheckedTrackColor = Color(0xFF222222),
+                disabledCheckedThumbColor = Color(0xFF8BB4F6).copy(alpha = 0.4f),
+                disabledCheckedTrackColor = Color(0xFF334B77).copy(alpha = 0.4f),
+                disabledUncheckedThumbColor = Color(0xFF666666).copy(alpha = 0.4f),
+                disabledUncheckedTrackColor = Color(0xFF222222).copy(alpha = 0.4f)
             )
         )
     }
@@ -915,16 +1183,18 @@ private fun SettingsActionCard(
     title: String,
     subtitle: String,
     isWarning: Boolean = false,
+    enabled: Boolean = true,
     onClick: () -> Unit
 ) {
+    val alpha = if (enabled) 1f else 0.4f
     val borderColor = if (isWarning) Color(0xFFF59E0B) else Color(0x1AFFFFFF)
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(Color(0xFF141418))
-            .border(1.dp, borderColor, RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
+            .border(1.dp, borderColor.copy(alpha = alpha), RoundedCornerShape(12.dp))
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
@@ -934,19 +1204,19 @@ private fun SettingsActionCard(
                 text = title,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,
-                color = if (isWarning) Color(0xFFF59E0B) else Color.White
+                color = (if (isWarning) Color(0xFFF59E0B) else Color.White).copy(alpha = alpha)
             )
             Text(
                 text = subtitle,
                 fontSize = 11.sp,
-                color = Color(0x99FFFFFF),
+                color = Color(0x99FFFFFF).copy(alpha = alpha),
                 lineHeight = 15.sp
             )
         }
         Text(
             text = "›",
             fontSize = 20.sp,
-            color = if (isWarning) Color(0xFFF59E0B) else Color(0x66FFFFFF),
+            color = (if (isWarning) Color(0xFFF59E0B) else Color(0x66FFFFFF)).copy(alpha = alpha),
             fontWeight = FontWeight.Light
         )
     }

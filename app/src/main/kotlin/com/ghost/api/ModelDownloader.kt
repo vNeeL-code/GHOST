@@ -95,16 +95,14 @@ class ModelDownloader(
             ?: File(context.filesDir, "models")
         modelsDir.mkdirs()
 
-        // 1. Check all candidate search directories for the requested model file
+        // 1. Check all candidate search directories for the requested model file (app scoped storage only)
         val allSearchDirs = listOfNotNull(
             modelsDir,
             context.getExternalFilesDir(null),
             File("/storage/emulated/0/Android/data/${context.packageName}/files/models"),
             File("/sdcard/Android/data/${context.packageName}/files/models"),
             File(context.filesDir, "models"),
-            context.filesDir,
-            File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "models"),
-            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+            context.filesDir
         ).distinct()
 
         // 1A. DESTINATION RETENTION GUARD: Under no circumstances download over an existing valid model file (>200MB)
@@ -345,9 +343,7 @@ class ModelDownloader(
                 File("/storage/emulated/0/Android/data/${context.packageName}/files/models"),
                 File("/sdcard/Android/data/${context.packageName}/files/models"),
                 File(context.filesDir, "models"),
-                context.filesDir,
-                File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "models"),
-                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                context.filesDir
             ).distinct()
 
             // Check standard file names directly first (with case-insensitive fallback)

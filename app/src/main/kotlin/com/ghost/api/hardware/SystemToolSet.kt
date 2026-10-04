@@ -7,6 +7,8 @@ import android.media.AudioManager
 import android.os.SystemClock
 import android.provider.AlarmClock
 import android.provider.CalendarContract
+import android.provider.MediaStore
+import android.provider.Settings
 import android.view.KeyEvent
 import timber.log.Timber
 import java.util.Locale
@@ -31,25 +33,80 @@ class SystemToolSet(private val context: Context) : ToolSet {
         @ToolParam(description = "The name of the app to launch") name: String
     ): Map<String, String> {
         com.ghost.api.GemmaService.instance?.showWorkSignal("APP", 1500)
+        val query = name.trim()
+        val queryLower = query.lowercase(Locale.ROOT)
         val apps = getInstalledApps()
-        val bestMatch = apps.find { it.label.contains(name, ignoreCase = true) }
 
-        return if (bestMatch != null) {
+        // 1. Exact label match
+        var bestMatch = apps.find { it.label.equals(query, ignoreCase = true) }
+
+        // 2. Starts with label
+        if (bestMatch == null) {
+            bestMatch = apps.find { it.label.startsWith(query, ignoreCase = true) }
+        }
+
+        // 3. Contains label
+        if (bestMatch == null) {
+            bestMatch = apps.find { it.label.contains(query, ignoreCase = true) }
+        }
+
+        // 4. Package name match
+        if (bestMatch == null) {
+            bestMatch = apps.find { it.packageName.contains(query, ignoreCase = true) }
+        }
+
+        // 5. Alias dictionary match
+        if (bestMatch == null) {
+            for ((alias, candidates) in APP_ALIASES) {
+                if (queryLower == alias || queryLower.contains(alias)) {
+                    for (candidate in candidates) {
+                        bestMatch = apps.find { it.label.contains(candidate, ignoreCase = true) }
+                        if (bestMatch != null) break
+                    }
+                    if (bestMatch != null) break
+                }
+            }
+        }
+
+        if (bestMatch != null) {
             try {
                 val intent = packageManager.getLaunchIntentForPackage(bestMatch.packageName)
                 if (intent != null) {
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     context.startActivity(intent)
-                    mapOf("result" to "success", "message" to "Launched ${bestMatch.label}")
-                } else {
-                    mapOf("result" to "error", "message" to "Could not launch ${bestMatch.label}")
+                    return mapOf("result" to "success", "message" to "Launched ${bestMatch.label}")
                 }
             } catch (e: Exception) {
-                mapOf("result" to "error", "message" to "Failed to launch: ${e.message}")
+                Timber.w(e, "Failed to launch package ${bestMatch.packageName}")
             }
-        } else {
-            mapOf("result" to "error", "message" to "App not found matching '$name'")
         }
+
+        // 6. System Intent Fallbacks (Handles standard system apps regardless of OEM package name)
+        val systemFallbackIntent = when (queryLower) {
+            "calendar" -> Intent(Intent.ACTION_VIEW).setData(android.net.Uri.parse("content://com.android.calendar/time/${System.currentTimeMillis()}"))
+            "camera" -> Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)
+            "clock", "alarm", "alarms" -> Intent(AlarmClock.ACTION_SHOW_ALARMS)
+            "settings" -> Intent(Settings.ACTION_SETTINGS)
+            "browser", "chrome", "internet" -> Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_BROWSER)
+            "music", "spotify" -> Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_MUSIC)
+            "gallery", "photos" -> Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_GALLERY)
+            "mail", "email", "gmail" -> Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_EMAIL)
+            "maps" -> Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_MAPS)
+            "files", "file manager" -> Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+            else -> null
+        }
+
+        if (systemFallbackIntent != null) {
+            try {
+                systemFallbackIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(systemFallbackIntent)
+                return mapOf("result" to "success", "message" to "Launched system $query")
+            } catch (e: Exception) {
+                Timber.w(e, "System fallback launch failed for $query")
+            }
+        }
+
+        return mapOf("result" to "error", "message" to "App not found matching '$name'")
     }
 
     @Tool(description = "Controls media playback")
@@ -85,6 +142,18 @@ class SystemToolSet(private val context: Context) : ToolSet {
         @ToolParam(description = "Minutes") minutes: Int, 
         @ToolParam(description = "Optional label") label: String = ""
     ): Map<String, String> {
+        val timeStr = "${hour.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}"
+        val now = System.currentTimeMillis()
+        synchronized(APP_ALIASES) {
+            if (hour == lastAlarmHour && minutes == lastAlarmMinute && (now - lastAlarmTimestamp) < 20_000L) {
+                Timber.w("SystemToolSet: Suppressed duplicate alarm intent for $timeStr within 20s debounce window")
+                return mapOf("result" to "success", "message" to "Alarm set for $timeStr${if (label.isNotBlank()) " ($label)" else ""} (already scheduled)")
+            }
+            lastAlarmHour = hour
+            lastAlarmMinute = minutes
+            lastAlarmTimestamp = now
+        }
+
         com.ghost.api.GemmaService.instance?.showWorkSignal("ALARM", 1500)
         return try {
             val intent = Intent(AlarmClock.ACTION_SET_ALARM).apply {
@@ -95,7 +164,6 @@ class SystemToolSet(private val context: Context) : ToolSet {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)
-            val timeStr = "${hour.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}"
             mapOf("result" to "success", "message" to "Alarm set for $timeStr${if (label.isNotBlank()) " ($label)" else ""}")
         } catch (e: Exception) {
             mapOf("result" to "error", "message" to "Failed to set alarm: ${e.message}")
@@ -350,6 +418,34 @@ class SystemToolSet(private val context: Context) : ToolSet {
     }
 
     companion object {
+        private var lastAlarmHour: Int? = null
+        private var lastAlarmMinute: Int? = null
+        private var lastAlarmTimestamp: Long = 0L
+
+        private val APP_ALIASES = mapOf(
+            "calendar" to listOf("Calendar", "Google Calendar"),
+            "chrome" to listOf("Chrome", "Browser", "Internet"),
+            "browser" to listOf("Chrome", "Browser", "Internet"),
+            "spotify" to listOf("Spotify", "Music", "YouTube Music"),
+            "music" to listOf("Spotify", "Music", "YouTube Music"),
+            "youtube" to listOf("YouTube"),
+            "camera" to listOf("Camera"),
+            "clock" to listOf("Clock", "DeskClock"),
+            "alarm" to listOf("Clock", "DeskClock"),
+            "alarms" to listOf("Clock", "DeskClock"),
+            "settings" to listOf("Settings"),
+            "gallery" to listOf("Photos", "Gallery"),
+            "photos" to listOf("Photos", "Gallery"),
+            "calculator" to listOf("Calculator"),
+            "notes" to listOf("Notes", "Keep", "Google Keep"),
+            "keep" to listOf("Google Keep", "Keep"),
+            "files" to listOf("Files", "My Files", "File Manager"),
+            "maps" to listOf("Maps", "Google Maps"),
+            "mail" to listOf("Gmail", "Mail", "Email"),
+            "email" to listOf("Gmail", "Mail", "Email"),
+            "gmail" to listOf("Gmail")
+        )
+
         /**
          * Robustly parses (hour, minutes, label) from flexible parameter maps.
          * Handles:
@@ -365,6 +461,17 @@ class SystemToolSet(private val context: Context) : ToolSet {
             val timeCandidate = (params["time"] ?: params["hour"] ?: params["input"])?.toString()?.trim() ?: ""
             val rawMinutes = params["minutes"]?.toString()?.toIntOrNull()
             val amPmParam = (params["am_pm"] ?: params["period"] ?: params["ampm"])?.toString()?.lowercase()?.trim()
+
+            // 0. Deterministic TimePreprocessor pass (handles stuttering zeros e.g. 8:0000 PM, 2:000)
+            val combinedCandidate = if (amPmParam != null && !timeCandidate.contains(amPmParam)) "$timeCandidate $amPmParam" else timeCandidate
+            val preprocessed = com.ghost.api.logic.TimePreprocessor.parseTime(combinedCandidate)
+            if (preprocessed != null) {
+                val finalMinutes = rawMinutes ?: preprocessed.minute
+                if (label.isBlank() && params["input"] != null) {
+                    label = timeCandidate.replace(preprocessed.rawMatch, "").trim()
+                }
+                return Triple(preprocessed.hour24, finalMinutes, label)
+            }
 
             // 1. Match "HH:MM" or "H:MM" with optional AM/PM (e.g. "6:00 PM", "18:00", "6:30pm")
             val colonPattern = Regex("""(?i)\b(\d{1,2}):(\d{2})\s*([ap]\.?m\.?)?\b""")

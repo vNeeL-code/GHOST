@@ -14,6 +14,64 @@ class MemoryManager(private val context: Context) {
     
     private val sessionMemoryFile = java.io.File(context.filesDir, "session_memory.txt")
 
+    val externalLogFile: java.io.File by lazy {
+        try {
+            val docs = android.os.Environment.getExternalStoragePublicDirectory(
+                android.os.Environment.DIRECTORY_DOCUMENTS
+            )
+            val ghostDir = java.io.File(docs, "GHOST")
+            if (!ghostDir.exists()) ghostDir.mkdirs()
+            java.io.File(ghostDir, "memory_log.txt")
+        } catch (e: Exception) {
+            val appExternal = context.getExternalFilesDir(null) ?: context.filesDir
+            val ghostDir = java.io.File(appExternal, "GHOST")
+            if (!ghostDir.exists()) ghostDir.mkdirs()
+            java.io.File(ghostDir, "memory_log.txt")
+        }
+    }
+
+    fun appendToMemoryLog(type: String, content: String) {
+        try {
+            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US).apply {
+                timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }
+            val timestamp = sdf.format(java.util.Date())
+            val sanitized = content.trim().replace("\r\n", "\n").replace("\n", " ⏎ ")
+            val line = "[$timestamp] | $type | $sanitized\n"
+            synchronized(this) {
+                externalLogFile.appendText(line, Charsets.UTF_8)
+            }
+        } catch (e: Exception) {
+            timber.log.Timber.w(e, "Failed to append to external memory_log.txt")
+        }
+    }
+
+    suspend fun tailMemoryLog(limitLines: Int = 30): List<String> = withContext(Dispatchers.IO) {
+        try {
+            if (!externalLogFile.exists()) return@withContext emptyList()
+            val lines = externalLogFile.readLines(Charsets.UTF_8)
+            lines.takeLast(limitLines)
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun grepMemoryLog(query: String, maxResults: Int = 20): List<String> = withContext(Dispatchers.IO) {
+        try {
+            if (!externalLogFile.exists() || query.isBlank()) return@withContext emptyList()
+            val matches = mutableListOf<String>()
+            externalLogFile.forEachLine(Charsets.UTF_8) { line ->
+                if (line.contains(query, ignoreCase = true)) {
+                    matches.add(line)
+                    if (matches.size >= maxResults) return@forEachLine
+                }
+            }
+            matches
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
     suspend fun getCompactedSessionMemory(): String = withContext(Dispatchers.IO) {
         if (sessionMemoryFile.exists()) {
             sessionMemoryFile.readText()
@@ -34,6 +92,7 @@ class MemoryManager(private val context: Context) {
 
     suspend fun storeTurn(turn: ConversationTurn) = withContext(Dispatchers.IO) {
         conversationDao.insertTurn(turn)
+        appendToMemoryLog("CHAT", "User: ${turn.userMessage} ↔ Gemma: ${turn.assistantResponse}")
     }
 
     suspend fun getFormattedHistory(limit: Int = 10): String = withContext(Dispatchers.IO) {
@@ -101,6 +160,7 @@ class MemoryManager(private val context: Context) {
             sourceConversationId = -1L
         )
         semanticFactDao.insertFact(fact)
+        appendToMemoryLog("FACT", "$title: $content")
     }
 
     suspend fun searchSemanticFacts(query: String): List<SemanticFact> = withContext(Dispatchers.IO) {
@@ -118,6 +178,8 @@ class MemoryManager(private val context: Context) {
 
     suspend fun addDiaryEntry(entry: DiaryEntry) = withContext(Dispatchers.IO) {
         diaryDao.insertEntry(entry)
+        diaryDao.trimOldEntries(keepCount = 25)
+        appendToMemoryLog(entry.eventType, entry.observation)
     }
 
     suspend fun writeDiaryEntry(eventType: String, observation: String, contextData: String) = withContext(Dispatchers.IO) {
@@ -128,6 +190,8 @@ class MemoryManager(private val context: Context) {
             contextData = contextData
         )
         diaryDao.insertEntry(entry)
+        diaryDao.trimOldEntries(keepCount = 25)
+        appendToMemoryLog(eventType, observation)
     }
 
     suspend fun clearAll() = withContext(Dispatchers.IO) {
