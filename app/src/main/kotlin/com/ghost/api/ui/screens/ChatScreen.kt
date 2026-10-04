@@ -135,47 +135,19 @@ fun ChatScreen(
                 )
             }
             
-            // Centered Header Glyph:
-            // Free Tier: 🦕💭💸
-            // Operator Tier ($3.50): Green Δ, Purple 👾, Green ∇
-            if (isOperatorTier) {
-                Row(
-                    modifier = Modifier.align(Alignment.Center),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Text(
-                        text = "Δ ",
-                        color = Color(0xFF22C55E), // Terminal/Matrix Green
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.1.sp
-                    )
-                    Text(
-                        text = "👾",
-                        fontSize = 18.sp,
-                        modifier = Modifier.padding(horizontal = 1.dp)
-                    )
-                    Text(
-                        text = " ∇",
-                        color = Color(0xFF22C55E), // Terminal/Matrix Green
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.1.sp
-                    )
-                }
-            } else {
-                Row(
-                    modifier = Modifier.align(Alignment.Center),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Text(
-                        text = "🦕💭💸",
-                        fontSize = 16.sp,
-                        letterSpacing = 2.sp
-                    )
-                }
+            // Centered Header Glyph (F-Droid FOSS Edition): ✧ GHOST
+            Row(
+                modifier = Modifier.align(Alignment.Center),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = "✧ GHOST",
+                    color = Color(0xFF8BB4F6),
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 2.sp
+                )
             }
             
             // Settings menu dropdown button with matching 44dp touch target
@@ -522,18 +494,7 @@ fun ChatMessageRow(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = if (isUser) {
-                        Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .clickable {
-                                if (isOperatorTier) {
-                                    showAvatarDialog = true
-                                } else {
-                                    Toast.makeText(context, "Operator Pass required (£3.50 🦕💭💸) to customize avatar", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                            .padding(vertical = 2.dp, horizontal = 4.dp)
-                    } else Modifier
+                    modifier = Modifier.padding(vertical = 2.dp, horizontal = 4.dp)
                 ) {
                     Text(
                         text = headerText,
@@ -542,13 +503,6 @@ fun ChatMessageRow(
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.1.sp
                     )
-                    if (isUser) {
-                        Text(
-                            text = if (isOperatorTier) " ▾" else " 🔒",
-                            color = headerColor.copy(alpha = 0.6f),
-                            fontSize = 11.sp
-                        )
-                    }
                 }
 
                 Row(
