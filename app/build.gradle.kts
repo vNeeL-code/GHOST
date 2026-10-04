@@ -56,9 +56,38 @@ android {
         jvmTarget = "17"
     }
 
+    flavorDimensions += listOf("distribution")
+
+    productFlavors {
+        create("play") {
+            dimension = "distribution"
+            buildConfigField("String", "DISTRIBUTION_FLAVOR", "\"play\"")
+            buildConfigField("boolean", "FEATURE_LOCKED_SKINS", "true")
+            buildConfigField("boolean", "SHOW_OPERATOR_PASS_PAYWALL", "true")
+            buildConfigField("boolean", "FORCE_UNLOCKED", "false")
+        }
+
+        create("fdroid") {
+            dimension = "distribution"
+            buildConfigField("String", "DISTRIBUTION_FLAVOR", "\"fdroid\"")
+            buildConfigField("boolean", "FEATURE_LOCKED_SKINS", "false")
+            buildConfigField("boolean", "SHOW_OPERATOR_PASS_PAYWALL", "false")
+            buildConfigField("boolean", "FORCE_UNLOCKED", "false")
+        }
+
+        create("patreon") {
+            dimension = "distribution"
+            buildConfigField("String", "DISTRIBUTION_FLAVOR", "\"patreon\"")
+            buildConfigField("boolean", "FEATURE_LOCKED_SKINS", "true")
+            buildConfigField("boolean", "SHOW_OPERATOR_PASS_PAYWALL", "false")
+            buildConfigField("boolean", "FORCE_UNLOCKED", "true")
+        }
+    }
+
     buildFeatures {
         viewBinding = true
         compose = true
+        buildConfig = true
     }
 
     packaging {

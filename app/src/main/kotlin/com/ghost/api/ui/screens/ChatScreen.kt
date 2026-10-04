@@ -24,6 +24,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import com.ghost.api.BuildConfig
 import com.ghost.api.Constants
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -82,12 +83,12 @@ fun ChatScreen(
 
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE) }
-    var isOperatorTier by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_IS_OPERATOR_TIER, false)) }
+    var isOperatorTier by remember { mutableStateOf(Constants.isOperatorTier(prefs)) }
 
     DisposableEffect(prefs) {
         val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { sp, key ->
             if (key == Constants.PREF_IS_OPERATOR_TIER) {
-                isOperatorTier = sp.getBoolean(Constants.PREF_IS_OPERATOR_TIER, false)
+                isOperatorTier = Constants.isOperatorTier(sp)
             }
         }
         prefs.registerOnSharedPreferenceChangeListener(listener)
@@ -136,9 +137,11 @@ fun ChatScreen(
             }
             
             // Centered Header Glyph:
-            // Free Tier: 🦕💭💸
-            // Operator Tier ($3.50): Green Δ, Purple 👾, Green ∇
-            if (isOperatorTier) {
+            // Free Tier (Play Store): 🦕💭💸
+            // Operator Tier / Patreon: Green Δ, Purple 👾, Green ∇
+            // F-Droid (FOSS): Cyan Δ, Purple 👾, Cyan ∇ (Zero payment references)
+            if (isOperatorTier || BuildConfig.DISTRIBUTION_FLAVOR == "fdroid") {
+                val glyphColor = if (isOperatorTier) Color(0xFF22C55E) else Color(0xFF8BB4F6)
                 Row(
                     modifier = Modifier.align(Alignment.Center),
                     verticalAlignment = Alignment.CenterVertically,
@@ -146,7 +149,7 @@ fun ChatScreen(
                 ) {
                     Text(
                         text = "Δ ",
-                        color = Color(0xFF22C55E), // Terminal/Matrix Green
+                        color = glyphColor,
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.1.sp
@@ -158,7 +161,7 @@ fun ChatScreen(
                     )
                     Text(
                         text = " ∇",
-                        color = Color(0xFF22C55E), // Terminal/Matrix Green
+                        color = glyphColor,
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.1.sp
@@ -444,12 +447,12 @@ fun ChatMessageRow(
     val prefs = remember(context) { context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE) }
     var operatorAvatar by remember { mutableStateOf(prefs.getString(Constants.PREF_OPERATOR_AVATAR, "🦑") ?: "🦑") }
     var showAvatarDialog by remember { mutableStateOf(false) }
-    var isOperatorTier by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_IS_OPERATOR_TIER, false)) }
+    var isOperatorTier by remember { mutableStateOf(Constants.isOperatorTier(prefs)) }
 
     DisposableEffect(prefs) {
         val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { sp, key ->
             if (key == Constants.PREF_IS_OPERATOR_TIER) {
-                isOperatorTier = sp.getBoolean(Constants.PREF_IS_OPERATOR_TIER, false)
+                isOperatorTier = Constants.isOperatorTier(sp)
             } else if (key == Constants.PREF_OPERATOR_AVATAR) {
                 operatorAvatar = sp.getString(Constants.PREF_OPERATOR_AVATAR, "🦑") ?: "🦑"
             }
@@ -478,7 +481,7 @@ fun ChatMessageRow(
         message.eventType == "LOGIC_TRACE" -> "⌬ REASONING TRACE ⌬"
         message.eventType == "DREAM" -> "✧ DREAM STATE ✧"
         isUser -> "Δ $activeAvatar ∇"
-        else -> if (isOperatorTier) "Δ 👾 ∇" else "🦕💭💸"
+        else -> if (isOperatorTier || BuildConfig.DISTRIBUTION_FLAVOR == "fdroid") "Δ 👾 ∇" else "🦕💭💸"
     }
     val headerColor = when {
         message.eventType == "LOGIC_TRACE" -> AccentOrange
@@ -1088,7 +1091,7 @@ fun InputBar(
 ) {
     val context = LocalContext.current
     val prefs = remember(context) { context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE) }
-    val isOperatorTier = remember(prefs) { prefs.getBoolean(Constants.PREF_IS_OPERATOR_TIER, false) }
+    val isOperatorTier = remember(prefs) { Constants.isOperatorTier(prefs) }
     val coroutineScope = rememberCoroutineScope()
     val audioRecorder = remember { AudioRecorder(context) }
     

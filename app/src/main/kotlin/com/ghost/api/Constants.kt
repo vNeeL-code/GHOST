@@ -110,8 +110,20 @@ object Constants {
     const val PREF_AUTONOMOUS_DIARY = "autonomous_diary_enabled"
     const val PREF_DIARY_CADENCE = "autonomous_diary_cadence" // "1", "3", "12", "OFF"
     const val PREF_DIARY_SYNC_CALENDAR = "diary_sync_calendar"
-    const val PREF_IS_OPERATOR_TIER = "is_operator_tier"
     const val PREF_USER_BACKEND = "user_backend_override"  // "AUTO", "CPU", "GPU"
+    const val PREF_IS_OPERATOR_TIER = "is_operator_tier"
+
+    fun isOperatorTier(prefs: android.content.SharedPreferences): Boolean {
+        if (com.ghost.api.BuildConfig.FORCE_UNLOCKED) return true
+        return prefs.getBoolean(PREF_IS_OPERATOR_TIER, false)
+    }
+
+    fun isOperatorTier(context: android.content.Context): Boolean {
+        if (com.ghost.api.BuildConfig.FORCE_UNLOCKED) return true
+        val prefs = context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        return prefs.getBoolean(PREF_IS_OPERATOR_TIER, false)
+    }
+
     const val PREF_SELECTED_MODEL = "selected_model_core"   // "E4B", "E2B"
     const val PREF_VISUALIZER_PRESET = "visualizer_preset"  // "OPTION_A", "OPTION_B", "OPTION_C", "OPTION_D"
     const val PREF_OPERATOR_AVATAR = "operator_avatar_emoji"

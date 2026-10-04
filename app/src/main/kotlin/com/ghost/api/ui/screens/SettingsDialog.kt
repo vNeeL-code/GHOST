@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.ghost.api.BuildConfig
 import com.ghost.api.Constants
 import com.ghost.api.GemmaAccessibilityService
 import com.ghost.api.GemmaNotificationListener
@@ -51,7 +52,7 @@ fun SettingsDialog(
     var diaryActive by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_AUTONOMOUS_DIARY, true)) }
     var diaryCadence by remember { mutableStateOf(prefs.getString(Constants.PREF_DIARY_CADENCE, "12") ?: "12") }
     var diarySyncCalendar by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_DIARY_SYNC_CALENDAR, false)) }
-    var isOperatorTier by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_IS_OPERATOR_TIER, false)) }
+    var isOperatorTier by remember { mutableStateOf(Constants.isOperatorTier(prefs)) }
     var ttsEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_TTS_ENABLED, true)) }
     var backend by remember { mutableStateOf(prefs.getString(Constants.PREF_USER_BACKEND, "AUTO") ?: "AUTO") }
     val isEngineActive = backend != "OFF"
@@ -83,7 +84,7 @@ fun SettingsDialog(
 
     var showOperatorUnlockDialog by remember { mutableStateOf(false) }
 
-    if (showOperatorUnlockDialog) {
+    if (showOperatorUnlockDialog && BuildConfig.SHOW_OPERATOR_PASS_PAYWALL) {
         AlertDialog(
             onDismissRequest = { showOperatorUnlockDialog = false },
             title = {
@@ -233,16 +234,24 @@ fun SettingsDialog(
                                     modifier = Modifier.padding(bottom = 8.dp)
                                 )
                                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    val rows = listOf(
+                                    val rows = if (BuildConfig.FEATURE_LOCKED_SKINS) {
                                         listOf(
-                                            "OPTION_A" to "Radial",
-                                            "OPTION_B" to "Hexagonal"
-                                        ),
-                                        listOf(
-                                            "OPTION_C" to "Prismatic",
-                                            "OPTION_D" to "Cuboid"
+                                            listOf(
+                                                "OPTION_A" to "Radial",
+                                                "OPTION_B" to "Hexagonal"
+                                            ),
+                                            listOf(
+                                                "OPTION_C" to "Prismatic",
+                                                "OPTION_D" to "Cuboid"
+                                            )
                                         )
-                                    )
+                                    } else {
+                                        listOf(
+                                            listOf(
+                                                "OPTION_A" to "Radial (Default)"
+                                            )
+                                        )
+                                    }
                                     for (presetRow in rows) {
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
@@ -344,12 +353,18 @@ fun SettingsDialog(
                                         color = Color.White,
                                         modifier = Modifier.padding(bottom = 8.dp)
                                     )
-                                    val styles = listOf(
-                                        Constants.EDGE_STYLE_BARS to "I",
-                                        Constants.EDGE_STYLE_BOOM to "II",
-                                        Constants.EDGE_STYLE_HEX to "III",
-                                        Constants.EDGE_STYLE_WIREFRAME to "IV"
-                                    )
+                                    val styles = if (BuildConfig.FEATURE_LOCKED_SKINS) {
+                                        listOf(
+                                            Constants.EDGE_STYLE_BARS to "I",
+                                            Constants.EDGE_STYLE_BOOM to "II",
+                                            Constants.EDGE_STYLE_HEX to "III",
+                                            Constants.EDGE_STYLE_WIREFRAME to "IV"
+                                        )
+                                    } else {
+                                        listOf(
+                                            Constants.EDGE_STYLE_BARS to "Style I (Default)"
+                                        )
+                                    }
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -971,137 +986,306 @@ fun SettingsDialog(
                             }
                         }
 
-                        // === Operator Pass (Tree Fiddy 🦕💭💸 vs Δ 👾 ∇) ===
-                        item {
-                            SettingsSectionHeader(title = "Operator Pass")
-                        }
-                        item {
-                            Surface(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .border(
-                                        width = 1.dp,
-                                        color = if (isOperatorTier) Color(0xFF22C55E) else Color(0xFF3B82F6),
-                                        shape = RoundedCornerShape(12.dp)
-                                    ),
-                                color = cardBg
-                            ) {
-                                Column(
+                        // === Flavor-specific Bottom Card ===
+                        if (BuildConfig.SHOW_OPERATOR_PASS_PAYWALL) {
+                            // Play Store Flavor: Operator Pass (Tree Fiddy 🦕💭💸 vs Δ 👾 ∇)
+                            item {
+                                SettingsSectionHeader(title = "Operator Pass")
+                            }
+                            item {
+                                Surface(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(14.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .border(
+                                            width = 1.dp,
+                                            color = if (isOperatorTier) Color(0xFF22C55E) else Color(0xFF3B82F6),
+                                            shape = RoundedCornerShape(12.dp)
+                                        ),
+                                    color = cardBg
                                 ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(14.dp)
                                     ) {
-                                        Text(
-                                            text = if (isOperatorTier) "OPERATOR PASS" else "OPERATOR PASS (£3.50)",
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (isOperatorTier) Color(0xFF22C55E) else Color(0xFF8BB4F6)
-                                        )
-                                        Box(
-                                            modifier = Modifier
-                                                .background(
-                                                    if (isOperatorTier) Color(0x3322C55E) else Color(0x338BB4F6),
-                                                    RoundedCornerShape(6.dp)
-                                                )
-                                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text(
-                                                text = if (isOperatorTier) "Δ 👾 ∇ ACTIVE" else "FREE TIER 🦕💭💸",
-                                                fontSize = 10.sp,
+                                                text = if (isOperatorTier) "OPERATOR PASS" else "OPERATOR PASS (£3.50)",
+                                                fontSize = 14.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = if (isOperatorTier) Color(0xFF22C55E) else Color(0xFF8BB4F6)
                                             )
+                                            Box(
+                                                modifier = Modifier
+                                                    .background(
+                                                        if (isOperatorTier) Color(0x3322C55E) else Color(0x338BB4F6),
+                                                        RoundedCornerShape(6.dp)
+                                                    )
+                                                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                                            ) {
+                                                Text(
+                                                    text = if (isOperatorTier) "Δ 👾 ∇ ACTIVE" else "FREE TIER 🦕💭💸",
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (isOperatorTier) Color(0xFF22C55E) else Color(0xFF8BB4F6)
+                                                )
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.height(6.dp))
+
+                                        Text(
+                                            text = if (isOperatorTier) {
+                                                "Elite status unlocked. Δ 👾 ∇ Turing glyph, reactive edge lights II-IV, hexagonal/prismatic/cuboid visualizers, and custom operator avatars active."
+                                            } else {
+                                                "100% uncrippled local offline AI & privacy. Unlock Operator status for £3.50 (Tree Fiddy 🦕💭💸) to get the elite Δ 👾 ∇ glyph, custom avatars, visualizer geometries, and edge light styles."
+                                            },
+                                            fontSize = 11.sp,
+                                            color = textDim,
+                                            lineHeight = 16.sp
+                                        )
+
+                                        Spacer(modifier = Modifier.height(12.dp))
+
+                                        // Avatar-only buttons (no extra text)
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            // Free Tier Button: 🦕💭💸
+                                            Box(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .background(if (!isOperatorTier) Color(0x333B82F6) else Color(0x14FFFFFF))
+                                                    .border(
+                                                        1.dp,
+                                                        if (!isOperatorTier) Color(0xFF3B82F6) else Color(0x22FFFFFF),
+                                                        RoundedCornerShape(10.dp)
+                                                    )
+                                                    .clickable {
+                                                        if (isOperatorTier) {
+                                                            isOperatorTier = false
+                                                            prefs.edit().putBoolean(Constants.PREF_IS_OPERATOR_TIER, false).apply()
+                                                            if (visualizerPreset != "OPTION_A") {
+                                                                visualizerPreset = "OPTION_A"
+                                                                prefs.edit().putString(Constants.PREF_VISUALIZER_PRESET, "OPTION_A").apply()
+                                                            }
+                                                            if (edgeLightsStyle != Constants.EDGE_STYLE_BARS) {
+                                                                edgeLightsStyle = Constants.EDGE_STYLE_BARS
+                                                                prefs.edit().putString(Constants.PREF_EDGE_LIGHT_STYLE, Constants.EDGE_STYLE_BARS).apply()
+                                                                EdgeLightsManager.invalidate()
+                                                            }
+                                                            Toast.makeText(context, "Free Tier active 🦕💭💸", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    }
+                                                    .padding(vertical = 12.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = "🦕💭💸",
+                                                    fontSize = 18.sp
+                                                )
+                                            }
+
+                                            // Operator Tier Button: Δ 👾 ∇
+                                            Box(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .background(if (isOperatorTier) Color(0x3322C55E) else Color(0x14FFFFFF))
+                                                    .border(
+                                                        1.dp,
+                                                        if (isOperatorTier) Color(0xFF22C55E) else Color(0x22FFFFFF),
+                                                        RoundedCornerShape(10.dp)
+                                                    )
+                                                    .clickable {
+                                                        if (!isOperatorTier) {
+                                                            showOperatorUnlockDialog = true
+                                                        } else {
+                                                            Toast.makeText(context, "Operator Pass active Δ 👾 ∇", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    }
+                                                    .padding(vertical = 12.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = "Δ 👾 ∇",
+                                                    fontSize = 16.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (isOperatorTier) Color(0xFF22C55E) else Color.White
+                                                )
+                                            }
                                         }
                                     }
-
-                                    Spacer(modifier = Modifier.height(6.dp))
-
-                                    Text(
-                                        text = if (isOperatorTier) {
-                                            "Elite status unlocked. Δ 👾 ∇ Turing glyph, reactive edge lights II-IV, hexagonal/prismatic/cuboid visualizers, and custom operator avatars active."
-                                        } else {
-                                            "100% uncrippled local offline AI & privacy. Unlock Operator status for £3.50 (Tree Fiddy 🦕💭💸) to get the elite Δ 👾 ∇ glyph, custom avatars, visualizer geometries, and edge light styles."
-                                        },
-                                        fontSize = 11.sp,
-                                        color = textDim,
-                                        lineHeight = 16.sp
-                                    )
-
-                                    Spacer(modifier = Modifier.height(12.dp))
-
-                                    // Avatar-only buttons (no extra text)
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                }
+                            }
+                        } else if (BuildConfig.DISTRIBUTION_FLAVOR == "fdroid") {
+                            // F-Droid Flavor: FOSS Community & Source (zero upsells, zero locks)
+                            item {
+                                SettingsSectionHeader(title = "Community & Source")
+                            }
+                            item {
+                                Surface(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .border(
+                                            width = 1.dp,
+                                            color = Color(0x338BB4F6),
+                                            shape = RoundedCornerShape(12.dp)
+                                        ),
+                                    color = cardBg
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(14.dp)
                                     ) {
-                                        // Free Tier Button: 🦕💭💸
-                                        Box(
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .clip(RoundedCornerShape(10.dp))
-                                                .background(if (!isOperatorTier) Color(0x333B82F6) else Color(0x14FFFFFF))
-                                                .border(
-                                                    1.dp,
-                                                    if (!isOperatorTier) Color(0xFF3B82F6) else Color(0x22FFFFFF),
-                                                    RoundedCornerShape(10.dp)
-                                                )
-                                                .clickable {
-                                                    if (isOperatorTier) {
-                                                        isOperatorTier = false
-                                                        prefs.edit().putBoolean(Constants.PREF_IS_OPERATOR_TIER, false).apply()
-                                                        if (visualizerPreset != "OPTION_A") {
-                                                            visualizerPreset = "OPTION_A"
-                                                            prefs.edit().putString(Constants.PREF_VISUALIZER_PRESET, "OPTION_A").apply()
-                                                        }
-                                                        if (edgeLightsStyle != Constants.EDGE_STYLE_BARS) {
-                                                            edgeLightsStyle = Constants.EDGE_STYLE_BARS
-                                                            prefs.edit().putString(Constants.PREF_EDGE_LIGHT_STYLE, Constants.EDGE_STYLE_BARS).apply()
-                                                            EdgeLightsManager.invalidate()
-                                                        }
-                                                        Toast.makeText(context, "Free Tier active 🦕💭💸", Toast.LENGTH_SHORT).show()
-                                                    }
-                                                }
-                                                .padding(vertical = 12.dp),
-                                            contentAlignment = Alignment.Center
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text(
-                                                text = "🦕💭💸",
-                                                fontSize = 18.sp
+                                                text = "GHOST Community Edition",
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF8BB4F6)
                                             )
+                                            Box(
+                                                modifier = Modifier
+                                                    .background(Color(0x338BB4F6), RoundedCornerShape(6.dp))
+                                                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                                            ) {
+                                                Text(
+                                                    text = "F-DROID / FOSS",
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color(0xFF8BB4F6)
+                                                )
+                                            }
                                         }
 
-                                        // Operator Tier Button: Δ 👾 ∇
+                                        Spacer(modifier = Modifier.height(6.dp))
+
+                                        Text(
+                                            text = "100% libre and free software. Zero network tracking, fully private on-device edge intelligence. Built with love for the open-source community.",
+                                            fontSize = 11.sp,
+                                            color = textDim,
+                                            lineHeight = 16.sp
+                                        )
+
+                                        Spacer(modifier = Modifier.height(12.dp))
+
                                         Box(
                                             modifier = Modifier
-                                                .weight(1f)
+                                                .fillMaxWidth()
                                                 .clip(RoundedCornerShape(10.dp))
-                                                .background(if (isOperatorTier) Color(0x3322C55E) else Color(0x14FFFFFF))
-                                                .border(
-                                                    1.dp,
-                                                    if (isOperatorTier) Color(0xFF22C55E) else Color(0x22FFFFFF),
-                                                    RoundedCornerShape(10.dp)
-                                                )
+                                                .background(Color(0x1F8BB4F6))
+                                                .border(1.dp, Color(0x4D8BB4F6), RoundedCornerShape(10.dp))
                                                 .clickable {
-                                                    if (!isOperatorTier) {
-                                                        showOperatorUnlockDialog = true
-                                                    } else {
-                                                        Toast.makeText(context, "Operator Pass active Δ 👾 ∇", Toast.LENGTH_SHORT).show()
+                                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/vNeeL-code/GHOST")).apply {
+                                                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
                                                     }
+                                                    context.startActivity(intent)
                                                 }
                                                 .padding(vertical = 12.dp),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Text(
-                                                text = "Δ 👾 ∇",
-                                                fontSize = 16.sp,
+                                                text = "View Source on GitHub ↗",
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = Color(0xFF8BB4F6)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            // Patreon / Supporter Flavor: Fully Unlocked Operator
+                            item {
+                                SettingsSectionHeader(title = "Operator Supporter")
+                            }
+                            item {
+                                Surface(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .border(
+                                            width = 1.dp,
+                                            color = Color(0xFF22C55E),
+                                            shape = RoundedCornerShape(12.dp)
+                                        ),
+                                    color = cardBg
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(14.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "OPERATOR PASS: UNLOCKED",
+                                                fontSize = 14.sp,
                                                 fontWeight = FontWeight.Bold,
-                                                color = if (isOperatorTier) Color(0xFF22C55E) else Color.White
+                                                color = Color(0xFF22C55E)
+                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .background(Color(0x3322C55E), RoundedCornerShape(6.dp))
+                                                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                                            ) {
+                                                Text(
+                                                    text = "Δ 👾 ∇ ACTIVE",
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color(0xFF22C55E)
+                                                )
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.height(6.dp))
+
+                                        Text(
+                                            text = "Elite status permanently active. All visualizer geometries, 4 reactive edge light styles, and custom avatars are fully unlocked. Thank you for supporting independent on-device AI development!",
+                                            fontSize = 11.sp,
+                                            color = textDim,
+                                            lineHeight = 16.sp
+                                        )
+
+                                        Spacer(modifier = Modifier.height(12.dp))
+
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(Color(0x1F22C55E))
+                                                .border(1.dp, Color(0x4D22C55E), RoundedCornerShape(10.dp))
+                                                .clickable {
+                                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/vNeeL-code/GHOST")).apply {
+                                                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                                    }
+                                                    context.startActivity(intent)
+                                                }
+                                                .padding(vertical = 12.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = "Support Development (GitHub / Patreon) ↗",
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = Color(0xFF22C55E)
                                             )
                                         }
                                     }
