@@ -43,6 +43,14 @@ class IntentBaggerTest {
     }
 
     @Test
+    fun testWebUrlWithConversationalContextIsNotWireSpeedDirect() {
+        val intents = IntentBagger.bagIntents(dummyContext, "what's wrong with https://github.com")
+        val intent = intents.firstOrNull { it.browserUrl == "https://github.com" }
+        assertNotNull(intent)
+        assertFalse("URL inside conversational question must NOT be wire-speed direct", intent!!.isWireSpeedDirect)
+    }
+
+    @Test
     fun testVolumeIntents() {
         val muteIntents = IntentBagger.bagIntents(dummyContext, "mute volume")
         val mute = muteIntents.firstOrNull { it.tool == "volume" }

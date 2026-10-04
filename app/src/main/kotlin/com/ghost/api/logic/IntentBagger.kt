@@ -34,6 +34,11 @@ object IntentBagger {
         val isHighConfidence: Boolean
     )
 
+    data class UrlMatch(
+        val url: String,
+        val isDirect: Boolean
+    )
+
     private val URL_REGEX = Regex("""(?i)\b(?:https?://|www\.)[^\s]+|\b[a-zA-Z0-9-]+\.(?:com|org|net|io|dev|app|ai|me|co|uk|de|ca)(?:/[^\s]*)?""")
 
 
@@ -93,19 +98,21 @@ object IntentBagger {
 
         val bagged = mutableListOf<BaggedIntent>()
 
-        // 1. Direct Web URL Navigation (Wire-speed exit candidate)
-        val directUrl = matchUrl(clean, trimmed)
-        if (directUrl != null) {
-            bagged.add(
-                BaggedIntent(
-                    tool = "open_system_browser_bar",
-                    paramsJson = "{\"queryOrUrl\":\"$directUrl\"}",
-                    hint = "Open $directUrl in system browser",
-                    isWireSpeedDirect = true,
-                    browserUrl = directUrl
-                )
+        // 1. Direct Web URL Navigation (Wire-speed exit candidate only if no extra text)
+        val urlMatch = matchUrl(clean, trimmed)
+        if (urlMatch != null) {
+            val urlIntent = BaggedIntent(
+                tool = "open_system_browser_bar",
+                paramsJson = "{\"queryOrUrl\":\"${urlMatch.url}\"}",
+                hint = "Open ${urlMatch.url} in system browser",
+                isWireSpeedDirect = urlMatch.isDirect,
+                browserUrl = urlMatch.url
             )
-            return bagged
+            if (urlMatch.isDirect) {
+                return listOf(urlIntent)
+            } else {
+                bagged.add(urlIntent)
+            }
         }
 
         // 2. App Launch Intent (e.g. "open calendar", "can you please open spotify for me")
@@ -195,7 +202,7 @@ object IntentBagger {
         return bagged.take(2)
     }
 
-    private fun matchUrl(clean: String, raw: String): String? {
+    private fun matchUrl(clean: String, raw: String): UrlMatch? {
         val match = URL_REGEX.find(raw) ?: URL_REGEX.find(clean) ?: return null
         var url = match.value.trim().trimEnd('.', ',', ';')
         if (url.startsWith("www.", ignoreCase = true)) {
@@ -203,7 +210,18 @@ object IntentBagger {
         } else if (!url.startsWith("http://", ignoreCase = true) && !url.startsWith("https://", ignoreCase = true)) {
             url = "https://$url"
         }
-        return url
+
+        // Only direct wire-speed exit if the message is strictly a URL or simple navigation command
+        var remainder = raw.replace(match.value, "").trim()
+        val navPrefixes = listOf("open", "go to", "browse to", "browse", "launch", "visit", "navigate to")
+        for (prefix in navPrefixes) {
+            if (remainder.equals(prefix, ignoreCase = true)) {
+                remainder = ""
+                break
+            }
+        }
+        val isDirect = remainder.isEmpty()
+        return UrlMatch(url, isDirect)
     }
 
     private fun matchAppLaunch(context: Context, clean: String, raw: String): AppMatch? {
