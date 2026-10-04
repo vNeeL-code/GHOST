@@ -41,8 +41,7 @@ class GemmaNotificationListener : NotificationListenerService() {
         try {
             val sbns = activeNotifications ?: return
             for (sbn in sbns) {
-                val pkg = sbn.packageName
-                if (pkg == packageName || pkg in IGNORED_PACKAGES) continue
+                if (isIgnored(sbn, packageName)) continue
                 val extras = sbn.notification.extras
                 val title = extras.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString()?.trim()
                     ?: extras.getCharSequence("android.title")?.toString()?.trim() ?: ""
@@ -52,17 +51,17 @@ class GemmaNotificationListener : NotificationListenerService() {
                 if (title.isBlank() && text.isBlank()) continue
 
                 val entry = NotificationEntry(
-                    packageName = pkg,
+                    packageName = sbn.packageName,
                     title = title.take(80),
                     text = text.take(160),
                     timestamp = sbn.postTime
                 )
                 synchronized(recentNotifications) {
-                    if (recentNotifications.none { it.packageName == pkg && it.title == entry.title && it.text == entry.text }) {
+                    if (recentNotifications.none { it.packageName == sbn.packageName && it.title == entry.title && it.text == entry.text }) {
                         recentNotifications.addFirst(entry)
                     }
                 }
-                storeReplyAction(pkg, sbn)
+                storeReplyAction(sbn.packageName, sbn)
             }
         } catch (e: Exception) {
             Timber.w(e, "NotificationListener: failed to sync active notifications")
@@ -72,22 +71,22 @@ class GemmaNotificationListener : NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         sbn ?: return
 
+        // Skip self, persistent services, and system noise
+        if (isIgnored(sbn, packageName)) return
+
         val pkg = sbn.packageName
         val extras = sbn.notification.extras
-        val title = extras.getCharSequence("android.title")?.toString() ?: ""
-        val text = extras.getCharSequence("android.text")?.toString() ?: ""
+        val title = extras.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString()?.trim()
+            ?: extras.getCharSequence("android.title")?.toString()?.trim() ?: ""
+        val text = extras.getCharSequence(android.app.Notification.EXTRA_TEXT)?.toString()?.trim()
+            ?: extras.getCharSequence(android.app.Notification.EXTRA_BIG_TEXT)?.toString()?.trim()
+            ?: extras.getCharSequence("android.text")?.toString()?.trim() ?: ""
         val timestamp = sbn.postTime
-
-        // Skip our own notifications
-        if (pkg == packageName) return
-
-        // Skip low-priority system noise
-        if (pkg in IGNORED_PACKAGES) return
 
         val entry = NotificationEntry(
             packageName = pkg,
-            title = title.take(50),
-            text = text.take(100),
+            title = title.take(80),
+            text = text.take(160),
             timestamp = timestamp
         )
 
@@ -170,6 +169,14 @@ class GemmaNotificationListener : NotificationListenerService() {
             "com.android.providers.downloads"
         )
 
+        fun isIgnored(sbn: StatusBarNotification, selfPkg: String? = null): Boolean {
+            val pkg = sbn.packageName
+            if (pkg == selfPkg || pkg == "com.ghost.api" || pkg.contains("ghost", ignoreCase = true)) return true
+            if (pkg in IGNORED_PACKAGES) return true
+            if (sbn.isOngoing) return true // Filter out persistent foreground services (GHOST worker, USB, media)
+            return false
+        }
+
         fun ensureConnected(context: android.content.Context) {
             if (instance == null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
                 try {
@@ -215,12 +222,8 @@ class GemmaNotificationListener : NotificationListenerService() {
                         val activeEntries = mutableListOf<String>()
                         val sorted = sbns.sortedByDescending { it.postTime }
                         for (sbn in sorted) {
+                            if (isIgnored(sbn, currentInstance.packageName)) continue
                             val pkg = sbn.packageName
-                            if (pkg == currentInstance.packageName || pkg in IGNORED_PACKAGES) continue
-
-                            // Skip ongoing media session since audio tracker covers it
-                            val isMedia = sbn.notification.extras.containsKey(android.app.Notification.EXTRA_MEDIA_SESSION)
-                            if (isMedia && sbn.isOngoing) continue
 
                             val extras = sbn.notification.extras
                             val title = extras.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString()?.trim()
