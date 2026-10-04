@@ -122,10 +122,11 @@ class GhostAgent(
     init {
         // Wire tool lifecycle hooks
         mcpTool.onToolExecuting = { toolName, params ->
+            val userTitle = Constants.getUserTitle(context)
             val hudText = when (toolName.lowercase()) {
                 "app", "open_app" -> {
                     val appName = try { JSONObject(params).optString("name", "") } catch (e: Exception) { "" }
-                    if (appName.isNotBlank()) com.ghost.api.logic.ActionFlavorTexts.appLaunchHud(appName) else "Executing: $toolName..."
+                    if (appName.isNotBlank()) com.ghost.api.logic.ActionFlavorTexts.appLaunchHud(appName, userTitle) else "Executing: $toolName..."
                 }
                 "flashlight", "toggle_torch" -> {
                     val isTorchOn = params.contains("ON", ignoreCase = true) || params.contains("true", ignoreCase = true)
@@ -145,7 +146,7 @@ class GhostAgent(
                     val action = Regex("""(?:action=)?(play|pause|next|skip|prev|stop)""").find(params.lowercase())?.groupValues?.get(1) ?: "action"
                     com.ghost.api.logic.ActionFlavorTexts.musicHud(action)
                 }
-                "status" -> com.ghost.api.logic.ActionFlavorTexts.statusHud()
+                "status" -> com.ghost.api.logic.ActionFlavorTexts.statusHud(userTitle)
                 "execute_command" -> {
                     val cmdLower = params.lowercase()
                     when {
@@ -154,7 +155,7 @@ class GhostAgent(
                             val level = Regex("""(?:level|volume)=(\d+)""").find(params)?.groupValues?.get(1)
                             com.ghost.api.logic.ActionFlavorTexts.volumeHud(level, isMute)
                         }
-                        cmdLower.contains("status") -> com.ghost.api.logic.ActionFlavorTexts.statusHud()
+                        cmdLower.contains("status") -> com.ghost.api.logic.ActionFlavorTexts.statusHud(userTitle)
                         cmdLower.contains("music") || cmdLower.contains("media") -> {
                             val action = Regex("""(?:action=)?(play|pause|next|skip|prev|stop)""").find(cmdLower)?.groupValues?.get(1) ?: "action"
                             com.ghost.api.logic.ActionFlavorTexts.musicHud(action)
@@ -173,12 +174,14 @@ class GhostAgent(
             lastExecutedToolResult = result
             toolExecutedInCurrentTurn = true
 
+            val userTitle = Constants.getUserTitle(context)
+
             // Trigger wire-speed flavor TTS for screen exit or void hardware toggles
             when (toolName.lowercase()) {
                 "app", "open_app" -> {
                     val appName = try { JSONObject(params).optString("name", "") } catch (e: Exception) { "" }
                     if (appName.isNotBlank()) {
-                        callbacks?.speak(com.ghost.api.logic.ActionFlavorTexts.appLaunchTts(appName))
+                        callbacks?.speak(com.ghost.api.logic.ActionFlavorTexts.appLaunchTts(appName, userTitle))
                         toolSpokeFlavorTts = true
                     }
                 }
@@ -199,7 +202,7 @@ class GhostAgent(
                     toolSpokeFlavorTts = true
                 }
                 "status" -> {
-                    callbacks?.speak(com.ghost.api.logic.ActionFlavorTexts.statusTts())
+                    callbacks?.speak(com.ghost.api.logic.ActionFlavorTexts.statusTts(userTitle))
                     toolSpokeFlavorTts = true
                 }
                 "alarm", "set_alarm" -> {
@@ -219,7 +222,7 @@ class GhostAgent(
                             toolSpokeFlavorTts = true
                         }
                         cmdLower.contains("status") -> {
-                            callbacks?.speak(com.ghost.api.logic.ActionFlavorTexts.statusTts())
+                            callbacks?.speak(com.ghost.api.logic.ActionFlavorTexts.statusTts(userTitle))
                             toolSpokeFlavorTts = true
                         }
                         cmdLower.contains("music") || cmdLower.contains("media") -> {
@@ -411,8 +414,9 @@ class GhostAgent(
             val appTarget = wireSpeedIntent.appLabel
             val urlTarget = wireSpeedIntent.browserUrl
             if (!appTarget.isNullOrBlank()) {
-                val ttsPhrase = com.ghost.api.logic.ActionFlavorTexts.appLaunchTts(appTarget)
-                val hudChip = com.ghost.api.logic.ActionFlavorTexts.appLaunchHud(appTarget)
+                val userTitle = Constants.getUserTitle(context)
+                val ttsPhrase = com.ghost.api.logic.ActionFlavorTexts.appLaunchTts(appTarget, userTitle)
+                val hudChip = com.ghost.api.logic.ActionFlavorTexts.appLaunchHud(appTarget, userTitle)
                 callbacks?.speak(ttsPhrase)
                 callbacks?.onThoughtUpdated(hudChip)
                 callbacks?.updateNotification("App: $appTarget")
@@ -770,7 +774,7 @@ class GhostAgent(
                 val continuationBuffer = StringBuilder()
                 try {
                     llmEngine.streamResponse(
-                        prompt = "Synthesize the findings from the tool result above.",
+                        prompt = "Synthesize the findings from the tool result above concisely for the ${Constants.getUserTitle(context)}.",
                         images = emptyList(),
                         audioData = null,
                         onToken = { contToken ->
@@ -1226,13 +1230,14 @@ class GhostAgent(
         }
 
         val output = result["output"] ?: result["result"] ?: "Success"
+        val userTitle = Constants.getUserTitle(context)
         return when (actionName) {
             "open_app", "openApp", "launch_app", "app" -> {
                 val appName = rawBody.removePrefix("{").removeSuffix("}")
                     .replace(Regex("""^"name"\s*[:=]\s*"""), "")
                     .replace(Regex("""^name\s*[:=]\s*"""), "")
                     .trim().removeSurrounding("\"")
-                com.ghost.api.logic.ActionFlavorTexts.appLaunchTts(if (appName.isNotBlank()) appName else "App")
+                com.ghost.api.logic.ActionFlavorTexts.appLaunchTts(if (appName.isNotBlank()) appName else "App", userTitle)
             }
             "toggle_torch", "toggleTorch", "turnOnFlashlight", "turnOffFlashlight", "flashlight" -> {
                 val enabled = rawBody.contains("true", ignoreCase = true) || rawBody.contains("on", ignoreCase = true) || actionName == "turnOnFlashlight"
@@ -1243,7 +1248,7 @@ class GhostAgent(
                 val level = Regex("""(?:level|volume)=(\d+)""").find(rawBody)?.groupValues?.get(1)
                 com.ghost.api.logic.ActionFlavorTexts.volumeTts(level, isMute)
             }
-            "status" -> com.ghost.api.logic.ActionFlavorTexts.statusTts()
+            "status" -> com.ghost.api.logic.ActionFlavorTexts.statusTts(userTitle)
             "music", "media" -> {
                 val action = Regex("""(?:action=)?(play|pause|next|skip|prev|stop)""").find(rawBody.lowercase())?.groupValues?.get(1) ?: "play"
                 com.ghost.api.logic.ActionFlavorTexts.musicTts(action)
@@ -1259,7 +1264,7 @@ class GhostAgent(
                         val level = Regex("""(?:level|volume)=(\d+)""").find(cmdLower)?.groupValues?.get(1)
                         com.ghost.api.logic.ActionFlavorTexts.volumeTts(level, isMute)
                     }
-                    cmdLower.contains("status") -> com.ghost.api.logic.ActionFlavorTexts.statusTts()
+                    cmdLower.contains("status") -> com.ghost.api.logic.ActionFlavorTexts.statusTts(userTitle)
                     cmdLower.contains("music") || cmdLower.contains("media") -> {
                         val action = Regex("""(?:action=)?(play|pause|next|skip|prev|stop)""").find(cmdLower)?.groupValues?.get(1) ?: "play"
                         com.ghost.api.logic.ActionFlavorTexts.musicTts(action)

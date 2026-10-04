@@ -52,7 +52,7 @@ class GhostMcpTool(
     // CORE 6 NATIVE TOOLS (Exposed to LiteRT-LM reflection schema)
     // ─────────────────────────────────────────────────────────────────────────────
 
-    @Tool(description = "Launches an installed Android application by name or label (e.g. 'Spotify', 'Calendar', 'Camera', 'Chrome', 'Clock', 'Settings', 'Files').")
+    @Tool(description = "Launches an installed Android application by name or label (e.g. 'YouTube Music', 'Calendar', 'Camera', 'Chrome', 'Clock', 'Settings', 'Files').")
     fun open_app(
         @ToolParam(description = "Name or label of the application to launch") name: String
     ): Map<String, String> {

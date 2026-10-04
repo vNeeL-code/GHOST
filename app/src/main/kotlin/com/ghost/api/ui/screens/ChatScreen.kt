@@ -1296,7 +1296,7 @@ fun InputBar(
                             currentImages.size == 1 -> "[📎 Image attached]"
                             voiceState == VoiceState.RECORDING -> "Recording..."
                             voiceState == VoiceState.CONFIRM -> "Send or tap here to cancel"
-                            else -> if (isOperatorTier) "Δ 👾 ∇" else "🦕💭💸"
+                            else -> Constants.getUserGlyph(prefs)
                         }
                         val hintColor = when (voiceState) {
                             VoiceState.RECORDING -> colorRecording

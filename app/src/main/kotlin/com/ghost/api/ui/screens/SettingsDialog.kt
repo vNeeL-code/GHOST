@@ -988,7 +988,7 @@ fun SettingsDialog(
 
                         // === Flavor-specific Bottom Card ===
                         if (BuildConfig.SHOW_OPERATOR_PASS_PAYWALL) {
-                            // Play Store Flavor: Operator Pass (Tree Fiddy 🦕💭💸 vs Δ 👾 ∇)
+                            // Play Store Flavor: Operator Pass (Tree Fiddy 🦕💭💸 Hunter vs Δ 👾 ∇ Operator)
                             item {
                                 SettingsSectionHeader(title = "Operator Pass")
                             }
@@ -1015,7 +1015,7 @@ fun SettingsDialog(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text(
-                                                text = if (isOperatorTier) "GUARDIAN" else "MINION",
+                                                text = if (isOperatorTier) "OPERATOR" else "HUNTER",
                                                 fontSize = 14.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = if (isOperatorTier) Color(0xFF22C55E) else Color(0xFF8BB4F6)
@@ -1041,9 +1041,9 @@ fun SettingsDialog(
 
                                         Text(
                                             text = if (isOperatorTier) {
-                                                "Elite status unlocked. Δ 👾 ∇ Turing glyph, reactive edge lights II-IV, hexagonal/prismatic/cuboid visualizers, and custom operator avatars active."
+                                                "Elite status unlocked. At your service, Operator. Δ 👾 ∇ Turing glyph, reactive edge lights II-IV, hexagonal/prismatic/cuboid visualizers, and custom operator avatars active."
                                             } else {
-                                                "100% uncrippled local offline AI & privacy. Unlock Guardian status for £3.50 (Tree Fiddy 🦕💭💸) to get the elite Δ 👾 ∇ glyph, custom avatars, visualizer geometries, and edge light styles."
+                                                "\"I need about tree fiddy...\" 🦕💭💸 100% uncrippled local offline AI & privacy. Unlock Operator status for £3.50 to get the elite Δ 👾 ∇ glyph, custom avatars, visualizer geometries, and edge light styles."
                                             },
                                             fontSize = 11.sp,
                                             color = textDim,
@@ -1057,7 +1057,7 @@ fun SettingsDialog(
                                             modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                                         ) {
-                                            // Free Tier Button: 🦕💭💸 [Minion]
+                                            // Free Tier Button: 🦕💭💸 [Hunter]
                                             Box(
                                                 modifier = Modifier
                                                     .weight(1f)
@@ -1081,7 +1081,7 @@ fun SettingsDialog(
                                                                 prefs.edit().putString(Constants.PREF_EDGE_LIGHT_STYLE, Constants.EDGE_STYLE_BARS).apply()
                                                                 EdgeLightsManager.invalidate()
                                                             }
-                                                            Toast.makeText(context, "Minion Tier active 🦕💭💸", Toast.LENGTH_SHORT).show()
+                                                            Toast.makeText(context, "Hunter Tier active 🦕💭💸", Toast.LENGTH_SHORT).show()
                                                         }
                                                     }
                                                     .padding(vertical = 10.dp),
@@ -1094,14 +1094,14 @@ fun SettingsDialog(
                                                     )
                                                     Spacer(modifier = Modifier.height(2.dp))
                                                     Text(
-                                                        text = "Minion",
+                                                        text = "Hunter",
                                                         fontSize = 11.sp,
                                                         color = if (!isOperatorTier) Color(0xFF8BB4F6) else textDim
                                                     )
                                                 }
                                             }
 
-                                            // Operator Tier Button: Δ 👾 ∇ [Guardian]
+                                            // Operator Tier Button: Δ 👾 ∇ [Operator]
                                             Box(
                                                 modifier = Modifier
                                                     .weight(1f)
@@ -1116,7 +1116,7 @@ fun SettingsDialog(
                                                         if (!isOperatorTier) {
                                                             showOperatorUnlockDialog = true
                                                         } else {
-                                                            Toast.makeText(context, "Guardian Pass active Δ 👾 ∇", Toast.LENGTH_SHORT).show()
+                                                            Toast.makeText(context, "Operator Pass active Δ 👾 ∇", Toast.LENGTH_SHORT).show()
                                                         }
                                                     }
                                                     .padding(vertical = 10.dp),
@@ -1131,7 +1131,7 @@ fun SettingsDialog(
                                                     )
                                                     Spacer(modifier = Modifier.height(2.dp))
                                                     Text(
-                                                        text = "Guardian",
+                                                        text = if (isOperatorTier) "Operator" else "Operator (£3.50)",
                                                         fontSize = 11.sp,
                                                         fontWeight = FontWeight.SemiBold,
                                                         color = if (isOperatorTier) Color(0xFF22C55E) else textDim
@@ -1143,9 +1143,9 @@ fun SettingsDialog(
                                 }
                             }
                         } else if (BuildConfig.DISTRIBUTION_FLAVOR == "fdroid") {
-                            // F-Droid Flavor: FOSS Operator (zero upsells, zero locks)
+                            // F-Droid Flavor: FOSS Guardian (zero upsells, zero locks)
                             item {
-                                SettingsSectionHeader(title = "FOSS Community")
+                                SettingsSectionHeader(title = "Guardian")
                             }
                             item {
                                 Surface(
@@ -1170,7 +1170,7 @@ fun SettingsDialog(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text(
-                                                text = "OPERATOR",
+                                                text = "GUARDIAN",
                                                 fontSize = 14.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = Color(0xFF8BB4F6)
@@ -1192,8 +1192,9 @@ fun SettingsDialog(
                                         Spacer(modifier = Modifier.height(6.dp))
 
                                         Text(
-                                            text = "100% libre and free software. Zero network tracking, fully private on-device edge intelligence. Built with love for the open-source community.",
-                                            fontSize = 11.sp,
+                                            text = "Eyes up, Guardian: news and updates",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium,
                                             color = textDim,
                                             lineHeight = 16.sp
                                         )
@@ -1226,7 +1227,7 @@ fun SettingsDialog(
                                                     color = Color(0xFF8BB4F6)
                                                 )
                                                 Text(
-                                                    text = "[foss / Operator]",
+                                                    text = "Here ↗",
                                                     fontSize = 12.sp,
                                                     fontWeight = FontWeight.SemiBold,
                                                     color = Color(0xFF8BB4F6)
@@ -1237,9 +1238,9 @@ fun SettingsDialog(
                                 }
                             }
                         } else {
-                            // Patreon / Supporter Flavor: Fully Unlocked Guardian
+                            // Patreon / Supporter Flavor: Fully Unlocked Operator
                             item {
-                                SettingsSectionHeader(title = "Guardian Supporter")
+                                SettingsSectionHeader(title = "Operator Pass")
                             }
                             item {
                                 Surface(
@@ -1264,7 +1265,7 @@ fun SettingsDialog(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text(
-                                                text = "GUARDIAN",
+                                                text = "OPERATOR",
                                                 fontSize = 14.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = Color(0xFF22C55E)
@@ -1286,7 +1287,7 @@ fun SettingsDialog(
                                         Spacer(modifier = Modifier.height(6.dp))
 
                                         Text(
-                                            text = "Elite status permanently active. All visualizer geometries, 4 reactive edge light styles, and custom avatars are fully unlocked. Thank you for supporting independent on-device AI development!",
+                                            text = "Operator, would you like to keep up with the project's updates? I would be delighted to take you there!",
                                             fontSize = 11.sp,
                                             color = textDim,
                                             lineHeight = 16.sp
@@ -1320,7 +1321,7 @@ fun SettingsDialog(
                                                     color = Color(0xFF22C55E)
                                                 )
                                                 Text(
-                                                    text = "[premium / Guardian]",
+                                                    text = "Here ↗",
                                                     fontSize = 12.sp,
                                                     fontWeight = FontWeight.SemiBold,
                                                     color = Color(0xFF22C55E)

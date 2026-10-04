@@ -14,21 +14,21 @@ class IntentBaggerTest {
 
     @Test
     fun testExactAppLaunchIsWireSpeedDirect() {
-        val intents = IntentBagger.bagIntents(dummyContext, "open spotify")
+        val intents = IntentBagger.bagIntents(dummyContext, "open camera")
         assertEquals(1, intents.size)
         val intent = intents[0]
         assertEquals("open_app", intent.tool)
-        assertEquals("Spotify", intent.appLabel)
+        assertEquals("Camera", intent.appLabel)
         assertTrue("Exact alias/known app must be wire-speed direct", intent.isWireSpeedDirect)
     }
 
     @Test
     fun testTypoAppLaunchDropsToCognitiveReAct() {
-        val intents = IntentBagger.bagIntents(dummyContext, "open sportify")
+        val intents = IntentBagger.bagIntents(dummyContext, "open cammera")
         assertEquals(1, intents.size)
         val intent = intents[0]
         assertEquals("open_app", intent.tool)
-        assertEquals("Sportify", intent.appLabel)
+        assertEquals("Cammera", intent.appLabel)
         assertFalse("Typo app must NOT be wire-speed direct (should trigger LLM ReAct loop)", intent.isWireSpeedDirect)
     }
 
@@ -80,9 +80,9 @@ class IntentBaggerTest {
     fun testFormatPromptEnvelopeCore6Syntax() {
         val appIntent = IntentBagger.BaggedIntent(
             tool = "open_app",
-            paramsJson = "{\"name\":\"Spotify\"}",
-            hint = "Launch Spotify app immediately",
-            appLabel = "Spotify"
+            paramsJson = "{\"name\":\"Camera\"}",
+            hint = "Launch Camera app immediately",
+            appLabel = "Camera"
         )
         val volIntent = IntentBagger.BaggedIntent(
             tool = "volume",
@@ -106,7 +106,7 @@ class IntentBaggerTest {
         )
 
         val envelope = IntentBagger.formatPromptEnvelope(listOf(appIntent, volIntent, statusIntent, torchIntent, alarmIntent))
-        assertTrue(envelope.contains("open_app(\"Spotify\")"))
+        assertTrue(envelope.contains("open_app(\"Camera\")"))
         assertTrue(envelope.contains("execute_command(\"volume\", \"stream=media level=50\")"))
         assertTrue(envelope.contains("execute_command(\"status\", \"\")"))
         assertTrue(envelope.contains("toggle_torch(enabled = true)"))

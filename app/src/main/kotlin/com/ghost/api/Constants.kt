@@ -124,6 +124,50 @@ object Constants {
         return prefs.getBoolean(PREF_IS_OPERATOR_TIER, false)
     }
 
+    /**
+     * Resolves the user's thematic companion title across flavors and unlock tiers:
+     * - F-Droid: "Guardian" (Destiny Ghost)
+     * - Patreon: "Operator" (Cephalon Ordis)
+     * - Play Store: "Hunter" (Cephalon Simaris free tier) or "Operator" (unlocked pass)
+     */
+    fun getUserTitle(prefs: android.content.SharedPreferences): String {
+        return when (com.ghost.api.BuildConfig.DISTRIBUTION_FLAVOR) {
+            "fdroid" -> "Guardian"
+            "patreon" -> "Operator"
+            else -> if (isOperatorTier(prefs)) "Operator" else "Hunter"
+        }
+    }
+
+    fun getUserTitle(context: android.content.Context): String {
+        return when (com.ghost.api.BuildConfig.DISTRIBUTION_FLAVOR) {
+            "fdroid" -> "Guardian"
+            "patreon" -> "Operator"
+            else -> if (isOperatorTier(context)) "Operator" else "Hunter"
+        }
+    }
+
+    /**
+     * Resolves the visual glyph signature for the user/flavor:
+     * - F-Droid: "Δ 🐙 ∇"
+     * - Patreon / Operator Tier: "Δ 👾 ∇"
+     * - Play Store Free: "🦕💭💸"
+     */
+    fun getUserGlyph(prefs: android.content.SharedPreferences): String {
+        return when (com.ghost.api.BuildConfig.DISTRIBUTION_FLAVOR) {
+            "fdroid" -> "Δ 🐙 ∇"
+            "patreon" -> "Δ 👾 ∇"
+            else -> if (isOperatorTier(prefs)) "Δ 👾 ∇" else "🦕💭💸"
+        }
+    }
+
+    fun getUserGlyph(context: android.content.Context): String {
+        return when (com.ghost.api.BuildConfig.DISTRIBUTION_FLAVOR) {
+            "fdroid" -> "Δ 🐙 ∇"
+            "patreon" -> "Δ 👾 ∇"
+            else -> if (isOperatorTier(context)) "Δ 👾 ∇" else "🦕💭💸"
+        }
+    }
+
     const val PREF_SELECTED_MODEL = "selected_model_core"   // "E4B", "E2B"
     const val PREF_VISUALIZER_PRESET = "visualizer_preset"  // "OPTION_A", "OPTION_B", "OPTION_C", "OPTION_D"
     const val PREF_OPERATOR_AVATAR = "operator_avatar_emoji"
