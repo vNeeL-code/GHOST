@@ -555,7 +555,7 @@ fun SettingsDialog(
                                 subtitle = if (!isEngineActive) {
                                     "Calendar sync paused (Engine is currently OFF)"
                                 } else if (diarySyncCalendar) {
-                                    "Google Calendar sync ACTIVE: Reflections mirror as Δ 👾 ∇ calendar blocks."
+                                    "Calendar sync ACTIVE: Reflections mirror as Δ 👾 ∇ calendar blocks."
                                 } else {
                                     "In-app PRIVATE: Reflections stay strictly in local database with FIFO eviction (last 25 entries)."
                                 },
@@ -1188,7 +1188,7 @@ fun SettingsDialog(
                                                 .fillMaxWidth()
                                                 .clip(RoundedCornerShape(10.dp))
                                                 .background(Color(0x1F8BB4F6))
-                                                .border(1.dp, Color(0x4D8BB4F6), RoundedCornerShape(10.dp))
+                                                .border(1.dp, Color(0x338BB4F6), RoundedCornerShape(10.dp))
                                                 .clickable {
                                                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/vNeeL-code/GHOST")).apply {
                                                         flags = Intent.FLAG_ACTIVITY_NEW_TASK
@@ -1199,10 +1199,8 @@ fun SettingsDialog(
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Text(
-                                                text = "View Source on GitHub ↗",
-                                                fontSize = 13.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = Color(0xFF8BB4F6)
+                                                text = "🐙",
+                                                fontSize = 20.sp
                                             )
                                         }
                                     }
@@ -1271,7 +1269,7 @@ fun SettingsDialog(
                                                 .fillMaxWidth()
                                                 .clip(RoundedCornerShape(10.dp))
                                                 .background(Color(0x1F22C55E))
-                                                .border(1.dp, Color(0x4D22C55E), RoundedCornerShape(10.dp))
+                                                .border(1.dp, Color(0x3322C55E), RoundedCornerShape(10.dp))
                                                 .clickable {
                                                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/vNeeL-code/GHOST")).apply {
                                                         flags = Intent.FLAG_ACTIVITY_NEW_TASK
@@ -1282,10 +1280,8 @@ fun SettingsDialog(
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Text(
-                                                text = "Support Development (GitHub / Patreon) ↗",
-                                                fontSize = 13.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = Color(0xFF22C55E)
+                                                text = "💚",
+                                                fontSize = 20.sp
                                             )
                                         }
                                     }
