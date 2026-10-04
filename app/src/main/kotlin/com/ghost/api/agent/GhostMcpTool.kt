@@ -39,20 +39,43 @@ class GhostMcpTool(
     /** Turns on flashlight. Helper method. */
     fun turnOnFlashlight(): Map<String, String> {
         Timber.i("GhostMcpTool: turnOnFlashlight invoked")
-        return executeMcpAction("flashlight", "{\"state\":\"ON\"}")
+        return toggle_torch(true)
     }
 
     /** Turns off flashlight. Helper method. */
     fun turnOffFlashlight(): Map<String, String> {
         Timber.i("GhostMcpTool: turnOffFlashlight invoked")
-        return executeMcpAction("flashlight", "{\"state\":\"OFF\"}")
+        return toggle_torch(false)
     }
 
-    @Tool(description = "Controls device flashlight (ON or OFF)")
-    fun flashlight(
-        @ToolParam(description = "State: ON or OFF") state: String
+    // ─────────────────────────────────────────────────────────────────────────────
+    // CORE 6 NATIVE TOOLS (Exposed to LiteRT-LM reflection schema)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    @Tool(description = "Launches an installed Android application by name or label (e.g. 'Spotify', 'Calendar', 'Camera', 'Chrome', 'Clock', 'Settings', 'Files').")
+    fun open_app(
+        @ToolParam(description = "Name or label of the application to launch") name: String
     ): Map<String, String> {
-        Timber.i("GhostMcpTool: flashlight invoked with state=$state")
+        Timber.i("GhostMcpTool: open_app invoked with name='$name'")
+        return executeMcpAction("app", "{\"name\":\"$name\"}")
+    }
+
+    @JvmOverloads
+    @Tool(description = "Sets an alarm for a specific time via the system Clock app. Hour must strictly be in 24-hour format 0-23 (e.g. 20 for 8 PM, 8 for 8 AM, 0 for midnight).")
+    fun set_alarm(
+        @ToolParam(description = "Strictly 24-hour format hour (0 to 23, e.g. 20 for 8 PM, 8 for 8 AM)") hour: Int,
+        @ToolParam(description = "Minute (0 to 59, default: 0)") minute: Int = 0
+    ): Map<String, String> {
+        Timber.i("GhostMcpTool: set_alarm invoked with hour=$hour, minute=$minute")
+        return executeMcpAction("alarm", "{\"hour\":$hour,\"minutes\":$minute}")
+    }
+
+    @Tool(description = "Controls device flashlight (true for ON, false for OFF).")
+    fun toggle_torch(
+        @ToolParam(description = "true to turn torch ON, false to turn torch OFF") enabled: Boolean
+    ): Map<String, String> {
+        val state = if (enabled) "ON" else "OFF"
+        Timber.i("GhostMcpTool: toggle_torch invoked with enabled=$enabled (state=$state)")
         return executeMcpAction("flashlight", "{\"state\":\"$state\"}")
     }
 
@@ -64,49 +87,57 @@ class GhostMcpTool(
         return executeMcpAction("search", "{\"query\":\"$query\"}")
     }
 
-    @Tool(description = "Launches an installed Android application by name or label (e.g. 'Spotify', 'Calendar', 'Camera', 'Chrome', 'Clock', 'Settings', 'Files').")
-    fun open_app(
-        @ToolParam(description = "Name or label of the application to launch") name: String
+    @JvmOverloads
+    @Tool(description = "Executes an on-device system or utility command (e.g. 'volume', 'status', 'music', 'calendar', 'timer', 'search_files'). Arguments are passed as key-value pairs (e.g. 'stream=media level=50', 'action=pause', 'seconds=300') or JSON.")
+    fun execute_command(
+        @ToolParam(description = "Command name (e.g. 'volume', 'status', 'music', 'calendar', 'timer', 'search_files', 'read_diary')") command: String,
+        @ToolParam(description = "Arguments string, e.g. 'stream=media level=50' or 'action=next'") args: String = ""
     ): Map<String, String> {
-        Timber.i("GhostMcpTool: open_app invoked with name='$name'")
-        return executeMcpAction("app", "{\"name\":\"$name\"}")
+        Timber.i("GhostMcpTool: execute_command invoked with command='$command', args='$args'")
+        return executeMcpAction(command, args)
     }
 
-    @Tool(description = "Alias for open_app. Launches an installed application by name.")
-    fun app(
-        @ToolParam(description = "Name or label of the application to launch") name: String
-    ): Map<String, String> = open_app(name)
-
-    @Tool(description = "Controls media playback (PLAY, PAUSE, NEXT, PREV).")
-    fun media(
-        @ToolParam(description = "Playback action: PLAY, PAUSE, NEXT, or PREV") action: String
+    @Tool(description = "Loads the detailed instructions and capabilities for a specific skill.")
+    fun load_skill(
+        @ToolParam(description = "The unique name of the skill to load (e.g., 'weather', 'calculator').") skill: String
     ): Map<String, String> {
-        Timber.i("GhostMcpTool: media invoked with action='$action'")
-        return executeMcpAction("media", "{\"action\":\"$action\"}")
+        Timber.i("GhostMcpTool: load_skill called for '$skill'")
+        val rawInstructions = skillManager.getSkillInstructions(skill)
+        return if (rawInstructions != null) {
+            val instructions = rawInstructions.take(1400)
+            com.ghost.api.GemmaService.instance?.recordToolOutput(instructions.length)
+            Timber.i("Skill loaded: $skill (${instructions.length} chars)")
+            mapOf("result" to "success", "instructions" to instructions)
+        } else {
+            Timber.w("Skill not found: $skill")
+            mapOf("result" to "error", "message" to "Skill '$skill' not found in registry.")
+        }
     }
 
-    // Helper functions preserved for direct Kotlin invocation or fallback recovery without schema bloat
+    // ─────────────────────────────────────────────────────────────────────────────
+    // UN-ANNOTATED HELPER / FALLBACK ALIASES (Preserved without LiteRT schema bloat)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    fun flashlight(state: String): Map<String, String> =
+        executeMcpAction("flashlight", "{\"state\":\"$state\"}")
+
+    fun app(name: String): Map<String, String> = open_app(name)
+
+    fun media(action: String): Map<String, String> =
+        executeMcpAction("media", "{\"action\":\"$action\"}")
+
     fun consult_peer(peer: String, prompt: String): Map<String, String> =
         executeMcpAction("consult_peer", "{\"peer\":\"$peer\",\"prompt\":\"$prompt\"}")
 
     @JvmOverloads
-    @Tool(description = "Sets an alarm for a specific time via the system Clock app. Hour must strictly be in 24-hour format 0-23 (e.g. 20 for 8 PM, 8 for 8 AM, 0 for midnight).")
-    fun alarm(
-        @ToolParam(description = "Strictly 24-hour format hour (0 to 23, e.g. 20 for 8 PM, 8 for 8 AM)") hour: Int,
-        @ToolParam(description = "Minute (0 to 59, default: 0)") minutes: Int = 0,
-        @ToolParam(description = "Optional alarm label") label: String = ""
-    ): Map<String, String> {
-        Timber.i("GhostMcpTool: alarm invoked with hour=$hour, minutes=$minutes, label='$label'")
+    fun alarm(hour: Int, minutes: Int = 0, label: String = ""): Map<String, String> {
+        Timber.i("GhostMcpTool: alarm helper invoked with hour=$hour, minutes=$minutes, label='$label'")
         return executeMcpAction("alarm", "{\"hour\":$hour,\"minutes\":$minutes,\"label\":\"$label\"}")
     }
 
     @JvmOverloads
-    @Tool(description = "Sets a countdown timer for the specified duration in seconds via the system Clock app.")
-    fun timer(
-        @ToolParam(description = "Duration in seconds (e.g. 300 for 5 minutes, 60 for 1 minute)") seconds: Int,
-        @ToolParam(description = "Optional timer label") label: String = ""
-    ): Map<String, String> {
-        Timber.i("GhostMcpTool: timer invoked with seconds=$seconds, label='$label'")
+    fun timer(seconds: Int, label: String = ""): Map<String, String> {
+        Timber.i("GhostMcpTool: timer helper invoked with seconds=$seconds, label='$label'")
         return executeMcpAction("timer", "{\"seconds\":$seconds,\"label\":\"$label\"}")
     }
 
@@ -125,37 +156,10 @@ class GhostMcpTool(
     fun move_file(sourcePath: String, destinationPath: String): Map<String, String> =
         executeMcpAction("move_file", "{\"sourcePath\":\"$sourcePath\",\"destinationPath\":\"$destinationPath\"}")
 
-    @Tool(description = "Execute an on-device action or MCP tool by name with parameters (JSON format).")
-    fun execute_action(
-        @ToolParam(description = "The exact name of the tool/action to execute (e.g. 'app', 'flashlight', 'media', 'alarm', 'timer', 'calendar', 'read_calendar', 'read_diary', 'search_files', 'list_files', 'open_file', 'consult_peer').") toolName: String,
-        @ToolParam(description = "JSON object string with parameters (e.g. '{\"name\":\"Calendar\"}', '{\"state\":\"ON\"}', '{\"action\":\"PAUSE\"}', '{\"hour\":7,\"minutes\":30}', '{\"seconds\":60}', '{\"query\":\"notes\"}').") parameters: String
-    ): Map<String, String> {
-        return executeMcpAction(toolName, parameters)
-    }
+    fun execute_action(toolName: String, parameters: String): Map<String, String> =
+        executeMcpAction(toolName, parameters)
 
-    @Tool(description = "Loads the detailed instructions and capabilities for a specific skill.")
-    fun load_skill(
-        @ToolParam(description = "The unique name of the skill to load (e.g., 'weather', 'calculator').") name: String
-    ): Map<String, String> {
-        Timber.i("GhostMcpTool: load_skill called for '$name'")
-        val rawInstructions = skillManager.getSkillInstructions(name)
-        return if (rawInstructions != null) {
-            val instructions = rawInstructions.take(1400)
-            com.ghost.api.GemmaService.instance?.recordToolOutput(instructions.length)
-            Timber.i("Skill loaded: $name (${instructions.length} chars)")
-            mapOf("result" to "success", "instructions" to instructions)
-        } else {
-            Timber.w("Skill not found: $name")
-            mapOf("result" to "error", "message" to "Skill '$name' not found in registry.")
-        }
-    }
-
-    @Tool(description = "Runs a JS script from a skill to perform complex calculations, fetch data, or return interactive UIs.")
-    fun run_js(
-        @ToolParam(description = "The name of the skill") skillName: String,
-        @ToolParam(description = "The script name to run. Use 'index.html' if not provided by user") scriptName: String,
-        @ToolParam(description = "The data to pass to the script as a JSON string. Use empty string if not provided.") data: String
-    ): Map<String, String> {
+    fun run_js(skillName: String, scriptName: String, data: String): Map<String, String> {
         return runBlocking(Dispatchers.IO) {
             Timber.i("GhostMcpTool: run_js called for skill '$skillName', script '$scriptName'")
             val skill = skillManager.getSkill(skillName.trim())
@@ -192,11 +196,7 @@ class GhostMcpTool(
         }
     }
 
-    @Tool(description = "Run an Android intent to interact with the OS.")
-    fun run_intent(
-        @ToolParam(description = "The intent to run") intent: String,
-        @ToolParam(description = "A JSON string containing the parameter values required for the intent.") parameters: String
-    ): Map<String, String> {
+    fun run_intent(intent: String, parameters: String): Map<String, String> {
         Timber.i("GhostMcpTool: run_intent called for intent '$intent'")
         val success = IntentHandler.handleAction(context, intent, parameters)
         return if (success) {

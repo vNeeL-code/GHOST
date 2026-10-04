@@ -23,8 +23,19 @@ object IntentBagger {
     data class BaggedIntent(
         val tool: String,
         val paramsJson: String,
-        val hint: String
+        val hint: String,
+        val isWireSpeedDirect: Boolean = false,
+        val appLabel: String? = null,
+        val browserUrl: String? = null
     )
+
+    data class AppMatch(
+        val name: String,
+        val isHighConfidence: Boolean
+    )
+
+    private val URL_REGEX = Regex("""(?i)\b(?:https?://|www\.)[^\s]+|\b[a-zA-Z0-9-]+\.(?:com|org|net|io|dev|app|ai|me|co|uk|de|ca)(?:/[^\s]*)?""")
+
 
     private val MEDIA_VERBS_PAUSE = listOf("pause", "pause music", "stop music", "halt music", "mute music", "stop playing")
     private val MEDIA_VERBS_PLAY = listOf("play", "resume", "unpause", "play music", "start music", "play song", "continue playing")
@@ -82,31 +93,68 @@ object IntentBagger {
 
         val bagged = mutableListOf<BaggedIntent>()
 
-        // 1. App Launch Intent (e.g. "open calendar", "can you please open spotify for me", "calendar, dammit")
-        val appName = matchAppLaunch(context, clean, trimmed)
-        if (appName != null) {
-            bagged.add(BaggedIntent("app", "{\"name\":\"$appName\"}", "Launch $appName app immediately"))
+        // 1. Direct Web URL Navigation (Wire-speed exit candidate)
+        val directUrl = matchUrl(clean, trimmed)
+        if (directUrl != null) {
+            bagged.add(
+                BaggedIntent(
+                    tool = "open_system_browser_bar",
+                    paramsJson = "{\"queryOrUrl\":\"$directUrl\"}",
+                    hint = "Open $directUrl in system browser",
+                    isWireSpeedDirect = true,
+                    browserUrl = directUrl
+                )
+            )
+            return bagged
         }
 
-        // 2. Media Transport Controls
+        // 2. App Launch Intent (e.g. "open calendar", "can you please open spotify for me")
+        val appMatch = matchAppLaunch(context, clean, trimmed)
+        if (appMatch != null) {
+            val appIntent = BaggedIntent(
+                tool = "open_app",
+                paramsJson = "{\"name\":\"${appMatch.name}\"}",
+                hint = "Launch ${appMatch.name} app immediately",
+                isWireSpeedDirect = appMatch.isHighConfidence,
+                appLabel = appMatch.name
+            )
+            if (appMatch.isHighConfidence) {
+                return listOf(appIntent)
+            } else {
+                bagged.add(appIntent)
+            }
+        }
+
+        // 3. Media Transport Controls
         val mediaAction = matchMedia(clean)
         if (mediaAction != null) {
-            bagged.add(BaggedIntent("media", "{\"action\":\"$mediaAction\"}", "Media $mediaAction"))
+            bagged.add(BaggedIntent("music", "{\"action\":\"$mediaAction\"}", "Media $mediaAction"))
         }
 
-        // 3. Flashlight / Torch
+        // 4. Volume / Sound Controls
+        val volumeParams = matchVolume(clean)
+        if (volumeParams != null) {
+            bagged.add(BaggedIntent("volume", volumeParams, "Adjust or inspect device volume"))
+        }
+
+        // 5. Device Status / Telemetry
+        if (matchStatus(clean)) {
+            bagged.add(BaggedIntent("status", "", "Check device telemetry (battery, network, sensors, audio)"))
+        }
+
+        // 6. Flashlight / Torch
         val flashState = matchFlashlight(clean)
         if (flashState != null) {
             bagged.add(BaggedIntent("flashlight", "{\"state\":\"$flashState\"}", "Turn $flashState flashlight"))
         }
 
-        // 4. Timer Intent
+        // 7. Timer Intent
         val timerSeconds = matchTimer(clean)
         if (timerSeconds != null) {
             bagged.add(BaggedIntent("timer", "{\"seconds\":$timerSeconds}", "Set countdown timer for ${timerSeconds}s"))
         }
 
-        // 5. Alarm Intent
+        // 8. Alarm Intent
         val alarmParams = matchAlarm(clean, trimmed)
         if (alarmParams != null) {
             val (h, m, label) = alarmParams
@@ -117,27 +165,27 @@ object IntentBagger {
             bagged.add(BaggedIntent("alarm", "{\"hour\":$h,\"minutes\":$m$labelSnippet}", "Set alarm for $time12h ($time24h)"))
         }
 
-        // 6. Diary Reflections Reading
+        // 9. Diary Reflections Reading
         if (clean.contains("diary") || clean.contains("memory log") || clean.contains("past reflections")) {
             if (clean.contains("read") || clean.contains("show") || clean.contains("what") || clean.contains("check") || clean.contains("open") || clean.contains("look at")) {
                 bagged.add(BaggedIntent("read_diary", "{\"days\":3}", "Read recent episodic memory diary reflections"))
             }
         }
 
-        // 7. Calendar Schedule Reading
+        // 10. Calendar Schedule Reading
         if (clean.contains("calendar") || clean.contains("schedule") || clean.contains("agenda") || clean.contains("appointments")) {
             if (clean.contains("what") || clean.contains("check") || clean.contains("read") || clean.contains("show") || clean.contains("upcoming") || clean.contains("today")) {
                 bagged.add(BaggedIntent("read_calendar", "{\"days\":7}", "Check upcoming calendar events"))
             }
         }
 
-        // 8. File Search Intent
+        // 11. File Search Intent
         val fileQuery = matchFileSearch(clean, trimmed)
         if (fileQuery != null) {
             bagged.add(BaggedIntent("search_files", "{\"query\":\"$fileQuery\"}", "Search device files for $fileQuery"))
         }
 
-        // 9. Peer Consultation Intent
+        // 12. Peer Consultation Intent
         val peer = matchPeerConsultation(clean, trimmed)
         if (peer != null) {
             val (peerName, prompt) = peer
@@ -147,7 +195,18 @@ object IntentBagger {
         return bagged.take(2)
     }
 
-    private fun matchAppLaunch(context: Context, clean: String, raw: String): String? {
+    private fun matchUrl(clean: String, raw: String): String? {
+        val match = URL_REGEX.find(raw) ?: URL_REGEX.find(clean) ?: return null
+        var url = match.value.trim().trimEnd('.', ',', ';')
+        if (url.startsWith("www.", ignoreCase = true)) {
+            url = "https://$url"
+        } else if (!url.startsWith("http://", ignoreCase = true) && !url.startsWith("https://", ignoreCase = true)) {
+            url = "https://$url"
+        }
+        return url
+    }
+
+    private fun matchAppLaunch(context: Context, clean: String, raw: String): AppMatch? {
         // Strip common prefixes
         var candidate = clean
         for (prefix in APP_LAUNCH_PREFIXES) {
@@ -161,6 +220,7 @@ object IntentBagger {
             .removeSuffix(" for me")
             .removeSuffix(" app")
             .removeSuffix(" please")
+            .removeSuffix(" dammit")
             .trim()
 
         if (candidate.isBlank()) {
@@ -168,16 +228,18 @@ object IntentBagger {
             val tokens = clean.split(" ")
             for (token in tokens) {
                 if (COMMON_APP_ALIASES.containsKey(token)) {
-                    return COMMON_APP_ALIASES[token]?.firstOrNull() ?: token.replaceFirstChar { it.uppercase() }
+                    val app = COMMON_APP_ALIASES[token]?.firstOrNull() ?: token.replaceFirstChar { it.uppercase() }
+                    return AppMatch(app, isHighConfidence = true)
                 }
             }
             return null
         }
 
-        // Check aliases first
+        // Check aliases first (Exact alias match = high confidence)
         for ((alias, candidates) in COMMON_APP_ALIASES) {
-            if (candidate == alias || candidate.contains(alias) || clean.contains(" $alias")) {
-                return candidates.firstOrNull() ?: alias.replaceFirstChar { it.uppercase() }
+            if (candidate == alias || clean.contains("open $alias") || clean.contains("launch $alias") || clean == alias) {
+                val app = candidates.firstOrNull() ?: alias.replaceFirstChar { it.uppercase() }
+                return AppMatch(app, isHighConfidence = true)
             }
         }
 
@@ -189,15 +251,72 @@ object IntentBagger {
         }
 
         val directMatch = apps.firstOrNull { it.equals(candidate, ignoreCase = true) }
-            ?: apps.firstOrNull { it.contains(candidate, ignoreCase = true) }
+        if (directMatch != null) return AppMatch(directMatch, isHighConfidence = true)
 
-        if (directMatch != null) return directMatch
+        val partialMatch = apps.firstOrNull { it.contains(candidate, ignoreCase = true) }
+        if (partialMatch != null) return AppMatch(partialMatch, isHighConfidence = false)
 
         if (candidate.length in 3..25 && (raw.contains("open", ignoreCase = true) || raw.contains("launch", ignoreCase = true))) {
-            return candidate.replaceFirstChar { it.uppercase() }
+            return AppMatch(candidate.replaceFirstChar { it.uppercase() }, isHighConfidence = false)
         }
 
         return null
+    }
+
+    private fun matchVolume(clean: String): String? {
+        val hasVolWord = clean.contains("volume") || clean.contains("sound") || clean.contains("audio")
+        val isMute = clean.contains("mute") && !clean.contains("unmute")
+        val isUnmute = clean.contains("unmute")
+        val isUp = clean.contains("louder") || clean.contains("volume up") || clean.contains("turn it up") || clean.contains("raise volume")
+        val isDown = clean.contains("quieter") || clean.contains("volume down") || clean.contains("turn it down") || clean.contains("lower volume")
+        val isSilent = clean.contains("silent mode") || clean.contains("silence phone")
+        val isVibrate = clean.contains("vibrate mode") || clean.contains("vibration mode")
+
+        if (!hasVolWord && !isMute && !isUnmute && !isUp && !isDown && !isSilent && !isVibrate) {
+            return null
+        }
+
+        val stream = when {
+            clean.contains("ring") || clean.contains("call") -> "ring"
+            clean.contains("alarm") -> "alarm"
+            clean.contains("notif") -> "notification"
+            clean.contains("sys") -> "system"
+            else -> "media"
+        }
+
+        if (isSilent) return "mode=silent"
+        if (isVibrate) return "mode=vibrate"
+        if (isMute) return "stream=$stream action=mute"
+        if (isUnmute) return "stream=$stream action=unmute"
+        if (isUp) return "stream=$stream action=up"
+        if (isDown) return "stream=$stream action=down"
+
+        val levelMatch = Regex("""(?:to|at|level)?\s*(\d{1,3})\s*%?""").find(clean)
+        if (levelMatch != null && hasVolWord) {
+            val lvl = levelMatch.groupValues[1].toIntOrNull()
+            if (lvl != null && lvl in 0..100) {
+                return "stream=$stream level=$lvl"
+            }
+        }
+
+        if (clean.contains("status") || clean.contains("check") || clean.contains("what") || clean.contains("get")) {
+            return "stream=$stream action=get"
+        }
+
+        return "stream=$stream"
+    }
+
+    private fun matchStatus(clean: String): Boolean {
+        if (clean.contains("battery") || clean.contains("charging") || clean.contains("battery level") || clean.contains("battery life")) {
+            return true
+        }
+        if (clean.contains("device status") || clean.contains("phone status") || clean.contains("system status") || clean.contains("hardware status")) {
+            return true
+        }
+        if ((clean.contains("check") || clean.contains("what") || clean.contains("show")) && (clean.contains("telemetry") || clean.contains("sensors") || clean.contains("status"))) {
+            return true
+        }
+        return false
     }
 
     private fun matchMedia(clean: String): String? {
@@ -262,54 +381,41 @@ object IntentBagger {
         val sb = StringBuilder("[Intent Hints (Operator action candidate — execute immediately if requested)]\n")
         for (c in candidates) {
             val directSyntax = when (c.tool) {
-                "alarm" -> {
-                    try {
-                        val json = org.json.JSONObject(c.paramsJson)
-                        val h = json.optInt("hour", 0)
-                        val m = json.optInt("minutes", 0)
-                        val l = json.optString("label", "")
-                        if (l.isNotBlank()) "alarm(hour = $h, minutes = $m, label = \"$l\")" else "alarm(hour = $h, minutes = $m)"
-                    } catch (e: Exception) {
-                        "alarm(${c.paramsJson})"
-                    }
+                "alarm", "set_alarm" -> {
+                    val h = Regex("""["']?hour["']?\s*[:=]\s*(\d+)""").find(c.paramsJson)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                    val m = Regex("""["']?min(?:ute)?s?["']?\s*[:=]\s*(\d+)""").find(c.paramsJson)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                    "set_alarm(hour = $h, minute = $m)"
                 }
                 "timer" -> {
-                    try {
-                        val json = org.json.JSONObject(c.paramsJson)
-                        val s = json.optInt("seconds", 60)
-                        "timer(seconds = $s)"
-                    } catch (e: Exception) {
-                        "timer(${c.paramsJson})"
-                    }
+                    val s = Regex("""["']?seconds?["']?\s*[:=]\s*(\d+)""").find(c.paramsJson)?.groupValues?.get(1)?.toIntOrNull() ?: 60
+                    "execute_command(\"timer\", \"seconds=$s\")"
                 }
-                "app" -> {
-                    try {
-                        val json = org.json.JSONObject(c.paramsJson)
-                        val name = json.optString("name", "")
-                        "open_app(\"$name\")"
-                    } catch (e: Exception) {
-                        "open_app(${c.paramsJson})"
-                    }
+                "app", "open_app" -> {
+                    val name = c.appLabel ?: Regex("""["']?name["']?\s*[:=]\s*["']?([^"'{}]+)["']?""").find(c.paramsJson)?.groupValues?.get(1)?.trim() ?: ""
+                    "open_app(\"$name\")"
                 }
-                "media" -> {
-                    try {
-                        val json = org.json.JSONObject(c.paramsJson)
-                        val act = json.optString("action", "PAUSE")
-                        "media(\"$act\")"
-                    } catch (e: Exception) {
-                        "media(${c.paramsJson})"
-                    }
+                "media", "music" -> {
+                    val act = Regex("""["']?action["']?\s*[:=]\s*["']?(\w+)["']?""").find(c.paramsJson)?.groupValues?.get(1)?.lowercase(Locale.ROOT) ?: "pause"
+                    "execute_command(\"music\", \"action=$act\")"
                 }
-                "flashlight" -> {
-                    try {
-                        val json = org.json.JSONObject(c.paramsJson)
-                        val st = json.optString("state", "ON")
-                        "flashlight(\"$st\")"
-                    } catch (e: Exception) {
-                        "flashlight(${c.paramsJson})"
-                    }
+                "flashlight", "toggle_torch" -> {
+                    val isTorchOn = c.paramsJson.contains("ON", ignoreCase = true) || c.paramsJson.contains("true", ignoreCase = true)
+                    "toggle_torch(enabled = $isTorchOn)"
                 }
-                else -> "execute_action(\"${c.tool}\", \"${c.paramsJson.replace("\"", "\\\"")}\")"
+                "volume" -> {
+                    "execute_command(\"volume\", \"${c.paramsJson}\")"
+                }
+                "status" -> {
+                    "execute_command(\"status\", \"\")"
+                }
+                "open_system_browser_bar" -> {
+                    val url = c.browserUrl ?: ""
+                    "execute_command(\"open_system_browser_bar\", \"queryOrUrl=\\\"$url\\\"\")"
+                }
+                else -> {
+                    val cleanParams = c.paramsJson.replace("\"", "\\\"")
+                    "execute_command(\"${c.tool}\", \"$cleanParams\")"
+                }
             }
             sb.append("• Action: $directSyntax — ${c.hint}\n")
         }
@@ -317,3 +423,4 @@ object IntentBagger {
         return sb.toString().trim()
     }
 }
+

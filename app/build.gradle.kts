@@ -67,6 +67,10 @@ android {
         }
     }
 
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+
     lint {
         disable += setOf("WebViewLayout")
     }

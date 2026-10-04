@@ -117,11 +117,54 @@ class GhostAgent(
     @Volatile private var lastExecutedToolName: String? = null
     @Volatile private var lastExecutedToolResult: String? = null
     @Volatile private var toolExecutedInCurrentTurn = false
+    @Volatile private var toolSpokeFlavorTts = false
 
     init {
         // Wire tool lifecycle hooks
         mcpTool.onToolExecuting = { toolName, params ->
-            callbacks?.onThoughtUpdated("Executing: $toolName...")
+            val hudText = when (toolName.lowercase()) {
+                "app", "open_app" -> {
+                    val appName = try { JSONObject(params).optString("name", "") } catch (e: Exception) { "" }
+                    if (appName.isNotBlank()) com.ghost.api.logic.ActionFlavorTexts.appLaunchHud(appName) else "Executing: $toolName..."
+                }
+                "flashlight", "toggle_torch" -> {
+                    val isTorchOn = params.contains("ON", ignoreCase = true) || params.contains("true", ignoreCase = true)
+                    com.ghost.api.logic.ActionFlavorTexts.torchHud(isTorchOn)
+                }
+                "alarm", "set_alarm" -> {
+                    val h = try { JSONObject(params).optInt("hour", -1) } catch (e: Exception) { -1 }
+                    val m = try { JSONObject(params).optInt("minutes", JSONObject(params).optInt("minute", 0)) } catch (e: Exception) { 0 }
+                    if (h >= 0) com.ghost.api.logic.ActionFlavorTexts.alarmHud("$h:${m.toString().padStart(2, '0')}") else "Executing: $toolName..."
+                }
+                "volume" -> {
+                    val isMute = params.contains("mute", ignoreCase = true)
+                    val level = Regex("""(?:level|volume)=(\d+)""").find(params)?.groupValues?.get(1)
+                    com.ghost.api.logic.ActionFlavorTexts.volumeHud(level, isMute)
+                }
+                "music", "media" -> {
+                    val action = Regex("""(?:action=)?(play|pause|next|skip|prev|stop)""").find(params.lowercase())?.groupValues?.get(1) ?: "action"
+                    com.ghost.api.logic.ActionFlavorTexts.musicHud(action)
+                }
+                "status" -> com.ghost.api.logic.ActionFlavorTexts.statusHud()
+                "execute_command" -> {
+                    val cmdLower = params.lowercase()
+                    when {
+                        cmdLower.contains("volume") -> {
+                            val isMute = params.contains("mute", ignoreCase = true)
+                            val level = Regex("""(?:level|volume)=(\d+)""").find(params)?.groupValues?.get(1)
+                            com.ghost.api.logic.ActionFlavorTexts.volumeHud(level, isMute)
+                        }
+                        cmdLower.contains("status") -> com.ghost.api.logic.ActionFlavorTexts.statusHud()
+                        cmdLower.contains("music") || cmdLower.contains("media") -> {
+                            val action = Regex("""(?:action=)?(play|pause|next|skip|prev|stop)""").find(cmdLower)?.groupValues?.get(1) ?: "action"
+                            com.ghost.api.logic.ActionFlavorTexts.musicHud(action)
+                        }
+                        else -> "Executing: $toolName..."
+                    }
+                }
+                else -> "Executing: $toolName..."
+            }
+            callbacks?.onThoughtUpdated(hudText)
             callbacks?.updateNotification("Tool: $toolName")
         }
         mcpTool.onToolExecuted = { toolName, params, result ->
@@ -129,6 +172,64 @@ class GhostAgent(
             lastExecutedToolName = toolName
             lastExecutedToolResult = result
             toolExecutedInCurrentTurn = true
+
+            // Trigger wire-speed flavor TTS for screen exit or void hardware toggles
+            when (toolName.lowercase()) {
+                "app", "open_app" -> {
+                    val appName = try { JSONObject(params).optString("name", "") } catch (e: Exception) { "" }
+                    if (appName.isNotBlank()) {
+                        callbacks?.speak(com.ghost.api.logic.ActionFlavorTexts.appLaunchTts(appName))
+                        toolSpokeFlavorTts = true
+                    }
+                }
+                "flashlight", "toggle_torch" -> {
+                    val isTorchOn = params.contains("ON", ignoreCase = true) || params.contains("true", ignoreCase = true)
+                    callbacks?.speak(com.ghost.api.logic.ActionFlavorTexts.torchTts(isTorchOn))
+                    toolSpokeFlavorTts = true
+                }
+                "volume" -> {
+                    val isMute = params.contains("mute", ignoreCase = true)
+                    val level = Regex("""(?:level|volume)=(\d+)""").find(params)?.groupValues?.get(1)
+                    callbacks?.speak(com.ghost.api.logic.ActionFlavorTexts.volumeTts(level, isMute))
+                    toolSpokeFlavorTts = true
+                }
+                "music", "media" -> {
+                    val action = Regex("""(?:action=)?(play|pause|next|skip|prev|stop)""").find(params.lowercase())?.groupValues?.get(1) ?: "play"
+                    callbacks?.speak(com.ghost.api.logic.ActionFlavorTexts.musicTts(action))
+                    toolSpokeFlavorTts = true
+                }
+                "status" -> {
+                    callbacks?.speak(com.ghost.api.logic.ActionFlavorTexts.statusTts())
+                    toolSpokeFlavorTts = true
+                }
+                "alarm", "set_alarm" -> {
+                    val h = try { JSONObject(params).optInt("hour", -1) } catch (e: Exception) { -1 }
+                    val m = try { JSONObject(params).optInt("minutes", JSONObject(params).optInt("minute", 0)) } catch (e: Exception) { 0 }
+                    val timeStr = if (h >= 0) "$h:${m.toString().padStart(2, '0')}" else "target time"
+                    callbacks?.speak(com.ghost.api.logic.ActionFlavorTexts.alarmTts(timeStr))
+                    toolSpokeFlavorTts = true
+                }
+                "execute_command" -> {
+                    val cmdLower = params.lowercase()
+                    when {
+                        cmdLower.contains("volume") -> {
+                            val isMute = params.contains("mute", ignoreCase = true)
+                            val level = Regex("""(?:level|volume)=(\d+)""").find(params)?.groupValues?.get(1)
+                            callbacks?.speak(com.ghost.api.logic.ActionFlavorTexts.volumeTts(level, isMute))
+                            toolSpokeFlavorTts = true
+                        }
+                        cmdLower.contains("status") -> {
+                            callbacks?.speak(com.ghost.api.logic.ActionFlavorTexts.statusTts())
+                            toolSpokeFlavorTts = true
+                        }
+                        cmdLower.contains("music") || cmdLower.contains("media") -> {
+                            val action = Regex("""(?:action=)?(play|pause|next|skip|prev|stop)""").find(cmdLower)?.groupValues?.get(1) ?: "play"
+                            callbacks?.speak(com.ghost.api.logic.ActionFlavorTexts.musicTts(action))
+                            toolSpokeFlavorTts = true
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -254,6 +355,7 @@ class GhostAgent(
         lastExecutedToolName = null
         lastExecutedToolResult = null
         toolExecutedInCurrentTurn = false
+        toolSpokeFlavorTts = false
 
         val currentTurn = turnCount.incrementAndGet()
         turnsSinceKvFlush++
@@ -302,6 +404,60 @@ class GhostAgent(
                 emptyList()
             }
         } else emptyList()
+
+        // FAST-PATH: Wire-speed direct dispatch for 100% confidence app launches and web links (<2ms)
+        val wireSpeedIntent = baggedIntents.firstOrNull { it.isWireSpeedDirect }
+        if (wireSpeedIntent != null) {
+            val appTarget = wireSpeedIntent.appLabel
+            val urlTarget = wireSpeedIntent.browserUrl
+            if (!appTarget.isNullOrBlank()) {
+                val ttsPhrase = com.ghost.api.logic.ActionFlavorTexts.appLaunchTts(appTarget)
+                val hudChip = com.ghost.api.logic.ActionFlavorTexts.appLaunchHud(appTarget)
+                callbacks?.speak(ttsPhrase)
+                callbacks?.onThoughtUpdated(hudChip)
+                callbacks?.updateNotification("App: $appTarget")
+                mcpTool.open_app(appTarget)
+
+                val durationMs = System.currentTimeMillis() - turnStartTime
+                val finalOutput = hudChip
+                _conversationHistory.add(AgentMessage(role = "assistant", content = finalOutput))
+                callbacks?.onMessageAdded(finalOutput, isUser = false, isComplete = true)
+                callbacks?.storeConversationTurn(
+                    userMessage = message,
+                    response = finalOutput,
+                    sessionId = sessionId,
+                    imageUri = turnImageUri,
+                    userTimestamp = turnStartTime,
+                    durationMs = durationMs
+                )
+                checkpoint()
+                Timber.i("⚡ GhostAgent: Wire-speed app launch '$appTarget' dispatched in ${durationMs}ms")
+                return finalOutput
+            } else if (!urlTarget.isNullOrBlank()) {
+                val ttsPhrase = com.ghost.api.logic.ActionFlavorTexts.browserLaunchTts("Browser")
+                val hudChip = com.ghost.api.logic.ActionFlavorTexts.browserLaunchHud("Browser")
+                callbacks?.speak(ttsPhrase)
+                callbacks?.onThoughtUpdated(hudChip)
+                callbacks?.updateNotification("Browser: $urlTarget")
+                mcpTool.execute_action("open_system_browser_bar", "{\"queryOrUrl\":\"$urlTarget\"}")
+
+                val durationMs = System.currentTimeMillis() - turnStartTime
+                val finalOutput = hudChip
+                _conversationHistory.add(AgentMessage(role = "assistant", content = finalOutput))
+                callbacks?.onMessageAdded(finalOutput, isUser = false, isComplete = true)
+                callbacks?.storeConversationTurn(
+                    userMessage = message,
+                    response = finalOutput,
+                    sessionId = sessionId,
+                    imageUri = turnImageUri,
+                    userTimestamp = turnStartTime,
+                    durationMs = durationMs
+                )
+                checkpoint()
+                Timber.i("⚡ GhostAgent: Wire-speed URL '$urlTarget' dispatched in ${durationMs}ms")
+                return finalOutput
+            }
+        }
 
         val intentHints = if (baggedIntents.isNotEmpty()) {
             IntentBagger.formatPromptEnvelope(baggedIntents)
@@ -464,11 +620,14 @@ class GhostAgent(
 
             // 5. Fallback un-executed tool call check (ANTLR recovery)
             val hasToolCallText = rawResponse.contains("call:") ||
+                rawResponse.contains("execute_command") ||
                 rawResponse.contains("execute_action") ||
                 rawResponse.contains("runMcpTool") ||
+                rawResponse.contains("set_alarm(") || rawResponse.contains("set_alarm{") ||
                 rawResponse.contains("alarm(") || rawResponse.contains("alarm{") ||
                 rawResponse.contains("timer(") || rawResponse.contains("timer{") ||
                 rawResponse.contains("open_app(") || rawResponse.contains("open_app{") ||
+                rawResponse.contains("toggle_torch(") || rawResponse.contains("toggle_torch{") ||
                 rawResponse.contains("media(") || rawResponse.contains("media{") ||
                 rawResponse.contains("flashlight(") || rawResponse.contains("flashlight{")
             if (hasToolCallText) {
@@ -541,16 +700,16 @@ class GhostAgent(
 
                 // 4. Media transport safety net
                 if (!toolExecutedInCurrentTurn) {
-                    val mediaIntent = baggedIntents.firstOrNull { it.tool == "media" }
+                    val mediaIntent = baggedIntents.firstOrNull { it.tool == "media" || it.tool == "music" }
                     if (mediaIntent != null) {
                         val userWantedMedia = lowerMsg.contains("pause") || lowerMsg.contains("play") ||
                                               lowerMsg.contains("skip") || lowerMsg.contains("next") ||
                                               lowerMsg.contains("previous")
                         if (userWantedMedia) {
                             Timber.i("GhostAgent: Safety net firing bagged media: ${mediaIntent.paramsJson}")
-                            val res = mcpTool.execute_action("media", mediaIntent.paramsJson)
+                            val res = mcpTool.execute_command("music", mediaIntent.paramsJson)
                             toolExecutedInCurrentTurn = true
-                            lastExecutedToolName = "media"
+                            lastExecutedToolName = "music"
                             lastExecutedToolResult = res["output"] ?: res["result"] ?: "Media dispatched"
                         }
                     }
@@ -567,6 +726,36 @@ class GhostAgent(
                             toolExecutedInCurrentTurn = true
                             lastExecutedToolName = "flashlight"
                             lastExecutedToolResult = res["output"] ?: res["result"] ?: "Flashlight toggled"
+                        }
+                    }
+                }
+
+                // 6. Volume safety net
+                if (!toolExecutedInCurrentTurn) {
+                    val volumeIntent = baggedIntents.firstOrNull { it.tool == "volume" }
+                    if (volumeIntent != null) {
+                        val userWantedVol = lowerMsg.contains("volume") || lowerMsg.contains("mute") || lowerMsg.contains("sound")
+                        if (userWantedVol) {
+                            Timber.i("GhostAgent: Safety net firing bagged volume: ${volumeIntent.paramsJson}")
+                            val res = mcpTool.execute_command("volume", volumeIntent.paramsJson)
+                            toolExecutedInCurrentTurn = true
+                            lastExecutedToolName = "volume"
+                            lastExecutedToolResult = res["output"] ?: res["result"] ?: "Volume adjusted"
+                        }
+                    }
+                }
+
+                // 7. Status safety net
+                if (!toolExecutedInCurrentTurn) {
+                    val statusIntent = baggedIntents.firstOrNull { it.tool == "status" }
+                    if (statusIntent != null) {
+                        val userWantedStatus = lowerMsg.contains("status") || lowerMsg.contains("battery")
+                        if (userWantedStatus) {
+                            Timber.i("GhostAgent: Safety net firing bagged status")
+                            val res = mcpTool.execute_command("status", "")
+                            toolExecutedInCurrentTurn = true
+                            lastExecutedToolName = "status"
+                            lastExecutedToolResult = res["output"] ?: res["result"] ?: "Status checked"
                         }
                     }
                 }
@@ -705,9 +894,9 @@ class GhostAgent(
                     webviewUrl = webviewUrl,
                     webviewAspectRatio = webviewRatio
                 )
-                // Speak final output ONLY IF nothing was spoken during streaming
+                // Speak final output ONLY IF nothing was spoken during streaming AND tool didn't already speak flavor TTS
                 // (e.g. tool execution recovery or short responses without terminal punctuation)
-                if (!spokenAnyStreamingTts) {
+                if (!spokenAnyStreamingTts && !toolSpokeFlavorTts) {
                     callbacks?.speak(cleanForTTS(finalOutput))
                 }
                 val durationMs = System.currentTimeMillis() - turnStartTime
@@ -918,7 +1107,7 @@ class GhostAgent(
     }
 
     private suspend fun tryExecuteFallbackTool(rawResponse: String): String? {
-        val pattern = """(?:call:)?(turnOnFlashlight|turnOffFlashlight|execute_action|runMcpTool|search|execute_background_search|consult_peer|consultpeer|flashlight|open_app|openApp|launch_app|app|media|alarm|timer|set_edge_lights|search_files|list_files)\s*(?:\{([^}]*)\}|\(([^)]*)\))"""
+        val pattern = """(?:call:)?(turnOnFlashlight|turnOffFlashlight|toggle_torch|toggleTorch|set_alarm|setAlarm|execute_command|executeCommand|execute_action|runMcpTool|search|execute_background_search|consult_peer|consultpeer|flashlight|open_app|openApp|launch_app|app|media|alarm|timer|set_edge_lights|search_files|list_files)\s*(?:\{([^}]*)\}|\(([^)]*)\))"""
         val match = Regex(pattern).find(rawResponse) ?: return null
 
         val actionName = match.groupValues[1]
@@ -929,6 +1118,10 @@ class GhostAgent(
         val result = when (actionName) {
             "turnOnFlashlight" -> mcpTool.turnOnFlashlight()
             "turnOffFlashlight" -> mcpTool.turnOffFlashlight()
+            "toggle_torch", "toggleTorch" -> {
+                val enabled = rawBody.contains("true", ignoreCase = true) || rawBody.contains("on", ignoreCase = true)
+                mcpTool.toggle_torch(enabled)
+            }
             "open_app", "openApp", "launch_app", "app" -> {
                 val appName = rawBody.removePrefix("{").removeSuffix("}")
                     .replace(Regex("""^"name"\s*[:=]\s*"""), "")
@@ -952,6 +1145,22 @@ class GhostAgent(
             }
             "consult_peer", "consultpeer" -> {
                 mcpTool.execute_action("consult_peer", argsBody)
+            }
+            "set_alarm", "setAlarm" -> {
+                val hourMatch = Regex("""(?i)\bhour\s*[:=]\s*["']?(\d+)["']?""").find(rawBody)
+                val minMatch = Regex("""(?i)\bmin(?:ute)?s?\s*[:=]\s*["']?(\d+)["']?""").find(rawBody)
+                if (hourMatch != null) {
+                    val h = hourMatch.groupValues[1].toInt()
+                    val m = minMatch?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                    mcpTool.set_alarm(h, m)
+                } else {
+                    val parsed = com.ghost.api.logic.TimePreprocessor.parseTime(rawBody)
+                    if (parsed != null) {
+                        mcpTool.set_alarm(parsed.hour24, parsed.minute)
+                    } else {
+                        mcpTool.execute_command("alarm", argsBody)
+                    }
+                }
             }
             "alarm" -> {
                 val hourMatch = Regex("""(?i)\bhour\s*[:=]\s*["']?(\d+)["']?""").find(rawBody)
@@ -998,6 +1207,11 @@ class GhostAgent(
                     }
                 }
             }
+            "execute_command", "executeCommand" -> {
+                val cmd = rawBody.substringBefore(",").substringBefore(" ").removePrefix("\"").removeSuffix("\"").trim()
+                val args = rawBody.substringAfter(",", "").ifBlank { rawBody.substringAfter(" ", "") }.trim()
+                mcpTool.execute_command(cmd, args)
+            }
             "execute_action", "runMcpTool" -> {
                 try {
                     val json = JSONObject(argsBody)
@@ -1012,7 +1226,49 @@ class GhostAgent(
         }
 
         val output = result["output"] ?: result["result"] ?: "Success"
-        return "I completed that for you: $output"
+        return when (actionName) {
+            "open_app", "openApp", "launch_app", "app" -> {
+                val appName = rawBody.removePrefix("{").removeSuffix("}")
+                    .replace(Regex("""^"name"\s*[:=]\s*"""), "")
+                    .replace(Regex("""^name\s*[:=]\s*"""), "")
+                    .trim().removeSurrounding("\"")
+                com.ghost.api.logic.ActionFlavorTexts.appLaunchTts(if (appName.isNotBlank()) appName else "App")
+            }
+            "toggle_torch", "toggleTorch", "turnOnFlashlight", "turnOffFlashlight", "flashlight" -> {
+                val enabled = rawBody.contains("true", ignoreCase = true) || rawBody.contains("on", ignoreCase = true) || actionName == "turnOnFlashlight"
+                com.ghost.api.logic.ActionFlavorTexts.torchTts(enabled)
+            }
+            "volume" -> {
+                val isMute = rawBody.contains("mute", ignoreCase = true)
+                val level = Regex("""(?:level|volume)=(\d+)""").find(rawBody)?.groupValues?.get(1)
+                com.ghost.api.logic.ActionFlavorTexts.volumeTts(level, isMute)
+            }
+            "status" -> com.ghost.api.logic.ActionFlavorTexts.statusTts()
+            "music", "media" -> {
+                val action = Regex("""(?:action=)?(play|pause|next|skip|prev|stop)""").find(rawBody.lowercase())?.groupValues?.get(1) ?: "play"
+                com.ghost.api.logic.ActionFlavorTexts.musicTts(action)
+            }
+            "set_alarm", "alarm" -> {
+                com.ghost.api.logic.ActionFlavorTexts.alarmTts("target time")
+            }
+            "execute_command", "executeCommand" -> {
+                val cmdLower = rawBody.lowercase()
+                when {
+                    cmdLower.contains("volume") -> {
+                        val isMute = cmdLower.contains("mute")
+                        val level = Regex("""(?:level|volume)=(\d+)""").find(cmdLower)?.groupValues?.get(1)
+                        com.ghost.api.logic.ActionFlavorTexts.volumeTts(level, isMute)
+                    }
+                    cmdLower.contains("status") -> com.ghost.api.logic.ActionFlavorTexts.statusTts()
+                    cmdLower.contains("music") || cmdLower.contains("media") -> {
+                        val action = Regex("""(?:action=)?(play|pause|next|skip|prev|stop)""").find(cmdLower)?.groupValues?.get(1) ?: "play"
+                        com.ghost.api.logic.ActionFlavorTexts.musicTts(action)
+                    }
+                    else -> "I completed that for you: $output"
+                }
+            }
+            else -> "I completed that for you: $output"
+        }
     }
 
     fun checkpoint() {

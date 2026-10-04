@@ -30,6 +30,9 @@ class MCPServer(
     private val skillManager: SkillManager,
     private val fileTools: com.ghost.api.hardware.FileToolSet = com.ghost.api.hardware.FileToolSet(context)
 ) {
+    val tuiCommandEngine: com.ghost.api.hardware.TuiCommandEngine by lazy {
+        com.ghost.api.hardware.TuiCommandEngine(context, sensorManager)
+    }
     
     data class ToolDefinition(val name: String, val description: String, val parameters: Map<String, ParameterSpec>)
     data class ParameterSpec(val type: String, val description: String, val required: Boolean = true, val enum: List<String>? = null)
@@ -39,9 +42,17 @@ class MCPServer(
         // Hardware
         "flashlight"      to ToolDefinition("flashlight", "Toggle the device flashlight", mapOf("state" to ParameterSpec("string", "ON or OFF"))),
         "set_edge_lights" to ToolDefinition("set_edge_lights", "Controls or toggles ambient screen equalizer edge lights rim lighting", mapOf("state" to ParameterSpec("string", "ON, OFF, or TOGGLE"))),
-        // System / Apps
+        // System / Apps / T-UI Primitives
         "app"             to ToolDefinition("app", "Launch an installed app by name", mapOf("name" to ParameterSpec("string", "App name"))),
         "media"           to ToolDefinition("media", "Control media playback", mapOf("action" to ParameterSpec("string", "PLAY, PAUSE, NEXT, or PREV"))),
+        "music"           to ToolDefinition("music", "Control media playback transport or query currently playing tracks", mapOf("action" to ParameterSpec("string", "PLAY, PAUSE, NEXT, PREV, STOP, or STATUS", required = false))),
+        "volume"          to ToolDefinition("volume", "Control stream volume or ringer profiles (media, ring, alarm, notification)", mapOf(
+            "stream" to ParameterSpec("string", "Stream type: media, ring, alarm, notification, system", required = false),
+            "level" to ParameterSpec("integer", "Volume level percentage (0-100)", required = false),
+            "action" to ParameterSpec("string", "Action: mute, unmute, up, down, get", required = false),
+            "mode" to ParameterSpec("string", "Ringer mode: silent, vibrate, normal", required = false)
+        )),
+        "status"          to ToolDefinition("status", "Instant aggregate device hardware telemetry report (battery, network, bluetooth, location, brightness, audio)", emptyMap()),
         "alarm"           to ToolDefinition("alarm", "Set an alarm", mapOf(
             "hour"    to ParameterSpec("integer", "Hour (0-23)"),
             "minutes" to ParameterSpec("integer", "Minute (0-59)"),
@@ -148,8 +159,20 @@ class MCPServer(
                 }
                 "media" -> {
                     val action = params["action"]?.toString() ?: "PAUSE"
-                    val res = systemTools.media(action)
+                    val res = tuiCommandEngine.music(params)
                     ToolResult(res["result"] == "success", res["message"] ?: "")
+                }
+                "music" -> {
+                    val res = tuiCommandEngine.music(params)
+                    ToolResult(res["result"] == "success", res["message"] ?: "")
+                }
+                "volume" -> {
+                    val res = tuiCommandEngine.volume(params)
+                    ToolResult(res["result"] == "success", res["message"] ?: "")
+                }
+                "status" -> {
+                    val res = tuiCommandEngine.status()
+                    ToolResult(res["result"] == "success", res["status"] ?: res["message"] ?: "")
                 }
                 "alarm" -> {
                     val parsed = com.ghost.api.hardware.SystemToolSet.parseAlarmParams(params)
