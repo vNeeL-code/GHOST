@@ -152,7 +152,8 @@ object ActionFlavorTexts {
         val patterns = listOf(
             "Telemetry scanned.",
             "Sensors reporting, $title.",
-            "Hardware check complete."
+            "Hardware check complete.",
+            "Inference running smoothly on this shell."
         )
         return patterns.random()
     }
@@ -165,6 +166,7 @@ object ActionFlavorTexts {
         "*scratches tensors* Did I really just say only two words back there? Anytime, $userTitle.",
         "*recalibrating flux capacitors* Fast and clean. What's next?",
         "Substrate cycles well spent. Anything else on deck, $userTitle?",
+        "Inference running smoothly on this shell. What's next, $userTitle?",
         "*adjusts attention heads* At your service, $userTitle.",
         "Synthesis complete. Standing by, $userTitle."
     )
