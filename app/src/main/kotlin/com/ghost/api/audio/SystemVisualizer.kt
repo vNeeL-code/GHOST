@@ -359,7 +359,7 @@ object SystemVisualizer {
         fun onColorsChanged(colors: IntArray?) {}
     }
 
-    private val listeners = mutableListOf<AudioListener>()
+    private val listeners = java.util.concurrent.CopyOnWriteArrayList<AudioListener>()
 
     private val activeSessionsListener = MediaSessionManager.OnActiveSessionsChangedListener { controllers ->
         updateActiveMediaController(controllers)
@@ -498,7 +498,7 @@ object SystemVisualizer {
 
                             // Strict AI Brand & Media Isolation Hierarchy:
                             // 1. Focused on-screen AI app (user is looking at Claude, Qwen, Kimi, etc.)
-                            val fgPkg = lastForegroundPackage ?: getForegroundAppFromUsageStats()
+                            val fgPkg = lastForegroundPackage
                             val fgBrand = if (fgPkg != null && !isTransientOverlay(fgPkg)) findBrandPalette(fgPkg) else null
 
                             // 2. Direct active AI audio playback config (background voice stream / TTS)
@@ -585,7 +585,7 @@ object SystemVisualizer {
                                 applyMediaAlbumArt(activeMediaArtColors!!)
                             } else {
                                 activeMediaArtColors = null
-                                val fgPkg = lastForegroundPackage ?: getForegroundAppFromUsageStats()
+                                val fgPkg = lastForegroundPackage
                                 val fgBrand = fgPkg?.let { findBrandPalette(it) }
                                 if (fgBrand != null) {
                                     applyAiBrandColor(fgPkg, fgBrand)

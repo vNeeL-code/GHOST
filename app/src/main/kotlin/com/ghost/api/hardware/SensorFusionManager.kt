@@ -431,14 +431,21 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
             val bm = batteryManager ?: return BatteryState(-1, false, 0f, 0f, 0)
             val batteryIntent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
 
-            // Level (0-100)
-            val level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            // Level (0-100) with fallback for OEM capacity anomalies
+            val propLevel = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            val rawLevel = batteryIntent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+            val scale = batteryIntent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+            val stickyLevel = if (rawLevel >= 0 && scale > 0) (rawLevel * 100) / scale else -1
+            val level = if (propLevel in 1..100) propLevel else if (stickyLevel in 0..100) stickyLevel else propLevel
 
             // Charging status
             val plugged = batteryIntent?.getIntExtra(BatteryManager.EXTRA_PLUGGED, -1) ?: 0
+            val status = batteryIntent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
             val isCharging = plugged == BatteryManager.BATTERY_PLUGGED_AC ||
                              plugged == BatteryManager.BATTERY_PLUGGED_USB ||
-                             plugged == BatteryManager.BATTERY_PLUGGED_WIRELESS
+                             plugged == BatteryManager.BATTERY_PLUGGED_WIRELESS ||
+                             status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                             status == BatteryManager.BATTERY_STATUS_FULL
 
             // TEMPERATURE - This is HER body temperature, not ambient!
             // Returns tenths of a degree Celsius (e.g., 295 = 29.5°C)
@@ -899,20 +906,22 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
 
         // --- ROW 1: POWER & THERMALS (Vital Signs) ---
         val battLevel = ctx.battery.level
+        val isFull = (ctx.battery.isCharging && battLevel >= 95) || battLevel >= 98
         val battIcon = when {
+            battLevel <= 0 -> "🔋"
             battLevel <= 10 -> "🪫"
-            battLevel <= 20 -> "🔋"
             else -> "🔋"
         }
-        val isFull = (ctx.battery.isCharging && battLevel >= 95) || battLevel >= 98
         val battCategory = when {
+            battLevel <= 0 -> "UNKNOWN"
             isFull -> "FULL"
             battLevel <= 5 -> "CRITICAL"
             battLevel <= 20 -> "LOW"
             battLevel <= 65 -> "MID"
             else -> "HIGH"
         }
-        sb.append("$battIcon $battLevel% [$battCategory]")
+        val levelStr = if (battLevel >= 0) "$battLevel%" else "??%"
+        sb.append("$battIcon $levelStr [$battCategory]")
         if (ctx.battery.isCharging) sb.append("⚡")
         if (ctx.battery.currentNow < 0) {
             sb.append(" (${Math.abs(ctx.battery.currentNow)}mA drain)")
@@ -922,13 +931,7 @@ class SensorFusionManager(private val context: Context) : AutoCloseable {
 
         sb.append(" | 🌡️ ${Math.round(ctx.battery.temperature)}°C")
         val ramUsed = ctx.system.ramUsedPercent
-        val ramCategory = when {
-            ramUsed < 50 -> "LIGHT"
-            ramUsed < 75 -> "MODERATE"
-            ramUsed < 90 -> "HIGH"
-            else -> "CRITICAL"
-        }
-        sb.append(" | 🧠 RAM: $ramUsed% [$ramCategory]")
+        sb.append(" | 🧠 RAM: $ramUsed%")
         sb.append(" | 💿 ${String.format(java.util.Locale.US, "%.1f", ctx.system.storageFreeGB)}GB free")
         sb.append("\n")
 

@@ -193,6 +193,16 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
     private val mediaSessionManager = context.getSystemService(Context.MEDIA_SESSION_SERVICE) as? android.media.session.MediaSessionManager
     var utteranceFinishedListener: ((String) -> Unit)? = null
 
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val abandonDuckingRunnable = Runnable {
+        if (tts?.isSpeaking != true) {
+            abandonAudioDucking()
+            try {
+                context.sendBroadcast(android.content.Intent("com.ghost.api.ACTION_TTS_STOP").setPackage(context.packageName))
+            } catch (e: Exception) {}
+        }
+    }
+
     private fun getActivePlayingController(): android.media.session.MediaController? {
         try {
             val component = android.content.ComponentName(context, com.ghost.api.GemmaNotificationListener::class.java)
@@ -211,6 +221,7 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
 
     private fun requestAudioDucking() {
         try {
+            mainHandler.removeCallbacks(abandonDuckingRunnable)
             // Target only actively playing media sessions if not already paused for this speech chain
             if (activePlayingController == null) {
                 val playing = getActivePlayingController()
@@ -335,21 +346,20 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
 
             tts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
+                    mainHandler.removeCallbacks(abandonDuckingRunnable)
                     requestAudioDucking()
-                    context.sendBroadcast(android.content.Intent("com.ghost.api.ACTION_TTS_START"))
+                    try {
+                        context.sendBroadcast(android.content.Intent("com.ghost.api.ACTION_TTS_START").setPackage(context.packageName))
+                    } catch (e: Exception) {}
                 }
                 override fun onDone(utteranceId: String?) {
-                    if (tts?.isSpeaking != true) {
-                        abandonAudioDucking()
-                        context.sendBroadcast(android.content.Intent("com.ghost.api.ACTION_TTS_STOP"))
-                    }
+                    mainHandler.removeCallbacks(abandonDuckingRunnable)
+                    mainHandler.postDelayed(abandonDuckingRunnable, 350)
                     utteranceId?.let { utteranceFinishedListener?.invoke(it) }
                 }
                 override fun onError(utteranceId: String?) {
-                    if (tts?.isSpeaking != true) {
-                        abandonAudioDucking()
-                        context.sendBroadcast(android.content.Intent("com.ghost.api.ACTION_TTS_STOP"))
-                    }
+                    mainHandler.removeCallbacks(abandonDuckingRunnable)
+                    mainHandler.postDelayed(abandonDuckingRunnable, 350)
                     utteranceId?.let { utteranceFinishedListener?.invoke(it) }
                 }
             })
@@ -659,6 +669,7 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
     }
 
     fun stop() {
+        mainHandler.removeCallbacks(abandonDuckingRunnable)
         abandonAudioDucking()
         deferredQueue.clear()
         tts?.stop()
@@ -671,6 +682,7 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
         synchronized(activeInstances) {
             activeInstances.remove(this)
         }
+        mainHandler.removeCallbacks(abandonDuckingRunnable)
         abandonAudioDucking()
         deferredQueue.clear()
         tts?.shutdown()
