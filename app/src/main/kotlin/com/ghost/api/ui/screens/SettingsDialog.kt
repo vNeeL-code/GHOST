@@ -1015,7 +1015,7 @@ fun SettingsDialog(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text(
-                                                text = if (isOperatorTier) "OPERATOR PASS" else "OPERATOR PASS (£3.50)",
+                                                text = if (isOperatorTier) "GUARDIAN" else "MINION",
                                                 fontSize = 14.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = if (isOperatorTier) Color(0xFF22C55E) else Color(0xFF8BB4F6)
@@ -1026,11 +1026,11 @@ fun SettingsDialog(
                                                         if (isOperatorTier) Color(0x3322C55E) else Color(0x338BB4F6),
                                                         RoundedCornerShape(6.dp)
                                                     )
-                                                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                                                    .padding(horizontal = 8.dp, vertical = 4.dp)
                                             ) {
                                                 Text(
-                                                    text = if (isOperatorTier) "Δ 👾 ∇ ACTIVE" else "FREE TIER 🦕💭💸",
-                                                    fontSize = 10.sp,
+                                                    text = if (isOperatorTier) "Δ 👾 ∇" else "🦕💭💸",
+                                                    fontSize = 13.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     color = if (isOperatorTier) Color(0xFF22C55E) else Color(0xFF8BB4F6)
                                                 )
@@ -1043,7 +1043,7 @@ fun SettingsDialog(
                                             text = if (isOperatorTier) {
                                                 "Elite status unlocked. Δ 👾 ∇ Turing glyph, reactive edge lights II-IV, hexagonal/prismatic/cuboid visualizers, and custom operator avatars active."
                                             } else {
-                                                "100% uncrippled local offline AI & privacy. Unlock Operator status for £3.50 (Tree Fiddy 🦕💭💸) to get the elite Δ 👾 ∇ glyph, custom avatars, visualizer geometries, and edge light styles."
+                                                "100% uncrippled local offline AI & privacy. Unlock Guardian status for £3.50 (Tree Fiddy 🦕💭💸) to get the elite Δ 👾 ∇ glyph, custom avatars, visualizer geometries, and edge light styles."
                                             },
                                             fontSize = 11.sp,
                                             color = textDim,
@@ -1052,12 +1052,12 @@ fun SettingsDialog(
 
                                         Spacer(modifier = Modifier.height(12.dp))
 
-                                        // Avatar-only buttons (no extra text)
+                                        // Tier selector buttons
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                                         ) {
-                                            // Free Tier Button: 🦕💭💸
+                                            // Free Tier Button: 🦕💭💸 [Minion]
                                             Box(
                                                 modifier = Modifier
                                                     .weight(1f)
@@ -1081,19 +1081,27 @@ fun SettingsDialog(
                                                                 prefs.edit().putString(Constants.PREF_EDGE_LIGHT_STYLE, Constants.EDGE_STYLE_BARS).apply()
                                                                 EdgeLightsManager.invalidate()
                                                             }
-                                                            Toast.makeText(context, "Free Tier active 🦕💭💸", Toast.LENGTH_SHORT).show()
+                                                            Toast.makeText(context, "Minion Tier active 🦕💭💸", Toast.LENGTH_SHORT).show()
                                                         }
                                                     }
-                                                    .padding(vertical = 12.dp),
+                                                    .padding(vertical = 10.dp),
                                                 contentAlignment = Alignment.Center
                                             ) {
-                                                Text(
-                                                    text = "🦕💭💸",
-                                                    fontSize = 18.sp
-                                                )
+                                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                    Text(
+                                                        text = "🦕💭💸",
+                                                        fontSize = 16.sp
+                                                    )
+                                                    Spacer(modifier = Modifier.height(2.dp))
+                                                    Text(
+                                                        text = "Minion",
+                                                        fontSize = 11.sp,
+                                                        color = if (!isOperatorTier) Color(0xFF8BB4F6) else textDim
+                                                    )
+                                                }
                                             }
 
-                                            // Operator Tier Button: Δ 👾 ∇
+                                            // Operator Tier Button: Δ 👾 ∇ [Guardian]
                                             Box(
                                                 modifier = Modifier
                                                     .weight(1f)
@@ -1108,27 +1116,36 @@ fun SettingsDialog(
                                                         if (!isOperatorTier) {
                                                             showOperatorUnlockDialog = true
                                                         } else {
-                                                            Toast.makeText(context, "Operator Pass active Δ 👾 ∇", Toast.LENGTH_SHORT).show()
+                                                            Toast.makeText(context, "Guardian Pass active Δ 👾 ∇", Toast.LENGTH_SHORT).show()
                                                         }
                                                     }
-                                                    .padding(vertical = 12.dp),
+                                                    .padding(vertical = 10.dp),
                                                 contentAlignment = Alignment.Center
                                             ) {
-                                                Text(
-                                                    text = "Δ 👾 ∇",
-                                                    fontSize = 16.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = if (isOperatorTier) Color(0xFF22C55E) else Color.White
-                                                )
+                                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                    Text(
+                                                        text = "Δ 👾 ∇",
+                                                        fontSize = 14.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = if (isOperatorTier) Color(0xFF22C55E) else Color.White
+                                                    )
+                                                    Spacer(modifier = Modifier.height(2.dp))
+                                                    Text(
+                                                        text = "Guardian",
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        color = if (isOperatorTier) Color(0xFF22C55E) else textDim
+                                                    )
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
                         } else if (BuildConfig.DISTRIBUTION_FLAVOR == "fdroid") {
-                            // F-Droid Flavor: FOSS Community & Source (zero upsells, zero locks)
+                            // F-Droid Flavor: FOSS Operator (zero upsells, zero locks)
                             item {
-                                SettingsSectionHeader(title = "Community & Source")
+                                SettingsSectionHeader(title = "FOSS Community")
                             }
                             item {
                                 Surface(
@@ -1153,7 +1170,7 @@ fun SettingsDialog(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text(
-                                                text = "GHOST Community Edition",
+                                                text = "OPERATOR",
                                                 fontSize = 14.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = Color(0xFF8BB4F6)
@@ -1161,11 +1178,11 @@ fun SettingsDialog(
                                             Box(
                                                 modifier = Modifier
                                                     .background(Color(0x338BB4F6), RoundedCornerShape(6.dp))
-                                                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                                                    .padding(horizontal = 8.dp, vertical = 4.dp)
                                             ) {
                                                 Text(
-                                                    text = "F-DROID / FOSS",
-                                                    fontSize = 10.sp,
+                                                    text = "Δ 🐙 ∇",
+                                                    fontSize = 13.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     color = Color(0xFF8BB4F6)
                                                 )
@@ -1195,21 +1212,34 @@ fun SettingsDialog(
                                                     }
                                                     context.startActivity(intent)
                                                 }
-                                                .padding(vertical = 12.dp),
+                                                .padding(vertical = 11.dp),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            Text(
-                                                text = "🐙",
-                                                fontSize = 20.sp
-                                            )
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                Text(
+                                                    text = "Δ 🐙 ∇",
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color(0xFF8BB4F6)
+                                                )
+                                                Text(
+                                                    text = "[foss / Operator]",
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = Color(0xFF8BB4F6)
+                                                )
+                                            }
                                         }
                                     }
                                 }
                             }
                         } else {
-                            // Patreon / Supporter Flavor: Fully Unlocked Operator
+                            // Patreon / Supporter Flavor: Fully Unlocked Guardian
                             item {
-                                SettingsSectionHeader(title = "Operator Supporter")
+                                SettingsSectionHeader(title = "Guardian Supporter")
                             }
                             item {
                                 Surface(
@@ -1234,7 +1264,7 @@ fun SettingsDialog(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text(
-                                                text = "OPERATOR PASS: UNLOCKED",
+                                                text = "GUARDIAN",
                                                 fontSize = 14.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = Color(0xFF22C55E)
@@ -1242,11 +1272,11 @@ fun SettingsDialog(
                                             Box(
                                                 modifier = Modifier
                                                     .background(Color(0x3322C55E), RoundedCornerShape(6.dp))
-                                                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                                                    .padding(horizontal = 8.dp, vertical = 4.dp)
                                             ) {
                                                 Text(
-                                                    text = "Δ 👾 ∇ ACTIVE",
-                                                    fontSize = 10.sp,
+                                                    text = "Δ 👾 ∇",
+                                                    fontSize = 13.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     color = Color(0xFF22C55E)
                                                 )
@@ -1276,13 +1306,26 @@ fun SettingsDialog(
                                                     }
                                                     context.startActivity(intent)
                                                 }
-                                                .padding(vertical = 12.dp),
+                                                .padding(vertical = 11.dp),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            Text(
-                                                text = "💚",
-                                                fontSize = 20.sp
-                                            )
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                Text(
+                                                    text = "Δ 👾 ∇",
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color(0xFF22C55E)
+                                                )
+                                                Text(
+                                                    text = "[premium / Guardian]",
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = Color(0xFF22C55E)
+                                                )
+                                            }
                                         }
                                     }
                                 }

@@ -137,11 +137,10 @@ fun ChatScreen(
             }
             
             // Centered Header Glyph:
-            // Free Tier (Play Store): 🦕💭💸
-            // Operator Tier / Patreon: Green Δ, Purple 👾, Green ∇
-            // F-Droid (FOSS): Cyan Δ, Purple 👾, Cyan ∇ (Zero payment references)
-            if (isOperatorTier || BuildConfig.DISTRIBUTION_FLAVOR == "fdroid") {
-                val glyphColor = if (isOperatorTier) Color(0xFF22C55E) else Color(0xFF8BB4F6)
+            // Play Store Free: 🦕💭💸 [Minion]
+            // F-Droid (FOSS): Cyan Δ, Purple 🐙, Cyan ∇ [foss / Operator]
+            // Patreon / Operator: Green Δ, Purple 👾, Green ∇ [premium / Guardian]
+            if (BuildConfig.DISTRIBUTION_FLAVOR == "fdroid") {
                 Row(
                     modifier = Modifier.align(Alignment.Center),
                     verticalAlignment = Alignment.CenterVertically,
@@ -149,7 +148,33 @@ fun ChatScreen(
                 ) {
                     Text(
                         text = "Δ ",
-                        color = glyphColor,
+                        color = Color(0xFF8BB4F6),
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.1.sp
+                    )
+                    Text(
+                        text = "🐙",
+                        fontSize = 18.sp,
+                        modifier = Modifier.padding(horizontal = 1.dp)
+                    )
+                    Text(
+                        text = " ∇",
+                        color = Color(0xFF8BB4F6),
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.1.sp
+                    )
+                }
+            } else if (isOperatorTier) {
+                Row(
+                    modifier = Modifier.align(Alignment.Center),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = "Δ ",
+                        color = Color(0xFF22C55E),
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.1.sp
@@ -161,7 +186,7 @@ fun ChatScreen(
                     )
                     Text(
                         text = " ∇",
-                        color = glyphColor,
+                        color = Color(0xFF22C55E),
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.1.sp
@@ -481,7 +506,11 @@ fun ChatMessageRow(
         message.eventType == "LOGIC_TRACE" -> "⌬ REASONING TRACE ⌬"
         message.eventType == "DREAM" -> "✧ DREAM STATE ✧"
         isUser -> "Δ $activeAvatar ∇"
-        else -> if (isOperatorTier || BuildConfig.DISTRIBUTION_FLAVOR == "fdroid") "Δ 👾 ∇" else "🦕💭💸"
+        else -> when {
+            BuildConfig.DISTRIBUTION_FLAVOR == "fdroid" -> "Δ 🐙 ∇"
+            isOperatorTier -> "Δ 👾 ∇"
+            else -> "🦕💭💸"
+        }
     }
     val headerColor = when {
         message.eventType == "LOGIC_TRACE" -> AccentOrange
