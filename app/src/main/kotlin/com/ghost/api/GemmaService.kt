@@ -614,6 +614,12 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             .apply()
 
         serviceScope.launch {
+            try {
+                currentInFlightJob?.cancel()
+                currentInFlightJob = null
+            } catch (e: Exception) {
+                Timber.w(e, "Error cancelling in-flight job on backend reload")
+            }
             cancelThinking()
             isInferencing = false
             currentInFlightQuery = null
@@ -1373,6 +1379,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
     var currentInFlightQuery: String? = null
         private set
+    @Volatile var currentInFlightJob: kotlinx.coroutines.Job? = null
+        private set
 
     /**
      * Core orchestrator: Context gathering + LLM reasoning + Tool execution
@@ -1415,6 +1423,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             }
 
             isInferencing = true
+            currentInFlightJob = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
             try {
                 return@withLock kotlinx.coroutines.withTimeoutOrNull(240000) {
                     val response = ghostAgent.processUserMessage(
@@ -1434,6 +1443,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             } finally {
                 isInferencing = false
                 currentInFlightQuery = null
+                currentInFlightJob = null
                 responseNotificationManager.cancelThinking()
                 if (!isDream) {
                     withContext(Dispatchers.Main) {
@@ -2108,6 +2118,13 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     }
 
     override suspend fun unloadEngine() {
+        if (::ghostAgent.isInitialized) {
+            try {
+                ghostAgent.shutdown()
+            } catch (e: Exception) {
+                Timber.w(e, "Failed to shutdown GhostAgent on engine unload")
+            }
+        }
         val oldEngine = engineRef.getAndSet(null)
         oldEngine?.cleanup()
         System.gc()

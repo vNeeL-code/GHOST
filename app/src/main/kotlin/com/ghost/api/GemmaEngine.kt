@@ -365,6 +365,15 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                 }
                 conversation = null
                 onError("Inference timed out after 45s.")
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                Timber.i("GemmaEngine: Inference cancelled, aborting active conversation...")
+                try {
+                    activeConv.close()
+                } catch (e: Exception) {
+                    Timber.w(e, "Failed to close conversation on cancellation")
+                }
+                conversation = null
+                throw ce
             }
         } finally {
             isBusy.set(false)
@@ -448,6 +457,9 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                                 systemInstruction = Contents.of(systemPrompt ?: "You are a concise observer.")
                             )
                             val tempConv = eng.createConversation(config)
+                            continuation.invokeOnCancellation {
+                                try { tempConv.close() } catch (e: Exception) {}
+                            }
                             val responseBuilder = StringBuilder()
                             tempConv.sendMessageAsync(
                                 Contents.of(listOf(Content.Text(prompt))),
@@ -511,10 +523,18 @@ class GemmaEngine(private val context: Context) : LlmBackend {
             if (!acquired) {
                 Timber.w("sessionMutex lock timed out during cleanup, proceeding with safe close")
             }
-            conversation?.close()
-            engine?.close()
+            try {
+                conversation?.close()
+            } catch (e: Exception) {
+                Timber.w(e, "Error closing conversation during cleanup")
+            }
+            try {
+                engine?.close()
+            } catch (e: Exception) {
+                Timber.w(e, "Error closing engine during cleanup")
+            }
         } catch (e: Exception) {
-            Timber.w(e, "Error closing engine/conversation")
+            Timber.w(e, "Error during cleanup")
         } finally {
             conversation = null
             engine = null

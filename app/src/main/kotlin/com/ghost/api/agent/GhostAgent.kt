@@ -948,6 +948,10 @@ class GhostAgent(
             return finalOutput
 
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) {
+                Timber.i("GhostAgent: Inference turn cancelled")
+                throw e
+            }
             callbacks?.cancelThinking()
             Timber.e(e, "GhostAgent: Inference turn failed")
             val errorMsg = "I stumbled while executing that: ${e.message}"

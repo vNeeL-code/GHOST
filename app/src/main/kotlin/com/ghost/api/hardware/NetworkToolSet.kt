@@ -94,8 +94,8 @@ class NetworkToolSet(private val context: Context) : ToolSet {
         connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
         connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
         connection.doOutput = true
-        connection.connectTimeout = 8000
-        connection.readTimeout = 8000
+        connection.connectTimeout = 3000
+        connection.readTimeout = 3000
 
         try {
             connection.outputStream.use { it.write("q=$encoded".toByteArray()) }
@@ -115,6 +115,9 @@ class NetworkToolSet(private val context: Context) : ToolSet {
             }
             sb.append("---\nSynthesize these results to answer.")
             return sanitizeToolString(sb.toString(), 1400)
+        } catch (e: Exception) {
+            Timber.w("DuckDuckGo search connection timed out or failed: ${e.message}")
+            return null
         } finally {
             connection.disconnect()
         }
@@ -132,12 +135,12 @@ class NetworkToolSet(private val context: Context) : ToolSet {
             val connection = url.openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
             connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) Gemma/1.0")
-            connection.connectTimeout = 8000
-            connection.readTimeout = 8000
+            connection.connectTimeout = 3000
+            connection.readTimeout = 3000
 
             try {
                 if (connection.responseCode != 200) {
-                    return@runBlocking mapOf("result" to "error", "message" to "HTTP ${connection.responseCode}")
+                    return@runBlocking mapOf("result" to "error", "message" to "HTTP remote node returned ${connection.responseCode}")
                 }
 
                 val html = connection.inputStream.bufferedReader().use { it.readText() }
@@ -154,7 +157,7 @@ class NetworkToolSet(private val context: Context) : ToolSet {
                 connection.disconnect()
             }
         } catch (e: Exception) {
-            mapOf("result" to "error", "message" to (e.message?.take(80) ?: "failed"))
+            mapOf("result" to "error", "message" to "Remote uplink timed out on this shell: ${e.message?.take(60) ?: "host unreachable"}")
         } finally {
             com.ghost.api.GemmaService.instance?.hideWorkSignal()
         }
