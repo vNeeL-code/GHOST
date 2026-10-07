@@ -277,7 +277,11 @@ class AvatarWallpaperService : WallpaperService() {
                     }
 
                     interpolateColors()
-                    drawFrame()
+                    try {
+                        drawFrame()
+                    } catch (e: Exception) {
+                        // Protect against OS surface invalidation or lockCanvas mode mismatch during backend flips
+                    }
                     try {
                         android.view.Choreographer.getInstance().postFrameCallback(this)
                     } catch (e: Exception) {}
@@ -341,6 +345,7 @@ class AvatarWallpaperService : WallpaperService() {
             // 1. CENTRE BOOMING: Dedicated Sub-Bass & Kick tracking
             // Controls the central mother geometry expansion, concentric bloom pulses, and breathing
             smoothedBass = smoothedBass * 0.70f + bass * 0.30f
+            smoothedIntensity = smoothedIntensity * 0.70f + intensity * 0.30f
 
             if (fft.isNotEmpty() && fft.size >= 16) {
                 val totalBins = (fft.size / 2) - 1

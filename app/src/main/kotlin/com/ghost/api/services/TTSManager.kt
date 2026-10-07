@@ -127,6 +127,8 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
         }
     }
 
+    private var pocketSensorListener: SensorEventListener? = null
+
     private fun initProximitySensor() {
         val sm = sensorManager ?: return
 
@@ -146,6 +148,7 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
             }
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
         }
+        pocketSensorListener = listener
 
         sm.getDefaultSensor(Sensor.TYPE_PROXIMITY)?.let {
             sm.registerListener(listener, it, SensorManager.SENSOR_DELAY_NORMAL)
@@ -681,6 +684,12 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
     fun shutdown() {
         synchronized(activeInstances) {
             activeInstances.remove(this)
+        }
+        pocketSensorListener?.let {
+            try {
+                sensorManager?.unregisterListener(it)
+            } catch (e: Exception) {}
+            pocketSensorListener = null
         }
         mainHandler.removeCallbacks(abandonDuckingRunnable)
         abandonAudioDucking()

@@ -103,24 +103,15 @@ class GemmaNotificationListener : NotificationListenerService() {
         // Cache reply action if available
         storeReplyAction(pkg, sbn)
         
-        // Passive Context Injection: Send to Gemma to process instead of direct TTS
+        // Passive Notification Announcement: Snappy spoken alert & inline chat bubble without 20s LLM loop
         val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
         if (prefs.getBoolean(Constants.PREF_PASSIVE_TTS, false) && text.isNotBlank()) {
-            val isMedia = pkg.contains("music") || pkg.contains("audio") || pkg.contains("player") || title.contains("playing", ignoreCase = true)
-            val isMessaging = pkg.contains("chat") || pkg.contains("msg") || pkg.contains("whatsapp") || pkg.contains("telegram") || pkg.contains("discord")
+            val isMedia = pkg.contains("music") || pkg.contains("audio") || pkg.contains("player") || pkg.contains("youtube") || title.contains("playing", ignoreCase = true)
+            val isMessaging = pkg.contains("chat") || pkg.contains("msg") || pkg.contains("whatsapp") || pkg.contains("telegram") || pkg.contains("discord") || pkg.contains("sms") || pkg.contains("mms") || pkg.contains("signal")
 
-            if (isMessaging) {
-                val appName = pkg.split('.').lastOrNull()?.replaceFirstChar { it.uppercase() } ?: pkg
-                var prompt = "Δ 👾 ∇ GHOST: Incoming message on $appName from $title: \"$text\". Briefly tell the user about this message in your own words"
-                
-                if (replyCache.containsKey(pkg)) {
-                    prompt += ", and ask if they would like you to reply to it."
-                } else {
-                    prompt += "."
-                }
-                
-                // Fire and forget to GemmaService
-                GemmaService.instance?.processNotificationContext(prompt)
+            if (isMessaging && !isMedia) {
+                val appLabel = resolveAppLabel(this, pkg)
+                GemmaService.instance?.processNotificationAnnouncement(appLabel, title, text)
             }
         }
 

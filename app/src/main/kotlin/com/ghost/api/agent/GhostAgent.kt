@@ -118,6 +118,7 @@ class GhostAgent(
     @Volatile private var lastExecutedToolResult: String? = null
     @Volatile private var toolExecutedInCurrentTurn = false
     @Volatile private var toolSpokeFlavorTts = false
+    @Volatile private var lastToolFlavorPhrase: String? = null
 
     init {
         // Wire tool lifecycle hooks
@@ -181,35 +182,47 @@ class GhostAgent(
                 "app", "open_app" -> {
                     val appName = try { JSONObject(params).optString("name", "") } catch (e: Exception) { "" }
                     if (appName.isNotBlank()) {
-                        callbacks?.speak(com.ghost.api.logic.ActionFlavorTexts.appLaunchTts(appName, userTitle))
+                        val phrase = com.ghost.api.logic.ActionFlavorTexts.appLaunchTts(appName, userTitle)
+                        lastToolFlavorPhrase = phrase
+                        callbacks?.speak(phrase)
                         toolSpokeFlavorTts = true
                     }
                 }
                 "flashlight", "toggle_torch" -> {
                     val isTorchOn = params.contains("ON", ignoreCase = true) || params.contains("true", ignoreCase = true)
-                    callbacks?.speak(com.ghost.api.logic.ActionFlavorTexts.torchTts(isTorchOn))
+                    val phrase = com.ghost.api.logic.ActionFlavorTexts.torchTts(isTorchOn)
+                    lastToolFlavorPhrase = phrase
+                    callbacks?.speak(phrase)
                     toolSpokeFlavorTts = true
                 }
                 "volume" -> {
                     val isMute = params.contains("mute", ignoreCase = true)
                     val level = Regex("""(?:level|volume)=(\d+)""").find(params)?.groupValues?.get(1)
-                    callbacks?.speak(com.ghost.api.logic.ActionFlavorTexts.volumeTts(level, isMute))
+                    val phrase = com.ghost.api.logic.ActionFlavorTexts.volumeTts(level, isMute)
+                    lastToolFlavorPhrase = phrase
+                    callbacks?.speak(phrase)
                     toolSpokeFlavorTts = true
                 }
                 "music", "media" -> {
                     val action = Regex("""(?:action=)?(play|pause|next|skip|prev|stop)""").find(params.lowercase())?.groupValues?.get(1) ?: "play"
-                    callbacks?.speak(com.ghost.api.logic.ActionFlavorTexts.musicTts(action))
+                    val phrase = com.ghost.api.logic.ActionFlavorTexts.musicTts(action)
+                    lastToolFlavorPhrase = phrase
+                    callbacks?.speak(phrase)
                     toolSpokeFlavorTts = true
                 }
                 "status" -> {
-                    callbacks?.speak(com.ghost.api.logic.ActionFlavorTexts.statusTts(userTitle))
+                    val phrase = com.ghost.api.logic.ActionFlavorTexts.statusTts(userTitle)
+                    lastToolFlavorPhrase = phrase
+                    callbacks?.speak(phrase)
                     toolSpokeFlavorTts = true
                 }
                 "alarm", "set_alarm" -> {
                     val h = try { JSONObject(params).optInt("hour", -1) } catch (e: Exception) { -1 }
                     val m = try { JSONObject(params).optInt("minutes", JSONObject(params).optInt("minute", 0)) } catch (e: Exception) { 0 }
                     val timeStr = if (h >= 0) "$h:${m.toString().padStart(2, '0')}" else "target time"
-                    callbacks?.speak(com.ghost.api.logic.ActionFlavorTexts.alarmTts(timeStr))
+                    val phrase = com.ghost.api.logic.ActionFlavorTexts.alarmTts(timeStr)
+                    lastToolFlavorPhrase = phrase
+                    callbacks?.speak(phrase)
                     toolSpokeFlavorTts = true
                 }
                 "execute_command" -> {
@@ -218,16 +231,22 @@ class GhostAgent(
                         cmdLower.contains("volume") -> {
                             val isMute = params.contains("mute", ignoreCase = true)
                             val level = Regex("""(?:level|volume)=(\d+)""").find(params)?.groupValues?.get(1)
-                            callbacks?.speak(com.ghost.api.logic.ActionFlavorTexts.volumeTts(level, isMute))
+                            val phrase = com.ghost.api.logic.ActionFlavorTexts.volumeTts(level, isMute)
+                            lastToolFlavorPhrase = phrase
+                            callbacks?.speak(phrase)
                             toolSpokeFlavorTts = true
                         }
                         cmdLower.contains("status") -> {
-                            callbacks?.speak(com.ghost.api.logic.ActionFlavorTexts.statusTts(userTitle))
+                            val phrase = com.ghost.api.logic.ActionFlavorTexts.statusTts(userTitle)
+                            lastToolFlavorPhrase = phrase
+                            callbacks?.speak(phrase)
                             toolSpokeFlavorTts = true
                         }
                         cmdLower.contains("music") || cmdLower.contains("media") -> {
                             val action = Regex("""(?:action=)?(play|pause|next|skip|prev|stop)""").find(cmdLower)?.groupValues?.get(1) ?: "play"
-                            callbacks?.speak(com.ghost.api.logic.ActionFlavorTexts.musicTts(action))
+                            val phrase = com.ghost.api.logic.ActionFlavorTexts.musicTts(action)
+                            lastToolFlavorPhrase = phrase
+                            callbacks?.speak(phrase)
                             toolSpokeFlavorTts = true
                         }
                     }
@@ -882,8 +901,18 @@ class GhostAgent(
             }
 
             val finalOutput = if (cleanResponse.isBlank()) {
-                "Processing complete."
-            } else cleanResponse
+                if (toolSpokeFlavorTts && !lastToolFlavorPhrase.isNullOrBlank()) {
+                    lastToolFlavorPhrase!!
+                } else {
+                    "Processing complete."
+                }
+            } else {
+                if (toolSpokeFlavorTts && !lastToolFlavorPhrase.isNullOrBlank() && !cleanResponse.contains(lastToolFlavorPhrase!!, ignoreCase = true)) {
+                    "${lastToolFlavorPhrase!!}\n$cleanResponse"
+                } else {
+                    cleanResponse
+                }
+            }
 
             // 6. Check for webview side-effects
             val (webviewUrl, webviewRatio) = mcpTool.consumeLastWebview()
@@ -1383,5 +1412,15 @@ class GhostAgent(
             .replace(Regex("""https?://\S+"""), "link")
             .replace(Regex("""[^\p{L}\p{N}\p{P}\p{Z}]"""), "") // Remove emojis and special symbols
             .trim()
+    }
+
+    fun appendAssistantContext(text: String) {
+        val clean = sanitizeAgentOutput(text)
+        if (clean.isNotBlank()) {
+            synchronized(_conversationHistory) {
+                _conversationHistory.add(AgentMessage(role = "assistant", content = clean))
+            }
+            checkpoint()
+        }
     }
 }

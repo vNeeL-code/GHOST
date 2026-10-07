@@ -1222,17 +1222,24 @@ class GemmaService : Service(), AgentPlatformCallbacks {
      * It uses the same backend engine but avoids spinning up unnecessary Overlay/Audio managers.
      */
 
-    fun processNotificationContext(prompt: String) {
-        if (!::ghostAgent.isInitialized || !ghostAgent.isReady) return
-        
-        serviceScope.launch {
-            try {
-                // Pass it through the core pipeline. isDream = false means it WILL be saved to history 
-                // and it WILL be spoken by TTS if a response is generated.
-                processQuery(prompt, null, false)
-            } catch (e: Exception) {
-                Timber.e(e, "Failed to process notification context")
-            }
+    fun processNotificationAnnouncement(appName: String, title: String, text: String) {
+        val userTitle = Constants.getUserTitle(applicationContext)
+        val shortText = text.take(120).trim()
+        val sender = if (title.isNotBlank()) title else appName
+        val phrase = "Ping on $appName from $sender: \"$shortText\""
+        val bubble = "[$appName] $sender: $shortText"
+
+        Timber.i("📢 Notification Announcement: $phrase")
+
+        // 1. Speak directly via TTSManager (respects headphones, mute, and screen rules)
+        if (::ttsManager.isInitialized) {
+            ttsManager.smartSpeak(phrase, com.ghost.api.services.TTSManager.Priority.NORMAL)
+        }
+
+        // 2. Add as message bubble to UI and agent conversation history so Gemma sees it
+        uiCallback?.onMessageAdded(bubble, isUser = false)
+        if (::ghostAgent.isInitialized) {
+            ghostAgent.appendAssistantContext(bubble)
         }
     }
 

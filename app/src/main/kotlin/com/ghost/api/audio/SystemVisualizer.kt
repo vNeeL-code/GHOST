@@ -60,8 +60,8 @@ object SystemVisualizer {
     // Active Media Session Album Art & Playback State
     var activeAlbumArt: Bitmap? = null
         private set
-    val isMediaPlaying: Boolean
-        get() = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
+    @Volatile var isMediaPlaying: Boolean = false
+        private set
 
     // Dynamic Central Glyph Morphing ("✧", "🐋", "✦")
     var activeAgentGlyph: String = "✧"
@@ -377,6 +377,7 @@ object SystemVisualizer {
 
         override fun onPlaybackStateChanged(state: PlaybackState?) {
             val isPlaying = state?.state == PlaybackState.STATE_PLAYING
+            isMediaPlaying = isPlaying
             val currentFg = lastForegroundPackage ?: getForegroundAppFromUsageStats()
             val fgBrand = currentFg?.let { findBrandPalette(it) }
 
@@ -644,9 +645,10 @@ object SystemVisualizer {
             it.playbackState?.state == PlaybackState.STATE_PLAYING 
         } ?: nonAiControllers?.firstOrNull()
         activeMediaController?.registerCallback(mediaControllerCallback)
+        isMediaPlaying = activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING
 
         // ONLY extract colors if media is ACTIVELY PLAYING and user is not focused on an AI agent!
-        if (activeMediaController?.playbackState?.state == PlaybackState.STATE_PLAYING) {
+        if (isMediaPlaying) {
             val currentFg = lastForegroundPackage ?: getForegroundAppFromUsageStats()
             val fgBrand = currentFg?.let { findBrandPalette(it) }
             if (fgBrand == null && activeAudioSpeakingPackage == null) {

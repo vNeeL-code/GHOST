@@ -258,9 +258,13 @@ class InputOverlay(
             setOnClickListener { 
                 onFocusRequest() 
                 requestFocus()
+                com.ghost.api.GemmaService.instance?.resumeEngineIfNeeded()
             }
             setOnFocusChangeListener { _, hasFocus ->
-                if (hasFocus) onFocusRequest()
+                if (hasFocus) {
+                    onFocusRequest()
+                    com.ghost.api.GemmaService.instance?.resumeEngineIfNeeded()
+                }
             }
 
             setOnEditorActionListener { _, actionId, _ ->

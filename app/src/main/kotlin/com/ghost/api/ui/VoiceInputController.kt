@@ -103,6 +103,8 @@ class VoiceInputController(
         } catch (e: Exception) {
             Timber.d("Could not stop TTS: ${e.message}")
         }
+        // Zero-wait inference prewarming: wake up weights while user speaks
+        com.ghost.api.GemmaService.instance?.resumeEngineIfNeeded()
         haptic()
         voiceState = VoiceState.RECORDING
         pendingAudio = null
