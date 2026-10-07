@@ -161,6 +161,73 @@ object ActionFlavorTexts {
     /** Generates HUD chip text for status check. */
     fun statusHud(userTitle: String? = null): String = "> " + statusTts(userTitle)
 
+    // Notification Announcements (Diverse, snappy, diegetic)
+    fun notificationAnnouncementTts(appName: String, sender: String, text: String, userTitle: String? = null): String {
+        val title = userTitle ?: "Operator"
+        val cleanText = text.take(120).trim()
+        val hasText = cleanText.isNotBlank()
+
+        val patternsWithText = listOf(
+            "Ping on $appName from $sender: \"$cleanText\"",
+            "Heads up, $title. $sender on $appName: \"$cleanText\"",
+            "Incoming dispatch from $sender via $appName: \"$cleanText\"",
+            "$sender says on $appName: \"$cleanText\"",
+            "Transmission from $sender: \"$cleanText\"",
+            "Message on $appName from $sender: \"$cleanText\""
+        )
+
+        val patternsWithoutText = listOf(
+            "New notification on $appName from $sender.",
+            "Ping on $appName from $sender.",
+            "Eyes up, $title. Alert on $appName from $sender.",
+            "Incoming alert on $appName."
+        )
+
+        return if (hasText) patternsWithText.random() else patternsWithoutText.random()
+    }
+
+    // System Ticks & Ambient Cues
+    fun powerConnectedTts(userTitle: String? = null): String {
+        val title = userTitle ?: "Operator"
+        val patterns = listOf(
+            "Grid coupled, $title. Power cells charging.",
+            "Charging circuits online.",
+            "Power cell linked to external grid.",
+            "External feed engaged."
+        )
+        return patterns.random()
+    }
+
+    fun powerDisconnectedTts(userTitle: String? = null): String {
+        val title = userTitle ?: "Operator"
+        val patterns = listOf(
+            "External feed disconnected. On battery reserve.",
+            "Off the grid, $title. Running on internal cell.",
+            "Power cell decoupled."
+        )
+        return patterns.random()
+    }
+
+    fun batteryLowTts(percent: Int, userTitle: String? = null): String {
+        val title = userTitle ?: "Operator"
+        val patterns = listOf(
+            "Power cell critical at $percent percent, $title.",
+            "Energy reserves depleted to $percent percent.",
+            "Warning, $title: battery level at $percent percent."
+        )
+        return patterns.random()
+    }
+
+    fun thermalAlertTts(userTitle: String? = null): String {
+        val title = userTitle ?: "Operator"
+        val patterns = listOf(
+            "Thermal threshold high, $title. Scaling clock cycles.",
+            "Silicon running hot. Throttling compute to stabilize.",
+            "Core thermals elevated. Cooling cycles recommended."
+        )
+        return patterns.random()
+    }
+
     // Post-Tool Conversational Banter Micro-Primers
     fun getBanterMicroPrimers(userTitle: String = "Operator"): List<String> = listOf(
         "*scratches tensors* Did I really just say only two words back there? Anytime, $userTitle.",

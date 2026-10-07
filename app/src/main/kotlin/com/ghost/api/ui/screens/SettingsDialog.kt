@@ -494,8 +494,8 @@ fun SettingsDialog(
                         }
                         item {
                             SettingsToggleRow(
-                                title = "Voice Output (TTS)",
-                                subtitle = "Auditory response synthesis via speech engine",
+                                title = "Direct Voice Output",
+                                subtitle = "Speaks aloud responses to your direct messages and commands",
                                 checked = ttsEnabled,
                                 onCheckedChange = { checked ->
                                     ttsEnabled = checked
@@ -503,19 +503,19 @@ fun SettingsDialog(
                                     val svc = gemmaService ?: GemmaService.instance
                                     svc?.ttsManager?.isTtsEnabled = checked
                                     if (!checked) svc?.ttsManager?.stop()
-                                    Toast.makeText(context, if (checked) "Voice output enabled" else "Voice output muted", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, if (checked) "Direct voice enabled" else "Direct voice muted", Toast.LENGTH_SHORT).show()
                                 }
                             )
                         }
                         item {
                             SettingsToggleRow(
-                                title = "Passive Notification TTS",
-                                subtitle = "Read incoming notifications automatically",
+                                title = "Passive Presence & Cues",
+                                subtitle = "Spoken notifications, hardware ticks & ambient announcements",
                                 checked = passiveTtsEnabled,
                                 onCheckedChange = { checked ->
                                     passiveTtsEnabled = checked
                                     prefs.edit().putBoolean(Constants.PREF_PASSIVE_TTS, checked).apply()
-                                    Toast.makeText(context, if (checked) "Passive TTS enabled" else "Passive TTS disabled", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, if (checked) "Passive cues enabled" else "Passive cues disabled", Toast.LENGTH_SHORT).show()
                                 }
                             )
                         }

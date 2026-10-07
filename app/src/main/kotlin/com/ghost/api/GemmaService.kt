@@ -1232,7 +1232,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         val userTitle = Constants.getUserTitle(applicationContext)
         val shortText = text.take(120).trim()
         val sender = if (title.isNotBlank()) title else appName
-        val phrase = "Ping on $appName from $sender: \"$shortText\""
+        val phrase = com.ghost.api.logic.ActionFlavorTexts.notificationAnnouncementTts(appName, sender, shortText, userTitle)
         val bubble = "[$appName] $sender: $shortText"
 
         Timber.i("📢 Notification Announcement: $phrase")
