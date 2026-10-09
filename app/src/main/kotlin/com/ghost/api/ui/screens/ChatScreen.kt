@@ -137,11 +137,21 @@ fun ChatScreen(
                 )
             }
             
-            // Centered Header Glyph:
-            // Play Store Free: 🦕💭💸 [Minion]
-            // F-Droid (FOSS): Cyan Δ, Purple 🐙, Cyan ∇ [foss / Operator]
-            // Patreon / Operator: Green Δ, Purple 👾, Green ∇ [premium / Guardian]
-            if (BuildConfig.DISTRIBUTION_FLAVOR == "fdroid") {
+            // Centered Header Glyph or Live Audio Visualizer when speaking
+            if (isTtsActive && visualizerViewFactory != null) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .height(28.dp)
+                        .fillMaxWidth(0.55f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    AndroidView(
+                        factory = visualizerViewFactory,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            } else if (BuildConfig.DISTRIBUTION_FLAVOR == "fdroid") {
                 Row(
                     modifier = Modifier.align(Alignment.Center),
                     verticalAlignment = Alignment.CenterVertically,
@@ -365,20 +375,6 @@ fun ChatScreen(
             }
         }
 
-        // Audio Visualizer — sleek end-to-end soundwave strip above the input bar
-        if (isTtsActive && visualizerViewFactory != null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(24.dp)
-                    .padding(horizontal = 16.dp, vertical = 2.dp)
-            ) {
-                AndroidView(
-                    factory = visualizerViewFactory,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-        }
 
         // Input Bar Area with complete voice & multimodal state mechanics
         InputBar(

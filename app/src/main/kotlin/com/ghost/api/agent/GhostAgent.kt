@@ -99,7 +99,8 @@ class GhostAgent(
     private var rollingMemory = ""
     private var lastInferenceTime = 0L
 
-    private val sentenceBoundaryRegex = Regex("""(?<!\b(?:Mr|Mrs|Ms|Dr|e\.g|i\.e|vs|etc|approx|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.)(?<!\d)([.!?]+['"”’)]*)(?:\s+|\n+)""")
+    // Sentence or major clause boundary for low-latency streaming TTS dispatch
+    private val sentenceBoundaryRegex = Regex("""(?<!\b(?:Mr|Mrs|Ms|Dr|e\.g|i\.e|vs|etc|approx|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.)(?<!\d)([.!?]+['"”’)]*|[,:;\n—–-]+)(?:\s+|\n+)""")
 
     private fun isToolInvocation(buffer: CharSequence): Boolean {
         val s = buffer.trimStart()
