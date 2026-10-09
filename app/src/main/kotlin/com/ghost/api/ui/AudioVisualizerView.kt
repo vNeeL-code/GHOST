@@ -28,9 +28,9 @@ class AudioVisualizerView @JvmOverloads constructor(
         maskFilter = BlurMaskFilter(12f, BlurMaskFilter.Blur.NORMAL)
     }
 
-    private val numBars = 17 // Odd count ensures a true center bar for Ghost eye symmetry
-    private val currentHeights = FloatArray(numBars) { 6f }
-    private val targetHeights = FloatArray(numBars) { 6f }
+    private val numBars = 41 // Higher count ensures crisp edge-to-edge spread across full width
+    private val currentHeights = FloatArray(numBars) { 4f }
+    private val targetHeights = FloatArray(numBars) { 4f }
     private var isPlaying = false
     private var phase = 0f
 

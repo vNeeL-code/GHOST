@@ -79,9 +79,19 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
         set(value) {
             val prefs = context.getSharedPreferences(com.ghost.api.Constants.PREFS_NAME, Context.MODE_PRIVATE)
             prefs.edit().putBoolean(com.ghost.api.Constants.PREF_TTS_ENABLED, value).apply()
-            if (!value) {
+            if (!value && !isPassiveTtsEnabled) {
                 stop()
             }
+        }
+
+    var isPassiveTtsEnabled: Boolean
+        get() {
+            val prefs = context.getSharedPreferences(com.ghost.api.Constants.PREFS_NAME, Context.MODE_PRIVATE)
+            return prefs.getBoolean(com.ghost.api.Constants.PREF_PASSIVE_TTS, true)
+        }
+        set(value) {
+            val prefs = context.getSharedPreferences(com.ghost.api.Constants.PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.edit().putBoolean(com.ghost.api.Constants.PREF_PASSIVE_TTS, value).apply()
         }
 
     data class DeferredSpeech(
@@ -638,6 +648,38 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
         if (isReady && text.isNotBlank()) {
             smartSpeak(text, Priority.IMMEDIATE)
         }
+    }
+
+    /**
+     * Spoken passive cue / notification announcement.
+     * Evaluates isPassiveTtsEnabled (independent of direct voice toggle).
+     * Bypasses screen-off deferral so announcements on desk/stand are spoken immediately,
+     * while still honoring pocket suppression and mic recording safety.
+     */
+    fun speakPassiveAnnouncement(text: String) {
+        if (!isPassiveTtsEnabled) {
+            Timber.d("TTS: Passive cue skipped — Passive TTS disabled in settings")
+            return
+        }
+        if (com.ghost.api.hardware.AudioRecorder.isAnyRecordingActive) {
+            Timber.d("TTS: Passive cue suppressed — Microphone is actively recording")
+            return
+        }
+        val cleanText = cleanMarkdownForSpeech(text)
+        if (!isReady || cleanText.isBlank()) return
+
+        val state = getDeviceState()
+        Timber.d("TTS speakPassiveAnnouncement: state=$state, text=${cleanText.take(40)}")
+
+        if (state == DeviceState.POCKET) {
+            Timber.d("TTS: Deferring passive cue (in pocket without headphones)")
+            deferSpeech(cleanText, Priority.NORMAL)
+            return
+        }
+
+        // Screen off or active -> speak immediately
+        requestAudioDucking()
+        tts?.speak(cleanText, TextToSpeech.QUEUE_ADD, null, "GemmaPassive_${System.currentTimeMillis()}")
     }
 
     fun speakQueued(text: String) {

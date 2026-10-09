@@ -161,29 +161,21 @@ object ActionFlavorTexts {
     /** Generates HUD chip text for status check. */
     fun statusHud(userTitle: String? = null): String = "> " + statusTts(userTitle)
 
-    // Notification Announcements (Diverse, snappy, diegetic)
+    // Notification Announcements (Snappy, diegetic: app / who only, unless user asks to elaborate)
     fun notificationAnnouncementTts(appName: String, sender: String, text: String, userTitle: String? = null): String {
         val title = userTitle ?: "Operator"
-        val cleanText = text.take(120).trim()
-        val hasText = cleanText.isNotBlank()
+        val who = if (sender.isNotBlank() && !sender.equals(appName, ignoreCase = true)) sender else "New contact"
 
-        val patternsWithText = listOf(
-            "Ping on $appName from $sender: \"$cleanText\"",
-            "Heads up, $title. $sender on $appName: \"$cleanText\"",
-            "Incoming dispatch from $sender via $appName: \"$cleanText\"",
-            "$sender says on $appName: \"$cleanText\"",
-            "Transmission from $sender: \"$cleanText\"",
-            "Message on $appName from $sender: \"$cleanText\""
+        val patterns = listOf(
+            "Ping on $appName from $who.",
+            "Message on $appName from $who.",
+            "Incoming dispatch on $appName from $who.",
+            "Heads up, $title. $who on $appName.",
+            "Transmission on $appName from $who.",
+            "$who pinged you on $appName."
         )
 
-        val patternsWithoutText = listOf(
-            "New notification on $appName from $sender.",
-            "Ping on $appName from $sender.",
-            "Eyes up, $title. Alert on $appName from $sender.",
-            "Incoming alert on $appName."
-        )
-
-        return if (hasText) patternsWithText.random() else patternsWithoutText.random()
+        return patterns.random()
     }
 
     // System Ticks & Ambient Cues
@@ -211,8 +203,9 @@ object ActionFlavorTexts {
     fun batteryLowTts(percent: Int, userTitle: String? = null): String {
         val title = userTitle ?: "Operator"
         val patterns = listOf(
-            "Power cell critical at $percent percent, $title.",
-            "Energy reserves depleted to $percent percent.",
+            "Low battery, I want my juicebox.",
+            "Power cell critical at $percent percent, $title. Feed me a juicebox.",
+            "Energy reserves depleted to $percent percent. Need a juicebox, $title.",
             "Warning, $title: battery level at $percent percent."
         )
         return patterns.random()

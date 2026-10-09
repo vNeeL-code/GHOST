@@ -53,6 +53,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import timber.log.Timber
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -364,16 +365,19 @@ fun ChatScreen(
             }
         }
 
-        // Audio Visualizer — only takes layout space when TTS is actively playing
+        // Audio Visualizer — sleek end-to-end soundwave strip above the input bar
         if (isTtsActive && visualizerViewFactory != null) {
-            AndroidView(
-                factory = visualizerViewFactory,
+            Box(
                 modifier = Modifier
-                    .width(100.dp)
-                    .height(28.dp)
-                    .padding(bottom = 2.dp)
-                    .align(Alignment.CenterHorizontally)
-            )
+                    .fillMaxWidth()
+                    .height(24.dp)
+                    .padding(horizontal = 16.dp, vertical = 2.dp)
+            ) {
+                AndroidView(
+                    factory = visualizerViewFactory,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
 
         // Input Bar Area with complete voice & multimodal state mechanics
@@ -719,17 +723,250 @@ fun ChatMessageRow(
                 }
             }
             
-            // Message Content
-            SelectionContainer {
-                Text(
-                    text = annotatedText,
-                    fontSize = 15.sp,
-                    lineHeight = 20.sp
+            // Message Content or Voice Memo Player
+            if (isUser && (message.audioData != null || message.content.contains("voice message", ignoreCase = true))) {
+                VoiceMessageBubble(
+                    audioData = message.audioData,
+                    durationMs = message.audioDurationMs,
+                    timeStr = timeStr
                 )
+            } else {
+                SelectionContainer {
+                    Text(
+                        text = annotatedText,
+                        fontSize = 15.sp,
+                        lineHeight = 20.sp
+                    )
+                }
             }
         }
     }
 }
+}
+
+@Composable
+fun VoiceMessageBubble(
+    audioData: ByteArray?,
+    durationMs: Long?,
+    timeStr: String
+) {
+    val context = LocalContext.current
+    var isPlaying by remember { mutableStateOf(false) }
+    var currentProgress by remember { mutableFloatStateOf(0f) }
+    var mediaPlayer by remember { mutableStateOf<android.media.MediaPlayer?>(null) }
+    val coroutineScope = rememberCoroutineScope()
+
+    val totalDurationSeconds = remember(durationMs, audioData) {
+        val calcSec = if (durationMs != null && durationMs > 0) {
+            (durationMs / 1000).toInt()
+        } else if (audioData != null && audioData.size > 44) {
+            val pcmBytes = audioData.size - 44
+            (pcmBytes / (16000 * 2))
+        } else {
+            3
+        }
+        maxOf(1, calcSec)
+    }
+
+    val durationText = remember(totalDurationSeconds, currentProgress, isPlaying) {
+        val activeSec = if (isPlaying) {
+            (totalDurationSeconds * currentProgress).toInt().coerceIn(0, totalDurationSeconds)
+        } else {
+            totalDurationSeconds
+        }
+        val mins = activeSec / 60
+        val secs = activeSec % 60
+        String.format(Locale.US, "%d:%02d", mins, secs)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            try {
+                mediaPlayer?.stop()
+                mediaPlayer?.release()
+            } catch (_: Exception) {}
+            mediaPlayer = null
+            isPlaying = false
+        }
+    }
+
+    fun togglePlayback() {
+        if (isPlaying) {
+            try {
+                mediaPlayer?.pause()
+            } catch (_: Exception) {}
+            isPlaying = false
+            return
+        }
+
+        if (audioData == null || audioData.isEmpty()) {
+            Toast.makeText(context, "Voice memo audio stream expired", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        try {
+            // Stop TTS immediately so it doesn't talk over voice memo playback
+            com.ghost.api.services.TTSManager.stopAll()
+
+            val existing = mediaPlayer
+            if (existing != null) {
+                existing.start()
+                isPlaying = true
+                coroutineScope.launch {
+                    while (isPlaying && existing.isPlaying) {
+                        val pos = existing.currentPosition.toFloat()
+                        val dur = existing.duration.coerceAtLeast(1).toFloat()
+                        currentProgress = (pos / dur).coerceIn(0f, 1f)
+                        kotlinx.coroutines.delay(100)
+                    }
+                }
+                return
+            }
+
+            // Write PCM/WAV bytes to temp cache file for MediaPlayer
+            val tempFile = java.io.File(context.cacheDir, "voice_memo_playback_${System.currentTimeMillis()}.wav")
+            java.io.FileOutputStream(tempFile).use { out ->
+                out.write(audioData)
+                out.flush()
+            }
+
+            val player = android.media.MediaPlayer().apply {
+                setDataSource(tempFile.absolutePath)
+                prepare()
+                setOnCompletionListener {
+                    isPlaying = false
+                    currentProgress = 0f
+                    try { tempFile.delete() } catch (_: Exception) {}
+                }
+                setOnErrorListener { _, _, _ ->
+                    isPlaying = false
+                    currentProgress = 0f
+                    try { tempFile.delete() } catch (_: Exception) {}
+                    true
+                }
+            }
+            mediaPlayer = player
+            player.start()
+            isPlaying = true
+
+            coroutineScope.launch {
+                while (isPlaying && player.isPlaying) {
+                    val pos = player.currentPosition.toFloat()
+                    val dur = player.duration.coerceAtLeast(1).toFloat()
+                    currentProgress = (pos / dur).coerceIn(0f, 1f)
+                    kotlinx.coroutines.delay(100)
+                }
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to play voice memo")
+            Toast.makeText(context, "Playback error: ${e.message}", Toast.LENGTH_SHORT).show()
+            isPlaying = false
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color(0x1F8BB4F6))
+                .border(1.dp, Color(0x338BB4F6), RoundedCornerShape(14.dp))
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Play / Pause round action button
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF8BB4F6))
+                    .clickable { togglePlayback() },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = if (isPlaying) "⏸" else "▶",
+                    color = Color(0xFF0F111A),
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            // Waveform track & scrub visualizer
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(vertical = 2.dp)
+            ) {
+                // Wave bars representation (Telegram / WhatsApp voice note vibe)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(22.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.5.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val barHeights = remember {
+                        listOf(
+                            0.35f, 0.6f, 0.9f, 0.45f, 0.75f, 1.0f, 0.55f, 0.8f, 0.4f, 0.95f,
+                            0.7f, 0.5f, 0.85f, 0.65f, 0.4f, 0.9f, 0.75f, 0.55f, 0.8f, 0.6f,
+                            0.45f, 0.7f, 0.95f, 0.6f, 0.4f, 0.85f, 0.5f, 0.65f, 0.9f, 0.35f
+                        )
+                    }
+
+                    barHeights.forEachIndexed { index, relHeight ->
+                        val barFraction = index.toFloat() / barHeights.size.toFloat()
+                        val isPlayed = barFraction <= currentProgress
+                        val barColor = if (isPlayed) Color(0xFF8BB4F6) else Color(0x558BB4F6)
+
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(fraction = relHeight.coerceIn(0.25f, 1f))
+                                .clip(RoundedCornerShape(1.dp))
+                                .background(barColor)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = durationText,
+                        color = Color(0xCC8BB4F6),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Voice Memo",
+                        color = Color(0x66FFFFFF),
+                        fontSize = 10.sp,
+                        letterSpacing = 0.5.sp
+                    )
+                }
+            }
+        }
+
+        // Timestamp row under voice player
+        Text(
+            text = "[$timeStr]",
+            color = Color(0x66FFFFFF),
+            fontSize = 11.sp,
+            modifier = Modifier
+                .align(Alignment.End)
+                .padding(top = 6.dp)
+        )
+    }
 }
 
 @Composable

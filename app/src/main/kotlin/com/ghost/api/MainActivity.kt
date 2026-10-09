@@ -333,7 +333,9 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
         isComplete: Boolean,
         image: android.graphics.Bitmap?,
         imageUri: String?,
-        images: List<android.graphics.Bitmap>
+        images: List<android.graphics.Bitmap>,
+        audioData: ByteArray?,
+        audioDurationMs: Long?
     ) {
         lifecycleScope.launch(Dispatchers.Main) {
             val allImages = if (images.isNotEmpty()) images else listOfNotNull(image)
@@ -343,7 +345,9 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
                     isFromUser = true,
                     image = allImages.firstOrNull(),
                     imageUri = imageUri,
-                    images = allImages
+                    images = allImages,
+                    audioData = audioData,
+                    audioDurationMs = audioDurationMs
                 ))
             } else {
                 val current = chatViewModel.messages.value

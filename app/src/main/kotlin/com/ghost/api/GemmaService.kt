@@ -79,7 +79,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             isComplete: Boolean = true,
             image: android.graphics.Bitmap? = null,
             imageUri: String? = null,
-            images: List<android.graphics.Bitmap> = emptyList()
+            images: List<android.graphics.Bitmap> = emptyList(),
+            audioData: ByteArray? = null,
+            audioDurationMs: Long? = null
         )
         fun onThinkingStateChanged(isThinking: Boolean)
         fun onThoughtUpdated(thought: String)
@@ -1233,16 +1235,34 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         val shortText = text.take(120).trim()
         val sender = if (title.isNotBlank()) title else appName
         val phrase = com.ghost.api.logic.ActionFlavorTexts.notificationAnnouncementTts(appName, sender, shortText, userTitle)
-        val bubble = "[$appName] $sender: $shortText"
+        val bubble = "[$appName] $sender: $phrase"
 
         Timber.i("📢 Notification Announcement: $phrase")
 
-        // 1. Speak directly via TTSManager (respects headphones, mute, and screen rules)
+        // 1. Speak directly via dedicated passive announcement pipeline
         if (::ttsManager.isInitialized) {
-            ttsManager.smartSpeak(phrase, com.ghost.api.services.TTSManager.Priority.NORMAL)
+            ttsManager.speakPassiveAnnouncement(phrase)
         }
 
-        // 2. Add as message bubble to UI and agent conversation history so Gemma sees it
+        // 2. Add as message bubble to UI and agent conversation history so Gemma sees what she announced
+        uiCallback?.onMessageAdded(bubble, isUser = false)
+        if (::ghostAgent.isInitialized) {
+            ghostAgent.appendAssistantContext(bubble)
+        }
+    }
+
+    /**
+     * Broadcast deterministic device status cues (battery, power, thermal)
+     */
+    fun processDeviceStatusCue(cueText: String) {
+        val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        if (!prefs.getBoolean(Constants.PREF_PASSIVE_TTS, true)) return
+
+        Timber.i("⚡ Device Status Cue: $cueText")
+        if (::ttsManager.isInitialized) {
+            ttsManager.speakPassiveAnnouncement(cueText)
+        }
+        val bubble = "✧ $cueText"
         uiCallback?.onMessageAdded(bubble, isUser = false)
         if (::ghostAgent.isInitialized) {
             ghostAgent.appendAssistantContext(bubble)
@@ -1326,9 +1346,18 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             }
         }
 
-        // Emit user message with attached image preview immediately
+        // Emit user message with attached image preview and audio memo preview immediately
         val primaryUri = persistentUris?.firstOrNull()
-        uiCallback?.onMessageAdded(query, isUser = true, image = images?.firstOrNull(), imageUri = primaryUri, images = images ?: emptyList())
+        val audioDurationMs = audio?.let { (it.size / (16000 * 2)).toLong() * 1000L }
+        uiCallback?.onMessageAdded(
+            message = query,
+            isUser = true,
+            image = images?.firstOrNull(),
+            imageUri = primaryUri,
+            images = images ?: emptyList(),
+            audioData = audio,
+            audioDurationMs = audioDurationMs
+        )
         uiCallback?.onThinkingStateChanged(true)
 
         serviceScope.launch {

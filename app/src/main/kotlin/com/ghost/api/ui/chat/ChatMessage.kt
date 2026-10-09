@@ -15,5 +15,7 @@ data class ChatMessage(
     val image: android.graphics.Bitmap? = null,
     val imageUri: String? = null,
     val images: List<android.graphics.Bitmap> = emptyList(),
-    val durationMs: Long? = null
+    val durationMs: Long? = null,
+    val audioData: ByteArray? = null,
+    val audioDurationMs: Long? = null
 )

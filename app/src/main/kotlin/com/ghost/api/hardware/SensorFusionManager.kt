@@ -201,6 +201,16 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
             when (intent?.action) {
                 Intent.ACTION_SCREEN_ON -> {}
                 Intent.ACTION_SCREEN_OFF -> {}
+                Intent.ACTION_POWER_CONNECTED -> {
+                    val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
+                    val cue = com.ghost.api.logic.ActionFlavorTexts.powerConnectedTts(userTitle)
+                    com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue)
+                }
+                Intent.ACTION_POWER_DISCONNECTED -> {
+                    val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
+                    val cue = com.ghost.api.logic.ActionFlavorTexts.powerDisconnectedTts(userTitle)
+                    com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue)
+                }
                 Intent.ACTION_BATTERY_CHANGED -> { 
                     // Audit Fix: Debounce battery intent to max once per 30 seconds
                     // to prevent thermal broadcast storms and high IPC usage during charging.
@@ -208,7 +218,13 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
                     if (now - lastBatteryUpdate > 30000L) {
                         lastBatteryUpdate = now
                         scope.launch {
-                            getContextSnapshot()
+                            val snapshot = getContextSnapshot()
+                            val level = snapshot.battery.level
+                            if (level in 1..15 && !snapshot.battery.isCharging) {
+                                val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
+                                val cue = com.ghost.api.logic.ActionFlavorTexts.batteryLowTts(level, userTitle)
+                                com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue)
+                            }
                         }
                     }
                 }

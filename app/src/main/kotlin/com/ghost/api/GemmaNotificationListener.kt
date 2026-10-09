@@ -105,11 +105,18 @@ class GemmaNotificationListener : NotificationListenerService() {
         
         // Passive Notification Announcement: Snappy spoken alert & inline chat bubble without 20s LLM loop
         val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
-        if (prefs.getBoolean(Constants.PREF_PASSIVE_TTS, false) && text.isNotBlank()) {
+        if (prefs.getBoolean(Constants.PREF_PASSIVE_TTS, false) && (text.isNotBlank() || title.isNotBlank())) {
             val isMedia = pkg.contains("music") || pkg.contains("audio") || pkg.contains("player") || pkg.contains("youtube") || title.contains("playing", ignoreCase = true)
-            val isMessaging = pkg.contains("chat") || pkg.contains("msg") || pkg.contains("whatsapp") || pkg.contains("telegram") || pkg.contains("discord") || pkg.contains("sms") || pkg.contains("mms") || pkg.contains("signal")
+            val category = sbn.notification.category
+            val isMessagingCategory = category == android.app.Notification.CATEGORY_MESSAGE ||
+                    category == android.app.Notification.CATEGORY_EMAIL ||
+                    category == android.app.Notification.CATEGORY_SOCIAL
+            val isMessagingPkg = pkg.contains("chat") || pkg.contains("msg") || pkg.contains("whatsapp") ||
+                    pkg.contains("telegram") || pkg.contains("discord") || pkg.contains("sms") ||
+                    pkg.contains("mms") || pkg.contains("signal") || pkg.contains("slack") ||
+                    pkg.contains("orca") || pkg.contains("messenger")
 
-            if (isMessaging && !isMedia) {
+            if ((isMessagingCategory || isMessagingPkg) && !isMedia) {
                 val appLabel = resolveAppLabel(this, pkg)
                 GemmaService.instance?.processNotificationAnnouncement(appLabel, title, text)
             }
