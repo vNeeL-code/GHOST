@@ -1,0 +1,20 @@
+Categories:
+  - System
+  - Utilities
+License: MIT
+AuthorName: GHOST Project
+SourceCode: https://github.com/vNeeL-code/GHOST
+IssueTracker: https://github.com/vNeeL-code/GHOST/issues
+
+AutoUpdateMode: Version v%v
+UpdateCheckMode: Tags
+CurrentVersion: 4.35
+CurrentVersionCode: 13
+
+Builds:
+  - versionName: '4.35'
+    versionCode: 13
+    commit: v4.35
+    subdir: app
+    gradle:
+      - fdroidRelease

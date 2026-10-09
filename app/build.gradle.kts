@@ -41,8 +41,6 @@ android {
             val ksFile = System.getenv("KEYSTORE_FILE")
             if (ksFile != null && File(ksFile).exists()) {
                 signingConfig = signingConfigs.getByName("release")
-            } else {
-                signingConfig = signingConfigs.getByName("debug")
             }
         }
     }
