@@ -49,10 +49,17 @@ class GhostAlarmReceiver : BroadcastReceiver() {
                 )
                 
                 val triggerTime = System.currentTimeMillis() + (5 * 60 * 1000)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    alarmManager.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
-                } else {
-                    alarmManager.setExact(android.app.AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        alarmManager.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+                    } else {
+                        alarmManager.setExact(android.app.AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+                    }
+                } catch (e: SecurityException) {
+                    Timber.w(e, "setExactAndAllowWhileIdle failed in snooze; falling back to setAndAllowWhileIdle")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        alarmManager.setAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+                    }
                 }
             }
             else -> {

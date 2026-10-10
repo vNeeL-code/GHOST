@@ -43,6 +43,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -53,6 +54,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import timber.log.Timber
 import java.text.SimpleDateFormat
 import java.util.*
@@ -472,6 +474,7 @@ fun ChatMessageRow(
     val prefs = remember(context) { context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE) }
     var operatorAvatar by remember { mutableStateOf(prefs.getString(Constants.PREF_OPERATOR_AVATAR, "🦑") ?: "🦑") }
     var showAvatarDialog by remember { mutableStateOf(false) }
+    var showReportDialog by remember { mutableStateOf(false) }
     var isOperatorTier by remember { mutableStateOf(Constants.isOperatorTier(prefs)) }
 
     DisposableEffect(prefs) {
@@ -497,6 +500,17 @@ fun ChatMessageRow(
                 prefs.edit().putString(Constants.PREF_OPERATOR_AVATAR, newEmoji).apply()
                 showAvatarDialog = false
                 Toast.makeText(context, "Operator callsign updated: Δ $newEmoji ∇", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+
+    if (showReportDialog && !isUser) {
+        ReportResponseDialog(
+            responseSnippet = displayContent,
+            onDismiss = { showReportDialog = false },
+            onSubmitReport = { reason, details ->
+                saveAiReport(context, displayContent, reason, details)
+                Toast.makeText(context, "Report received. Thank you for helping improve GHOST.", Toast.LENGTH_SHORT).show()
             }
         )
     }
@@ -587,7 +601,7 @@ fun ChatMessageRow(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // Speaker only on AI / assistant cards!
+                    // Speaker and Report only on AI / assistant cards!
                     if (!isUser && displayContent.isNotEmpty()) {
                         Box(
                             modifier = Modifier
@@ -597,6 +611,19 @@ fun ChatMessageRow(
                         ) {
                             Text(
                                 text = "🔊",
+                                fontSize = 13.sp,
+                                modifier = Modifier.alpha(0.7f)
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .clickable { showReportDialog = true }
+                                .padding(horizontal = 6.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "🚩",
                                 fontSize = 13.sp,
                                 modifier = Modifier.alpha(0.7f)
                             )
@@ -1095,6 +1122,168 @@ fun OperatorAvatarDialog(
                 }
             }
         }
+    }
+}
+
+@Composable
+fun ReportResponseDialog(
+    responseSnippet: String,
+    onDismiss: () -> Unit,
+    onSubmitReport: (reason: String, details: String) -> Unit
+) {
+    val reasons = listOf(
+        "Inaccurate or Hallucination",
+        "Harmful or Inappropriate",
+        "Broken Output / Syntax Error",
+        "Other Issue"
+    )
+    var selectedReason by remember { mutableStateOf(reasons.first()) }
+    var userNotes by remember { mutableStateOf("") }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = Color(0xFF0D1219),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E2C3D)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.Start
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "🚩",
+                        fontSize = 16.sp
+                    )
+                    Text(
+                        text = "REPORT AI OUTPUT",
+                        color = Color(0xFF8BB4F6),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
+                }
+
+                Text(
+                    text = "Help improve GHOST's quality and safety. Reports are logged for review.",
+                    color = Color(0x88FFFFFF),
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 4.dp, bottom = 14.dp)
+                )
+
+                // Snippet preview (truncated)
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0x18FFFFFF),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 14.dp)
+                ) {
+                    Text(
+                        text = responseSnippet.take(120).let { if (responseSnippet.length > 120) "$it..." else it },
+                        color = Color(0xCCFFFFFF),
+                        fontSize = 11.sp,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(10.dp)
+                    )
+                }
+
+                Text(
+                    text = "REASON",
+                    color = Color(0xAA8BB4F6),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(bottom = 6.dp)
+                )
+
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    reasons.forEach { reason ->
+                        val isSelected = selectedReason == reason
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) Color(0x268BB4F6) else Color(0x0DFFFFFF))
+                                .border(
+                                    1.dp,
+                                    if (isSelected) Color(0xFF8BB4F6) else Color(0x1AFFFFFF),
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .clickable { selectedReason = reason }
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Text(
+                                text = if (isSelected) "◉ " else "○ ",
+                                color = if (isSelected) Color(0xFF8BB4F6) else Color(0x66FFFFFF),
+                                fontSize = 12.sp
+                            )
+                            Text(
+                                text = reason,
+                                color = if (isSelected) Color.White else Color(0xAAFFFFFF),
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Cancel", color = Color(0x88FFFFFF), fontSize = 13.sp)
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            onSubmitReport(selectedReason, userNotes)
+                            onDismiss()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8BB4F6)),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = "Submit Report",
+                            color = Color(0xFF0D1219),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun saveAiReport(context: Context, response: String, reason: String, details: String) {
+    try {
+        Timber.w("[AI_REPORT] Output flagged: reason=$reason, details=$details, preview=${response.take(80)}")
+        val file = java.io.File(context.filesDir, "ai_reports.jsonl")
+        val json = JSONObject().apply {
+            put("timestamp", System.currentTimeMillis())
+            put("reason", reason)
+            put("details", details)
+            put("responseSnippet", response.take(1000))
+        }
+        file.appendText(json.toString() + "\n")
+    } catch (e: Exception) {
+        Timber.e(e, "Failed to persist AI report")
     }
 }
 
