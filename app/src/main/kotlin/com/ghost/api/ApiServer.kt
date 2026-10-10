@@ -57,7 +57,11 @@ class ApiServer(
                         val sessionId = parsed["session_id"] as? String ?: UUID.randomUUID().toString()
 
                         val aiResponse = withContext(Dispatchers.Default) {
-                            gemmaService.processQuery(prompt, sessionId) ?: "Error: No response generated"
+                            gemmaService.processQuery(
+                                userPrompt = prompt,
+                                sessionId = sessionId,
+                                inputSource = com.ghost.api.logic.InputSource.API_SERVER
+                            ) ?: "Error: No response generated"
                         }
 
                         val jsonResponse = gson.toJson(mapOf(
@@ -108,7 +112,11 @@ class ApiServer(
                             }
                         } else {
                             val aiResponse = withContext(Dispatchers.Default) {
-                                gemmaService.processQuery(prompt, "api_session") ?: "Error"
+                                gemmaService.processQuery(
+                                    userPrompt = prompt,
+                                    sessionId = "api_session",
+                                    inputSource = com.ghost.api.logic.InputSource.API_SERVER
+                                ) ?: "Error"
                             }
                             val responseMap = mapOf(
                                 "id" to completionId, "object" to "chat.completion",

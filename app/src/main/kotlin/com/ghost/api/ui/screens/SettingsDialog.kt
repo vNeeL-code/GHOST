@@ -54,6 +54,7 @@ fun SettingsDialog(
     var diaryActive by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_AUTONOMOUS_DIARY, true)) }
     var diaryCadence by remember { mutableStateOf(prefs.getString(Constants.PREF_DIARY_CADENCE, "12") ?: "12") }
     var diarySyncCalendar by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_DIARY_SYNC_CALENDAR, false)) }
+    var fastPathEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_FAST_PATH_ENABLED, true)) }
     var isOperatorTier by remember { mutableStateOf(Constants.isOperatorTier(prefs)) }
     var ttsEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_TTS_ENABLED, true)) }
     var backend by remember { mutableStateOf(prefs.getString(Constants.PREF_USER_BACKEND, "AUTO") ?: "AUTO") }
@@ -240,6 +241,18 @@ fun SettingsDialog(
                                 title = "Tutorial Programme",
                                 subtitle = "Review setup orientation and gesture controls",
                                 onClick = onShowTutorial
+                            )
+                        }
+                        item {
+                            SettingsToggleRow(
+                                title = "Fast-Path Router",
+                                subtitle = "Zero-token instant bypass for URLs, volume & system actions",
+                                checked = fastPathEnabled,
+                                onCheckedChange = { checked ->
+                                    fastPathEnabled = checked
+                                    prefs.edit().putBoolean(Constants.PREF_FAST_PATH_ENABLED, checked).apply()
+                                    Toast.makeText(context, if (checked) "Fast-path router active ⚡" else "Fast-path router disabled (all queries go to LLM)", Toast.LENGTH_SHORT).show()
+                                }
                             )
                         }
 

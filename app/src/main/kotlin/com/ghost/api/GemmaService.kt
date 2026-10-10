@@ -1424,9 +1424,45 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         userPrompt: String,
         sessionId: String? = null,
         isDream: Boolean = false,
-        fromUi: Boolean = false
+        fromUi: Boolean = false,
+        inputSource: com.ghost.api.logic.InputSource = if (fromUi) com.ghost.api.logic.InputSource.USER_TYPED else com.ghost.api.logic.InputSource.BACKGROUND_TASK
     ): String? {
         val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+
+        // 1. Fast-Path Router (Zero-Token Bypass & Entity Extraction)
+        // Does not run on autonomous dream cycles or internal background tasks
+        var effectivePrompt = userPrompt
+        if (!isDream) {
+            val isFastPathEnabled = prefs.getBoolean(Constants.PREF_FAST_PATH_ENABLED, true)
+            val routingResult = com.ghost.api.logic.FastPathRouter.route(
+                input = userPrompt,
+                source = inputSource,
+                isFastPathEnabled = isFastPathEnabled
+            )
+
+            when (routingResult) {
+                is com.ghost.api.logic.RoutingResult.HandledFastPath -> {
+                    Timber.i("⚡ [FastPath] Handled without LLM: ${routingResult.action} | feedback=${routingResult.feedback}")
+                    markActivity()
+                    if (::ttsManager.isInitialized) {
+                        ttsManager.stop()
+                    }
+                    withContext(Dispatchers.Main) {
+                        if (!fromUi) {
+                            uiCallback?.onMessageAdded(userPrompt, isUser = true)
+                        }
+                        uiCallback?.onMessageAdded(routingResult.feedback, isUser = false)
+                    }
+                    routingResult.execute?.invoke(this@GemmaService)
+                    responseNotificationManager.showResponse("⚡ ${routingResult.feedback}")
+                    return routingResult.feedback
+                }
+                is com.ghost.api.logic.RoutingResult.FallThroughToLlm -> {
+                    effectivePrompt = routingResult.augmentedUserMessage
+                }
+            }
+        }
+
         val userBackend = prefs.getString(Constants.PREF_USER_BACKEND, "AUTO")
         if (userBackend == "OFF") {
             val msg = "Inference Engine is set to OFF in Settings. Select AUTO, CPU, or GPU to enable on-device chat."
@@ -1462,7 +1498,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             try {
                 return@withLock kotlinx.coroutines.withTimeoutOrNull(240000) {
                     val response = ghostAgent.processUserMessage(
-                        message = userPrompt,
+                        message = effectivePrompt,
                         sessionId = sessionId ?: java.util.UUID.randomUUID().toString(),
                         isDream = isDream
                     )

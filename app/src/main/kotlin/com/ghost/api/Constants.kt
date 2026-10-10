@@ -180,6 +180,7 @@ object Constants {
 
     // Model Persistence & Storage Protection
     const val PREF_LAST_KNOWN_MODEL_PATH = "last_known_model_path"
+    const val PREF_FAST_PATH_ENABLED = "fast_path_enabled"
 
     // Summon Controls
     const val PREF_SUMMON_METHOD = "summon_method" // "SHAKE", "EDGE_NUB", "BOTH", "OFF"
