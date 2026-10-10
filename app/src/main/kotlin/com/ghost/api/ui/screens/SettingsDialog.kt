@@ -1,8 +1,10 @@
 package com.ghost.api.ui.screens
 
+import android.app.Activity
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import com.ghost.api.billing.BillingManager
 import android.net.Uri
 import android.provider.Settings
 import android.widget.Toast
@@ -84,12 +86,29 @@ fun SettingsDialog(
 
     var showOperatorUnlockDialog by remember { mutableStateOf(false) }
 
+    val billingManager = remember { BillingManager.create(context) }
+    val billingPrice by billingManager.formattedPrice.collectAsState()
+    val billingPurchased by billingManager.isOperatorPurchased.collectAsState()
+
+    DisposableEffect(billingManager) {
+        billingManager.startConnection()
+        onDispose {
+            billingManager.destroy()
+        }
+    }
+
+    LaunchedEffect(billingPurchased) {
+        if (billingPurchased) {
+            isOperatorTier = true
+        }
+    }
+
     if (showOperatorUnlockDialog && BuildConfig.SHOW_OPERATOR_PASS_PAYWALL) {
         AlertDialog(
             onDismissRequest = { showOperatorUnlockDialog = false },
             title = {
                 Text(
-                    text = "Unlock Operator Pass (£3.50)",
+                    text = "Unlock Operator Pass ($billingPrice)",
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF8BB4F6)
                 )
@@ -97,7 +116,7 @@ fun SettingsDialog(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "Support GHOST development! (£3.50 one-time purchase)",
+                        text = "Support GHOST development! ($billingPrice one-time purchase)",
                         fontSize = 13.sp,
                         color = Color.White
                     )
@@ -112,14 +131,17 @@ fun SettingsDialog(
             confirmButton = {
                 Button(
                     onClick = {
-                        isOperatorTier = true
-                        prefs.edit().putBoolean(Constants.PREF_IS_OPERATOR_TIER, true).apply()
-                        showOperatorUnlockDialog = false
-                        Toast.makeText(context, "Operator Pass Activated! Δ 👾 ∇ unlocked", Toast.LENGTH_SHORT).show()
+                        val activity = context as? Activity
+                        if (activity != null) {
+                            showOperatorUnlockDialog = false
+                            billingManager.launchPurchaseFlow(activity)
+                        } else {
+                            Toast.makeText(context, "Activity unavailable for store checkout", Toast.LENGTH_SHORT).show()
+                        }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E))
                 ) {
-                    Text("Activate (£3.50)", color = Color.Black, fontWeight = FontWeight.Bold)
+                    Text("Purchase ($billingPrice)", color = Color.Black, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -279,7 +301,7 @@ fun SettingsDialog(
                                                         )
                                                         .clickable {
                                                             if (isLocked) {
-                                                                Toast.makeText(context, "Operator Pass (£3.50 🦕💭💸) required to unlock $label geometry", Toast.LENGTH_SHORT).show()
+                                                                Toast.makeText(context, "Operator Pass ($billingPrice 🦕💭💸) required to unlock $label geometry", Toast.LENGTH_SHORT).show()
                                                             } else {
                                                                 visualizerPreset = key
                                                                 prefs.edit().putString(Constants.PREF_VISUALIZER_PRESET, key).apply()
@@ -391,7 +413,7 @@ fun SettingsDialog(
                                                     )
                                                     .clickable {
                                                         if (isLocked) {
-                                                            Toast.makeText(context, "Operator Pass (£3.50 🦕💭💸) required for Edge Style $label", Toast.LENGTH_SHORT).show()
+                                                            Toast.makeText(context, "Operator Pass ($billingPrice 🦕💭💸) required for Edge Style $label", Toast.LENGTH_SHORT).show()
                                                         } else {
                                                             edgeLightsStyle = key
                                                             prefs.edit().putString(Constants.PREF_EDGE_LIGHT_STYLE, key).apply()
@@ -1043,7 +1065,7 @@ fun SettingsDialog(
                                             text = if (isOperatorTier) {
                                                 "Elite status unlocked. At your service, Operator. Δ 👾 ∇ Turing glyph, reactive edge lights II-IV, hexagonal/prismatic/cuboid visualizers, and custom operator avatars active."
                                             } else {
-                                                "\"I need about tree fiddy...\" 🦕💭💸 100% uncrippled local offline AI & privacy. Unlock Operator status for £3.50 to get the elite Δ 👾 ∇ glyph, custom avatars, visualizer geometries, and edge light styles."
+                                                "\"I need about tree fiddy...\" 🦕💭💸 100% uncrippled local offline AI & privacy. Unlock Operator status ($billingPrice) to get the elite Δ 👾 ∇ glyph, custom avatars, visualizer geometries, and edge light styles."
                                             },
                                             fontSize = 11.sp,
                                             color = textDim,
@@ -1131,7 +1153,7 @@ fun SettingsDialog(
                                                     )
                                                     Spacer(modifier = Modifier.height(2.dp))
                                                     Text(
-                                                        text = if (isOperatorTier) "Operator" else "Operator (£3.50)",
+                                                        text = if (isOperatorTier) "Operator" else "Operator ($billingPrice)",
                                                         fontSize = 11.sp,
                                                         fontWeight = FontWeight.SemiBold,
                                                         color = if (isOperatorTier) Color(0xFF22C55E) else textDim

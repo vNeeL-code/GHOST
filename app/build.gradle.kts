@@ -109,6 +109,7 @@ ksp {
 
 dependencies {
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.12.0")
+    "playImplementation"("com.android.billingclient:billing-ktx:7.1.1")
 
 
 

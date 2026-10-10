@@ -575,7 +575,7 @@ fun ChatMessageRow(
                                 if (isOperatorTier) {
                                     showAvatarDialog = true
                                 } else {
-                                    Toast.makeText(context, "Operator Pass required (£3.50 🦕💭💸) to customize avatar", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Operator Pass required (🦕💭💸) to customize avatar", Toast.LENGTH_SHORT).show()
                                 }
                             }
                             .padding(vertical = 2.dp, horizontal = 4.dp)
