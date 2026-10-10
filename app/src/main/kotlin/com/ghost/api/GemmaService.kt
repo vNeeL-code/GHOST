@@ -1552,7 +1552,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         // Expanded style text (BigText)
         val bigTextContent = if (::sensorFusionManager.isInitialized) {
              // Use concise telemetry for expanded view
-             sensorFusionManager.getContextString()
+             sensorFusionManager.getNotificationTelemetryString()
         } else {
              text
         }
@@ -1564,7 +1564,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             .setSubText("Agentic Gemma Inference")
             .setOnlyAlertOnce(true)
             .setStyle(Notification.BigTextStyle()
-                .bigText(if (::sensorFusionManager.isInitialized) sensorFusionManager.getContextString() else telemetry)
+                .bigText(if (::sensorFusionManager.isInitialized) sensorFusionManager.getNotificationTelemetryString() else telemetry)
                 .setBigContentTitle("Δ \uD83D\uDC7E ∇")
                 .setSummaryText("Agentic Gemma Inference"))
 
@@ -1763,6 +1763,24 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     override fun updateNotification(text: String) {
         val manager = getSystemService(NotificationManager::class.java)
         manager.notify(NOTIFICATION_ID, buildNotification(text))
+    }
+
+    /**
+     * Re-renders the live foreground notification telemetry card so battery and sensors
+     * never stay frozen when the phone is idling or engine weights are suspended.
+     */
+    fun refreshNotificationTelemetry() {
+        try {
+            val manager = getSystemService(NotificationManager::class.java)
+            val currentText = when {
+                isSuspendedDueToRam.get() -> "✧ GHOST: Suspended (Standby)"
+                isInferencing -> "✧ Inferencing..."
+                else -> "✧ Machine Status: Operational"
+            }
+            manager.notify(NOTIFICATION_ID, buildNotification(currentText))
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to refresh notification telemetry")
+        }
     }
 
     private fun markActivity() {

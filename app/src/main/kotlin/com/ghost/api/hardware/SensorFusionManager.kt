@@ -197,6 +197,8 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
 
     private val stateReceiver = object : android.content.BroadcastReceiver() {
         private var lastBatteryUpdate = 0L
+        private var lastReportedBatteryLevel = -1
+        private var lastLowBatteryCueTime = 0L
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
                 Intent.ACTION_SCREEN_ON -> {}
@@ -205,26 +207,29 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
                     val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
                     val cue = com.ghost.api.logic.ActionFlavorTexts.powerConnectedTts(userTitle)
                     com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue)
+                    com.ghost.api.GemmaService.instance?.refreshNotificationTelemetry()
                 }
                 Intent.ACTION_POWER_DISCONNECTED -> {
                     val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
                     val cue = com.ghost.api.logic.ActionFlavorTexts.powerDisconnectedTts(userTitle)
                     com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue)
+                    com.ghost.api.GemmaService.instance?.refreshNotificationTelemetry()
                 }
                 Intent.ACTION_BATTERY_CHANGED -> { 
-                    // Audit Fix: Debounce battery intent to max once per 30 seconds
-                    // to prevent thermal broadcast storms and high IPC usage during charging.
                     val now = System.currentTimeMillis()
-                    if (now - lastBatteryUpdate > 30000L) {
+                    val snapshot = getContextSnapshot()
+                    val level = snapshot.battery.level
+                    if (level != lastReportedBatteryLevel || now - lastBatteryUpdate > 60000L) {
                         lastBatteryUpdate = now
-                        scope.launch {
-                            val snapshot = getContextSnapshot()
-                            val level = snapshot.battery.level
-                            if (level in 1..15 && !snapshot.battery.isCharging) {
-                                val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
-                                val cue = com.ghost.api.logic.ActionFlavorTexts.batteryLowTts(level, userTitle)
-                                com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue)
-                            }
+                        lastReportedBatteryLevel = level
+                        com.ghost.api.GemmaService.instance?.refreshNotificationTelemetry()
+                    }
+                    if (now - lastLowBatteryCueTime > 60000L) {
+                        if (level in 1..15 && !snapshot.battery.isCharging) {
+                            lastLowBatteryCueTime = now
+                            val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
+                            val cue = com.ghost.api.logic.ActionFlavorTexts.batteryLowTts(level, userTitle)
+                            com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue)
                         }
                     }
                 }
@@ -910,14 +915,27 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
     fun getContextString(): String {
         return try {
             val ctx = getContextSnapshot()
-            buildContextString(ctx)
+            buildContextString(ctx, isForNotification = false)
         } catch (e: Exception) {
             Timber.e(e, "CRITICAL: buildContextString failed!")
             "🔋 ??% 🌡️ ??°C\n⚠️ Sensors unavailable: ${e.message}"
         }
     }
 
-    private fun buildContextString(ctx: DeviceContext): String {
+    /**
+     * Concise formatted telemetry for the system notification shade.
+     * Prevents awkward line wraps across narrow phone notification cards.
+     */
+    fun getNotificationTelemetryString(): String {
+        return try {
+            val ctx = getContextSnapshot()
+            buildContextString(ctx, isForNotification = true)
+        } catch (e: Exception) {
+            getContextString()
+        }
+    }
+
+    private fun buildContextString(ctx: DeviceContext, isForNotification: Boolean = false): String {
         val sb = StringBuilder()
 
         // --- ROW 1: POWER & THERMALS (Vital Signs) ---
@@ -935,7 +953,14 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
             battLevel in 1..29 -> if (ctx.battery.isCharging) "Replenishing energy" else "Low energy"
             else -> "Nominal"
         }
-        sb.append("🔋 Battery: $levelStr ($energyDescriptor, $chargingDescriptor)")
+
+        if (isForNotification) {
+            val battIcon = if (battLevel <= 15) "🪫" else "🔋"
+            val chargeSymbol = if (ctx.battery.isCharging) "⚡" else ""
+            sb.append("$battIcon $levelStr$chargeSymbol")
+        } else {
+            sb.append("🔋 Battery: $levelStr ($energyDescriptor, $chargingDescriptor)")
+        }
 
         sb.append(" | 🌡️ ${Math.round(ctx.battery.temperature)}°C")
         val ramUsed = ctx.system.ramUsedPercent
