@@ -604,21 +604,52 @@ class GhostAgent(
                                 ttsSentenceBuffer.clear()
                             } else {
                                 ttsSentenceBuffer.append(cleanToken)
-                                while (true) {
-                                    val currentText = ttsSentenceBuffer.toString()
-                                    val match = sentenceBoundaryRegex.find(currentText) ?: break
-                                    val punctuationEnd = match.range.first + match.groupValues[1].length
-                                    val sentence = currentText.substring(0, punctuationEnd).trim()
-                                    val remainder = currentText.substring(match.range.last + 1).trimStart()
+                                val currentText = ttsSentenceBuffer.toString()
 
-                                    val ttsChunk = cleanForTTS(sentence)
-                                    if (ttsChunk.isNotBlank() && ttsChunk.length >= 10) {
-                                        callbacks?.speak(ttsChunk)
-                                        spokenAnyStreamingTts = true
-                                        ttsSentenceBuffer.clear()
-                                        ttsSentenceBuffer.append(remainder)
-                                    } else {
-                                        break
+                                if (!spokenAnyStreamingTts) {
+                                    // Ultra-fast speech onset (~3rd-5th token): trigger on first clause/punctuation or ~4 words (22+ chars)
+                                    val earlyPunct = Regex("""([.!?]+|[,:;\n—–-]+)(?:\s+|$)""").find(currentText)
+                                    if (earlyPunct != null) {
+                                        val cut = earlyPunct.range.first + earlyPunct.groupValues[1].length
+                                        val firstChunk = currentText.substring(0, cut).trim()
+                                        val rem = currentText.substring(earlyPunct.range.last + 1).trimStart()
+                                        val ttsChunk = cleanForTTS(firstChunk)
+                                        if (ttsChunk.isNotBlank()) {
+                                            callbacks?.speak(ttsChunk)
+                                            spokenAnyStreamingTts = true
+                                            ttsSentenceBuffer.clear()
+                                            ttsSentenceBuffer.append(rem)
+                                        }
+                                    } else if (currentText.length >= 22 && currentText.contains(" ")) {
+                                        val lastSpace = currentText.lastIndexOf(' ')
+                                        val firstChunk = currentText.substring(0, lastSpace).trim()
+                                        val rem = currentText.substring(lastSpace + 1).trimStart()
+                                        val ttsChunk = cleanForTTS(firstChunk)
+                                        if (ttsChunk.isNotBlank()) {
+                                            callbacks?.speak(ttsChunk)
+                                            spokenAnyStreamingTts = true
+                                            ttsSentenceBuffer.clear()
+                                            ttsSentenceBuffer.append(rem)
+                                        }
+                                    }
+                                } else {
+                                    // Subsequent chunks: stream at natural sentence boundaries
+                                    while (true) {
+                                        val textToScan = ttsSentenceBuffer.toString()
+                                        val match = sentenceBoundaryRegex.find(textToScan) ?: break
+                                        val punctuationEnd = match.range.first + match.groupValues[1].length
+                                        val sentence = textToScan.substring(0, punctuationEnd).trim()
+                                        val remainder = textToScan.substring(match.range.last + 1).trimStart()
+
+                                        val ttsChunk = cleanForTTS(sentence)
+                                        if (ttsChunk.isNotBlank()) {
+                                            callbacks?.speak(ttsChunk)
+                                            ttsSentenceBuffer.clear()
+                                            ttsSentenceBuffer.append(remainder)
+                                        } else {
+                                            ttsSentenceBuffer.clear()
+                                            ttsSentenceBuffer.append(remainder)
+                                        }
                                     }
                                 }
                             }
@@ -1108,7 +1139,13 @@ class GhostAgent(
     private suspend fun perceive(isAutonomous: Boolean = false): String {
         return try {
             val isFullBaseline = (turnsSinceKvFlush == 0) || isCriticalBattery()
-            contextManager.buildContext(isFullBaseline = isFullBaseline, isAutonomous = isAutonomous)
+            val baseContext = contextManager.buildContext(isFullBaseline = isFullBaseline, isAutonomous = isAutonomous)
+            val ambient = lastAmbientAnnouncement
+            if (ambient != null) {
+                baseContext + "\n[Spoken Announcement Grounding: $ambient]"
+            } else {
+                baseContext
+            }
         } catch (e: Exception) {
             Timber.w(e, "GhostAgent: Perception context build failed")
             ""
@@ -1423,13 +1460,13 @@ class GhostAgent(
             .trim()
     }
 
+    @Volatile var lastAmbientAnnouncement: String? = null
+        private set
+
     fun appendAssistantContext(text: String) {
         val clean = sanitizeAgentOutput(text)
         if (clean.isNotBlank()) {
-            synchronized(_conversationHistory) {
-                _conversationHistory.add(AgentMessage(role = "assistant", content = clean))
-            }
-            checkpoint()
+            lastAmbientAnnouncement = clean
         }
     }
 }

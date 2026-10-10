@@ -1544,8 +1544,8 @@ fun InputBar(
         }
         
         // Right Action Button (Dynamic State Machine: Text Send / Voice Record / Confirm Send)
-        if (text.isNotBlank()) {
-            // Text is ready: Electric cobalt send arrow
+        if (text.isNotBlank() || currentImages.isNotEmpty()) {
+            // Text or image is ready: Electric cobalt send arrow
             Text(
                 text = "➤",
                 color = colorSend,
