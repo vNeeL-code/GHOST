@@ -6,7 +6,7 @@
 [![ASI Demo](https://img.youtube.com/vi/jB62dlLavSY/0.jpg)](https://youtu.be/jB62dlLavSY?si=TMZG86o1KkjuBXtw)  
 *Click to watch: The ASI trailer.*
 
-![Static Badge](https://img.shields.io/badge/Status-Beta-green)
+![Static Badge](https://img.shields.io/badge/Status-WIP-green)
 ![Version](https://img.shields.io/badge/Version-v4.35%20(fdroid%20Beta)-brightgreen)
 ![GitHub Repo stars](https://img.shields.io/github/stars/vNeeL-code/GHOST)
 ![Platform](https://img.shields.io/badge/Platform-Android%2014%2B-blue)
