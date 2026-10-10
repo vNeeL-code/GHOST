@@ -701,6 +701,7 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
     }
 
     fun speakQueued(text: String) {
+        if (!isTtsEnabled) return
         if (com.ghost.api.hardware.AudioRecorder.isAnyRecordingActive) return
         val cleanText = cleanMarkdownForSpeech(text)
         if (isReady && cleanText.isNotBlank()) {

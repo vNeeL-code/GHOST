@@ -929,13 +929,13 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
             ctx.battery.isCharging -> "Charging on wire ⚡"
             else -> "On Battery"
         }
-        val staminaDescriptor = when {
-            battLevel >= 70 -> "High stamina / Alert"
-            battLevel >= 30 -> "Moderate stamina"
-            battLevel in 1..29 -> if (ctx.battery.isCharging) "Replenishing stamina" else "Low stamina"
+        val energyDescriptor = when {
+            battLevel >= 70 -> "High energy / Alert"
+            battLevel >= 30 -> "Moderate energy"
+            battLevel in 1..29 -> if (ctx.battery.isCharging) "Replenishing energy" else "Low energy"
             else -> "Nominal"
         }
-        sb.append("🔋 Battery: $levelStr ($staminaDescriptor, $chargingDescriptor)")
+        sb.append("🔋 Battery: $levelStr ($energyDescriptor, $chargingDescriptor)")
 
         sb.append(" | 🌡️ ${Math.round(ctx.battery.temperature)}°C")
         val ramUsed = ctx.system.ramUsedPercent

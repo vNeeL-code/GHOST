@@ -1244,7 +1244,12 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             ttsManager.speakPassiveAnnouncement(phrase)
         }
 
-        // 2. Inform agent sensory awareness so Gemma knows what she announced
+        // 2. Append visual event card to chat UI
+        serviceScope.launch(Dispatchers.Main) {
+            uiCallback?.onMessageAdded("📢 [$appName] $sender: $shortText", isUser = false)
+        }
+
+        // 3. Inform agent sensory awareness so Gemma knows what she announced without corrupting history
         if (::ghostAgent.isInitialized) {
             ghostAgent.appendAssistantContext(bubble)
         }
@@ -1262,6 +1267,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             ttsManager.speakPassiveAnnouncement(cueText)
         }
         val bubble = "✧ $cueText"
+        serviceScope.launch(Dispatchers.Main) {
+            uiCallback?.onMessageAdded(bubble, isUser = false)
+        }
         if (::ghostAgent.isInitialized) {
             ghostAgent.appendAssistantContext(bubble)
         }

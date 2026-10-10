@@ -107,6 +107,7 @@ class GemmaNotificationListener : NotificationListenerService() {
         val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
         if (prefs.getBoolean(Constants.PREF_PASSIVE_TTS, false) && (text.isNotBlank() || title.isNotBlank())) {
             val isMedia = pkg.contains("music") || pkg.contains("audio") || pkg.contains("player") || pkg.contains("youtube") || title.contains("playing", ignoreCase = true)
+            val isGroupSummary = (sbn.notification.flags and android.app.Notification.FLAG_GROUP_SUMMARY) != 0
             val category = sbn.notification.category
             val isMessagingCategory = category == android.app.Notification.CATEGORY_MESSAGE ||
                     category == android.app.Notification.CATEGORY_EMAIL ||
@@ -114,11 +115,23 @@ class GemmaNotificationListener : NotificationListenerService() {
             val isMessagingPkg = pkg.contains("chat") || pkg.contains("msg") || pkg.contains("whatsapp") ||
                     pkg.contains("telegram") || pkg.contains("discord") || pkg.contains("sms") ||
                     pkg.contains("mms") || pkg.contains("signal") || pkg.contains("slack") ||
-                    pkg.contains("orca") || pkg.contains("messenger")
+                    pkg.contains("orca") || pkg.contains("messenger") || pkg.contains("gm") ||
+                    pkg.contains("email") || pkg.contains("mail")
 
-            if ((isMessagingCategory || isMessagingPkg) && !isMedia) {
-                val appLabel = resolveAppLabel(this, pkg)
-                GemmaService.instance?.processNotificationAnnouncement(appLabel, title, text)
+            if ((isMessagingCategory || isMessagingPkg) && !isMedia && !isGroupSummary) {
+                val announceKey = "$pkg:${title.trim()}:${text.take(30).trim()}"
+                val now = System.currentTimeMillis()
+                val lastTime = lastAnnouncedMap[announceKey] ?: 0L
+                if (now - lastTime > 20_000L) {
+                    lastAnnouncedMap[announceKey] = now
+                    if (lastAnnouncedMap.size > 50) {
+                        lastAnnouncedMap.entries.removeIf { now - it.value > 60_000L }
+                    }
+                    val appLabel = resolveAppLabel(this, pkg)
+                    GemmaService.instance?.processNotificationAnnouncement(appLabel, title, text)
+                } else {
+                    Timber.d("📢 Suppressed duplicate notification announcement for $announceKey (${now - lastTime}ms since last)")
+                }
             }
         }
 
@@ -154,6 +167,7 @@ class GemmaNotificationListener : NotificationListenerService() {
         
         // Cache for pending reply intents: packageName -> ReplyAction
         private val replyCache = java.util.concurrent.ConcurrentHashMap<String, ReplyAction>()
+        private val lastAnnouncedMap = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
         data class ReplyAction(
             val pendingIntent: android.app.PendingIntent,
