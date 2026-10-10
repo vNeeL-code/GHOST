@@ -1,0 +1,11 @@
+GHOST is a cyberpunk-themed, on-device embodied AI companion powered by Google LiteRT-LM and local Gemma weights.
+
+Built for complete privacy and hardware integration, GHOST runs entirely on your phone with zero mandatory cloud telemetry.
+
+Key Capabilities:
+• Real-time local inference using LiteRT-LM (Gemma 3n / Gemma 2B / 270M)
+• Hardware telemetry integration (battery, thermals, sensors, system state)
+• Diegetic voice interactions & passive auditory cues
+• On-device multimodal vision and voice processing
+• Cyberpunk-styled terminal interface and responsive edge visualizer
+• 100% Free and Open Source (FOSS) with zero proprietary tracker SDKs.

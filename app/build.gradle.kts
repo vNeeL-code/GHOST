@@ -110,10 +110,7 @@ ksp {
 dependencies {
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.12.0")
 
-    // Google Agent Development Kit (ADK) for Kotlin & Android
-    implementation("com.google.adk:google-adk-kotlin-core-android:1.0.0")
-    implementation("com.google.adk:google-adk-kotlin-litertlm:1.0.0")
-    ksp("com.google.adk:google-adk-kotlin-processor:1.0.0")
+
 
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.activity:activity-ktx:1.10.0")

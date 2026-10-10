@@ -1,0 +1,6 @@
+Initial F-Droid release v4.35 (build 13):
+• On-device Gemma inference with LiteRT-LM
+• Real-time sensor fusion telemetry
+• Passive auditory cues & deterministic hardware state announcements
+• Interactive voice memo playback player in chat
+• Edge-to-edge audio visualizer strip

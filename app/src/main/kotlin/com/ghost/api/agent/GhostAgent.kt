@@ -403,10 +403,14 @@ class GhostAgent(
         val timeStr = java.time.LocalTime.now().format(timeFormatter)
 
         val isAutonomous = isDream || message.startsWith("Δ 👾 ∇")
+        val imageTag = if (images.isNotEmpty()) {
+            val countStr = if (images.size > 1) "${images.size} images" else "image"
+            " [Attached: $countStr]"
+        } else ""
         val historyContent = if (isAutonomous) {
             if (message.startsWith("Δ 👾 ∇ GHOST:")) message else "Δ 👾 ∇ GHOST: $message"
         } else {
-            "Δ $operatorAvatar ∇ [$timeStr]: $message"
+            "Δ $operatorAvatar ∇ [$timeStr]$imageTag: ${if (message.isBlank()) "[shared image]" else message}"
         }
 
         val userMessage = AgentMessage(

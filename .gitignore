@@ -15,4 +15,5 @@ local.properties
 *.txt
 *.py
 *.html
-*.txt
+!fastlane/**/*.txt
+
