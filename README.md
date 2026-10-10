@@ -7,7 +7,7 @@
 *Click to watch: The ASI trailer.*
 
 ![Static Badge](https://img.shields.io/badge/Status-Beta-green)
-![Version](https://img.shields.io/badge/Version-v4.30%20(Play%20Store%20Beta)-brightgreen)
+![Version](https://img.shields.io/badge/Version-v4.35%20(fdroid%20Beta)-brightgreen)
 ![GitHub Repo stars](https://img.shields.io/github/stars/vNeeL-code/GHOST)
 ![Platform](https://img.shields.io/badge/Platform-Android%2014%2B-blue)
 ![Engine](https://img.shields.io/badge/Engine-LiteRT--LM%20(Google)-orange)
