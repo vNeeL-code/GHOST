@@ -1391,11 +1391,30 @@ class GhostAgent(
     }
 
     private fun getBatteryLevel(): Int = try {
-        val bm = context.getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager
-        bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        val bm = context.getSystemService(Context.BATTERY_SERVICE) as? android.os.BatteryManager
+        val batteryIntent = context.registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
+        val rawLevel = batteryIntent?.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = batteryIntent?.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1) ?: -1
+        val stickyLevel = if (rawLevel >= 0 && scale > 0) (rawLevel * 100) / scale else -1
+        val propLevel = bm?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
+        if (stickyLevel in 0..100) stickyLevel else if (propLevel in 1..100) propLevel else 100
     } catch (e: Exception) { 100 }
 
-    private fun isCriticalBattery(): Boolean = getBatteryLevel() <= 15
+    private fun isCharging(): Boolean = try {
+        val batteryIntent = context.registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
+        val plugged = batteryIntent?.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, -1) ?: 0
+        val status = batteryIntent?.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1) ?: -1
+        plugged == android.os.BatteryManager.BATTERY_PLUGGED_AC ||
+        plugged == android.os.BatteryManager.BATTERY_PLUGGED_USB ||
+        plugged == android.os.BatteryManager.BATTERY_PLUGGED_WIRELESS ||
+        status == android.os.BatteryManager.BATTERY_STATUS_CHARGING ||
+        status == android.os.BatteryManager.BATTERY_STATUS_FULL
+    } catch (e: Exception) { false }
+
+    private fun isCriticalBattery(): Boolean {
+        val level = getBatteryLevel()
+        return level in 1..15 && !isCharging()
+    }
 
     private fun getAssistantCallSign(): String = ContextManager.resolveDeviceCallSign(context)
 

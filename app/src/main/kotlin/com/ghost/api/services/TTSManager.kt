@@ -206,14 +206,42 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
     private val mediaSessionManager = context.getSystemService(Context.MEDIA_SESSION_SERVICE) as? android.media.session.MediaSessionManager
     var utteranceFinishedListener: ((String) -> Unit)? = null
 
+    private val pendingUtterances = java.util.concurrent.atomic.AtomicInteger(0)
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
-    private val abandonDuckingRunnable = Runnable {
-        if (tts?.isSpeaking != true) {
+    private val abandonDuckingRunnable = object : Runnable {
+        override fun run() {
+            val isStillInferencing = com.ghost.api.GemmaService.isInferencing
+            val isSpeakingNow = tts?.isSpeaking == true
+            val pending = pendingUtterances.get()
+
+            if (isStillInferencing || isSpeakingNow || pending > 0) {
+                Timber.d("TTS: Keeping audio ducked (inferencing=$isStillInferencing, speaking=$isSpeakingNow, pending=$pending)")
+                mainHandler.removeCallbacks(this)
+                mainHandler.postDelayed(this, 500)
+                return
+            }
+
             abandonAudioDucking()
             try {
                 context.sendBroadcast(android.content.Intent("com.ghost.api.ACTION_TTS_STOP").setPackage(context.packageName))
             } catch (e: Exception) {}
         }
+    }
+
+    private fun executeSpeak(text: String, queueMode: Int, utteranceId: String): Boolean {
+        mainHandler.removeCallbacks(abandonDuckingRunnable)
+        requestAudioDucking()
+        pendingUtterances.incrementAndGet()
+        val res = tts?.speak(text, queueMode, null, utteranceId)
+        if (res != TextToSpeech.SUCCESS) {
+            decrementPendingUtterances()
+            return false
+        }
+        return true
+    }
+
+    private fun decrementPendingUtterances() {
+        pendingUtterances.updateAndGet { if (it > 0) it - 1 else 0 }
     }
 
     private fun getActivePlayingController(): android.media.session.MediaController? {
@@ -366,13 +394,15 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
                     } catch (e: Exception) {}
                 }
                 override fun onDone(utteranceId: String?) {
+                    decrementPendingUtterances()
                     mainHandler.removeCallbacks(abandonDuckingRunnable)
-                    mainHandler.postDelayed(abandonDuckingRunnable, 350)
+                    mainHandler.postDelayed(abandonDuckingRunnable, 800)
                     utteranceId?.let { utteranceFinishedListener?.invoke(it) }
                 }
                 override fun onError(utteranceId: String?) {
+                    decrementPendingUtterances()
                     mainHandler.removeCallbacks(abandonDuckingRunnable)
-                    mainHandler.postDelayed(abandonDuckingRunnable, 350)
+                    mainHandler.postDelayed(abandonDuckingRunnable, 800)
                     utteranceId?.let { utteranceFinishedListener?.invoke(it) }
                 }
             })
@@ -531,10 +561,8 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
 
         // IMMEDIATE priority bypasses all checks
         if (priority == Priority.IMMEDIATE) {
-            requestAudioDucking()
             val queueMode = if (isChunk) TextToSpeech.QUEUE_ADD else TextToSpeech.QUEUE_FLUSH
-            tts?.speak(text, queueMode, null, uId)
-            return true
+            return executeSpeak(text, queueMode, uId)
         }
 
         return when (state) {
@@ -548,26 +576,20 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
                 if (respectScreenLock) {
                     // Screen off - defer unless high priority
                     if (priority == Priority.HIGH) {
-                        requestAudioDucking()
-                        tts?.speak(text, TextToSpeech.QUEUE_ADD, null, "GemmaHigh")
-                        true
+                        executeSpeak(text, TextToSpeech.QUEUE_ADD, "GemmaHigh")
                     } else {
                         Timber.d("TTS: Deferring speech (screen off)")
                         deferSpeech(text, priority)
                         false
                     }
                 } else {
-                    requestAudioDucking()
-                    tts?.speak(text, TextToSpeech.QUEUE_ADD, null, "GemmaResponse")
-                    true
+                    executeSpeak(text, TextToSpeech.QUEUE_ADD, "GemmaResponse")
                 }
             }
             DeviceState.LOCKED_VISIBLE -> {
                 // Lock screen visible - speak at lower volume for HIGH, defer NORMAL/LOW
                 if (priority >= Priority.NORMAL) {
-                    requestAudioDucking()
-                    tts?.speak(text, TextToSpeech.QUEUE_ADD, null, "GemmaLocked")
-                    true
+                    executeSpeak(text, TextToSpeech.QUEUE_ADD, "GemmaLocked")
                 } else {
                     deferSpeech(text, priority)
                     false
@@ -575,16 +597,13 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
             }
             DeviceState.PRIVATE_AUDIO -> {
                 // Headphones connected - always safe to speak
-                requestAudioDucking()
-                tts?.speak(text, TextToSpeech.QUEUE_ADD, null, "GemmaPrivate")
-                true
+                executeSpeak(text, TextToSpeech.QUEUE_ADD, "GemmaPrivate")
             }
             DeviceState.ACTIVE -> {
                 // Active use - request audio ducking and queue streaming sentences seamlessly in FIFO order
-                requestAudioDucking()
-                tts?.speak(text, TextToSpeech.QUEUE_ADD, null, "GemmaResponse_${System.currentTimeMillis()}")
-                lastSpeechTime = System.currentTimeMillis()
-                true
+                val ok = executeSpeak(text, TextToSpeech.QUEUE_ADD, "GemmaResponse_${System.currentTimeMillis()}")
+                if (ok) lastSpeechTime = System.currentTimeMillis()
+                ok
             }
         }
     }
@@ -623,12 +642,12 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
 
         // Announce we have messages
         if (recent.size > 1) {
-            tts?.speak("You have ${recent.size} messages.", TextToSpeech.QUEUE_ADD, null, "GemmaAnnounce")
+            executeSpeak("You have ${recent.size} messages.", TextToSpeech.QUEUE_ADD, "GemmaAnnounce")
         }
 
         // Play most important ones (max 3)
         recent.take(3).forEach { speech ->
-            tts?.speak(speech.text, TextToSpeech.QUEUE_ADD, null, "GemmaDeferred_${speech.timestamp}")
+            executeSpeak(speech.text, TextToSpeech.QUEUE_ADD, "GemmaDeferred_${speech.timestamp}")
         }
     }
 
@@ -678,15 +697,14 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
         }
 
         // Screen off or active -> speak immediately
-        requestAudioDucking()
-        tts?.speak(cleanText, TextToSpeech.QUEUE_ADD, null, "GemmaPassive_${System.currentTimeMillis()}")
+        executeSpeak(cleanText, TextToSpeech.QUEUE_ADD, "GemmaPassive_${System.currentTimeMillis()}")
     }
 
     fun speakQueued(text: String) {
         if (com.ghost.api.hardware.AudioRecorder.isAnyRecordingActive) return
         val cleanText = cleanMarkdownForSpeech(text)
         if (isReady && cleanText.isNotBlank()) {
-            tts?.speak(cleanText, TextToSpeech.QUEUE_ADD, null, "GemmaResponse_${System.currentTimeMillis()}")
+            executeSpeak(cleanText, TextToSpeech.QUEUE_ADD, "GemmaResponse_${System.currentTimeMillis()}")
         }
     }
 
@@ -715,6 +733,7 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
 
     fun stop() {
         mainHandler.removeCallbacks(abandonDuckingRunnable)
+        pendingUtterances.set(0)
         abandonAudioDucking()
         deferredQueue.clear()
         tts?.stop()
@@ -734,10 +753,11 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
             pocketSensorListener = null
         }
         mainHandler.removeCallbacks(abandonDuckingRunnable)
+        pendingUtterances.set(0)
         abandonAudioDucking()
         deferredQueue.clear()
         tts?.shutdown()
     }
 
-    fun isSpeaking(): Boolean = tts?.isSpeaking == true
+    fun isSpeaking(): Boolean = (tts?.isSpeaking == true) || (pendingUtterances.get() > 0)
 }

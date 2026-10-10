@@ -922,28 +922,20 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
 
         // --- ROW 1: POWER & THERMALS (Vital Signs) ---
         val battLevel = ctx.battery.level
+        val levelStr = if (battLevel in 0..100) "$battLevel%" else "Unknown"
         val isFull = (ctx.battery.isCharging && battLevel >= 95) || battLevel >= 98
-        val battIcon = when {
-            battLevel <= 0 -> "🔋"
-            battLevel <= 10 -> "🪫"
-            else -> "🔋"
+        val chargingDescriptor = when {
+            isFull -> "Fully Charged ⚡"
+            ctx.battery.isCharging -> "Charging on wire ⚡"
+            else -> "On Battery"
         }
-        val battCategory = when {
-            battLevel <= 0 -> "UNKNOWN"
-            isFull -> "FULL"
-            battLevel <= 5 -> "CRITICAL"
-            battLevel <= 20 -> "LOW"
-            battLevel <= 65 -> "MID"
-            else -> "HIGH"
+        val staminaDescriptor = when {
+            battLevel >= 70 -> "High stamina / Alert"
+            battLevel >= 30 -> "Moderate stamina"
+            battLevel in 1..29 -> if (ctx.battery.isCharging) "Replenishing stamina" else "Low stamina"
+            else -> "Nominal"
         }
-        val levelStr = if (battLevel >= 0) "$battLevel%" else "??%"
-        sb.append("$battIcon $levelStr [$battCategory]")
-        if (ctx.battery.isCharging) sb.append("⚡")
-        if (ctx.battery.currentNow < 0) {
-            sb.append(" (${Math.abs(ctx.battery.currentNow)}mA drain)")
-        } else if (ctx.battery.currentNow > 0 && ctx.battery.isCharging) {
-            sb.append(" (${ctx.battery.currentNow}mA charge)")
-        }
+        sb.append("🔋 Battery: $levelStr ($staminaDescriptor, $chargingDescriptor)")
 
         sb.append(" | 🌡️ ${Math.round(ctx.battery.temperature)}°C")
         val ramUsed = ctx.system.ramUsedPercent
