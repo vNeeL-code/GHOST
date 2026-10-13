@@ -1085,7 +1085,7 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
 
     companion object {
         /**
-         * Converts raw battery percentage into explicit spelled-out words, decade buckets,
+         * Converts raw battery percentage into explicit spelled-out words,
          * verbal qualitative ranges, and anti-hallucination semantic guards for LLM sensory perception.
          */
         fun formatBatteryVerbal(level: Int, isCharging: Boolean): String {
@@ -1100,26 +1100,11 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
                 else -> "critical low"
             }
 
-            val decadeWord = when (level) {
-                100 -> "one hundred"
-                in 90..99 -> "nineties"
-                in 80..89 -> "eighties"
-                in 70..79 -> "seventies"
-                in 60..69 -> "sixties"
-                in 50..59 -> "fifties"
-                in 40..49 -> "forties"
-                in 30..39 -> "thirties"
-                in 20..29 -> "twenties"
-                in 10..19 -> "teens"
-                else -> "single digits"
-            }
-
             val spelledOutNumber = numberToWords(level)
-            val chargingWord = if (isCharging) "charging on wire" else "on battery"
-            val panicGuard = if (level >= 20 && !isCharging) "healthy nominal level (NOT low, NOT on fumes)" else ""
-            val panicGuardStr = if (panicGuard.isNotEmpty()) ", $panicGuard" else ""
+            val chargingWord = if (isCharging) "charging" else "on battery"
+            val panicGuard = if (level >= 20 && !isCharging) " · nominal, not on fumes" else ""
 
-            return "$spelledOutNumber percent ($level%) · decade: $decadeWord · range: $verbalBucket · $chargingWord$panicGuardStr"
+            return "$spelledOutNumber percent ($level% · $verbalBucket · $chargingWord$panicGuard)"
         }
 
         fun numberToWords(n: Int): String {
