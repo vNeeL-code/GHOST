@@ -499,16 +499,19 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 Timber.i("SensorFusion loop started")
             }
 
-            reportStatus("Foreground Started. Binding API...")
-
-            // Start API immediately so localhost:9000 exists
-            try {
-                apiServer = ApiServer(this, memoryManager)
-                apiServer.start()
-                reportStatus("Alive! API on Port ${Constants.API_PORT}")
-            } catch (e: Exception) {
-                reportStatus("API Error: ${e.message}")
-                Timber.e(e, "API Bind Failed")
+            // Start API only if explicitly enabled by user
+            val apiEnabled = prefs.getBoolean(Constants.PREF_API_SERVER_ENABLED, false)
+            if (apiEnabled) {
+                try {
+                    apiServer = ApiServer(this, memoryManager)
+                    apiServer.start()
+                    reportStatus("Alive! API on Port ${Constants.API_PORT}")
+                } catch (e: Exception) {
+                    reportStatus("API Error: ${e.message}")
+                    Timber.e(e, "API Bind Failed")
+                }
+            } else {
+                Timber.i("Local API Server disabled by preference (default safe)")
             }
 
             scope.launch {

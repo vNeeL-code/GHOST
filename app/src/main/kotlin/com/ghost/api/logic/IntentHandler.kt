@@ -191,9 +191,8 @@ object IntentHandler {
                     true
                 }
                 "bash" -> {
-                    val command = json.optString("command", "")
-                    com.ghost.api.hardware.TermuxAdbToolSet(context).bash(command)
-                    true
+                    Log.w(TAG, "bash execution via intent dispatch is blocked for security; requires explicit confirmation")
+                    false
                 }
                 "execute_background_search", "search" -> {
                     val query = json.optString("query", json.optString("input", ""))

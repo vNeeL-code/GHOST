@@ -11,10 +11,13 @@ UpdateCheckMode: Tags
 CurrentVersion: 4.35
 CurrentVersionCode: 13
 
+RepoType: git
+Repo: https://github.com/vNeeL-code/GHOST.git
+
 Builds:
   - versionName: '4.35'
     versionCode: 13
     commit: v4.35
     subdir: app
     gradle:
-      - fdroidRelease
+      - fdroid

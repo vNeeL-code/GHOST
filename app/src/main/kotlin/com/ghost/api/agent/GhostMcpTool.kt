@@ -156,8 +156,8 @@ class GhostMcpTool(
     fun move_file(sourcePath: String, destinationPath: String): Map<String, String> =
         executeMcpAction("move_file", "{\"sourcePath\":\"$sourcePath\",\"destinationPath\":\"$destinationPath\"}")
 
-    fun execute_action(toolName: String, parameters: String): Map<String, String> =
-        executeMcpAction(toolName, parameters)
+    fun execute_action(toolName: String, parameters: String, preApproved: Boolean = false): Map<String, String> =
+        executeMcpAction(toolName, parameters, preApproved)
 
     fun run_js(skillName: String, scriptName: String, data: String): Map<String, String> {
         return runBlocking(Dispatchers.IO) {
@@ -206,19 +206,19 @@ class GhostMcpTool(
         }
     }
 
-    private fun executeMcpAction(toolName: String, rawParams: String): Map<String, String> {
+    fun executeMcpAction(toolName: String, rawParams: String, preApproved: Boolean = false): Map<String, String> {
         val trimmedTool = toolName.trim()
         val cleanTool = when (trimmedTool.lowercase()) {
             "open_app", "launch_app" -> "app"
             else -> trimmedTool
         }
         val cleanParams = rawParams.trim()
-        Timber.i("GhostMcpTool: dispatching '$cleanTool' with '$cleanParams'")
+        Timber.i("GhostMcpTool: dispatching '$cleanTool' with '$cleanParams' (preApproved=$preApproved)")
         onToolExecuting?.invoke(cleanTool, cleanParams)
 
         val paramsMap = parseParams(cleanTool, cleanParams)
         val result = runBlocking(Dispatchers.IO) {
-            mcpServer.executeTool(cleanTool, paramsMap)
+            mcpServer.executeTool(cleanTool, paramsMap, preApproved = preApproved)
         }
         val rawOutput = if (result.success) result.output else (result.error ?: "Action failed")
         val outputStr = rawOutput.take(1500)

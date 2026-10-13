@@ -1064,7 +1064,7 @@ class GhostAgent(
         agentScope.launch {
             if (isApproved) {
                 val paramJson = JSONObject(params.filterValues { it != null }).toString()
-                val result = mcpTool.execute_action(toolName, paramJson)
+                val result = mcpTool.execute_action(toolName, paramJson, preApproved = true)
                 val output = result["output"] ?: "Action succeeded."
                 responseChannel.complete("✓ $toolName executed: $output")
             } else {

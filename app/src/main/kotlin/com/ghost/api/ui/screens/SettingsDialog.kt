@@ -86,6 +86,7 @@ fun SettingsDialog(
     val isAccessibilityGranted = enabledServices != null && enabledServices.contains(accessCn.flattenToString())
 
     var showOperatorUnlockDialog by remember { mutableStateOf(false) }
+    var showAccessibilityDisclosureDialog by remember { mutableStateOf(false) }
 
     val billingManager = remember { BillingManager.create(context) }
     val billingPrice by billingManager.formattedPrice.collectAsState()
@@ -147,6 +148,56 @@ fun SettingsDialog(
             },
             dismissButton = {
                 TextButton(onClick = { showOperatorUnlockDialog = false }) {
+                    Text("Cancel", color = Color(0x99FFFFFF))
+                }
+            },
+            containerColor = Color(0xFF141418),
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
+    if (showAccessibilityDisclosureDialog) {
+        AlertDialog(
+            onDismissRequest = { showAccessibilityDisclosureDialog = false },
+            title = {
+                Text(
+                    text = "Accessibility Service Disclosure",
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "GHOST requires Accessibility Service access to provide contextual assistance and UI automation.",
+                        fontSize = 13.sp,
+                        color = Color.White
+                    )
+                    Text(
+                        text = "• How it is used: Inspecting active screen elements and performing clicks, scrolls, or text entry when you explicitly ask the agent to interact with your device.\n• Privacy & Security: All processing occurs entirely on-device with your local AI model. No screen content or personal data is ever collected, stored remotely, or transmitted to any external servers.",
+                        fontSize = 12.sp,
+                        color = Color(0xCCFFFFFF),
+                        lineHeight = 16.sp
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showAccessibilityDisclosureDialog = false
+                        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(intent)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8BB4F6)),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Continue to Settings", color = Color.Black, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAccessibilityDisclosureDialog = false }) {
                     Text("Cancel", color = Color(0x99FFFFFF))
                 }
             },
@@ -980,10 +1031,7 @@ fun SettingsDialog(
                                     subtitle = "Required for active agent app awareness & dynamic avatar reactivity",
                                     isWarning = true,
                                     onClick = {
-                                        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
-                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        }
-                                        context.startActivity(intent)
+                                        showAccessibilityDisclosureDialog = true
                                     }
                                 )
                             }

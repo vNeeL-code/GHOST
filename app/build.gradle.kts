@@ -14,7 +14,7 @@ android {
     defaultConfig {
         applicationId = "com.ghost.api"
         minSdk = 31
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 13
         versionName = "4.35"
 

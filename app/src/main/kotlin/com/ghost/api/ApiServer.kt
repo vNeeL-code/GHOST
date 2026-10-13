@@ -25,13 +25,18 @@ class ApiServer(
     private val gson = Gson()
 
     fun start() {
-        server = embeddedServer(CIO, port = Constants.API_PORT) {
+        server = embeddedServer(CIO, host = "127.0.0.1", port = Constants.API_PORT) {
             routing {
 
                 fun ApplicationCall.isAuthorized(): Boolean {
                     val header = request.header("X-Ghost-Token")
                         ?: request.header("Authorization")?.removePrefix("Bearer ")?.trim()
-                    return header == Constants.getApiToken(gemmaService)
+                    if (header == null) return false
+                    val expected = Constants.getApiToken(gemmaService)
+                    return java.security.MessageDigest.isEqual(
+                        header.toByteArray(Charsets.UTF_8),
+                        expected.toByteArray(Charsets.UTF_8)
+                    )
                 }
 
                 get("/v1/models") {

@@ -200,15 +200,10 @@ object Constants {
 
     // API Server
     const val API_PORT = 8080
-
-    /**
-     * Default API token fallback. Prefer [getApiToken] for runtime-generated tokens.
-     */
-    const val DEFAULT_API_TOKEN = "ghost-local-token-changeme"
+    const val PREF_API_SERVER_ENABLED = "api_server_enabled"
 
     /**
      * Returns a per-device API token, generating and persisting a UUID on first launch.
-     * Falls back to [DEFAULT_API_TOKEN] only if SharedPreferences is unavailable.
      */
     fun getApiToken(context: Context): String {
         val prefs = context.getSharedPreferences(PREFS_NAME, 0)

@@ -29,8 +29,8 @@ object ToolPolicy {
             "bash" -> true
             "call_phone" -> true
 
-            // Default to SAFE for unknown tools — agent shouldn't need permission to do what user asked
-            else -> false
+            // Default to RISKY for unknown tools — requires confirmation
+            else -> true
         }
     }
 

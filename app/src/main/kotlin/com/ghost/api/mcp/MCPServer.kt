@@ -137,7 +137,15 @@ class MCPServer(
 
     fun getTools(): Map<String, ToolDefinition> = toolRegistry
 
-    suspend fun executeTool(name: String, params: Map<String, Any>): ToolResult {
+    suspend fun executeTool(name: String, params: Map<String, Any>, preApproved: Boolean = false): ToolResult {
+        if (!preApproved && com.ghost.api.agent.ToolPolicy.isRisky(name, params)) {
+            val desc = com.ghost.api.agent.ToolPolicy.getRiskDescription(name)
+            return ToolResult(
+                success = false,
+                output = "",
+                error = "Tool '$name' requires user confirmation ($desc). Execution blocked by security policy."
+            )
+        }
         return try {
             when (name) {
                 // Hardware

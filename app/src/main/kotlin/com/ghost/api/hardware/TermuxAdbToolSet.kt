@@ -61,9 +61,21 @@ class TermuxAdbToolSet(private val context: Context) : ToolSet {
     fun adb_input_text(
         @ToolParam(description = "Text to input") text: String
     ): Map<String, String> {
-        val escapedText = text.replace(" ", "%s").replace("\"", "\\\"")
-        Timber.i("ADB Input Text: $escapedText")
-        return runAdb("input text \"$escapedText\"")
+        // Strip or escape any shell metacharacters to eliminate command injection vectors
+        val sanitized = text
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("$", "\\$")
+            .replace("`", "\\`")
+            .replace("'", "\\'")
+            .replace(";", "")
+            .replace("&", "")
+            .replace("|", "")
+            .replace("\n", "")
+            .replace("\r", "")
+            .replace(" ", "%s")
+        Timber.i("ADB Input Text: $sanitized")
+        return runAdb("input text \"$sanitized\"")
     }
 
     @Tool(description = "Fetch the current foreground app window (Power User)")
