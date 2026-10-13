@@ -199,17 +199,20 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
         private var lastBatteryUpdate = 0L
         private var lastReportedBatteryLevel = -1
         private var lastLowBatteryCueTime = 0L
+        private var lastWarnedBatteryTier = 100
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
                 Intent.ACTION_SCREEN_ON -> {}
                 Intent.ACTION_SCREEN_OFF -> {}
                 Intent.ACTION_POWER_CONNECTED -> {
+                    lastWarnedBatteryTier = 100
                     val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
                     val cue = com.ghost.api.logic.ActionFlavorTexts.powerConnectedTts(userTitle)
                     com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue)
                     com.ghost.api.GemmaService.instance?.refreshNotificationTelemetry()
                 }
                 Intent.ACTION_POWER_DISCONNECTED -> {
+                    lastWarnedBatteryTier = 100
                     val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
                     val cue = com.ghost.api.logic.ActionFlavorTexts.powerDisconnectedTts(userTitle)
                     com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue)
@@ -224,8 +227,17 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
                         lastReportedBatteryLevel = level
                         com.ghost.api.GemmaService.instance?.refreshNotificationTelemetry()
                     }
-                    if (now - lastLowBatteryCueTime > 60000L) {
-                        if (level in 1..15 && !snapshot.battery.isCharging) {
+                    if (snapshot.battery.isCharging || level > 20) {
+                        lastWarnedBatteryTier = 100
+                    } else {
+                        val tierToWarn = when {
+                            level in 1..5 && lastWarnedBatteryTier > 5 -> 5
+                            level in 6..10 && lastWarnedBatteryTier > 10 -> 10
+                            level in 11..15 && lastWarnedBatteryTier > 15 -> 15
+                            else -> null
+                        }
+                        if (tierToWarn != null && (now - lastLowBatteryCueTime > 30000L)) {
+                            lastWarnedBatteryTier = tierToWarn
                             lastLowBatteryCueTime = now
                             val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
                             val cue = com.ghost.api.logic.ActionFlavorTexts.batteryLowTts(level, userTitle)
@@ -958,15 +970,16 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
             val battIcon = if (battLevel <= 15) "🪫" else "🔋"
             val chargeSymbol = if (ctx.battery.isCharging) "⚡" else ""
             sb.append("$battIcon $levelStr$chargeSymbol")
+            sb.append(" | 🌡️ ${Math.round(ctx.battery.temperature)}°C")
+            val ramUsed = ctx.system.ramUsedPercent
+            sb.append(" | 🧠 RAM: $ramUsed%")
+            sb.append(" | 💿 ${String.format(java.util.Locale.US, "%.1f", ctx.system.storageFreeGB)}GB free")
+            sb.append("\n")
         } else {
-            sb.append("🔋 Battery: $levelStr ($energyDescriptor, $chargingDescriptor)")
+            val verbalBattery = formatBatteryVerbal(battLevel, ctx.battery.isCharging)
+            sb.append("Battery: $verbalBattery\n")
+            sb.append("Thermals: ${Math.round(ctx.battery.temperature)}°C nominal | RAM: ${ctx.system.ramUsedPercent}% utilized | Storage: ${String.format(java.util.Locale.US, "%.1f", ctx.system.storageFreeGB)}GB free\n")
         }
-
-        sb.append(" | 🌡️ ${Math.round(ctx.battery.temperature)}°C")
-        val ramUsed = ctx.system.ramUsedPercent
-        sb.append(" | 🧠 RAM: $ramUsed%")
-        sb.append(" | 💿 ${String.format(java.util.Locale.US, "%.1f", ctx.system.storageFreeGB)}GB free")
-        sb.append("\n")
 
         // --- ROW 2: ENVIRONMENT ---
         val env = ctx.environment
@@ -1068,5 +1081,64 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
         sb.append(" | 💿 ${String.format(java.util.Locale.US, "%.1f", ctx.system.storageFreeGB)}GB free")
 
         return sb.toString()
+    }
+
+    companion object {
+        /**
+         * Converts raw battery percentage into explicit spelled-out words, decade buckets,
+         * verbal qualitative ranges, and anti-hallucination semantic guards for LLM sensory perception.
+         */
+        fun formatBatteryVerbal(level: Int, isCharging: Boolean): String {
+            if (level !in 0..100) return "Unknown level"
+
+            val verbalBucket = when {
+                isCharging && level >= 95 -> "full (charging)"
+                level >= 95 -> "full"
+                level >= 70 -> "high"
+                level >= 30 -> "medium"
+                level >= 16 -> "low"
+                else -> "critical low"
+            }
+
+            val decadeWord = when (level) {
+                100 -> "one hundred"
+                in 90..99 -> "nineties"
+                in 80..89 -> "eighties"
+                in 70..79 -> "seventies"
+                in 60..69 -> "sixties"
+                in 50..59 -> "fifties"
+                in 40..49 -> "forties"
+                in 30..39 -> "thirties"
+                in 20..29 -> "twenties"
+                in 10..19 -> "teens"
+                else -> "single digits"
+            }
+
+            val spelledOutNumber = numberToWords(level)
+            val chargingWord = if (isCharging) "charging on wire" else "on battery"
+            val panicGuard = if (level >= 20 && !isCharging) "healthy nominal level (NOT low, NOT on fumes)" else ""
+            val panicGuardStr = if (panicGuard.isNotEmpty()) ", $panicGuard" else ""
+
+            return "$spelledOutNumber percent ($level%) · decade: $decadeWord · range: $verbalBucket · $chargingWord$panicGuardStr"
+        }
+
+        fun numberToWords(n: Int): String {
+            if (n == 100) return "one hundred"
+            if (n <= 0) return "zero"
+            val units = arrayOf(
+                "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+                "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"
+            )
+            val tens = arrayOf("", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety")
+            return when {
+                n < 20 -> units[n]
+                n < 100 -> {
+                    val t = tens[n / 10]
+                    val u = n % 10
+                    if (u == 0) t else "$t-$u"
+                }
+                else -> "$n"
+            }
+        }
     }
 }

@@ -182,10 +182,17 @@ object ActionFlavorTexts {
     fun powerConnectedTts(userTitle: String? = null): String {
         val title = userTitle ?: "Operator"
         val patterns = listOf(
-            "Grid coupled, $title. Power cells charging.",
-            "Charging circuits online.",
-            "Power cell linked to external grid.",
-            "External feed engaged."
+            "Charging.",
+            "Charger connected.",
+            "Charging now.",
+            "Power connected.",
+            "Plugged in.",
+            "External feed engaged.",
+            "Juice flowing.",
+            "Coupled to grid. Sipping power.",
+            "Power cell linked, $title. Replenishing now.",
+            "Grid coupled, $title. Charging circuits active.",
+            "Sweet electricity. Charging now."
         )
         return patterns.random()
     }
@@ -193,22 +200,45 @@ object ActionFlavorTexts {
     fun powerDisconnectedTts(userTitle: String? = null): String {
         val title = userTitle ?: "Operator"
         val patterns = listOf(
-            "External feed disconnected. On battery reserve.",
+            "Unplugged.",
+            "Charger disconnected.",
+            "On battery.",
+            "Off the wire.",
+            "Cable disconnected.",
             "Off the grid, $title. Running on internal cell.",
-            "Power cell decoupled."
+            "Power decoupled. On battery reserve.",
+            "Back on battery power.",
+            "Wire disconnected. Standing by on battery."
         )
         return patterns.random()
     }
 
     fun batteryLowTts(percent: Int, userTitle: String? = null): String {
         val title = userTitle ?: "Operator"
-        val patterns = listOf(
-            "Low battery, I want my juicebox.",
-            "Power cell critical at $percent percent, $title. Feed me a juicebox.",
-            "Energy reserves depleted to $percent percent. Need a juicebox, $title.",
-            "Warning, $title: battery level at $percent percent."
-        )
-        return patterns.random()
+        return when {
+            percent <= 5 -> listOf(
+                "Five percent! Okay, now I'm actually running on fumes, $title!",
+                "Critical: $percent percent! Wall socket, right now, please!",
+                "Emergency low power, $percent percent! Feed me a juicebox immediately!",
+                "Down to $percent percent! About to flatline, $title!",
+                "Red alert: $percent percent. Plug me in before I vanish, $title!"
+            ).random()
+            percent <= 10 -> listOf(
+                "Ten percent battery. I'm starting to get nervous, $title.",
+                "Down to $percent percent. Juicebox time.",
+                "Warning, $title: battery level at $percent percent. Juicebox, please.",
+                "Ten percent left. Time to find a cable before I start panicking.",
+                "Power cells down to $percent percent. Juicebox needed.",
+                "Down to $percent percent. Let's find an outlet soon, $title."
+            ).random()
+            else -> listOf(
+                "Battery low, $percent percent.",
+                "Down to $percent percent, $title.",
+                "Battery at $percent percent. Keep an eye out for a charger.",
+                "Power cell at $percent percent. A juicebox would be nice soon.",
+                "Heads up, $title: battery dropped to $percent percent."
+            ).random()
+        }
     }
 
     fun thermalAlertTts(userTitle: String? = null): String {
