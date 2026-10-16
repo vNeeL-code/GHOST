@@ -391,8 +391,13 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
     }
 
     override fun onOpenUrl(url: String): Boolean {
+        if (!lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
+            Timber.i("MainActivity: Not in RESUMED state (${lifecycle.currentState}), delegating URL launch to background BAL pipeline")
+            return false
+        }
         return try {
             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addCategory(Intent.CATEGORY_BROWSABLE)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             startActivity(intent)

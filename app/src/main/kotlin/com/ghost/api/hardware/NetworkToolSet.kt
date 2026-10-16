@@ -22,12 +22,10 @@ class NetworkToolSet(private val context: Context) : ToolSet {
     fun open_system_browser_bar(
         @ToolParam(description = "The exact search query or URL to navigate to") queryOrUrl: String
     ): Map<String, String> {
-        val targetUrl = if (android.util.Patterns.WEB_URL.matcher(queryOrUrl).matches()) {
-            if (queryOrUrl.startsWith("http://", ignoreCase = true) || queryOrUrl.startsWith("https://", ignoreCase = true)) {
-                queryOrUrl
-            } else {
-                "https://$queryOrUrl"
-            }
+        val targetUrl = if (queryOrUrl.startsWith("http://", ignoreCase = true) || queryOrUrl.startsWith("https://", ignoreCase = true)) {
+            queryOrUrl
+        } else if (android.util.Patterns.WEB_URL.matcher(queryOrUrl).matches()) {
+            "https://$queryOrUrl"
         } else {
             "https://www.google.com/search?q=${Uri.encode(queryOrUrl)}"
         }

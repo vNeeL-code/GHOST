@@ -125,6 +125,36 @@ class GemmaNotificationManager(private val context: Context) {
         notificationManager.notify(RESPONSE_NOTIF_ID, notification)
     }
 
+    /**
+     * Posts an interactive notification for opening a URL.
+     * Guaranteed fallback on restricted OEM ROMs (RedMagic, MIUI) that block background activity starts.
+     */
+    fun showUrlNotification(url: String, title: String = "Opening link in browser") {
+        val cleanDeviceName = com.ghost.api.logic.ContextManager.resolveDeviceCallSign(context)
+        val notifTitle = "✧ $cleanDeviceName: $title"
+        val browserIntent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)).apply {
+            addCategory(Intent.CATEGORY_BROWSABLE)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            (System.currentTimeMillis() % 10000).toInt(),
+            browserIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = NotificationCompat.Builder(context, STATUS_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_notify_chat)
+            .setContentTitle(notifTitle)
+            .setContentText(url)
+            .setStyle(NotificationCompat.BigTextStyle().bigText("Tap to open $url in external browser"))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .addAction(android.R.drawable.ic_menu_compass, "Open Browser ↗", pendingIntent)
+            .build()
+        notificationManager.notify(RESPONSE_NOTIF_ID, notification)
+    }
+
     fun pushStartupShortcut() {
         // No-op: shortcut registration not needed
     }

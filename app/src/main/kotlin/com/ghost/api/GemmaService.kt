@@ -232,7 +232,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                             overlayManager.toggle { query ->
                                 scope.launch {
                                     val sessionId = UUID.randomUUID().toString()
-                                    processQuery(query, sessionId)
+                                    processQuery(query, sessionId, fromUi = true, inputSource = com.ghost.api.logic.InputSource.OVERLAY)
                                 }
                             }
                         } catch (e: Exception) {
@@ -444,7 +444,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                                 overlayManager.toggle { query ->
                                     scope.launch {
                                         val sessionId = UUID.randomUUID().toString()
-                                        processQuery(query, sessionId)
+                                        processQuery(query, sessionId, fromUi = true, inputSource = com.ghost.api.logic.InputSource.OVERLAY)
                                     }
                                 }
                             }
@@ -750,7 +750,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                             overlayManager.toggle { query ->
                                 scope.launch {
                                     val sessionId = UUID.randomUUID().toString()
-                                    processQuery(query, sessionId)
+                                    processQuery(query, sessionId, fromUi = true, inputSource = com.ghost.api.logic.InputSource.OVERLAY)
                                 }
                             }
                         }
@@ -773,29 +773,105 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     }
 
     /**
-     * Dispatches URL to external system browser.
-     * Prefers dispatching via the active foreground Activity to bypass Android 14+ BAL restrictions.
+     * Dispatches URL to external system browser with multi-layer Android 14+ BAL (Background Activity Launch) bypass.
+     * Tier 1: Active foreground MainActivity if resumed.
+     * Tier 2: PendingIntent with MODE_BACKGROUND_ACTIVITY_START_ALLOWED (API 34/35 BAL bypass).
+     * Tier 3: Privileged GemmaAccessibilityService context.
+     * Tier 4: Direct Service startActivity with FLAG_ACTIVITY_NEW_TASK.
+     * Tier 5: Interactive heads-up notification with 1-tap browser intent action.
      */
     fun openUrl(url: String): Boolean {
-        // 1. Dispatch through active foreground Activity (guaranteed to bypass Android 14 BAL restrictions)
-        val uiHandled = uiCallback?.onOpenUrl(url) ?: false
+        val targetUrl = if (!url.startsWith("http://", ignoreCase = true) && !url.startsWith("https://", ignoreCase = true)) {
+            "https://$url"
+        } else {
+            url
+        }
+        val uri = try {
+            android.net.Uri.parse(targetUrl)
+        } catch (e: Exception) {
+            Timber.e(e, "GemmaService: Failed to parse URL $targetUrl")
+            return false
+        }
+
+        // Tier 1: Dispatch through active foreground Activity if resumed
+        val uiHandled = uiCallback?.onOpenUrl(targetUrl) ?: false
         if (uiHandled) {
-            Timber.i("GemmaService: URL opened via foreground Activity: $url")
+            Timber.i("GemmaService: URL opened via foreground Activity: $targetUrl")
             return true
         }
 
-        // 2. Fallback to Service context
-        return try {
-            val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)).apply {
+        // Tier 2: PendingIntent with Android 14+ Background Activity Launch (BAL) bypass
+        var pendingIntentSucceeded = false
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                addCategory(Intent.CATEGORY_BROWSABLE)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            val pendingIntent = android.app.PendingIntent.getActivity(
+                this,
+                (System.currentTimeMillis() % 10000).toInt(),
+                intent,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+            val options = android.app.ActivityOptions.makeBasic()
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                options.setPendingIntentBackgroundActivityStartMode(
+                    android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+                )
+            }
+            if (android.os.Build.VERSION.SDK_INT >= 35) {
+                try {
+                    val m = android.app.ActivityOptions::class.java.getMethod(
+                        "setPendingIntentCreatorBackgroundActivityStartMode",
+                        Int::class.javaPrimitiveType
+                    )
+                    m.invoke(options, android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+                } catch (_: Throwable) {}
+            }
+            pendingIntent.send(this, 0, null, null, null, null, options.toBundle())
+            Timber.i("GemmaService: URL dispatched via PendingIntent BAL bypass: $targetUrl")
+            pendingIntentSucceeded = true
+        } catch (e: Exception) {
+            Timber.w(e, "GemmaService: PendingIntent BAL bypass failed for $targetUrl")
+        }
+
+        // Tier 3: Privileged Accessibility Service context
+        var accessibilitySucceeded = false
+        val accessService = GemmaAccessibilityService.instance
+        if (accessService != null) {
+            try {
+                val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                    addCategory(Intent.CATEGORY_BROWSABLE)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                accessService.startActivity(intent)
+                Timber.i("GemmaService: URL launched via AccessibilityService: $targetUrl")
+                accessibilitySucceeded = true
+            } catch (e: Exception) {
+                Timber.w(e, "GemmaService: AccessibilityService launch failed for $targetUrl")
+            }
+        }
+
+        // Tier 4: Direct Service context launch
+        var serviceSucceeded = false
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                addCategory(Intent.CATEGORY_BROWSABLE)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             startActivity(intent)
-            Timber.i("GemmaService: URL launched via Service context: $url")
-            true
+            Timber.i("GemmaService: URL launched via Service context: $targetUrl")
+            serviceSucceeded = true
         } catch (e: Exception) {
-            Timber.e(e, "GemmaService: Failed to open URL $url")
-            false
+            Timber.w(e, "GemmaService: Direct startActivity failed for $targetUrl")
         }
+
+        // Tier 5: Always post interactive heads-up notification so user has guaranteed instant 1-tap fallback
+        if (::responseNotificationManager.isInitialized) {
+            responseNotificationManager.showUrlNotification(targetUrl)
+        }
+
+        return pendingIntentSucceeded || accessibilitySucceeded || serviceSucceeded
     }
 
     private fun getThermalSafetyState(thermalState: HardwarePropertiesManager.ThermalState): ThermalSafetyState {
