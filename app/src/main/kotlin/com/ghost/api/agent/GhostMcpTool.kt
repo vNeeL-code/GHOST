@@ -186,11 +186,42 @@ class GhostMcpTool(
                     htmlFile.writeText(
                         """
                         <!DOCTYPE html>
-                        <html><head><meta name="viewport" content="width=device-width,initial-scale=1.0">
+                        <html><head><meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
                         <style>
-                          body{margin:0;background:#10131C;color:#E2E8F0;font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;padding:12px;box-sizing:border-box;}
-                          img{max-width:82%;max-height:76%;border-radius:12px;background:#fff;padding:10px;box-shadow:0 6px 24px rgba(0,0,0,0.5);}
-                          .lbl{margin-top:10px;font-size:12px;color:#94A3B8;word-break:break-all;text-align:center;max-width:90%;}
+                          html, body {
+                            margin: 0;
+                            padding: 0;
+                            width: 100%;
+                            height: 100%;
+                            background: #10131C;
+                            color: #E2E8F0;
+                            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                            display: flex;
+                            flex-direction: column;
+                            align-items: center;
+                            justify-content: center;
+                            box-sizing: border-box;
+                            overflow: hidden;
+                          }
+                          img {
+                            width: 170px;
+                            height: 170px;
+                            border-radius: 12px;
+                            background: #ffffff;
+                            padding: 8px;
+                            box-sizing: border-box;
+                            box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+                            image-rendering: pixelated;
+                          }
+                          .lbl {
+                            margin-top: 8px;
+                            font-size: 11px;
+                            color: #94A3B8;
+                            word-break: break-all;
+                            text-align: center;
+                            max-width: 90%;
+                            line-height: 1.2;
+                          }
                         </style>
                         </head><body>
                           <img src="$imgSrc" alt="QR Code"/>
@@ -198,7 +229,7 @@ class GhostMcpTool(
                         </body></html>
                         """.trimIndent()
                     )
-                    lastWebviewUrl = "file://${htmlFile.absolutePath}"
+                    lastWebviewUrl = imgSrc
                     lastWebviewAspectRatio = 1.0f
                     val out = "Generated QR code for $targetText"
                     onToolExecuted?.invoke("run_js", "qr-code", out)

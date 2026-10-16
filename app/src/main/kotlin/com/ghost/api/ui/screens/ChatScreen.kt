@@ -763,9 +763,22 @@ fun ChatMessageRow(
                 }
             }
 
-            // Interactive Skill WebView Card (AI Edge Gallery JS/WebView & QR Code Skills)
+            // Interactive Skill Card (AI Edge Gallery JS/WebView & Native QR/Image Skills)
             if (!message.webviewUrl.isNullOrBlank()) {
                 val targetUrl = message.webviewUrl
+                val qrBitmap = remember(targetUrl) {
+                    if (targetUrl.startsWith("data:image/")) {
+                        try {
+                            val base64Data = targetUrl.substringAfter(",")
+                            val bytes = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT)
+                            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                        } catch (e: Exception) {
+                            Timber.e(e, "Failed to decode inline data:image bitmap")
+                            null
+                        }
+                    } else null
+                }
+
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -773,30 +786,53 @@ fun ChatMessageRow(
                         .padding(top = 10.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .border(1.dp, Color(0x448BB4F6), RoundedCornerShape(12.dp))
-                        .background(Color(0xFF0F111A))
+                        .background(Color(0xFF0F111A)),
+                    contentAlignment = Alignment.Center
                 ) {
-                    AndroidView(
-                        factory = { ctx ->
-                            android.webkit.WebView(ctx).apply {
-                                settings.javaScriptEnabled = true
-                                settings.domStorageEnabled = true
-                                settings.allowFileAccess = true
-                                @Suppress("DEPRECATION")
-                                settings.allowFileAccessFromFileURLs = true
-                                @Suppress("DEPRECATION")
-                                settings.allowUniversalAccessFromFileURLs = true
-                                setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                                webViewClient = android.webkit.WebViewClient()
-                                loadUrl(targetUrl)
-                            }
-                        },
-                        update = { webView ->
-                            if (webView.url != targetUrl) {
-                                webView.loadUrl(targetUrl)
-                            }
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
+                    if (qrBitmap != null) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(12.dp)
+                        ) {
+                            Image(
+                                bitmap = qrBitmap.asImageBitmap(),
+                                contentDescription = "Generated QR Code",
+                                modifier = Modifier
+                                    .size(190.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color.White)
+                                    .padding(8.dp),
+                                filterQuality = androidx.compose.ui.graphics.FilterQuality.None
+                            )
+                        }
+                    } else {
+                        AndroidView(
+                            factory = { ctx ->
+                                android.webkit.WebView(ctx).apply {
+                                    settings.javaScriptEnabled = true
+                                    settings.domStorageEnabled = true
+                                    settings.allowFileAccess = true
+                                    @Suppress("DEPRECATION")
+                                    settings.allowFileAccessFromFileURLs = true
+                                    @Suppress("DEPRECATION")
+                                    settings.allowUniversalAccessFromFileURLs = true
+                                    setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                                    webViewClient = android.webkit.WebViewClient()
+                                    loadUrl(targetUrl)
+                                }
+                            },
+                            update = { webView ->
+                                val currentUrl = webView.url
+                                if (currentUrl != null && currentUrl != targetUrl) {
+                                    webView.loadUrl(targetUrl)
+                                }
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
                 }
             }
         }
