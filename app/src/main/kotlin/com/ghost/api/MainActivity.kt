@@ -390,6 +390,20 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
         }
     }
 
+    override fun onOpenUrl(url: String): Boolean {
+        return try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+            Timber.i("MainActivity: Launched browser for URL: $url")
+            true
+        } catch (e: Exception) {
+            Timber.e(e, "MainActivity: Failed to open URL $url")
+            false
+        }
+    }
+
     private fun sendStagedMessage(text: String) {
         val bitmaps = chatViewModel.attachedImages.value
         val imagePaths = chatViewModel.attachedImagePaths.value

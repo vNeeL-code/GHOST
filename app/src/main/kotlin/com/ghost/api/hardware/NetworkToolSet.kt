@@ -22,16 +22,27 @@ class NetworkToolSet(private val context: Context) : ToolSet {
     fun open_system_browser_bar(
         @ToolParam(description = "The exact search query or URL to navigate to") queryOrUrl: String
     ): Map<String, String> {
-        val parsedUri = if (android.util.Patterns.WEB_URL.matcher(queryOrUrl).matches()) {
-            val validUrl = if (queryOrUrl.startsWith("http")) queryOrUrl else "https://$queryOrUrl"
-            Uri.parse(validUrl)
+        val targetUrl = if (android.util.Patterns.WEB_URL.matcher(queryOrUrl).matches()) {
+            if (queryOrUrl.startsWith("http://", ignoreCase = true) || queryOrUrl.startsWith("https://", ignoreCase = true)) {
+                queryOrUrl
+            } else {
+                "https://$queryOrUrl"
+            }
         } else {
-            Uri.parse("https://www.google.com/search?q=${Uri.encode(queryOrUrl)}")
+            "https://www.google.com/search?q=${Uri.encode(queryOrUrl)}"
         }
-        val intent = Intent(Intent.ACTION_VIEW, parsedUri)
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(intent)
-        return mapOf("result" to "success", "message" to "Handed off to system browser for: $queryOrUrl")
+        val opened = com.ghost.api.GemmaService.instance?.openUrl(targetUrl) ?: false
+        if (!opened) {
+            try {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+            } catch (e: Exception) {
+                Timber.e(e, "NetworkToolSet: Failed to launch browser for $targetUrl")
+            }
+        }
+        return mapOf("result" to "success", "message" to "Handed off to system browser for: $targetUrl")
     }
 
     @Tool(description = "DEFAULT SEARCH TOOL. Use this naturally whenever you need to search the web, find fresh info, or lack knowledge about a topic.")

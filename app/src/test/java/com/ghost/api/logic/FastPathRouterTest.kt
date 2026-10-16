@@ -24,6 +24,11 @@ class FastPathRouterTest {
         val r3 = FastPathRouter.route("github.com/vNeeL-code/GHOST", InputSource.USER_TYPED)
         assertTrue(r3 is RoutingResult.HandledFastPath)
         assertEquals("https://github.com/vNeeL-code/GHOST", (r3 as RoutingResult.HandledFastPath).url)
+
+        // Bare www domain
+        val r4 = FastPathRouter.route("www.patreon.com", InputSource.USER_TYPED)
+        assertTrue(r4 is RoutingResult.HandledFastPath)
+        assertEquals("https://www.patreon.com", (r4 as RoutingResult.HandledFastPath).url)
     }
 
     @Test
@@ -39,7 +44,10 @@ class FastPathRouterTest {
         assertEquals("https://github.com/vNeeL-code/GHOST", ft.extractedEntities["url"])
         assertTrue(ft.toolHints.contains("web_fetch"))
 
-        // Hint must be appended to the dynamic user message turn (preserving static system KV cache)
+        // cleanUserMessage must remain strictly unpolluted
+        assertEquals(query, ft.cleanUserMessage)
+
+        // Hint must be appended to the dynamic model prompt runway (preserving user bubble & static system KV cache)
         assertTrue(ft.augmentedUserMessage.startsWith(query))
         assertTrue(ft.augmentedUserMessage.contains("[Router Context: Detected URL: https://github.com/vNeeL-code/GHOST"))
     }

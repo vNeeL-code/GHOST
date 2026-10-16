@@ -31,10 +31,11 @@ sealed class RoutingResult {
     /**
      * Fall-through to LLM (Gemma).
      * If entities or hints were extracted during partial match, [augmentedUserMessage]
-     * appends them strictly to the USER MESSAGE TURN (preserving the static system KV cache!).
+     * passes them strictly to the inference prompt runway without polluting user chat history.
      */
     data class FallThroughToLlm(
         val augmentedUserMessage: String,
+        val cleanUserMessage: String = augmentedUserMessage,
         val extractedEntities: Map<String, String> = emptyMap(),
         val toolHints: List<String> = emptyList()
     ) : RoutingResult()
@@ -52,6 +53,22 @@ object FastPathRouter {
         "^((https?://)?[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}(:\\d+)?(/\\S*)?)$",
         RegexOption.IGNORE_CASE
     )
+
+    fun isBareUrl(trimmed: String): Boolean {
+        if (trimmed.isEmpty() || trimmed.any { it.isWhitespace() }) return false
+        val lower = trimmed.lowercase()
+        if (lower.startsWith("http://") || lower.startsWith("https://") || lower.startsWith("www.")) {
+            return true
+        }
+        if (BARE_URL_REGEX.matches(trimmed)) {
+            return true
+        }
+        return try {
+            android.util.Patterns.WEB_URL?.matcher(trimmed)?.matches() ?: false
+        } catch (_: Throwable) {
+            false
+        }
+    }
 
     private val INLINE_URL_REGEX = Regex(
         "(https?://[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}(:\\d+)?(/\\S*)?)",
@@ -95,7 +112,7 @@ object FastPathRouter {
         }
 
         // 3. Mode A (Anchored): Bare URL execution
-        if (isTrustedUserSource && BARE_URL_REGEX.matches(trimmed)) {
+        if (isTrustedUserSource && isBareUrl(trimmed)) {
             val normalizedUrl = if (!trimmed.startsWith("http://", ignoreCase = true) &&
                 !trimmed.startsWith("https://", ignoreCase = true)
             ) {
@@ -114,13 +131,16 @@ object FastPathRouter {
                     url = normalizedUrl,
                     spokenTts = ActionFlavorTexts.browserLaunchTts("Browser"),
                     execute = { context ->
-                        try {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(normalizedUrl)).apply {
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        val opened = (context as? com.ghost.api.GemmaService)?.openUrl(normalizedUrl) ?: false
+                        if (!opened) {
+                            try {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(normalizedUrl)).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                Timber.e(e, "FastPath: Failed to launch browser for $normalizedUrl")
                             }
-                            context.startActivity(intent)
-                        } catch (e: Exception) {
-                            Timber.e(e, "FastPath: Failed to launch browser for $normalizedUrl")
                         }
                     }
                 )
@@ -202,6 +222,7 @@ object FastPathRouter {
                 Timber.i("⚡ [FastPath] Partial URL match detected ($foundUrl). Injected into user turn to preserve KV cache.")
                 return RoutingResult.FallThroughToLlm(
                     augmentedUserMessage = if (isSkillOrQr) trimmed else augmented,
+                    cleanUserMessage = trimmed,
                     extractedEntities = mapOf("url" to foundUrl),
                     toolHints = hints
                 )
@@ -209,15 +230,29 @@ object FastPathRouter {
         }
 
         // Default fall-through: unaugmented input
-        return RoutingResult.FallThroughToLlm(augmentedUserMessage = input)
+        return RoutingResult.FallThroughToLlm(augmentedUserMessage = input, cleanUserMessage = input)
     }
 
     fun extractScheme(urlStr: String): String? {
+        val lower = urlStr.lowercase()
+        if (lower.startsWith("http://")) return "http"
+        if (lower.startsWith("https://")) return "https"
+        val colonIdx = lower.indexOf(':')
+        if (colonIdx > 0) {
+            val potentialScheme = lower.substring(0, colonIdx)
+            if (potentialScheme.all { it.isLetterOrDigit() || it == '+' || it == '-' || it == '.' }) {
+                return potentialScheme
+            }
+        }
         return try {
-            val uri = URI(urlStr)
-            uri.scheme?.lowercase()
-        } catch (e: Exception) {
-            null
+            val uri = Uri.parse(urlStr)
+            uri?.scheme?.lowercase()
+        } catch (_: Throwable) {
+            try {
+                URI(urlStr).scheme?.lowercase()
+            } catch (_: Throwable) {
+                null
+            }
         }
     }
 }

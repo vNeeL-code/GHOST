@@ -81,7 +81,9 @@ object IntentBagger {
         "discord" to listOf("Discord"),
         "reddit" to listOf("Reddit"),
         "twitter" to listOf("X", "Twitter"),
-        "x" to listOf("X", "Twitter")
+        "x" to listOf("X", "Twitter"),
+        "patreon" to listOf("Patreon"),
+        "github" to listOf("GitHub")
     )
 
     fun bagIntents(context: Context, rawMessage: String): List<BaggedIntent> {

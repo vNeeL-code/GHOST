@@ -88,6 +88,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         fun onThinkingStateChanged(isThinking: Boolean)
         fun onThoughtUpdated(thought: String)
         fun onDownloadProgress(progressText: String?) {}
+        fun onOpenUrl(url: String): Boolean = false
     }
     
     internal var uiCallback: UiCallback? = null
@@ -771,6 +772,32 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         }
     }
 
+    /**
+     * Dispatches URL to external system browser.
+     * Prefers dispatching via the active foreground Activity to bypass Android 14+ BAL restrictions.
+     */
+    fun openUrl(url: String): Boolean {
+        // 1. Dispatch through active foreground Activity (guaranteed to bypass Android 14 BAL restrictions)
+        val uiHandled = uiCallback?.onOpenUrl(url) ?: false
+        if (uiHandled) {
+            Timber.i("GemmaService: URL opened via foreground Activity: $url")
+            return true
+        }
+
+        // 2. Fallback to Service context
+        return try {
+            val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+            Timber.i("GemmaService: URL launched via Service context: $url")
+            true
+        } catch (e: Exception) {
+            Timber.e(e, "GemmaService: Failed to open URL $url")
+            false
+        }
+    }
+
     private fun getThermalSafetyState(thermalState: HardwarePropertiesManager.ThermalState): ThermalSafetyState {
         return when (thermalState) {
             HardwarePropertiesManager.ThermalState.CRITICAL -> ThermalSafetyState.CRITICAL
@@ -1437,6 +1464,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         // 1. Fast-Path Router (Zero-Token Bypass & Entity Extraction)
         // Does not run on autonomous dream cycles or internal background tasks
         var effectivePrompt = userPrompt
+        var promptHint: String? = null
         if (!isDream) {
             val isFastPathEnabled = prefs.getBoolean(Constants.PREF_FAST_PATH_ENABLED, true)
             val routingResult = com.ghost.api.logic.FastPathRouter.route(
@@ -1472,7 +1500,10 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                     return routingResult.feedback
                 }
                 is com.ghost.api.logic.RoutingResult.FallThroughToLlm -> {
-                    effectivePrompt = routingResult.augmentedUserMessage
+                    effectivePrompt = routingResult.cleanUserMessage
+                    if (routingResult.augmentedUserMessage != routingResult.cleanUserMessage) {
+                        promptHint = routingResult.augmentedUserMessage.substringAfter(routingResult.cleanUserMessage).trim()
+                    }
                 }
             }
         }
@@ -1514,7 +1545,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                     val response = ghostAgent.processUserMessage(
                         message = effectivePrompt,
                         sessionId = sessionId ?: java.util.UUID.randomUUID().toString(),
-                        isDream = isDream
+                        isDream = isDream,
+                        promptHint = promptHint
                     )
                     
                     // Watchdog Fix (Audit 3.0): Reset crash counter on successful inference

@@ -392,7 +392,8 @@ class GhostAgent(
     suspend fun processUserMessage(
         message: String,
         sessionId: String = UUID.randomUUID().toString(),
-        isDream: Boolean = false
+        isDream: Boolean = false,
+        promptHint: String? = null
     ): String? = inferenceMutex.withLock {
         if (!isReady) return "System is still initializing. Please wait."
 
@@ -524,6 +525,10 @@ class GhostAgent(
             }
             if (intentHints.isNotBlank()) {
                 append(intentHints)
+                append("\n\n")
+            }
+            if (!promptHint.isNullOrBlank()) {
+                append(promptHint)
                 append("\n\n")
             }
             append(historyContent)
