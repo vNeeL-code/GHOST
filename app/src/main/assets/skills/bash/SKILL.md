@@ -7,7 +7,7 @@ description: Execute a shell command (via Termux if installed).
 
 ## Instructions
 
-Call the un_intent tool with the following exact parameters:
+Call the `run_intent` tool with the following exact parameters:
 
 - intent: bash
 - parameters: A JSON string with the following fields:

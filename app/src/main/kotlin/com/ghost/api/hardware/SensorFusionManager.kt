@@ -181,7 +181,22 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
     @Volatile private var cachedAccelX: Float? = null
     @Volatile private var cachedAccelY: Float? = null
     @Volatile private var cachedAccelZ: Float? = null
+    @Volatile private var prevAccelMagnitude: Float = 9.81f
     @Volatile private var lastSignificantMotion: Long = 0
+    @Volatile private var lastImpactBarkTime: Long = 0L
+    @Volatile private var lastFallenBarkTime: Long = 0L
+    @Volatile private var lastVertigoBarkTime: Long = 0L
+    @Volatile private var lastShakeBurstSampleTime: Long = 0L
+    @Volatile private var continuousShakeStartTime: Long = 0L
+    @Volatile private var continuousShakeHits: Int = 0
+
+    // Free-fall ("falling") -> Impact ("fallen") & Dual-Spike state machine
+    @Volatile private var freeFallStartMs: Long = 0L
+    @Volatile private var lastConfirmedFreeFallMs: Long = 0L
+    @Volatile private var isCurrentlyFalling: Boolean = false
+    @Volatile private var lastDropLandedFlat: Boolean = false
+    @Volatile private var primarySpikeTimeMs: Long = 0L
+    @Volatile private var sawReboundDipAfterSpike: Boolean = false
 
     @Volatile private var cachedBtConnected: Boolean = false
     @Volatile private var cachedBtDeviceName: String? = null
@@ -200,10 +215,45 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
         private var lastReportedBatteryLevel = -1
         private var lastLowBatteryCueTime = 0L
         private var lastWarnedBatteryTier = 100
+        private var lastScreenOffTime = 0L
+        private var lastUnlockBarkTime = 0L
+        private var lastLockBarkTime = 0L
+
+        private fun handleOperatorPresent(ctx: Context?) {
+            val now = System.currentTimeMillis()
+            // Speak unlock/presence bark if screen was asleep >= 60s and 3m cooldown elapsed
+            if (lastScreenOffTime > 0L && (now - lastScreenOffTime > 60_000L) && (now - lastUnlockBarkTime > 180_000L)) {
+                lastUnlockBarkTime = now
+                lastScreenOffTime = 0L
+                if (audioManager?.isMusicActive != true) {
+                    val userTitle = ctx?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
+                    val cue = com.ghost.api.logic.ActionFlavorTexts.deviceUnlockedTts(userTitle)
+                    com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, showInChat = false)
+                }
+            }
+        }
+
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
-                Intent.ACTION_SCREEN_ON -> {}
-                Intent.ACTION_SCREEN_OFF -> {}
+                Intent.ACTION_SCREEN_ON -> {
+                    val km = context?.getSystemService(Context.KEYGUARD_SERVICE) as? android.app.KeyguardManager
+                    if (km?.isKeyguardLocked != true) {
+                        handleOperatorPresent(context)
+                    }
+                }
+                Intent.ACTION_USER_PRESENT -> {
+                    handleOperatorPresent(context)
+                }
+                Intent.ACTION_SCREEN_OFF -> {
+                    val now = System.currentTimeMillis()
+                    lastScreenOffTime = now
+                    if (now - lastLockBarkTime > 180_000L && audioManager?.isMusicActive != true) {
+                        lastLockBarkTime = now
+                        val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
+                        val cue = com.ghost.api.logic.ActionFlavorTexts.deviceLockedTts(userTitle)
+                        com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, showInChat = false)
+                    }
+                }
                 Intent.ACTION_POWER_CONNECTED -> {
                     lastWarnedBatteryTier = 100
                     val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
@@ -285,6 +335,7 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_USER_PRESENT)
             addAction(Intent.ACTION_BATTERY_CHANGED)
             addAction(Intent.ACTION_POWER_CONNECTED)
             addAction(Intent.ACTION_POWER_DISCONNECTED)
@@ -365,17 +416,117 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
                     Sensor.TYPE_RELATIVE_HUMIDITY -> cachedHumidity = event.values[0]
                     Sensor.TYPE_LIGHT -> cachedLight = event.values[0]
                     Sensor.TYPE_ACCELEROMETER -> {
-                        cachedAccelX = event.values[0]
-                        cachedAccelY = event.values[1]
-                        cachedAccelZ = event.values[2]
-                        // Detect significant motion (beyond gravity)
-                        val magnitude = kotlin.math.sqrt(
-                            event.values[0] * event.values[0] +
-                            event.values[1] * event.values[1] +
-                            event.values[2] * event.values[2]
-                        )
-                        if (kotlin.math.abs(magnitude - 9.81f) > 2f) {
-                            lastSignificantMotion = System.currentTimeMillis()
+                        val ax = event.values[0]
+                        val ay = event.values[1]
+                        val az = event.values[2]
+                        cachedAccelX = ax
+                        cachedAccelY = ay
+                        cachedAccelZ = az
+
+                        val magnitude = kotlin.math.sqrt(ax * ax + ay * ay + az * az)
+                        val deltaFromGravity = kotlin.math.abs(magnitude - 9.81f)
+                        val jerk = kotlin.math.abs(magnitude - prevAccelMagnitude)
+                        prevAccelMagnitude = magnitude
+                        val now = System.currentTimeMillis()
+
+                        if (deltaFromGravity > 2f) {
+                            lastSignificantMotion = now
+                        }
+
+                        // 1. Free-Fall ("Falling") Phase Detection:
+                        // Near-weightlessness (< 2.8 m/s²) sustained for >= 90ms indicates true free-fall.
+                        if (magnitude < 2.8f) {
+                            if (freeFallStartMs == 0L) {
+                                freeFallStartMs = now
+                            } else if (now - freeFallStartMs >= 90L) {
+                                isCurrentlyFalling = true
+                                lastConfirmedFreeFallMs = now
+                            }
+                        } else {
+                            if (freeFallStartMs > 0L && now - freeFallStartMs >= 75L) {
+                                lastConfirmedFreeFallMs = now
+                            }
+                            freeFallStartMs = 0L
+                            if (now - lastConfirmedFreeFallMs > 700L) {
+                                isCurrentlyFalling = false
+                            }
+                        }
+
+                        // 2. Continuous Shaking / Vertigo Reflex ("I think I'm going to be sick...")
+                        if (deltaFromGravity > 12.5f) {
+                            if (now - lastShakeBurstSampleTime > 1200L) {
+                                continuousShakeStartTime = now
+                                continuousShakeHits = 1
+                                lastShakeBurstSampleTime = now
+                            } else if (now - lastShakeBurstSampleTime >= 140L) {
+                                continuousShakeHits++
+                                lastShakeBurstSampleTime = now
+                                if (continuousShakeHits >= 12 &&
+                                    (now - continuousShakeStartTime) >= 2000L &&
+                                    (now - lastVertigoBarkTime) > 25_000L
+                                ) {
+                                    lastVertigoBarkTime = now
+                                    continuousShakeHits = 0
+                                    primarySpikeTimeMs = 0L
+                                    sawReboundDipAfterSpike = false
+                                    val userTitle = com.ghost.api.Constants.getUserTitle(context)
+                                    val cue = com.ghost.api.logic.ActionFlavorTexts.continuousShakeTts(userTitle)
+                                    com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, showInChat = false)
+                                }
+                            }
+                        }
+
+                        // 3A. Free-Fall -> Impact Transition ("Fallen" vs "Falling"):
+                        // A confirmed free-fall phase followed within 650ms by a sharp landing spike (> 28 m/s²).
+                        val timeSinceFreeFall = now - lastConfirmedFreeFallMs
+                        if (lastConfirmedFreeFallMs > 0L &&
+                            timeSinceFreeFall in 1..650L &&
+                            magnitude > 28.0f &&
+                            jerk > 16.0f &&
+                            (now - lastFallenBarkTime) > 15_000L
+                        ) {
+                            lastFallenBarkTime = now
+                            lastImpactBarkTime = now
+                            lastConfirmedFreeFallMs = 0L
+                            isCurrentlyFalling = false
+                            primarySpikeTimeMs = 0L
+                            sawReboundDipAfterSpike = false
+                            val landedFlat = kotlin.math.abs(az) > 7.5f
+                            lastDropLandedFlat = landedFlat
+                            val userTitle = com.ghost.api.Constants.getUserTitle(context)
+                            val cue = com.ghost.api.logic.ActionFlavorTexts.fallenImpactTts(userTitle, landedFlat)
+                            com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, showInChat = false)
+                        }
+                        // 3B. Dual-Spike Collision Reflex ("Ow!" without free-fall):
+                        // Prevents single-spike false positives when setting phone down or tapping.
+                        // Requires Spike 1 (> 39 m/s² & jerk > 24 m/s²) -> Rebound Dip (< 17 m/s²) -> Spike 2 (> 29 m/s² & jerk > 15 m/s²) within 380ms.
+                        else if ((now - lastImpactBarkTime) > 15_000L &&
+                                 (now - lastFallenBarkTime) > 15_000L &&
+                                 (now - lastVertigoBarkTime) > 10_000L
+                        ) {
+                            if (primarySpikeTimeMs == 0L || (now - primarySpikeTimeMs) > 400L) {
+                                // Look for Primary Spike 1
+                                if (magnitude > 39.0f && jerk > 24.0f) {
+                                    primarySpikeTimeMs = now
+                                    sawReboundDipAfterSpike = false
+                                }
+                            } else {
+                                val elapsedSinceSpike1 = now - primarySpikeTimeMs
+                                if (!sawReboundDipAfterSpike) {
+                                    // Must pass through a rebound trough (< 17.5 m/s²) after Spike 1
+                                    if (magnitude < 17.5f && elapsedSinceSpike1 >= 20L) {
+                                        sawReboundDipAfterSpike = true
+                                    }
+                                } else if (elapsedSinceSpike1 in 40L..380L && magnitude > 29.0f && jerk > 15.0f) {
+                                    // Confirmed Secondary Spike 2 after rebound dip!
+                                    lastImpactBarkTime = now
+                                    primarySpikeTimeMs = 0L
+                                    sawReboundDipAfterSpike = false
+                                    val userTitle = com.ghost.api.Constants.getUserTitle(context)
+                                    val cue = com.ghost.api.logic.ActionFlavorTexts.impactSpikeTts(userTitle)
+                                    com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, showInChat = false)
+                                }
+                            }
                         }
                     }
                 }
@@ -409,8 +560,8 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
             Timber.d("Registered light sensor")
         }
         sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let {
-            sm.registerListener(listener, it, SensorManager.SENSOR_DELAY_NORMAL, sensorHandler)
-            Timber.d("Registered accelerometer")
+            sm.registerListener(listener, it, SensorManager.SENSOR_DELAY_UI, sensorHandler)
+            Timber.d("Registered accelerometer (SENSOR_DELAY_UI for free-fall & dual-spike resolution)")
         }
     }
 
@@ -1035,7 +1186,21 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
 
         val motionParts = mutableListOf<String>()
         ctx.motion.orientation?.let { motionParts.add("📐 $it") }
-        if (ctx.motion.isMoving) motionParts.add("🏃 Moving")
+        if (isCurrentlyFalling) {
+            motionParts.add("🪂 FALLING (Free-fall weightlessness)")
+        } else if (ctx.motion.isMoving) {
+            motionParts.add("🏃 Moving")
+        }
+        val nowMs = System.currentTimeMillis()
+        if (lastFallenBarkTime > 0L && nowMs - lastFallenBarkTime < 60_000L) {
+            val postureNow = if (ctx.motion.orientation == "flat") "still lying flat after fall" else "picked back up (${ctx.motion.orientation ?: "held"})"
+            motionParts.add("🪂💥 FALLEN / DROPPED (${(nowMs - lastFallenBarkTime) / 1000}s ago · $postureNow)")
+        } else if (lastImpactBarkTime > 0L && nowMs - lastImpactBarkTime < 60_000L) {
+            motionParts.add("💥 Dual-Spike Chassis Impact (${(nowMs - lastImpactBarkTime) / 1000}s ago)")
+        }
+        if (lastVertigoBarkTime > 0L && nowMs - lastVertigoBarkTime < 60_000L) {
+            motionParts.add("🌀 Shaken/Vertigo (${(nowMs - lastVertigoBarkTime) / 1000}s ago)")
+        }
 
         if (motionParts.isNotEmpty()) {
             sb.append(motionParts.joinToString(" | ") + "\n")

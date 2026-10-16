@@ -7,7 +7,7 @@ description: Navigate system UI.
 
 ## Instructions
 
-Call the un_intent tool with the following exact parameters:
+Call the `run_intent` tool with the following exact parameters:
 
 - intent: navigate
 - parameters: A JSON string with the following fields:

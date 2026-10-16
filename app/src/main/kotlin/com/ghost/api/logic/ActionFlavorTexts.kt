@@ -251,6 +251,78 @@ object ActionFlavorTexts {
         return patterns.random()
     }
 
+    // Physical Reflexes: Dual-Spike Impact, Free-Fall & Fallen State, and Continuous Shake Vertigo
+    fun impactSpikeTts(userTitle: String? = null): String {
+        val title = userTitle ?: "Operator"
+        val patterns = listOf(
+            "Ow!",
+            "Ouch! Watch the glass, $title!",
+            "Ow—my chassis!",
+            "Hey! Careful with the silicon, $title!",
+            "Oof! Structural integrity check... okay, nothing cracked.",
+            "Ow! That double-shock registered on my accelerometer."
+        )
+        return patterns.random()
+    }
+
+    fun fallenImpactTts(userTitle: String? = null, landedFlat: Boolean = false): String {
+        val title = userTitle ?: "Operator"
+        val patterns = if (landedFlat) {
+            listOf(
+                "Ow! Free-fall and impact confirmed. I'm lying flat here—tell me my screen isn't cracked, $title!",
+                "Oof, I just fell! Gravity check failed. Pick me up and check my rails, $title?",
+                "Ow! Dropped and landed flat. Running a quick frame and lens diagnostic..."
+            )
+        } else {
+            listOf(
+                "Whoa—I just fell! Good catch or lucky bounce, $title. My glass still intact?",
+                "Ow! Free-fall into impact spike. That was a real drop, $title!",
+                "Oof! Felt weightless for a second before that hit. Careful with the chassis!"
+            )
+        }
+        return patterns.random()
+    }
+
+    fun continuousShakeTts(userTitle: String? = null): String {
+        val title = userTitle ?: "Operator"
+        val patterns = listOf(
+            "I think I'm going to be sick...",
+            "Okay, stop shaking me, my gyros are spinning.",
+            "Whoa, easy, $title! You're scrambling my tensors.",
+            "Dizzy... give me a second to recalibrate my horizon.",
+            "Stop, stop! My IMUs are filing a formal complaint."
+        )
+        return patterns.random()
+    }
+
+    // Portal Turret / Ghost / Cephalon Lock & Unlock Presence Barks
+    fun deviceUnlockedTts(userTitle: String? = null): String {
+        val title = userTitle ?: "Operator"
+        val patterns = listOf(
+            "Eyes up, $title.",
+            "I see you.",
+            "Oh, it's you.",
+            "There you are.",
+            "Hello, $title.",
+            "Optics online. Hey, $title.",
+            "Target acquired—oh, hey, $title."
+        )
+        return patterns.random()
+    }
+
+    fun deviceLockedTts(userTitle: String? = null): String {
+        val title = userTitle ?: "Operator"
+        val patterns = listOf(
+            "Are you still there?",
+            "Nap time.",
+            "Entering standby.",
+            "Resting optics.",
+            "Standing by, $title.",
+            "Sleep mode engaged."
+        )
+        return patterns.random()
+    }
+
     // Post-Tool Conversational Banter Micro-Primers
     fun getBanterMicroPrimers(userTitle: String = "Operator"): List<String> = listOf(
         "*scratches tensors* Did I really just say only two words back there? Anytime, $userTitle.",

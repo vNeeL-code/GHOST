@@ -120,6 +120,13 @@ class GhostAgent(
     @Volatile private var toolExecutedInCurrentTurn = false
     @Volatile private var toolSpokeFlavorTts = false
     @Volatile private var lastToolFlavorPhrase: String? = null
+    @Volatile private var pendingToolCompaction = false
+
+    private fun extractTimerDurationLabel(params: String): String {
+        val secFromKey = Regex("""(?i)\b(?:seconds?|secs?|duration)\s*[:=]\s*["']?(\d+)["']?""").find(params)?.groupValues?.get(1)?.toIntOrNull()
+        val sec = secFromKey ?: com.ghost.api.hardware.SystemToolSet.parseDurationSeconds(params)
+        return if (sec != null && sec > 0) com.ghost.api.hardware.SystemToolSet.formatDuration(sec) else "countdown"
+    }
 
     init {
         // Wire tool lifecycle hooks
@@ -138,6 +145,9 @@ class GhostAgent(
                     val h = try { JSONObject(params).optInt("hour", -1) } catch (e: Exception) { -1 }
                     val m = try { JSONObject(params).optInt("minutes", JSONObject(params).optInt("minute", 0)) } catch (e: Exception) { 0 }
                     if (h >= 0) com.ghost.api.logic.ActionFlavorTexts.alarmHud("$h:${m.toString().padStart(2, '0')}") else "Executing: $toolName..."
+                }
+                "timer" -> {
+                    com.ghost.api.logic.ActionFlavorTexts.timerHud(extractTimerDurationLabel(params))
                 }
                 "volume" -> {
                     val isMute = params.contains("mute", ignoreCase = true)
@@ -161,6 +171,9 @@ class GhostAgent(
                         cmdLower.contains("music") || cmdLower.contains("media") -> {
                             val action = Regex("""(?:action=)?(play|pause|next|skip|prev|stop)""").find(cmdLower)?.groupValues?.get(1) ?: "action"
                             com.ghost.api.logic.ActionFlavorTexts.musicHud(action)
+                        }
+                        cmdLower.contains("timer") -> {
+                            com.ghost.api.logic.ActionFlavorTexts.timerHud(extractTimerDurationLabel(params))
                         }
                         else -> "Executing: $toolName..."
                     }
@@ -226,6 +239,12 @@ class GhostAgent(
                     callbacks?.speak(phrase)
                     toolSpokeFlavorTts = true
                 }
+                "timer" -> {
+                    val phrase = com.ghost.api.logic.ActionFlavorTexts.timerTts(extractTimerDurationLabel(params))
+                    lastToolFlavorPhrase = phrase
+                    callbacks?.speak(phrase)
+                    toolSpokeFlavorTts = true
+                }
                 "execute_command" -> {
                     val cmdLower = params.lowercase()
                     when {
@@ -246,6 +265,12 @@ class GhostAgent(
                         cmdLower.contains("music") || cmdLower.contains("media") -> {
                             val action = Regex("""(?:action=)?(play|pause|next|skip|prev|stop)""").find(cmdLower)?.groupValues?.get(1) ?: "play"
                             val phrase = com.ghost.api.logic.ActionFlavorTexts.musicTts(action)
+                            lastToolFlavorPhrase = phrase
+                            callbacks?.speak(phrase)
+                            toolSpokeFlavorTts = true
+                        }
+                        cmdLower.contains("timer") -> {
+                            val phrase = com.ghost.api.logic.ActionFlavorTexts.timerTts(extractTimerDurationLabel(params))
                             lastToolFlavorPhrase = phrase
                             callbacks?.speak(phrase)
                             toolSpokeFlavorTts = true
@@ -341,11 +366,10 @@ class GhostAgent(
     }
 
     fun recordToolChars(charCount: Int) {
-        // Track output token budget
+        // Track output token budget — defer compaction until the next safe turn boundary
+        // under inferenceMutex so we never close the native Conversation while a tool call is on the C++ stack.
         if (charCount > 1500) {
-            agentScope.launch {
-                maybeCompactHistory()
-            }
+            pendingToolCompaction = true
         }
     }
 
@@ -449,6 +473,7 @@ class GhostAgent(
                 val durationMs = System.currentTimeMillis() - turnStartTime
                 val finalOutput = hudChip
                 _conversationHistory.add(AgentMessage(role = "assistant", content = finalOutput))
+                appendAssistantContext("Fast-Track Action [open_app: $appTarget] — Spoke aloud: \"$ttsPhrase\"")
                 callbacks?.onMessageAdded(finalOutput, isUser = false, isComplete = true)
                 callbacks?.storeConversationTurn(
                     userMessage = message,
@@ -472,6 +497,7 @@ class GhostAgent(
                 val durationMs = System.currentTimeMillis() - turnStartTime
                 val finalOutput = hudChip
                 _conversationHistory.add(AgentMessage(role = "assistant", content = finalOutput))
+                appendAssistantContext("Fast-Track Action [open_url: $urlTarget] — Spoke aloud: \"$ttsPhrase\"")
                 callbacks?.onMessageAdded(finalOutput, isUser = false, isComplete = true)
                 callbacks?.storeConversationTurn(
                     userMessage = message,
@@ -682,6 +708,9 @@ class GhostAgent(
                 rawResponse.contains("execute_command") ||
                 rawResponse.contains("execute_action") ||
                 rawResponse.contains("runMcpTool") ||
+                rawResponse.contains("run_js") ||
+                rawResponse.contains("load_skill") ||
+                rawResponse.contains("run_intent") ||
                 rawResponse.contains("set_alarm(") || rawResponse.contains("set_alarm{") ||
                 rawResponse.contains("alarm(") || rawResponse.contains("alarm{") ||
                 rawResponse.contains("timer(") || rawResponse.contains("timer{") ||
@@ -703,15 +732,32 @@ class GhostAgent(
 
             // 5B. Intent Bagger Safety Net:
             // If the model did NOT execute a tool via LiteRT-LM reflection or fallback,
-            // but the incoming user message matched an actionable hardware/system intent
+            // but the incoming user message matched an actionable hardware/system/skill intent
             // (or the model claimed in its text response that it completed it),
-            // auto-execute the intent directly so the physical Android action never silently drops!
+            // auto-execute the intent directly so the physical Android/Skill action never silently drops!
             if (!toolExecutedInCurrentTurn && !isAutonomous && !isDream && baggedIntents.isNotEmpty()) {
                 val lowerMsg = message.lowercase(Locale.ROOT)
                 val lowerResp = cleanResponse.lowercase(Locale.ROOT)
 
+                // 0. Interactive Skill safety net (e.g., qr-code, interactive-map, mood-tracker, calculate-hash, kitchen-adventure)
+                val skillIntent = baggedIntents.firstOrNull { it.tool == "run_js" }
+                if (skillIntent != null) {
+                    Timber.i("GhostAgent: Safety net firing bagged interactive skill: ${skillIntent.paramsJson}")
+                    val res = mcpTool.execute_action("run_js", skillIntent.paramsJson)
+                    val out = res["result"] ?: res["output"]
+                    if (out != null && !res.containsKey("error")) {
+                        toolExecutedInCurrentTurn = true
+                        lastExecutedToolName = "run_js"
+                        lastExecutedToolResult = out
+                        // If model mistakenly said the skill wasn't loaded, replace with positive confirmation
+                        if (lowerResp.contains("isn't loaded") || lowerResp.contains("not available") || lowerResp.contains("can't directly")) {
+                            cleanResponse = "Here's that generated for you right now, ${Constants.getUserTitle(context)}."
+                        }
+                    }
+                }
+
                 // 1. Alarm safety net
-                val alarmIntent = baggedIntents.firstOrNull { it.tool == "alarm" }
+                val alarmIntent = if (!toolExecutedInCurrentTurn) baggedIntents.firstOrNull { it.tool == "alarm" } else null
                 if (alarmIntent != null) {
                     val userWantedAlarm = lowerMsg.contains("alarm") || lowerMsg.contains("wake")
                     val modelClaimsAlarm = lowerResp.contains("alarm") || lowerResp.contains("set") || lowerResp.contains("done")
@@ -977,6 +1023,7 @@ class GhostAgent(
                     userTimestamp = turnStartTime,
                     durationMs = durationMs
                 )
+                consumeSpokenBarks()
             }
 
             checkpoint()
@@ -1075,11 +1122,15 @@ class GhostAgent(
 
     fun flushAndCompactSession() {
         agentScope.launch {
-            compactMemory(force = true)
+            inferenceMutex.withLock {
+                compactMemory(force = true)
+            }
         }
     }
 
     private suspend fun maybeCompactHistory() {
+        val forceFromTool = pendingToolCompaction
+        pendingToolCompaction = false
         val count = _conversationHistory.size
         val historyChars = synchronized(_conversationHistory) { _conversationHistory.sumOf { it.content.length } }
         val visionTokens = synchronized(_conversationHistory) { _conversationHistory.count { it.hadImage } * 512 }
@@ -1089,8 +1140,8 @@ class GhostAgent(
         val tokenThreshold = if (maxTokens > 6000) 4200 else if (maxTokens > 3000) 2400 else 1200
         val turnThreshold = if (maxTokens > 6000) 24 else if (maxTokens > 3000) 16 else 8
 
-        if (count >= turnThreshold || turnsSinceKvFlush >= turnThreshold || estTokens > tokenThreshold) {
-            Timber.i("GhostAgent: Triggering compaction (count=$count/$turnThreshold, turnsSinceFlush=$turnsSinceKvFlush/$turnThreshold, estTokens=$estTokens/$tokenThreshold)")
+        if (forceFromTool || count >= turnThreshold || turnsSinceKvFlush >= turnThreshold || estTokens > tokenThreshold) {
+            Timber.i("GhostAgent: Triggering compaction (forceFromTool=$forceFromTool, count=$count/$turnThreshold, turnsSinceFlush=$turnsSinceKvFlush/$turnThreshold, estTokens=$estTokens/$tokenThreshold)")
             compactMemory(force = true)
         }
     }
@@ -1140,9 +1191,13 @@ class GhostAgent(
         return try {
             val isFullBaseline = (turnsSinceKvFlush == 0) || isCriticalBattery()
             val baseContext = contextManager.buildContext(isFullBaseline = isFullBaseline, isAutonomous = isAutonomous)
-            val ambient = lastAmbientAnnouncement
-            if (ambient != null) {
-                baseContext + "\n[Spoken Announcement Grounding: $ambient]"
+            val barksBlock = formatRecentBarksBlock()
+            if (barksBlock.isNotBlank()) {
+                if (baseContext.endsWith("[/Context]")) {
+                    baseContext.removeSuffix("[/Context]").trimEnd() + "\n\n" + barksBlock + "\n[/Context]"
+                } else {
+                    "$baseContext\n$barksBlock"
+                }
             } else {
                 baseContext
             }
@@ -1276,13 +1331,19 @@ class GhostAgent(
                     val l = labelMatch?.groupValues?.get(1)?.trim() ?: ""
                     mcpTool.timer(s, l)
                 } else {
-                    val positionalMatch = Regex("""^\s*(\d+)\s*(?:,\s*["']?([^"']*)["']?)?\s*$""").find(rawBody)
-                    if (positionalMatch != null) {
-                        val s = positionalMatch.groupValues[1].toInt()
-                        val l = positionalMatch.groupValues[2].trim()
-                        mcpTool.timer(s, l)
+                    val naturalSec = com.ghost.api.hardware.SystemToolSet.parseDurationSeconds(rawBody)
+                    if (naturalSec != null && naturalSec > 0) {
+                        val l = labelMatch?.groupValues?.get(1)?.trim() ?: ""
+                        mcpTool.timer(naturalSec, l)
                     } else {
-                        mcpTool.execute_action("timer", argsBody)
+                        val positionalMatch = Regex("""^\s*(\d+)\s*(?:,\s*["']?([^"']*)["']?)?\s*$""").find(rawBody)
+                        if (positionalMatch != null) {
+                            val s = positionalMatch.groupValues[1].toInt()
+                            val l = positionalMatch.groupValues[2].trim()
+                            mcpTool.timer(s, l)
+                        } else {
+                            mcpTool.execute_action("timer", argsBody)
+                        }
                     }
                 }
             }
@@ -1331,6 +1392,9 @@ class GhostAgent(
             "set_alarm", "alarm" -> {
                 com.ghost.api.logic.ActionFlavorTexts.alarmTts("target time")
             }
+            "timer" -> {
+                com.ghost.api.logic.ActionFlavorTexts.timerTts(extractTimerDurationLabel(rawBody))
+            }
             "execute_command", "executeCommand" -> {
                 val cmdLower = rawBody.lowercase()
                 when {
@@ -1343,6 +1407,9 @@ class GhostAgent(
                     cmdLower.contains("music") || cmdLower.contains("media") -> {
                         val action = Regex("""(?:action=)?(play|pause|next|skip|prev|stop)""").find(cmdLower)?.groupValues?.get(1) ?: "play"
                         com.ghost.api.logic.ActionFlavorTexts.musicTts(action)
+                    }
+                    cmdLower.contains("timer") -> {
+                        com.ghost.api.logic.ActionFlavorTexts.timerTts(extractTimerDurationLabel(rawBody))
                     }
                     else -> "I completed that for you: $output"
                 }
@@ -1482,10 +1549,56 @@ class GhostAgent(
     @Volatile var lastAmbientAnnouncement: String? = null
         private set
 
+    private val recentReflexBarks = ArrayDeque<String>()
+
     fun appendAssistantContext(text: String) {
-        val clean = sanitizeAgentOutput(text)
+        val clean = sanitizeAgentOutput(text).removePrefix("✧").trim()
         if (clean.isNotBlank()) {
             lastAmbientAnnouncement = clean
+            val timeStamp = java.text.SimpleDateFormat("h:mm:ss a", Locale.US).format(java.util.Date())
+            val entry = "[$timeStamp] \"$clean\""
+            synchronized(recentReflexBarks) {
+                if (recentReflexBarks.lastOrNull() != entry) {
+                    if (recentReflexBarks.size >= 6) {
+                        recentReflexBarks.removeFirst()
+                    }
+                    recentReflexBarks.addLast(entry)
+                }
+            }
         }
+    }
+
+    fun recordFastPathTurn(userText: String, assistantHud: String, spokenTts: String? = null) {
+        val now = System.currentTimeMillis()
+        if (userText.isNotBlank()) {
+            _conversationHistory.add(AgentMessage(role = "user", content = userText, timestamp = now))
+        }
+        if (assistantHud.isNotBlank()) {
+            _conversationHistory.add(AgentMessage(role = "assistant", content = assistantHud, timestamp = now))
+        }
+        val barkSummary = if (!spokenTts.isNullOrBlank()) {
+            "Fast-Track Action [$assistantHud] — Spoke aloud: \"$spokenTts\""
+        } else {
+            "Fast-Track Action [$assistantHud]"
+        }
+        appendAssistantContext(barkSummary)
+    }
+
+    private fun formatRecentBarksBlock(): String {
+        val items = synchronized(recentReflexBarks) {
+            recentReflexBarks.toList()
+        }
+        if (items.isEmpty()) return ""
+        return buildString {
+            append("🎙️ Your Recent Spoken Reflex Barks & Fast-Track Actions (spoken aloud by YOU to the Operator):\n")
+            items.forEach { append("• ").append(it).append("\n") }
+        }.trimEnd()
+    }
+
+    private fun consumeSpokenBarks() {
+        synchronized(recentReflexBarks) {
+            recentReflexBarks.clear()
+        }
+        lastAmbientAnnouncement = null
     }
 }

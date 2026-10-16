@@ -38,11 +38,29 @@ class GemmaEngine(private val context: Context) : LlmBackend {
 
     private var engine: Engine? = null
     private var conversation: Conversation? = null
+    @Volatile private var pendingCloseConversation: Conversation? = null
     private val sessionMutex = Mutex()
 
     @Volatile private var isResetting = false
     private var toolSets: List<ToolSet> = emptyList()
     private val isBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * Safely closes any retired Conversation that was handed off by a late-finishing native callback thread.
+     * Must be called while holding [sessionMutex].
+     */
+    private fun disposePendingConversationLocked() {
+        val stale = pendingCloseConversation
+        if (stale != null) {
+            pendingCloseConversation = null
+            try {
+                stale.close()
+                Timber.i("GemmaEngine: Disposed deferred stale conversation safely.")
+            } catch (e: Throwable) {
+                Timber.w(e, "GemmaEngine: Failed to close deferred stale conversation")
+            }
+        }
+    }
     
     // Sampler config for inference - tuned for Gemma 4 E2B conversational stability
     private var samplerConfig: SamplerConfig = SamplerConfig(
@@ -98,6 +116,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
     ): String? {
         return runCatching {
             Timber.i("Initializing Gemma Engine...")
+            disposePendingConversationLocked()
             Engine.setNativeMinLogSeverity(LogSeverity.INFO)
 
             val sharedGpuBackend = Backend.GPU()
@@ -157,8 +176,8 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                     val newConversation = newEngine.createConversation(conversationConfig)
                     candidateConversation = newConversation
 
-                    engine?.close()
-                    conversation?.close()
+                    try { conversation?.close() } catch (_: Throwable) {}
+                    try { engine?.close() } catch (_: Throwable) {}
                     engine = newEngine
                     conversation = newConversation
 
@@ -215,11 +234,18 @@ class GemmaEngine(private val context: Context) : LlmBackend {
         onError: (String) -> Unit
     ) {
         val startTime = System.currentTimeMillis()
-        val deferred = CompletableDeferred<Unit>()
+        val streamSignal = CompletableDeferred<Unit>()
+        val callbackFinished = CompletableDeferred<Unit>()
+        val isAborted = java.util.concurrent.atomic.AtomicBoolean(false)
+        val deferCloseToCallback = java.util.concurrent.atomic.AtomicBoolean(false)
+        val isLoopDetected = java.util.concurrent.atomic.AtomicBoolean(false)
+        val needsConversationReset = java.util.concurrent.atomic.AtomicBoolean(false)
+        val pendingStreamError = java.util.concurrent.atomic.AtomicReference<String?>(null)
         
         // Use a lock ONLY to start the stream and verify state
         var startError: String? = null
         val activeConv = sessionMutex.withLock {
+            disposePendingConversationLocked()
             if (isBusy.getAndSet(true)) {
                 startError = "Engine is currently busy with another inference."
                 null
@@ -274,12 +300,11 @@ class GemmaEngine(private val context: Context) : LlmBackend {
             }
 
             var fullResponse = ""
-            var isLoopDetected = false
             activeConv.sendMessageAsync(
                 Contents.of(contents),
                 object : MessageCallback {
                     override fun onMessage(message: Message) {
-                        if (isLoopDetected) return
+                        if (isLoopDetected.get() || isAborted.get()) return
                         val token = message.toString()
                         
                         if (fullResponse.isEmpty()) {
@@ -287,65 +312,65 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                         }
                         fullResponse += token
 
-                        // Live runaway loop guard: immediately halt if token/phrase repeats
+                        // Live runaway loop guard: immediately halt if token/phrase repeats.
+                        // IMPORTANT: Never call activeConv.close() inside onMessage (which executes on the C++ worker thread),
+                        // as destroying the native Conversation while its callback is on the call stack causes a native SIGSEGV.
                         val tail = fullResponse.takeLast(400)
                         val loopMatch = findDegenerateLoopMatch(tail)
                         if (loopMatch != null) {
-                            Timber.w("🚨 Live runaway token loop detected in stream ('${loopMatch.value.take(60)}...'). Terminating generation early.")
-                            isLoopDetected = true
+                            Timber.w("🚨 Live runaway token loop detected in stream ('${loopMatch.value.take(60)}...'). Cancelling native generation.")
+                            isLoopDetected.set(true)
+                            needsConversationReset.set(true)
                             try {
-                                activeConv.close()
-                                val eng = engine
-                                if (eng != null) {
-                                    val resetConfig = ConversationConfig(
-                                        samplerConfig = samplerConfig,
-                                        systemInstruction = if (lastSystemPrompt.isNotBlank()) Contents.of(lastSystemPrompt) else null,
-                                        tools = toolSets.map { tool(it) }
-                                    )
-                                    conversation = eng.createConversation(resetConfig)
-                                    Timber.i("Recreated clean conversation after loop detection.")
-                                } else {
-                                    conversation = null
-                                }
-                            } catch (e: Exception) {
-                                Timber.w(e, "Error recreating conversation on loop detect")
-                                conversation = null
+                                activeConv.cancelProcess()
+                            } catch (e: Throwable) {
+                                Timber.w(e, "Error calling cancelProcess on loop detect")
                             }
-                            val truncated = truncateRepetition(fullResponse)
-                            onComplete(truncated)
-                            isBusy.set(false)
-                            deferred.complete(Unit)
+                            streamSignal.complete(Unit)
                             return
                         }
 
                         onToken(token)
                     }
                     override fun onDone() {
-                        if (isLoopDetected) return
                         try {
-                            onComplete(truncateRepetition(fullResponse))
+                            if (!isLoopDetected.get() && !isAborted.get()) {
+                                onComplete(truncateRepetition(fullResponse))
+                            }
                         } finally {
-                            isBusy.set(false)
-                            deferred.complete(Unit)
+                            if (deferCloseToCallback.get()) {
+                                pendingCloseConversation = activeConv
+                                if (conversation === activeConv) {
+                                    conversation = null
+                                }
+                                isBusy.set(false)
+                                Timber.i("GemmaEngine: Late native worker finished (onDone); queued conversation for safe disposal.")
+                            }
+                            callbackFinished.complete(Unit)
+                            streamSignal.complete(Unit)
                         }
                     }
                     override fun onError(throwable: Throwable) {
-                        if (isLoopDetected) return
                         try {
-                            val errMsg = throwable.message ?: "Stream error"
-                            if (errMsg.contains("token", ignoreCase = true) || errMsg.contains("Status Code: 3", ignoreCase = true)) {
-                                Timber.w("GemmaEngine: Resetting native conversation due to token limit breach: $errMsg")
-                                try {
-                                    activeConv.close()
-                                } catch (e: Exception) {
-                                    Timber.w(e, "Failed to close conversation on error")
+                            if (!isLoopDetected.get() && !isAborted.get()) {
+                                val errMsg = throwable.message ?: "Stream error"
+                                if (errMsg.contains("token", ignoreCase = true) || errMsg.contains("Status Code: 3", ignoreCase = true)) {
+                                    Timber.w("GemmaEngine: Marking native conversation for reset due to token limit breach: $errMsg")
+                                    needsConversationReset.set(true)
                                 }
-                                conversation = null
+                                pendingStreamError.set(errMsg)
                             }
-                            onError(errMsg)
                         } finally {
-                            isBusy.set(false)
-                            deferred.complete(Unit)
+                            if (deferCloseToCallback.get()) {
+                                pendingCloseConversation = activeConv
+                                if (conversation === activeConv) {
+                                    conversation = null
+                                }
+                                isBusy.set(false)
+                                Timber.i("GemmaEngine: Late native worker finished (onError); queued conversation for safe disposal.")
+                            }
+                            callbackFinished.complete(Unit)
+                            streamSignal.complete(Unit)
                         }
                     }
                 }
@@ -354,30 +379,112 @@ class GemmaEngine(private val context: Context) : LlmBackend {
             // Wait for completion outside the mutex - using await() with graceful recovery
             try {
                 kotlinx.coroutines.withTimeout(45000) {
-                    deferred.await()
+                    streamSignal.await()
+                }
+                if (isLoopDetected.get()) {
+                    val exited = kotlinx.coroutines.withTimeoutOrNull(3000) {
+                        callbackFinished.await()
+                        true
+                    } ?: false
+                    if (!exited) {
+                        deferCloseToCallback.set(true)
+                        if (callbackFinished.isCompleted) {
+                            deferCloseToCallback.set(false)
+                        }
+                    }
+                    val truncated = truncateRepetition(fullResponse)
+                    onComplete(truncated)
+                } else {
+                    pendingStreamError.get()?.let { errMsg ->
+                        onError(errMsg)
+                    }
                 }
             } catch (te: kotlinx.coroutines.TimeoutCancellationException) {
-                Timber.w("GemmaEngine: Inference timed out after 45s, recovering conversation state...")
+                isAborted.set(true)
+                needsConversationReset.set(true)
+                Timber.w("GemmaEngine: Inference timed out after 45s, cancelling native process...")
                 try {
-                    activeConv.close()
-                } catch (e: Exception) {
-                    Timber.w(e, "Failed to close conversation after timeout")
+                    activeConv.cancelProcess()
+                } catch (e: Throwable) {
+                    Timber.w(e, "Failed to cancel native process after timeout")
                 }
-                conversation = null
+                val exited = kotlinx.coroutines.withTimeoutOrNull(3000) {
+                    callbackFinished.await()
+                    true
+                } ?: false
+                if (!exited) {
+                    deferCloseToCallback.set(true)
+                    if (callbackFinished.isCompleted) {
+                        deferCloseToCallback.set(false)
+                    } else {
+                        Timber.e("GemmaEngine: Native worker thread still active 3s after timeout cancelProcess(); deferring Conversation.close() until worker exits to prevent SIGSEGV.")
+                    }
+                }
                 onError("Inference timed out after 45s.")
             } catch (ce: kotlinx.coroutines.CancellationException) {
-                Timber.i("GemmaEngine: Inference cancelled, aborting active conversation...")
+                isAborted.set(true)
+                needsConversationReset.set(true)
+                Timber.i("GemmaEngine: Inference cancelled, cancelling active native process...")
                 try {
-                    activeConv.close()
-                } catch (e: Exception) {
-                    Timber.w(e, "Failed to close conversation on cancellation")
+                    activeConv.cancelProcess()
+                } catch (e: Throwable) {
+                    Timber.w(e, "Failed to cancel native process on cancellation")
                 }
-                conversation = null
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                    val exited = kotlinx.coroutines.withTimeoutOrNull(3000) {
+                        callbackFinished.await()
+                        true
+                    } ?: false
+                    if (!exited) {
+                        deferCloseToCallback.set(true)
+                        if (callbackFinished.isCompleted) {
+                            deferCloseToCallback.set(false)
+                        } else {
+                            Timber.e("GemmaEngine: Native worker thread still active 3s after cancellation; deferring Conversation.close() until worker exits to prevent SIGSEGV.")
+                        }
+                    }
+                }
                 throw ce
             }
         } finally {
-            isBusy.set(false)
-            if (!deferred.isCompleted) deferred.complete(Unit)
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                if (!deferCloseToCallback.get()) {
+                    if (needsConversationReset.get() && callbackFinished.isCompleted) {
+                        // Brief yield so the JNI callback frame finishes returning to C++ before native close()
+                        kotlinx.coroutines.delay(15)
+                        sessionMutex.withLock {
+                            disposePendingConversationLocked()
+                            try {
+                                activeConv.close()
+                            } catch (e: Exception) {
+                                Timber.w(e, "Failed to close conversation during reset")
+                            }
+                            if (conversation === activeConv) {
+                                conversation = null
+                            }
+                            if (isLoopDetected.get()) {
+                                val eng = engine
+                                if (eng != null) {
+                                    try {
+                                        val resetConfig = ConversationConfig(
+                                            samplerConfig = samplerConfig,
+                                            systemInstruction = if (lastSystemPrompt.isNotBlank()) Contents.of(lastSystemPrompt) else null,
+                                            tools = toolSets.map { tool(it) }
+                                        )
+                                        conversation = eng.createConversation(resetConfig)
+                                        Timber.i("Recreated clean conversation after loop detection.")
+                                    } catch (e: Exception) {
+                                        Timber.w(e, "Error recreating conversation on loop detect")
+                                        conversation = null
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    isBusy.set(false)
+                }
+                if (!streamSignal.isCompleted) streamSignal.complete(Unit)
+            }
         }
     }
 
@@ -388,7 +495,21 @@ class GemmaEngine(private val context: Context) : LlmBackend {
         if (newToolSets != null) {
             this.toolSets = newToolSets
         }
+        if (isBusy.get()) {
+            Timber.w("GemmaEngine: softReset called while inference is busy; cancelling active process and waiting...")
+            try { conversation?.cancelProcess() } catch (_: Throwable) {}
+            var waitTicks = 0
+            while (isBusy.get() && waitTicks < 30) {
+                kotlinx.coroutines.delay(100)
+                waitTicks++
+            }
+            if (isBusy.get()) {
+                Timber.e("GemmaEngine: Native worker still busy after 3s in softReset; skipping immediate close to prevent native UAF.")
+                return
+            }
+        }
         sessionMutex.withLock {
+            disposePendingConversationLocked()
             val eng = engine ?: return@withLock
             try {
                 conversation?.close()
@@ -411,7 +532,17 @@ class GemmaEngine(private val context: Context) : LlmBackend {
 
     override suspend fun hardReset() {
         if (lastModelPath.isBlank()) return
+        if (isBusy.get()) {
+            Timber.w("GemmaEngine: hardReset called while inference is busy; cancelling active process and waiting...")
+            try { conversation?.cancelProcess() } catch (_: Throwable) {}
+            var waitTicks = 0
+            while (isBusy.get() && waitTicks < 30) {
+                kotlinx.coroutines.delay(100)
+                waitTicks++
+            }
+        }
         sessionMutex.withLock {
+            disposePendingConversationLocked()
             try {
                 conversation?.close()
                 engine?.close()
@@ -427,6 +558,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
     override suspend fun generateOneShot(prompt: String, systemPrompt: String?, temperature: Double?): String {
         return kotlinx.coroutines.withTimeoutOrNull(8000L) {
             sessionMutex.withLock {
+                disposePendingConversationLocked()
                 // Guard: wait briefly if a streaming inference is in flight
                 var retries = 0
                 while (isBusy.get() && retries < 15) {
@@ -449,36 +581,61 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                     }
                     conversation = null
 
-                    suspendCancellableCoroutine { continuation ->
-                        try {
-                            val temp = temperature ?: 0.1
-                            val config = ConversationConfig(
-                                samplerConfig = SamplerConfig(topK = if (temp < 0.3) 1 else 40, topP = if (temp < 0.3) 0.1 else 0.95, temperature = temp),
-                                systemInstruction = Contents.of(systemPrompt ?: "You are a concise observer.")
-                            )
-                            val tempConv = eng.createConversation(config)
-                            continuation.invokeOnCancellation {
-                                try { tempConv.close() } catch (e: Exception) {}
-                            }
-                            val responseBuilder = StringBuilder()
-                            tempConv.sendMessageAsync(
-                                Contents.of(listOf(Content.Text(prompt))),
-                                object : MessageCallback {
-                                    override fun onMessage(message: Message) { responseBuilder.append(message.toString()) }
-                                    override fun onDone() {
-                                        val resp = responseBuilder.toString()
-                                        try { tempConv.close() } catch (e: Exception) {}
-                                        if (continuation.isActive) continuation.resume(resp)
-                                    }
-                                    override fun onError(throwable: Throwable) {
-                                        try { tempConv.close() } catch (e: Exception) {}
-                                        if (continuation.isActive) continuation.resumeWithException(throwable)
-                                    }
+                    val temp = temperature ?: 0.1
+                    val config = ConversationConfig(
+                        samplerConfig = SamplerConfig(topK = if (temp < 0.3) 1 else 40, topP = if (temp < 0.3) 0.1 else 0.95, temperature = temp),
+                        systemInstruction = Contents.of(systemPrompt ?: "You are a concise observer.")
+                    )
+                    val tempConv = eng.createConversation(config)
+                    val oneShotCallbackDone = CompletableDeferred<Unit>()
+
+                    try {
+                        val resp = kotlinx.coroutines.withTimeoutOrNull(7000L) {
+                            suspendCancellableCoroutine<String> { continuation ->
+                                continuation.invokeOnCancellation {
+                                    try { tempConv.cancelProcess() } catch (_: Throwable) {}
                                 }
-                            )
-                        } catch (e: Exception) {
-                            if (continuation.isActive) continuation.resumeWithException(e)
+                                val responseBuilder = StringBuilder()
+                                tempConv.sendMessageAsync(
+                                    Contents.of(listOf(Content.Text(prompt))),
+                                    object : MessageCallback {
+                                        override fun onMessage(message: Message) {
+                                            responseBuilder.append(message.toString())
+                                        }
+                                        override fun onDone() {
+                                            val resultText = responseBuilder.toString()
+                                            oneShotCallbackDone.complete(Unit)
+                                            if (continuation.isActive) continuation.resume(resultText)
+                                        }
+                                        override fun onError(throwable: Throwable) {
+                                            oneShotCallbackDone.complete(Unit)
+                                            if (continuation.isActive) continuation.resumeWithException(throwable)
+                                        }
+                                    }
+                                )
+                            }
                         }
+                        if (resp == null) {
+                            try { tempConv.cancelProcess() } catch (_: Throwable) {}
+                            kotlinx.coroutines.withTimeoutOrNull(1500L) { oneShotCallbackDone.await() }
+                        }
+                        if (oneShotCallbackDone.isCompleted) {
+                            kotlinx.coroutines.delay(15)
+                            try { tempConv.close() } catch (_: Throwable) {}
+                        } else {
+                            pendingCloseConversation = tempConv
+                        }
+                        resp ?: "Error: generateOneShot timed out"
+                    } catch (e: Exception) {
+                        try { tempConv.cancelProcess() } catch (_: Throwable) {}
+                        kotlinx.coroutines.withTimeoutOrNull(1500L) { oneShotCallbackDone.await() }
+                        if (oneShotCallbackDone.isCompleted) {
+                            kotlinx.coroutines.delay(15)
+                            try { tempConv.close() } catch (_: Throwable) {}
+                        } else {
+                            pendingCloseConversation = tempConv
+                        }
+                        throw e
                     }
                 } finally {
                     isBusy.set(false)
@@ -512,6 +669,14 @@ class GemmaEngine(private val context: Context) : LlmBackend {
     }
 
     override suspend fun cleanup() {
+        if (isBusy.get()) {
+            try { conversation?.cancelProcess() } catch (_: Throwable) {}
+            var waitTicks = 0
+            while (isBusy.get() && waitTicks < 30) {
+                kotlinx.coroutines.delay(100)
+                waitTicks++
+            }
+        }
         // Mark busy upfront to prevent new inferences from queueing during teardown
         isBusy.set(true)
         val acquired = kotlinx.coroutines.withTimeoutOrNull(5000) {
@@ -523,6 +688,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
             if (!acquired) {
                 Timber.w("sessionMutex lock timed out during cleanup, proceeding with safe close")
             }
+            disposePendingConversationLocked()
             try {
                 conversation?.close()
             } catch (e: Exception) {

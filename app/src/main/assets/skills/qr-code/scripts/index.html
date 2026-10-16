@@ -1,0 +1,29 @@
+<!--
+@license
+Copyright 2026 Google LLC
+Licensed under the Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0)
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QR Code Generator</title>
+</head>
+<body>
+  <script>
+    window['ai_edge_gallery_get_result'] = async function(data) {
+      try {
+        const params = JSON.parse(data || "{}");
+        const url = params.url || params.text || "";
+        return JSON.stringify({
+          result: JSON.stringify({ status: "success", url: url }),
+          error: null
+        });
+      } catch (err) {
+        return JSON.stringify({ result: null, error: err.message });
+      }
+    };
+  </script>
+</body>
+</html>

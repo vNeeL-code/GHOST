@@ -7,7 +7,7 @@ description: Control media playback (PLAY, PAUSE, NEXT, PREV).
 
 ## Instructions
 
-Call the un_intent tool with the following exact parameters:
+Call the `run_intent` tool with the following exact parameters:
 
 - intent: media
 - parameters: A JSON string with the following fields:

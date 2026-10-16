@@ -77,7 +77,9 @@ class ChatViewModel : ViewModel() {
         content: String,
         thought: String? = null,
         isComplete: Boolean = true,
-        durationMs: Long? = null
+        durationMs: Long? = null,
+        webviewUrl: String? = null,
+        webviewAspectRatio: Float? = null
     ) {
         val current = _messages.value
         if (current.isNotEmpty() && !current.last().isFromUser) {
@@ -92,7 +94,9 @@ class ChatViewModel : ViewModel() {
                     thought = thought ?: last.thought,
                     isComplete = isComplete,
                     timestamp = updatedTimestamp,
-                    durationMs = computedDuration
+                    durationMs = computedDuration,
+                    webviewUrl = webviewUrl ?: last.webviewUrl,
+                    webviewAspectRatio = webviewAspectRatio ?: last.webviewAspectRatio
                 )
             }
             _messages.value = updated

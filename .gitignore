@@ -16,4 +16,5 @@ local.properties
 *.py
 *.html
 !fastlane/**/*.txt
+!app/src/main/assets/**
 

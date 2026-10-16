@@ -88,10 +88,10 @@ class GhostMcpTool(
     }
 
     @JvmOverloads
-    @Tool(description = "Executes an on-device system or utility command (e.g. 'volume', 'status', 'notifications', 'music', 'calendar', 'timer', 'search_files'). Arguments are passed as key-value pairs (e.g. 'stream=media level=50', 'action=pause', 'seconds=300') or JSON.")
+    @Tool(description = "Executes an on-device system or utility command (e.g. 'volume', 'status', 'notifications', 'music', 'calendar', 'timer', 'search_files'). Arguments are passed as key-value pairs (e.g. 'stream=media level=50', 'action=pause', 'seconds=300' for 5m, 'seconds=3600' for 1h) or JSON.")
     fun execute_command(
         @ToolParam(description = "Command name (e.g. 'volume', 'status', 'notifications', 'music', 'calendar', 'timer', 'search_files', 'read_diary')") command: String,
-        @ToolParam(description = "Arguments string, e.g. 'stream=media level=50' or 'action=next'") args: String = ""
+        @ToolParam(description = "Arguments string, e.g. 'stream=media level=50', 'action=next', or 'seconds=3600' (1 hour = 3600, 1 minute = 60)") args: String = ""
     ): Map<String, String> {
         Timber.i("GhostMcpTool: execute_command invoked with command='$command', args='$args'")
         return executeMcpAction(command, args)
@@ -159,45 +159,137 @@ class GhostMcpTool(
     fun execute_action(toolName: String, parameters: String, preApproved: Boolean = false): Map<String, String> =
         executeMcpAction(toolName, parameters, preApproved)
 
-    fun run_js(skillName: String, scriptName: String, data: String): Map<String, String> {
+    @JvmOverloads
+    @Tool(description = "Runs a JavaScript skill script (e.g. from a loaded skill such as 'qr-code', 'interactive-map', 'mood-tracker', 'query-wikipedia', 'calculate-hash', 'text-spinner') and returns the result or interactive view.")
+    fun run_js(
+        @ToolParam(description = "The name of the skill (e.g. 'qr-code', 'interactive-map', 'query-wikipedia').") skillName: String,
+        @ToolParam(description = "The script file to run, defaults to 'index.html'.") scriptName: String = "index.html",
+        @ToolParam(description = "A JSON string of parameters for the script (e.g. '{\"url\":\"https://example.com\"}').") data: String = "{}"
+    ): Map<String, String> {
         return runBlocking(Dispatchers.IO) {
-            Timber.i("GhostMcpTool: run_js called for skill '$skillName', script '$scriptName'")
-            val skill = skillManager.getSkill(skillName.trim())
+            val normalizedSkill = skillName.trim().lowercase().replace("_", "-")
+            Timber.i("GhostMcpTool: run_js called for skill '$normalizedSkill', script '$scriptName', data='$data'")
+            onToolExecuting?.invoke("run_js", normalizedSkill)
+
+            // Fast native offline QR Code generation (zero CDN, 100% offline FOSS)
+            if (normalizedSkill == "qr-code" || normalizedSkill == "qrcode" || normalizedSkill == "qr") {
+                return@runBlocking try {
+                    val targetText = try {
+                        val j = JSONObject(data)
+                        j.optString("url").ifBlank { j.optString("text").ifBlank { j.optString("query") } }
+                    } catch (_: Exception) {
+                        Regex("""https?://[^\s"'\}]+""").find(data)?.value ?: data.trim('"', '\'', '{', '}', ' ')
+                    }.ifBlank { "https://github.com/vNeeL-code/GHOST" }
+
+                    val imgSrc = com.ghost.api.skills.QrCodeGenerator.generatePngBase64(targetText, 512)
+                    val htmlFile = java.io.File(context.cacheDir, "skill_qr_${System.currentTimeMillis()}.html")
+                    htmlFile.writeText(
+                        """
+                        <!DOCTYPE html>
+                        <html><head><meta name="viewport" content="width=device-width,initial-scale=1.0">
+                        <style>
+                          body{margin:0;background:#10131C;color:#E2E8F0;font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;padding:12px;box-sizing:border-box;}
+                          img{max-width:82%;max-height:76%;border-radius:12px;background:#fff;padding:10px;box-shadow:0 6px 24px rgba(0,0,0,0.5);}
+                          .lbl{margin-top:10px;font-size:12px;color:#94A3B8;word-break:break-all;text-align:center;max-width:90%;}
+                        </style>
+                        </head><body>
+                          <img src="$imgSrc" alt="QR Code"/>
+                          <div class="lbl">${targetText.replace("<", "&lt;").replace(">", "&gt;")}</div>
+                        </body></html>
+                        """.trimIndent()
+                    )
+                    lastWebviewUrl = "file://${htmlFile.absolutePath}"
+                    lastWebviewAspectRatio = 1.0f
+                    val out = "Generated QR code for $targetText"
+                    onToolExecuted?.invoke("run_js", "qr-code", out)
+                    mapOf("result" to out)
+                } catch (e: Exception) {
+                    Timber.e(e, "GhostMcpTool: Native QR generation failed")
+                    mapOf("error" to "Failed to generate QR code: ${e.message}")
+                }
+            }
+
+            val skill = skillManager.getSkill(normalizedSkill) ?: skillManager.getSkill(skillName.trim())
             if (skill == null) {
                 Timber.w("Skill not found: $skillName")
                 return@runBlocking mapOf("error" to "Skill '$skillName' not found")
             }
 
             val scriptPath = if (scriptName.isNotBlank() && scriptName != "null") scriptName else "index.html"
-            val url = "file://${skill.path}/scripts/$scriptPath"
+            val baseUrl = if (skill.path.startsWith("file://")) skill.path else "file://${skill.path}"
+            val url = "$baseUrl/scripts/$scriptPath"
             val secret = ""
 
             val resultJsonString = JsExecutionBridge.executeJs(context, url, data, secret)
+            com.ghost.api.GemmaService.instance?.recordToolOutput(resultJsonString.length.coerceAtMost(1500))
 
             try {
                 val json = JSONObject(resultJsonString)
-                if (json.has("error")) {
+                if (json.has("error") && !json.isNull("error") && json.optString("error").isNotBlank()) {
                     return@runBlocking mapOf("error" to json.getString("error"))
                 }
-                if (json.has("webview")) {
+                if (json.has("webview") && !json.isNull("webview")) {
                     val webviewObj = json.getJSONObject("webview")
                     val webviewUrl = webviewObj.optString("url", "")
-                    val absoluteWebviewUrl = if (webviewUrl.startsWith("http")) webviewUrl
-                                             else "file://${skill.path}/assets/$webviewUrl"
+                    val absoluteWebviewUrl = when {
+                        webviewUrl.startsWith("http") || webviewUrl.startsWith("file://") -> webviewUrl
+                        webviewUrl.startsWith("../assets/") -> "$baseUrl/assets/${webviewUrl.removePrefix("../assets/")}"
+                        webviewUrl.startsWith("assets/") -> "$baseUrl/$webviewUrl"
+                        else -> "$baseUrl/assets/$webviewUrl"
+                    }
                     Timber.i("GhostMcpTool: Sending Webview request to UI: $absoluteWebviewUrl")
                     lastWebviewUrl = absoluteWebviewUrl
                     lastWebviewAspectRatio = webviewObj.optDouble("aspectRatio", 1.333).toFloat()
-                    return@runBlocking mapOf("result" to json.optString("result", "Interactive view loaded."))
+                    val out = json.optString("result", "Interactive view loaded.")
+                    onToolExecuted?.invoke("run_js", skillName, out)
+                    return@runBlocking mapOf("result" to out)
                 }
-                return@runBlocking mapOf("result" to json.optString("result", "Success"))
+                if (json.has("image") && !json.isNull("image")) {
+                    val imageObj = json.getJSONObject("image")
+                    val base64 = imageObj.optString("base64", "")
+                    if (base64.isNotBlank()) {
+                        val imgSrc = if (base64.startsWith("data:image")) base64 else "data:image/png;base64,$base64"
+                        val htmlFile = java.io.File(context.cacheDir, "skill_img_${System.currentTimeMillis()}.html")
+                        htmlFile.writeText(
+                            """
+                            <!DOCTYPE html>
+                            <html><head><meta name="viewport" content="width=device-width,initial-scale=1.0">
+                            <style>body{margin:0;background:#10131C;display:flex;align-items:center;justify-content:center;height:100vh;}img{max-width:92%;max-height:92%;border-radius:12px;background:#fff;padding:8px;}</style>
+                            </head><body><img src="$imgSrc"/></body></html>
+                            """.trimIndent()
+                        )
+                        lastWebviewUrl = "file://${htmlFile.absolutePath}"
+                        lastWebviewAspectRatio = 1.0f
+                    }
+                }
+                val out = json.optString("result", resultJsonString).take(1400)
+                onToolExecuted?.invoke("run_js", skillName, out)
+                return@runBlocking mapOf("result" to out)
             } catch (e: Exception) {
-                return@runBlocking mapOf("result" to resultJsonString)
+                val out = resultJsonString.take(1400)
+                onToolExecuted?.invoke("run_js", skillName, out)
+                return@runBlocking mapOf("result" to out)
             }
         }
     }
 
-    fun run_intent(intent: String, parameters: String): Map<String, String> {
-        Timber.i("GhostMcpTool: run_intent called for intent '$intent'")
+    @JvmOverloads
+    @Tool(description = "Runs a native Android or GHOST intent action as instructed by a loaded skill (e.g. 'send_email', 'timer', 'alarm', 'flashlight', 'media', 'app').")
+    fun run_intent(
+        @ToolParam(description = "The intent name to execute (e.g. 'send_email', 'timer', 'alarm').") intent: String,
+        @ToolParam(description = "A JSON string containing the parameter values required for the intent.") parameters: String = "{}"
+    ): Map<String, String> {
+        Timber.i("GhostMcpTool: run_intent called for intent '$intent' with parameters='$parameters'")
+        val normalized = intent.trim().lowercase()
+        // Route native GHOST MCP tools directly if the skill references them via run_intent
+        val ghostMcpTools = setOf(
+            "timer", "alarm", "flashlight", "app", "open_app", "media", "calendar",
+            "read_calendar", "search", "recall", "remember", "click", "scroll",
+            "navigate", "take_screenshot", "bash"
+        )
+        if (normalized in ghostMcpTools) {
+            return executeMcpAction(normalized, parameters)
+        }
         val success = IntentHandler.handleAction(context, intent, parameters)
         return if (success) {
             mapOf("action" to intent, "result" to "succeeded")
@@ -214,9 +306,51 @@ class GhostMcpTool(
         }
         val cleanParams = rawParams.trim()
         Timber.i("GhostMcpTool: dispatching '$cleanTool' with '$cleanParams' (preApproved=$preApproved)")
-        onToolExecuting?.invoke(cleanTool, cleanParams)
 
         val paramsMap = parseParams(cleanTool, cleanParams)
+        when (cleanTool.lowercase()) {
+            "load_skill", "loadskill" -> {
+                val name = (paramsMap["skill"] ?: paramsMap["name"] ?: paramsMap["input"] ?: cleanParams).toString()
+                return load_skill(name)
+            }
+            "run_js", "runjs" -> {
+                val skillName = (paramsMap["skillName"] ?: paramsMap["skill"] ?: paramsMap["name"] ?: "").toString()
+                val scriptName = (paramsMap["scriptName"] ?: paramsMap["script"] ?: "index.html").toString()
+                val dataObj = paramsMap["data"]
+                val dataStr = when (dataObj) {
+                    is JSONObject -> dataObj.toString()
+                    is Map<*, *> -> JSONObject(dataObj).toString()
+                    null -> cleanParams
+                    else -> dataObj.toString()
+                }
+                return run_js(skillName, scriptName, dataStr)
+            }
+            "run_intent", "runintent" -> {
+                val intentName = (paramsMap["intent"] ?: paramsMap["action"] ?: "").toString()
+                val paramObj = paramsMap["parameters"]
+                val paramStr = when (paramObj) {
+                    is JSONObject -> paramObj.toString()
+                    is Map<*, *> -> JSONObject(paramObj).toString()
+                    null -> cleanParams
+                    else -> paramObj.toString()
+                }
+                return run_intent(intentName, paramStr)
+            }
+            "save_skill", "saveskill" -> {
+                val name = (paramsMap["name"] ?: "").toString()
+                val desc = (paramsMap["description"] ?: "Custom skill").toString()
+                val inst = (paramsMap["instructions"] ?: paramsMap["content"] ?: "").toString()
+                val ok = skillManager.saveNewSkill(name, desc, inst)
+                return if (ok) {
+                    mapOf("result" to "success", "output" to "Saved skill '$name' to Documents/GHOST/skills/$name/SKILL.md")
+                } else {
+                    mapOf("result" to "error", "output" to "Failed to save skill '$name'")
+                }
+            }
+        }
+
+        onToolExecuting?.invoke(cleanTool, cleanParams)
+
         val result = runBlocking(Dispatchers.IO) {
             mcpServer.executeTool(cleanTool, paramsMap, preApproved = preApproved)
         }
@@ -267,7 +401,10 @@ class GhostMcpTool(
             "flashlight", "set_edge_lights" -> mapOf("state" to plain)
             "app", "open_app", "launch_app" -> mapOf("name" to plain)
             "media", "navigate" -> mapOf("action" to plain)
-            "timer" -> mapOf("seconds" to (plain.toIntOrNull() ?: 60))
+            "timer" -> {
+                val parsedSec = com.ghost.api.hardware.SystemToolSet.parseDurationSeconds(plain) ?: plain.toIntOrNull()
+                if (parsedSec != null && parsedSec > 0) mapOf("seconds" to parsedSec, "input" to plain) else mapOf("input" to plain)
+            }
             "alarm" -> mapOf("input" to plain)
             "calendar" -> mapOf("title" to plain)
             "remember" -> mapOf("content" to plain)

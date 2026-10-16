@@ -762,6 +762,43 @@ fun ChatMessageRow(
                     )
                 }
             }
+
+            // Interactive Skill WebView Card (AI Edge Gallery JS/WebView & QR Code Skills)
+            if (!message.webviewUrl.isNullOrBlank()) {
+                val targetUrl = message.webviewUrl
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(260.dp)
+                        .padding(top = 10.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .border(1.dp, Color(0x448BB4F6), RoundedCornerShape(12.dp))
+                        .background(Color(0xFF0F111A))
+                ) {
+                    AndroidView(
+                        factory = { ctx ->
+                            android.webkit.WebView(ctx).apply {
+                                settings.javaScriptEnabled = true
+                                settings.domStorageEnabled = true
+                                settings.allowFileAccess = true
+                                @Suppress("DEPRECATION")
+                                settings.allowFileAccessFromFileURLs = true
+                                @Suppress("DEPRECATION")
+                                settings.allowUniversalAccessFromFileURLs = true
+                                setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                                webViewClient = android.webkit.WebViewClient()
+                                loadUrl(targetUrl)
+                            }
+                        },
+                        update = { webView ->
+                            if (webView.url != targetUrl) {
+                                webView.loadUrl(targetUrl)
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
         }
     }
 }

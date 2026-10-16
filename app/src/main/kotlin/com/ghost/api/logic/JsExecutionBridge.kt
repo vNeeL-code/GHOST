@@ -32,6 +32,11 @@ object JsExecutionBridge {
                 val webView = WebView(context).apply {
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
+                    settings.allowFileAccess = true
+                    @Suppress("DEPRECATION")
+                    settings.allowFileAccessFromFileURLs = true
+                    @Suppress("DEPRECATION")
+                    settings.allowUniversalAccessFromFileURLs = true
                 }
 
                 // Inject our callback interface

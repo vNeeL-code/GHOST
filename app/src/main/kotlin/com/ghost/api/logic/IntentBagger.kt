@@ -98,8 +98,14 @@ object IntentBagger {
 
         val bagged = mutableListOf<BaggedIntent>()
 
-        // 1. Direct Web URL Navigation (Wire-speed exit candidate only if no extra text)
-        val urlMatch = matchUrl(clean, trimmed)
+        // 0. Interactive Skill Intent Matching (QR Code, Map, Mood Tracker, Hash, Wikipedia, Kitchen Adventure)
+        val skillIntent = matchInteractiveSkill(clean, trimmed)
+        if (skillIntent != null) {
+            bagged.add(skillIntent)
+        }
+
+        // 1. Direct Web URL Navigation (Wire-speed exit candidate only if no extra text and not a skill request)
+        val urlMatch = if (skillIntent == null) matchUrl(clean, trimmed) else null
         if (urlMatch != null) {
             val urlIntent = BaggedIntent(
                 tool = "open_system_browser_bar",
@@ -158,7 +164,8 @@ object IntentBagger {
         // 7. Timer Intent
         val timerSeconds = matchTimer(clean)
         if (timerSeconds != null) {
-            bagged.add(BaggedIntent("timer", "{\"seconds\":$timerSeconds}", "Set countdown timer for ${timerSeconds}s"))
+            val formattedDur = com.ghost.api.hardware.SystemToolSet.formatDuration(timerSeconds)
+            bagged.add(BaggedIntent("timer", "{\"seconds\":$timerSeconds}", "Set countdown timer for $formattedDur (${timerSeconds}s) via execute_command(command=\"timer\", args=\"seconds=$timerSeconds\")"))
         }
 
         // 8. Alarm Intent
@@ -353,16 +360,9 @@ object IntentBagger {
     }
 
     private fun matchTimer(clean: String): Int? {
-        if (!clean.contains("timer")) return null
-        val match = Regex("""(\d+)\s*(sec|second|min|minute|hr|hour)s?""").find(clean) ?: return null
-        val num = match.groupValues[1].toIntOrNull() ?: return null
-        val unit = match.groupValues[2]
-        return when {
-            unit.startsWith("sec") -> num
-            unit.startsWith("min") -> num * 60
-            unit.startsWith("hr") || unit.startsWith("hour") -> num * 3600
-            else -> num * 60
-        }
+        if (!clean.contains("timer") && !clean.contains("countdown")) return null
+        if (clean.contains("you set") || clean.contains("instead of") || clean.contains("why did you")) return null
+        return com.ghost.api.hardware.SystemToolSet.parseDurationSeconds(clean)
     }
 
     private fun matchAlarm(clean: String, raw: String): Triple<Int, Int, String>? {
@@ -391,6 +391,63 @@ object IntentBagger {
         return Pair(capitalizedPeer, prompt)
     }
 
+    private fun matchInteractiveSkill(clean: String, raw: String): BaggedIntent? {
+        // 1. QR Code skill
+        if (clean.contains("qr code") || clean.contains("qrcode") || Regex("""\bqr\b""").containsMatchIn(clean)) {
+            val urlCandidate = URL_REGEX.find(raw)?.value?.trim()?.trimEnd('.', ',', ';')?.let {
+                if (it.startsWith("www.", ignoreCase = true)) "https://$it" else it
+            } ?: raw.substringAfterLast("for ", "").trim().takeIf { it.isNotBlank() } ?: "https://github.com/vNeeL-code/GHOST"
+            val escaped = urlCandidate.replace("\"", "")
+            return BaggedIntent(
+                tool = "run_js",
+                paramsJson = "{\"skillName\":\"qr-code\",\"scriptName\":\"index.html\",\"data\":{\"url\":\"$escaped\"}}",
+                hint = "Generate QR code for $escaped using the qr-code skill"
+            )
+        }
+
+        // 2. Calculate Hash (SHA-256) skill
+        if (clean.contains("sha256") || clean.contains("sha 256") || clean.contains("calculate hash") || clean.contains("hash of")) {
+            val target = raw.substringAfterLast("of ", "").substringAfterLast("for ", "").trim().ifBlank { raw }
+            val escaped = target.replace("\"", "")
+            return BaggedIntent(
+                tool = "run_js",
+                paramsJson = "{\"skillName\":\"calculate-hash\",\"scriptName\":\"index.html\",\"data\":{\"input\":\"$escaped\"}}",
+                hint = "Calculate SHA-256 hash using the calculate-hash skill"
+            )
+        }
+
+        // 3. Interactive Map skill
+        if (clean.contains("interactive map") || clean.contains("show on map") || clean.contains("map of ")) {
+            val loc = raw.substringAfter("map of ", "").substringAfter("map for ", "").substringAfter("on map", "").trim().ifBlank { "London" }
+            val escaped = loc.replace("\"", "")
+            return BaggedIntent(
+                tool = "run_js",
+                paramsJson = "{\"skillName\":\"interactive-map\",\"scriptName\":\"index.html\",\"data\":{\"location\":\"$escaped\"}}",
+                hint = "Display interactive map for $escaped"
+            )
+        }
+
+        // 4. Mood Tracker skill
+        if (clean.contains("mood tracker") || clean.contains("track my mood") || clean.contains("log my mood") || clean.contains("mood dashboard")) {
+            return BaggedIntent(
+                tool = "run_js",
+                paramsJson = "{\"skillName\":\"mood-tracker\",\"scriptName\":\"index.html\",\"data\":{\"plotDays\":7}}",
+                hint = "Open interactive Mood Tracker dashboard"
+            )
+        }
+
+        // 5. Kitchen Adventure skill
+        if (clean.contains("kitchen adventure")) {
+            return BaggedIntent(
+                tool = "run_js",
+                paramsJson = "{\"skillName\":\"kitchen-adventure\",\"scriptName\":\"index.html\",\"data\":{}}",
+                hint = "Launch Kitchen Adventure interactive skill"
+            )
+        }
+
+        return null
+    }
+
     /**
      * Formats bagged intent hints into a concise context block for prompt injection.
      */
@@ -399,6 +456,18 @@ object IntentBagger {
         val sb = StringBuilder("[Intent Hints (Operator action candidate — execute immediately if requested)]\n")
         for (c in candidates) {
             val directSyntax = when (c.tool) {
+                "run_js" -> {
+                    try {
+                        val json = org.json.JSONObject(c.paramsJson)
+                        val skill = json.optString("skillName", "qr-code")
+                        val script = json.optString("scriptName", "index.html")
+                        val dataObj = json.optJSONObject("data")?.toString() ?: "{}"
+                        val escapedData = dataObj.replace("\"", "\\\"")
+                        "run_js(skillName = \"$skill\", scriptName = \"$script\", data = \"$escapedData\")"
+                    } catch (_: Exception) {
+                        "run_js(skillName = \"qr-code\", scriptName = \"index.html\", data = \"{}\")"
+                    }
+                }
                 "alarm", "set_alarm" -> {
                     val h = Regex("""["']?hour["']?\s*[:=]\s*(\d+)""").find(c.paramsJson)?.groupValues?.get(1)?.toIntOrNull() ?: 0
                     val m = Regex("""["']?min(?:ute)?s?["']?\s*[:=]\s*(\d+)""").find(c.paramsJson)?.groupValues?.get(1)?.toIntOrNull() ?: 0

@@ -24,6 +24,7 @@ sealed class RoutingResult {
         val action: String,
         val feedback: String,
         val url: String? = null,
+        val spokenTts: String? = null,
         val execute: ((Context) -> Unit)? = null
     ) : RoutingResult()
 
@@ -111,6 +112,7 @@ object FastPathRouter {
                     action = "OPEN_URL",
                     feedback = "Opening link in browser ↗",
                     url = normalizedUrl,
+                    spokenTts = ActionFlavorTexts.browserLaunchTts("Browser"),
                     execute = { context ->
                         try {
                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(normalizedUrl)).apply {
@@ -137,6 +139,7 @@ object FastPathRouter {
                     return RoutingResult.HandledFastPath(
                         action = "SET_VOLUME",
                         feedback = "Volume set to $percent%",
+                        spokenTts = ActionFlavorTexts.volumeTts("$percent%"),
                         execute = { context ->
                             try {
                                 val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
@@ -162,6 +165,7 @@ object FastPathRouter {
                 return RoutingResult.HandledFastPath(
                     action = "TOGGLE_FLASHLIGHT",
                     feedback = if (state) "Flashlight turned on" else "Flashlight turned off",
+                    spokenTts = ActionFlavorTexts.torchTts(state),
                     execute = { context ->
                         try {
                             val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as? android.hardware.camera2.CameraManager
@@ -184,13 +188,20 @@ object FastPathRouter {
             val foundUrl = inlineUrlMatch.value
             val scheme = extractScheme(foundUrl)
             if (scheme == "http" || scheme == "https") {
-                val hints = listOf("web_fetch", "web_search")
-                val hintBlock = "\n\n[Router Context: Detected URL: $foundUrl | Suggested tools: ${hints.joinToString(", ")}]"
-                val augmented = trimmed + hintBlock
+                val isSkillOrQr = trimmed.contains("qr", ignoreCase = true) ||
+                                  trimmed.contains("skill", ignoreCase = true) ||
+                                  trimmed.contains("hash", ignoreCase = true)
+                val hints = if (isSkillOrQr) listOf("run_js", "web_fetch") else listOf("web_fetch", "web_search")
+                val hintBlock = if (isSkillOrQr) {
+                    "\n\n[Router Context: Detected URL: $foundUrl | Suggested tools: run_js, qr-code]"
+                } else {
+                    "\n\n[Router Context: Detected URL: $foundUrl | Suggested tools: ${hints.joinToString(", ")}]"
+                }
+                val augmented = if (isSkillOrQr) trimmed else (trimmed + hintBlock)
 
                 Timber.i("⚡ [FastPath] Partial URL match detected ($foundUrl). Injected into user turn to preserve KV cache.")
                 return RoutingResult.FallThroughToLlm(
-                    augmentedUserMessage = augmented,
+                    augmentedUserMessage = if (isSkillOrQr) trimmed else augmented,
                     extractedEntities = mapOf("url" to foundUrl),
                     toolHints = hints
                 )

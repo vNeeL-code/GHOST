@@ -335,7 +335,9 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
         imageUri: String?,
         images: List<android.graphics.Bitmap>,
         audioData: ByteArray?,
-        audioDurationMs: Long?
+        audioDurationMs: Long?,
+        webviewUrl: String?,
+        webviewAspectRatio: Float?
     ) {
         lifecycleScope.launch(Dispatchers.Main) {
             val allImages = if (images.isNotEmpty()) images else listOfNotNull(image)
@@ -353,11 +355,23 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
                 val current = chatViewModel.messages.value
                 val last = current.lastOrNull()
                 if (last != null && !last.isFromUser && !last.isComplete) {
-                    chatViewModel.updateLastMessage(message, isComplete = isComplete)
+                    chatViewModel.updateLastMessage(
+                        content = message,
+                        isComplete = isComplete,
+                        webviewUrl = webviewUrl,
+                        webviewAspectRatio = webviewAspectRatio
+                    )
                 } else {
                     val prevUserMsg = current.lastOrNull { it.isFromUser }
                     val durationMs = if (prevUserMsg != null) System.currentTimeMillis() - prevUserMsg.timestamp else null
-                    chatViewModel.addMessage(ChatMessage(message, isFromUser = false, isComplete = isComplete, durationMs = durationMs))
+                    chatViewModel.addMessage(ChatMessage(
+                        content = message,
+                        isFromUser = false,
+                        isComplete = isComplete,
+                        durationMs = durationMs,
+                        webviewUrl = webviewUrl,
+                        webviewAspectRatio = webviewAspectRatio
+                    ))
                 }
             }
         }

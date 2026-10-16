@@ -172,19 +172,31 @@ class SystemToolSet(private val context: Context) : ToolSet {
 
     @Tool(description = "Sets a timer for the specified duration")
     fun timer(
-        @ToolParam(description = "Total duration in precise seconds (e.g. 5 minutes = 300)") seconds: Int, 
+        @ToolParam(description = "Total duration in precise seconds (e.g. 5 minutes = 300, 1 hour = 3600)") seconds: Int, 
         @ToolParam(description = "Optional label") label: String = ""
     ): Map<String, String> {
+        val safeSeconds = seconds.coerceAtLeast(1)
+        val formattedDur = formatDuration(safeSeconds)
+        val now = System.currentTimeMillis()
+        synchronized(APP_ALIASES) {
+            if (safeSeconds == lastTimerSeconds && (now - lastTimerTimestamp) < 20_000L) {
+                Timber.w("SystemToolSet: Suppressed duplicate timer intent for ${safeSeconds}s within 20s debounce window")
+                return mapOf("result" to "success", "message" to "Timer scheduled for $formattedDur (${safeSeconds}s)${if (label.isNotBlank()) " ($label)" else ""} (already scheduled)")
+            }
+            lastTimerSeconds = safeSeconds
+            lastTimerTimestamp = now
+        }
+
         com.ghost.api.GemmaService.instance?.showWorkSignal("TIMER", 1500)
         return try {
             val intent = Intent(AlarmClock.ACTION_SET_TIMER).apply {
-                putExtra(AlarmClock.EXTRA_LENGTH, seconds)
-                putExtra(AlarmClock.EXTRA_MESSAGE, label)
+                putExtra(AlarmClock.EXTRA_LENGTH, safeSeconds)
+                if (label.isNotBlank()) putExtra(AlarmClock.EXTRA_MESSAGE, label)
                 putExtra(AlarmClock.EXTRA_SKIP_UI, true)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)
-            mapOf("result" to "success", "message" to "Timer scheduled for $seconds seconds in system Clock app")
+            mapOf("result" to "success", "message" to "Timer scheduled for $formattedDur (${safeSeconds}s)${if (label.isNotBlank()) " ($label)" else ""} in system Clock app")
         } catch (e: Exception) {
             mapOf("result" to "error", "message" to "Failed to set timer: ${e.message}")
         }
@@ -422,6 +434,17 @@ class SystemToolSet(private val context: Context) : ToolSet {
         private var lastAlarmMinute: Int? = null
         private var lastAlarmTimestamp: Long = 0L
 
+        private var lastTimerSeconds: Int? = null
+        private var lastTimerTimestamp: Long = 0L
+
+        private val WORD_NUMBERS = mapOf(
+            "a" to 1, "an" to 1, "one" to 1, "two" to 2, "three" to 3, "four" to 4, "five" to 5,
+            "six" to 6, "seven" to 7, "eight" to 8, "nine" to 9, "ten" to 10, "eleven" to 11,
+            "twelve" to 12, "thirteen" to 13, "fourteen" to 14, "fifteen" to 15, "sixteen" to 16,
+            "seventeen" to 17, "eighteen" to 18, "nineteen" to 19, "twenty" to 20, "twenty-five" to 25,
+            "thirty" to 30, "forty" to 40, "forty-five" to 45, "fifty" to 50, "sixty" to 60, "ninety" to 90
+        )
+
         private val APP_ALIASES = mapOf(
             "calendar" to listOf("Calendar", "Google Calendar"),
             "chrome" to listOf("Chrome", "Browser", "Internet"),
@@ -445,6 +468,138 @@ class SystemToolSet(private val context: Context) : ToolSet {
             "email" to listOf("Gmail", "Mail", "Email"),
             "gmail" to listOf("Gmail")
         )
+
+        /**
+         * Formats a duration in seconds into a natural human-readable phrase (e.g. "1 hour", "5 minutes", "1 minute 30 seconds").
+         */
+        fun formatDuration(seconds: Int): String {
+            if (seconds <= 0) return "0 seconds"
+            val h = seconds / 3600
+            val m = (seconds % 3600) / 60
+            val s = seconds % 60
+            val parts = mutableListOf<String>()
+            if (h > 0) parts.add("$h ${if (h == 1) "hour" else "hours"}")
+            if (m > 0) parts.add("$m ${if (m == 1) "minute" else "minutes"}")
+            if (s > 0 || parts.isEmpty()) parts.add("$s ${if (s == 1) "second" else "seconds"}")
+            return parts.joinToString(" ")
+        }
+
+        /**
+         * Parses natural-language and numeric durations into total seconds.
+         * Supports:
+         * - "an hour", "one hour", "1 hour", "2 hours", "1.5 hours"
+         * - "half an hour", "half hour", "quarter of an hour", "quarter hour"
+         * - "an hour and a half", "one and a half hours"
+         * - "a minute", "5 minutes", "10 mins", "30 seconds", "45s", "10m", "2h"
+         * - Compound durations: "1 hour 30 minutes", "2m 30s"
+         */
+        fun parseDurationSeconds(text: String): Int? {
+            val clean = text.trim().lowercase(Locale.ROOT)
+                .replace(Regex("""\bforty\s+five\b"""), "forty-five")
+                .replace(Regex("""\btwenty\s+five\b"""), "twenty-five")
+            if (clean.isBlank()) return null
+
+            // Pure integer string -> treat as seconds
+            clean.toIntOrNull()?.let { if (it > 0) return it }
+
+            // Special natural phrases
+            if (Regex("""\b(?:an?|one|1)\s+hour\s+and\s+a\s+half\b""").containsMatchIn(clean) ||
+                Regex("""\b(?:one|1)\s+and\s+a\s+half\s+hours?\b""").containsMatchIn(clean)) {
+                return 5400
+            }
+            if (Regex("""\bhalf\s+(?:an?\s+)?hours?\b""").containsMatchIn(clean)) {
+                return 1800
+            }
+            if (Regex("""\bquarter\s+(?:of\s+an?\s+|an?\s+)?hours?\b""").containsMatchIn(clean)) {
+                return 900
+            }
+            if (Regex("""\bhalf\s+(?:a\s+)?minutes?\b""").containsMatchIn(clean)) {
+                return 30
+            }
+
+            var totalSeconds = 0
+            var matchedAny = false
+
+            // 1. Numeric (int or decimal) + unit: e.g. "1.5 hours", "1 hour 30 minutes", "10m", "45s"
+            val numericUnitRegex = Regex("""\b(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b""")
+            for (m in numericUnitRegex.findAll(clean)) {
+                val amount = m.groupValues[1].toDoubleOrNull() ?: continue
+                val unit = m.groupValues[2]
+                val multiplier = when {
+                    unit.startsWith("h") -> 3600.0
+                    unit.startsWith("m") -> 60.0
+                    else -> 1.0
+                }
+                totalSeconds += (amount * multiplier).toInt()
+                matchedAny = true
+            }
+            if (matchedAny && totalSeconds > 0) {
+                return totalSeconds
+            }
+
+            // 2. Word-number + unit: e.g. "an hour", "a minute", "five minutes", "ten seconds"
+            val wordUnitRegex = Regex("""\b(a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|twenty-five|thirty|forty|forty-five|fifty|sixty|ninety)\s+(hours?|hrs?|minutes?|mins?|seconds?|secs?)\b""")
+            for (m in wordUnitRegex.findAll(clean)) {
+                val word = m.groupValues[1]
+                val amount = WORD_NUMBERS[word] ?: continue
+                val unit = m.groupValues[2]
+                val multiplier = when {
+                    unit.startsWith("h") -> 3600
+                    unit.startsWith("m") -> 60
+                    else -> 1
+                }
+                totalSeconds += amount * multiplier
+                matchedAny = true
+            }
+            if (matchedAny && totalSeconds > 0) {
+                return totalSeconds
+            }
+
+            return null
+        }
+
+        /**
+         * Robustly parses (seconds, label) from flexible timer parameter maps.
+         * Handles:
+         * - Explicit seconds/minutes/hours: {"seconds": 3600}, {"minutes": 60}, {"hours": 1}, {"hours": 1, "minutes": 30}
+         * - Natural duration strings in seconds/duration/time/input: {"duration": "1 hour"}, {"input": "an hour"}
+         * - Key-value strings: "seconds=3600", "hours=1"
+         */
+        fun parseTimerParams(params: Map<String, Any?>): Pair<Int, String>? {
+            var label = (params["label"] ?: params["message"] ?: params["note"] ?: params["title"])?.toString()?.trim() ?: ""
+
+            val explicitHours = (params["hours"] ?: params["hour"] ?: params["hr"])?.toString()?.toDoubleOrNull()
+            val explicitMinutes = (params["minutes"] ?: params["minute"] ?: params["min"])?.toString()?.toDoubleOrNull()
+            val rawSecondsObj = params["seconds"] ?: params["second"] ?: params["sec"] ?: params["duration"] ?: params["length"]
+            val explicitSeconds = rawSecondsObj?.toString()?.toDoubleOrNull()
+
+            if (explicitHours != null || explicitMinutes != null || explicitSeconds != null) {
+                val total = ((explicitHours ?: 0.0) * 3600.0 +
+                             (explicitMinutes ?: 0.0) * 60.0 +
+                             (explicitSeconds ?: 0.0)).toInt()
+                if (total > 0) {
+                    return Pair(total, label)
+                }
+            }
+
+            // Try parsing natural language duration from any candidate parameter
+            val candidates = listOfNotNull(
+                rawSecondsObj?.toString(),
+                params["time"]?.toString(),
+                params["input"]?.toString(),
+                params["args"]?.toString(),
+                label.takeIf { it.isNotBlank() }
+            )
+            for (candidate in candidates) {
+                val parsedSec = parseDurationSeconds(candidate)
+                if (parsedSec != null && parsedSec > 0) {
+                    if (candidate == label) label = ""
+                    return Pair(parsedSec, label)
+                }
+            }
+
+            return null
+        }
 
         /**
          * Robustly parses (hour, minutes, label) from flexible parameter maps.

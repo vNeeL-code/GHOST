@@ -7,7 +7,7 @@ description: Tap a UI element by text on the screen.
 
 ## Instructions
 
-Call the un_intent tool with the following exact parameters:
+Call the `run_intent` tool with the following exact parameters:
 
 - intent: click
 - parameters: A JSON string with the following fields:

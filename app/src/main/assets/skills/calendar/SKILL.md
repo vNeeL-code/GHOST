@@ -7,7 +7,7 @@ description: Create a calendar event.
 
 ## Instructions
 
-Call the un_intent tool with the following exact parameters:
+Call the `run_intent` tool with the following exact parameters:
 
 - intent: calendar
 - parameters: A JSON string with the following fields:

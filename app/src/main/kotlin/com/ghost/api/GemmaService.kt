@@ -81,7 +81,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             imageUri: String? = null,
             images: List<android.graphics.Bitmap> = emptyList(),
             audioData: ByteArray? = null,
-            audioDurationMs: Long? = null
+            audioDurationMs: Long? = null,
+            webviewUrl: String? = null,
+            webviewAspectRatio: Float? = null
         )
         fun onThinkingStateChanged(isThinking: Boolean)
         fun onThoughtUpdated(thought: String)
@@ -463,12 +465,10 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             val sdSkillsDir = getExternalFilesDir(null)?.absolutePath?.let { "$it/skills" }
             if (sdSkillsDir != null) skillManager.loadSkillsFromDir(sdSkillsDir)
             
-            // Also load from user-accessible public folder: Documents/GHOST/skills
+            // Seed & load from user-accessible public folder: Documents/GHOST/skills
             try {
-                val publicSkillsDir = android.os.Environment.getExternalStoragePublicDirectory(
-                    android.os.Environment.DIRECTORY_DOCUMENTS
-                ).absolutePath + "/GHOST/skills"
-                skillManager.loadSkillsFromDir(publicSkillsDir)
+                skillManager.seedPublicSkillsFromAssets()
+                skillManager.loadSkillsFromDir(skillManager.publicSkillsDir.absolutePath)
             } catch (e: Exception) {
                 Timber.w(e, "Failed to load skills from public Documents folder")
             }
@@ -1259,19 +1259,21 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     }
 
     /**
-     * Broadcast deterministic device status cues (battery, power, thermal)
+     * Broadcast deterministic device status cues (battery, power, thermal, physical reflexes, lock/unlock)
      */
-    fun processDeviceStatusCue(cueText: String) {
+    fun processDeviceStatusCue(cueText: String, showInChat: Boolean = true) {
         val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
         if (!prefs.getBoolean(Constants.PREF_PASSIVE_TTS, true)) return
 
-        Timber.i("⚡ Device Status Cue: $cueText")
+        Timber.i("⚡ Device Status Cue: $cueText (showInChat=$showInChat)")
         if (::ttsManager.isInitialized) {
             ttsManager.speakPassiveAnnouncement(cueText)
         }
         val bubble = "✧ $cueText"
-        serviceScope.launch(Dispatchers.Main) {
-            uiCallback?.onMessageAdded(bubble, isUser = false)
+        if (showInChat) {
+            serviceScope.launch(Dispatchers.Main) {
+                uiCallback?.onMessageAdded(bubble, isUser = false)
+            }
         }
         if (::ghostAgent.isInitialized) {
             ghostAgent.appendAssistantContext(bubble)
@@ -1447,8 +1449,17 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 is com.ghost.api.logic.RoutingResult.HandledFastPath -> {
                     Timber.i("⚡ [FastPath] Handled without LLM: ${routingResult.action} | feedback=${routingResult.feedback}")
                     markActivity()
+                    val phraseToSpeak = routingResult.spokenTts ?: routingResult.feedback
                     if (::ttsManager.isInitialized) {
                         ttsManager.stop()
+                        ttsManager.speak(phraseToSpeak)
+                    }
+                    if (::ghostAgent.isInitialized) {
+                        ghostAgent.recordFastPathTurn(
+                            userText = userPrompt,
+                            assistantHud = routingResult.feedback,
+                            spokenTts = phraseToSpeak
+                        )
                     }
                     withContext(Dispatchers.Main) {
                         if (!fromUi) {
@@ -2127,7 +2138,13 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     }
 
     override fun onMessageAdded(message: String, isUser: Boolean, isComplete: Boolean, webviewUrl: String?, webviewAspectRatio: Float?) {
-        uiCallback?.onMessageAdded(message, isUser, isComplete)
+        uiCallback?.onMessageAdded(
+            message = message,
+            isUser = isUser,
+            isComplete = isComplete,
+            webviewUrl = webviewUrl,
+            webviewAspectRatio = webviewAspectRatio
+        )
     }
 
     override fun onEmotionSignal(emoji: String) {

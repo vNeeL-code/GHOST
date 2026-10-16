@@ -101,6 +101,11 @@ android {
     lint {
         disable += setOf("WebViewLayout")
     }
+
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
+    }
 }
 
 ksp {

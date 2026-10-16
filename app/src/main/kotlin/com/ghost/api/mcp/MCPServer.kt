@@ -193,8 +193,9 @@ class MCPServer(
                     }
                 }
                 "timer" -> {
-                    val seconds = params["seconds"]?.toString()?.toIntOrNull() ?: 60
-                    val label   = params["label"]?.toString() ?: ""
+                    val parsed = com.ghost.api.hardware.SystemToolSet.parseTimerParams(params)
+                    val seconds = parsed?.first ?: 60
+                    val label   = parsed?.second ?: (params["label"]?.toString() ?: "")
                     val res = systemTools.timer(seconds, label)
                     ToolResult(res["result"] == "success", res["message"] ?: "")
                 }
