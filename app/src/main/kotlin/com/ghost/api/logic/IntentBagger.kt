@@ -233,15 +233,38 @@ object IntentBagger {
         return UrlMatch(url, isDirect)
     }
 
+    private val CONVERSATIONAL_MARKERS = setOf(
+        "why", "how", "what", "who", "when", "where", "which",
+        "not", "didn't", "didnt", "don't", "dont", "won't", "wont", "wasn't", "wasnt",
+        "error", "bug", "crash", "crashed", "failed", "failing", "fail", "stuck",
+        "broken", "problem", "issue", "again", "instead", "because", "sorry",
+        "assuming", "supposed", "was", "were", "is", "are", "tell", "explain",
+        "tried", "trying", "without", "need", "needed", "did", "does", "do",
+        "reflex", "repetitive", "bombarding"
+    )
+
     private fun matchAppLaunch(context: Context, clean: String, raw: String): AppMatch? {
-        // Strip common prefixes
-        var candidate = clean
+        val trimmedClean = clean.trim()
+        if (trimmedClean.isBlank()) return null
+
+        // 1. Rigid Anchored Check: Did the input start with an explicit launch command?
+        var matchedPrefix: String? = null
         for (prefix in APP_LAUNCH_PREFIXES) {
-            if (candidate.startsWith(prefix)) {
-                candidate = candidate.removePrefix(prefix).trim()
-                break
+            if (trimmedClean.startsWith(prefix, ignoreCase = true)) {
+                if (trimmedClean.length == prefix.length || trimmedClean[prefix.length].isWhitespace()) {
+                    matchedPrefix = prefix
+                    break
+                }
             }
         }
+
+        // If it starts with a prefix, strip it; otherwise candidate is the whole message
+        var candidate = if (matchedPrefix != null) {
+            trimmedClean.substring(matchedPrefix.length).trim()
+        } else {
+            trimmedClean
+        }
+
         candidate = candidate
             .removePrefix("the ")
             .removeSuffix(" for me")
@@ -251,24 +274,13 @@ object IntentBagger {
             .trim()
 
         if (candidate.isBlank()) {
-            // Check if raw message contains a direct single app keyword (e.g. "calendar", "spotify")
-            val tokens = clean.split(" ")
-            for (token in tokens) {
-                if (COMMON_APP_ALIASES.containsKey(token)) {
-                    val app = COMMON_APP_ALIASES[token]?.firstOrNull() ?: token.replaceFirstChar { it.uppercase() }
-                    return AppMatch(app, isHighConfidence = true)
-                }
-            }
             return null
         }
 
-        // Check aliases first (Exact alias match = high confidence)
-        for ((alias, candidates) in COMMON_APP_ALIASES) {
-            if (candidate == alias || clean.contains("open $alias") || clean.contains("launch $alias") || clean == alias) {
-                val app = candidates.firstOrNull() ?: alias.replaceFirstChar { it.uppercase() }
-                return AppMatch(app, isHighConfidence = true)
-            }
-        }
+        // Conversational/negation guards: Questions, errors, explanations, or long queries
+        // must NEVER auto-execute wire-speed! Gemma must decide.
+        val words = trimmedClean.split(Regex("""[\s,;.!?'"]+""")).filter { it.isNotBlank() }
+        val isConversational = words.any { it.lowercase() in CONVERSATIONAL_MARKERS } || words.size > 4
 
         // Check installed apps cache
         val apps = if (AppReelOverlay.AppListCache.isLoaded && AppReelOverlay.AppListCache.cachedApps.isNotEmpty()) {
@@ -277,13 +289,44 @@ object IntentBagger {
             emptyList()
         }
 
-        val directMatch = apps.firstOrNull { it.equals(candidate, ignoreCase = true) }
-        if (directMatch != null) return AppMatch(directMatch, isHighConfidence = true)
+        // 2. High-Confidence Fast-Track:
+        // Must be RIGID & FRAGILE. Only triggers if:
+        // - NOT conversational
+        // - Candidate is strictly an exact alias or exact installed app label
+        // - And either had an explicit launch prefix (e.g. "open chrome") OR was a bare single-word app alias (e.g. "chrome")
+        val isExplicitLaunch = matchedPrefix != null || words.size == 1
+
+        if (!isConversational && isExplicitLaunch) {
+            // Check exact aliases
+            for ((alias, candidates) in COMMON_APP_ALIASES) {
+                if (candidate.equals(alias, ignoreCase = true)) {
+                    val app = candidates.firstOrNull() ?: alias.replaceFirstChar { it.uppercase() }
+                    return AppMatch(app, isHighConfidence = true)
+                }
+            }
+
+            // Check exact installed app name
+            val directMatch = apps.firstOrNull { it.equals(candidate, ignoreCase = true) }
+            if (directMatch != null) {
+                return AppMatch(directMatch, isHighConfidence = true)
+            }
+        }
+
+        // 3. Low-Confidence Cognitive ReAct Fallback (Gemma decides!):
+        // Does NOT auto-execute wire-speed. Only injects a background hint for Gemma.
+        for ((alias, candidates) in COMMON_APP_ALIASES) {
+            if (candidate.equals(alias, ignoreCase = true) || words.any { it.equals(alias, ignoreCase = true) }) {
+                val app = candidates.firstOrNull() ?: alias.replaceFirstChar { it.uppercase() }
+                return AppMatch(app, isHighConfidence = false)
+            }
+        }
 
         val partialMatch = apps.firstOrNull { it.contains(candidate, ignoreCase = true) }
-        if (partialMatch != null) return AppMatch(partialMatch, isHighConfidence = false)
+        if (partialMatch != null) {
+            return AppMatch(partialMatch, isHighConfidence = false)
+        }
 
-        if (candidate.length in 3..25 && (raw.contains("open", ignoreCase = true) || raw.contains("launch", ignoreCase = true))) {
+        if (matchedPrefix != null && candidate.length in 3..25 && !isConversational) {
             return AppMatch(candidate.replaceFirstChar { it.uppercase() }, isHighConfidence = false)
         }
 

@@ -33,6 +33,32 @@ class IntentBaggerTest {
     }
 
     @Test
+    fun testConversationalAppMentionsNeverTriggerWireSpeed() {
+        // "just the auto browser pipe was stuck failing to open browser"
+        val intents1 = IntentBagger.bagIntents(dummyContext, "just the auto browser pipe was stuck failing to open browser")
+        val direct1 = intents1.firstOrNull { it.isWireSpeedDirect }
+        assertTrue("Conversational mention of browser must NEVER trigger wire-speed direct", direct1 == null)
+
+        // "ah as in you didnt need to launch browser again but im assuming that was a reflex"
+        val intents2 = IntentBagger.bagIntents(dummyContext, "ah as in you didnt need to launch browser again but im assuming that was a reflex")
+        val direct2 = intents2.firstOrNull { it.isWireSpeedDirect }
+        assertTrue("Negated/conversational launch of browser must NEVER trigger wire-speed direct", direct2 == null)
+
+        // "why did chrome crash"
+        val intents3 = IntentBagger.bagIntents(dummyContext, "why did chrome crash")
+        val direct3 = intents3.firstOrNull { it.isWireSpeedDirect }
+        assertTrue("Question about chrome crash must NEVER trigger wire-speed direct", direct3 == null)
+    }
+
+    @Test
+    fun testBareAppAliasIsWireSpeedDirect() {
+        val intents = IntentBagger.bagIntents(dummyContext, "chrome")
+        val intent = intents.firstOrNull { it.appLabel == "Chrome" }
+        assertNotNull(intent)
+        assertTrue("Bare app alias in isolation must be wire-speed direct", intent!!.isWireSpeedDirect)
+    }
+
+    @Test
     fun testWebUrlIsWireSpeedDirect() {
         val intents = IntentBagger.bagIntents(dummyContext, "go to https://github.com")
         assertEquals(1, intents.size)
