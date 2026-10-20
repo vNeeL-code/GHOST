@@ -12,6 +12,8 @@
 ![Platform](https://img.shields.io/badge/Platform-Android%2014%2B-blue)
 ![Engine](https://img.shields.io/badge/Engine-LiteRT--LM%20(Google)-orange)
 ![Neural Core](https://img.shields.io/badge/Neural%20Core-Gemma%204-purple)
+![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/vNeeL-code/badge.svg)](https://hub.xerj.org/contributors/vNeeL-code.html)
+
 
 ---
 
