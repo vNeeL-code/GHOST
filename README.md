@@ -6,9 +6,10 @@
 [![ASI Demo](https://img.youtube.com/vi/jB62dlLavSY/0.jpg)](https://youtu.be/jB62dlLavSY?si=TMZG86o1KkjuBXtw)  
 *Click to watch: The ASI trailer.*
 
-![Static Badge](https://img.shields.io/badge/Status-WIP-green)
+
 ![Version](https://img.shields.io/badge/Version-v4.35%20-brightgreen)
 ![GitHub Repo stars](https://img.shields.io/github/stars/vNeeL-code/GHOST)
+![Static Badge](https://img.shields.io/badge/Status-Δ 👾 ∇-green)
 ![Platform](https://img.shields.io/badge/Chassis-Android%2014%2B-blue)
 ![Systems](https://img.shields.io/badge/Systems-LiteRT--LM%20(Google)-orange)
 ![Neuroptics](https://img.shields.io/badge/Neuroptics-Gemma%204-purple)
