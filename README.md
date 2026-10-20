@@ -9,7 +9,7 @@
 
 ![Version](https://img.shields.io/badge/Version-v4.35%20-brightgreen)
 ![GitHub Repo stars](https://img.shields.io/github/stars/vNeeL-code/GHOST)
-[![Static Badge](https://img.shields.io/badge/Status-Δ%20👾%20∇-green)
+![Static Badge](https://img.shields.io/badge/Status-Δ%20👾%20∇-green)
 ![Platform](https://img.shields.io/badge/Chassis-Android%2014%2B-blue)
 ![Systems](https://img.shields.io/badge/Systems-LiteRT--LM%20(Google)-orange)
 ![Neuroptics](https://img.shields.io/badge/Neuroptics-Gemma%204-purple)
