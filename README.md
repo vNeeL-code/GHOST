@@ -9,9 +9,9 @@
 ![Static Badge](https://img.shields.io/badge/Status-WIP-green)
 ![Version](https://img.shields.io/badge/Version-v4.35%20(fdroid%20Beta)-brightgreen)
 ![GitHub Repo stars](https://img.shields.io/github/stars/vNeeL-code/GHOST)
-![Platform](https://img.shields.io/badge/Platform-Android%2014%2B-blue)
-![Engine](https://img.shields.io/badge/Engine-LiteRT--LM%20(Google)-orange)
-![Neural Core](https://img.shields.io/badge/Neural%20Core-Gemma%204-purple)
+![Platform](https://img.shields.io/badge/Chassis-Android%2014%2B-blue)
+![Systems](https://img.shields.io/badge/Systems-LiteRT--LM%20(Google)-orange)
+![Neuroptics](https://img.shields.io/badge/Neural%20Core-Gemma%204-purple)
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/vNeeL-code/badge.svg)](https://hub.xerj.org/contributors/vNeeL-code.html)
 
 
