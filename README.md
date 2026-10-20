@@ -11,7 +11,7 @@
 ![GitHub Repo stars](https://img.shields.io/github/stars/vNeeL-code/GHOST)
 ![Platform](https://img.shields.io/badge/Chassis-Android%2014%2B-blue)
 ![Systems](https://img.shields.io/badge/Systems-LiteRT--LM%20(Google)-orange)
-![Neuroptics](https://img.shields.io/badge/Neural%20Core-Gemma%204-purple)
+![Neuroptics](https://img.shields.io/badge/NNeuroptics-Gemma%204-purple)
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/vNeeL-code/badge.svg)](https://hub.xerj.org/contributors/vNeeL-code.html)
 
 
