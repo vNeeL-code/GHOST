@@ -1,7 +1,7 @@
 # ✧ GHOST — Gemma Hosting Open Source Thingamajig
 
 > *"So, Epsilon, ChurchGPT, Leonard part six or whatever your name is... Are you a ghost this time, or an artificial intelligence thingamajig? I, personally prefer the ghost explanation. Feels more grounded to me"*  
-> — **Sarge [Red vs. Blue]**
+> — **Sarge**
 
 [![ASI Demo](https://img.youtube.com/vi/jB62dlLavSY/0.jpg)](https://youtu.be/jB62dlLavSY?si=TMZG86o1KkjuBXtw)  
 *Click to watch: The ASI trailer.*
