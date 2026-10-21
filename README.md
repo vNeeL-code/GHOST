@@ -75,11 +75,11 @@ $$\mathbf{Integrated\ AI\ System} = \mathbf{Chassis} + \mathbf{Model} + \mathbf{
 │    • Physical Sensors (Ambient Lux, Barometer, Gyroscope, Radios)      │
 ├─────────────────────────────────────────────────────────────┤
 │ 2. MODEL (Gemma 4 Cognitive Core via LiteRT-LM)                        │
-│    • Compact Tier: Gemma 4 E2B (Sub-2GB RAM Footprint)                    │
+│    • Compact Tier: Gemma 4 E2B (Sub-2GB RAM Footprint)                 │
 │    • Frontier Tier: Gemma 4 E4B (MTP Speculative Decoding)             │
-├────────────────────────────────────────────────────────────┤
+├─────────────────────────────────────────────────────────────┤
 │ 3. SYSTEMS HARNESS (GHOST Runtime Engine)                              │
-│    • SensorFusion Grounding: [Context: Live Sensory Grounding]           │
+│    • SensorFusion Grounding: [Context: Live Sensory Grounding]         │
 │    • Infinite Rolling Scratchpad: SessionMemoryCompactor + KV-Cache    │
 │    • MCP Tool Mesh: Torch, Apps, Termux, Web Search, Media, Files      │
 │    • Presentation: Ephemeral Shake Launcher, HUD, Prismatic Avatars    │
