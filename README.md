@@ -66,18 +66,18 @@ A genuine on-device companion cannot be an isolated chat bubble running in a vac
 $$\mathbf{Integrated\ AI\ System} = \mathbf{Chassis} + \mathbf{Model} + \mathbf{Systems\ Harness}$$
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
+┌────────────────────────────────────────────────────────────────┐
 │                        ✧ GHOST ARCHITECTURE                            │
 ├───────────────────────────────────────────────────────────────┤
 │ 1. CHASSIS (Physical Android Hardware)                                 │
-│    • Qualcomm Snapdragon / Tensor / Dimensity Silicon                 │
+│    • Qualcomm Snapdragon / Tensor / Dimensity Silicon                  │
 │    • Battery Drain Vectors (-mA), Thermals (°C), Dynamic RAM           │
-│    • Physical Sensors (Ambient Lux, Barometer, Gyroscope, Radios)     │
+│    • Physical Sensors (Ambient Lux, Barometer, Gyroscope, Radios)      │
 ├───────────────────────────────────────────────────────────────┤
 │ 2. MODEL (Gemma 4 Cognitive Core via LiteRT-LM)                        │
 │    • Compact Tier: Gemma 4 E2B (Sub-2GB RAM Footprint)                    │
 │    • Frontier Tier: Gemma 4 E4B (MTP Speculative Decoding)             │
-├─────────────────────────────────────────────────── ───────────┤
+├──────────────────────────────────────────────────────────────┤
 │ 3. SYSTEMS HARNESS (GHOST Runtime Engine)                              │
 │    • SensorFusion Grounding: [Context: Live Sensory Grounding]           │
 │    • Infinite Rolling Scratchpad: SessionMemoryCompactor + KV-Cache    │
