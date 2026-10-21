@@ -189,6 +189,12 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
     @Volatile private var lastShakeBurstSampleTime: Long = 0L
     @Volatile private var continuousShakeStartTime: Long = 0L
     @Volatile private var continuousShakeHits: Int = 0
+    @Volatile private var prevAccelAx: Float = 0f
+    @Volatile private var prevAccelAy: Float = 0f
+    @Volatile private var prevAccelAz: Float = 9.81f
+    @Volatile private var prevDiffX: Float = 0f
+    @Volatile private var prevDiffY: Float = 0f
+    @Volatile private var prevDiffZ: Float = 0f
 
     // Free-fall ("falling") -> Impact ("fallen") & Dual-Spike state machine
     @Volatile private var freeFallStartMs: Long = 0L
@@ -228,7 +234,7 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
                 if (audioManager?.isMusicActive != true) {
                     val userTitle = ctx?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
                     val cue = com.ghost.api.logic.ActionFlavorTexts.deviceUnlockedTts(userTitle)
-                    com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, showInChat = false)
+                    com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.PRESENCE, showInChat = false)
                 }
             }
         }
@@ -251,21 +257,21 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
                         lastLockBarkTime = now
                         val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
                         val cue = com.ghost.api.logic.ActionFlavorTexts.deviceLockedTts(userTitle)
-                        com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, showInChat = false)
+                        com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.PRESENCE, showInChat = false)
                     }
                 }
                 Intent.ACTION_POWER_CONNECTED -> {
                     lastWarnedBatteryTier = 100
                     val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
                     val cue = com.ghost.api.logic.ActionFlavorTexts.powerConnectedTts(userTitle)
-                    com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue)
+                    com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.POWER)
                     com.ghost.api.GemmaService.instance?.refreshNotificationTelemetry()
                 }
                 Intent.ACTION_POWER_DISCONNECTED -> {
                     lastWarnedBatteryTier = 100
                     val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
                     val cue = com.ghost.api.logic.ActionFlavorTexts.powerDisconnectedTts(userTitle)
-                    com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue)
+                    com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.POWER)
                     com.ghost.api.GemmaService.instance?.refreshNotificationTelemetry()
                 }
                 Intent.ACTION_BATTERY_CHANGED -> { 
@@ -277,7 +283,17 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
                         lastReportedBatteryLevel = level
                         com.ghost.api.GemmaService.instance?.refreshNotificationTelemetry()
                     }
-                    if (snapshot.battery.isCharging || level > 20) {
+                    if (snapshot.battery.isCharging) {
+                        if (level == 100 && lastWarnedBatteryTier != 1000 && (now - lastLowBatteryCueTime > 60_000L)) {
+                            lastWarnedBatteryTier = 1000
+                            lastLowBatteryCueTime = now
+                            val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
+                            val cue = com.ghost.api.logic.ActionFlavorTexts.batteryFullTts(userTitle)
+                            com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.BATTERY)
+                        } else if (level < 99) {
+                            lastWarnedBatteryTier = 100
+                        }
+                    } else if (level > 20) {
                         lastWarnedBatteryTier = 100
                     } else {
                         val tierToWarn = when {
@@ -291,7 +307,7 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
                             lastLowBatteryCueTime = now
                             val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
                             val cue = com.ghost.api.logic.ActionFlavorTexts.batteryLowTts(level, userTitle)
-                            com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue)
+                            com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.BATTERY)
                         }
                     }
                 }
@@ -304,10 +320,17 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
                     }
                     cachedBtConnected = true
                     cachedBtDeviceName = try { device?.name ?: "Connected Device" } catch (e: SecurityException) { "Connected Device" }
+                    val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
+                    val cue = com.ghost.api.logic.ActionFlavorTexts.bluetoothConnectedTts(cachedBtDeviceName ?: "Device", userTitle)
+                    com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.PERIPHERALS, showInChat = false)
                 }
                 android.bluetooth.BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+                    val prevDeviceName = cachedBtDeviceName
                     cachedBtConnected = false
                     cachedBtDeviceName = null
+                    val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
+                    val cue = com.ghost.api.logic.ActionFlavorTexts.bluetoothDisconnectedTts(prevDeviceName, userTitle)
+                    com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.PERIPHERALS, showInChat = false)
                 }
                 android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED -> {
                     val state = intent.getIntExtra(android.bluetooth.BluetoothAdapter.EXTRA_STATE, android.bluetooth.BluetoothAdapter.ERROR)
@@ -452,18 +475,32 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
                             }
                         }
 
+                        val diffX = ax - prevAccelAx
+                        val diffY = ay - prevAccelAy
+                        val diffZ = az - prevAccelAz
+                        val isDirectionReversal = (diffX * prevDiffX < -4f) || (diffY * prevDiffY < -4f) || (diffZ * prevDiffZ < -4f)
+                        prevDiffX = diffX
+                        prevDiffY = diffY
+                        prevDiffZ = diffZ
+                        prevAccelAx = ax
+                        prevAccelAy = ay
+                        prevAccelAz = az
+
                         // 2. Continuous Shaking / Vertigo Reflex ("I think I'm going to be sick...")
-                        if (deltaFromGravity > 12.5f) {
-                            if (now - lastShakeBurstSampleTime > 1200L) {
+                        // Robust rejection of pocket bounce / walking:
+                        // Walking vertical bounce is rhythmic and produces deltaFromGravity ~ 10-14 m/s² with unidirectional step spikes.
+                        // Deliberate shaking requires violent alternating reversals (deltaFromGravity > 18.5 m/s² and direction reversal)
+                        if (deltaFromGravity > 18.5f && isDirectionReversal) {
+                            if (now - lastShakeBurstSampleTime > 650L) {
                                 continuousShakeStartTime = now
                                 continuousShakeHits = 1
                                 lastShakeBurstSampleTime = now
-                            } else if (now - lastShakeBurstSampleTime >= 140L) {
+                            } else if (now - lastShakeBurstSampleTime >= 80L) {
                                 continuousShakeHits++
                                 lastShakeBurstSampleTime = now
-                                if (continuousShakeHits >= 12 &&
-                                    (now - continuousShakeStartTime) >= 2000L &&
-                                    (now - lastVertigoBarkTime) > 25_000L
+                                if (continuousShakeHits >= 14 &&
+                                    (now - continuousShakeStartTime) >= 2200L &&
+                                    (now - lastVertigoBarkTime) > 30_000L
                                 ) {
                                     lastVertigoBarkTime = now
                                     continuousShakeHits = 0
@@ -471,9 +508,11 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
                                     sawReboundDipAfterSpike = false
                                     val userTitle = com.ghost.api.Constants.getUserTitle(context)
                                     val cue = com.ghost.api.logic.ActionFlavorTexts.continuousShakeTts(userTitle)
-                                    com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, showInChat = false)
+                                    com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.MOTION, showInChat = false)
                                 }
                             }
+                        } else if (continuousShakeHits > 0 && (now - lastShakeBurstSampleTime > 650L)) {
+                            continuousShakeHits = 0
                         }
 
                         // 3A. Free-Fall -> Impact Transition ("Fallen" vs "Falling"):
@@ -495,7 +534,7 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
                             lastDropLandedFlat = landedFlat
                             val userTitle = com.ghost.api.Constants.getUserTitle(context)
                             val cue = com.ghost.api.logic.ActionFlavorTexts.fallenImpactTts(userTitle, landedFlat)
-                            com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, showInChat = false)
+                            com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.MOTION, showInChat = false)
                         }
                         // 3B. Dual-Spike Collision Reflex ("Ow!" without free-fall):
                         // Prevents single-spike false positives when setting phone down or tapping.
@@ -524,7 +563,7 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
                                     sawReboundDipAfterSpike = false
                                     val userTitle = com.ghost.api.Constants.getUserTitle(context)
                                     val cue = com.ghost.api.logic.ActionFlavorTexts.impactSpikeTts(userTitle)
-                                    com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, showInChat = false)
+                                    com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.MOTION, showInChat = false)
                                 }
                             }
                         }
@@ -1078,7 +1117,7 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
     fun getContextString(): String {
         return try {
             val ctx = getContextSnapshot()
-            buildContextString(ctx, isForNotification = false)
+            buildContextString(ctx)
         } catch (e: Exception) {
             Timber.e(e, "CRITICAL: buildContextString failed!")
             "🔋 ??% 🌡️ ??°C\n⚠️ Sensors unavailable: ${e.message}"
@@ -1087,50 +1126,48 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
 
     /**
      * Concise formatted telemetry for the system notification shade.
-     * Prevents awkward line wraps across narrow phone notification cards.
+     * Displays:
+     * - Machine status: <traffic light> <text> <emoji>
+     * - RAM utilization & total memory availability
+     * - Flash storage free
+     * - Thermals
+     * - System uptime
+     * Redundant status bar items (Battery level, Wi-Fi, Bluetooth) and orientation are stripped.
      */
-    fun getNotificationTelemetryString(): String {
+    fun getNotificationTelemetryString(machineStatus: String? = null): String {
         return try {
             val ctx = getContextSnapshot()
-            buildContextString(ctx, isForNotification = true)
+            buildNotificationCardString(ctx, machineStatus)
         } catch (e: Exception) {
-            getContextString()
+            "Machine status: ${machineStatus ?: "🟢 Fully operational ✧"}\n🧠 RAM: nominal | ⏱️ Uptime: active"
         }
     }
 
-    private fun buildContextString(ctx: DeviceContext, isForNotification: Boolean = false): String {
+    private fun buildNotificationCardString(ctx: DeviceContext, machineStatus: String?): String {
+        val sb = StringBuilder()
+        val status = machineStatus ?: "🟢 Fully operational ✧"
+        sb.append("Machine status: $status\n")
+
+        val ramUsed = ctx.system.ramUsedPercent
+        val ramAvailGB = String.format(java.util.Locale.US, "%.1f", ctx.system.ramAvailableMB / 1024.0)
+        val storageGB = String.format(java.util.Locale.US, "%.1f", ctx.system.storageFreeGB)
+        val temp = Math.round(ctx.battery.temperature)
+        sb.append("🧠 RAM: $ramUsed% (${ramAvailGB}GB free) | 💽 ${storageGB}GB free | 🌡️ ${temp}°C\n")
+
+        val hours = ctx.system.uptimeMinutes / 60
+        val mins = ctx.system.uptimeMinutes % 60
+        sb.append("⏱️ Uptime: ${hours}h${mins}m")
+        return sb.toString()
+    }
+
+    private fun buildContextString(ctx: DeviceContext): String {
         val sb = StringBuilder()
 
         // --- ROW 1: POWER & THERMALS (Vital Signs) ---
         val battLevel = ctx.battery.level
-        val levelStr = if (battLevel in 0..100) "$battLevel%" else "Unknown"
-        val isFull = (ctx.battery.isCharging && battLevel >= 95) || battLevel >= 98
-        val chargingDescriptor = when {
-            isFull -> "Fully Charged ⚡"
-            ctx.battery.isCharging -> "Charging on wire ⚡"
-            else -> "On Battery"
-        }
-        val energyDescriptor = when {
-            battLevel >= 70 -> "High energy / Alert"
-            battLevel >= 30 -> "Moderate energy"
-            battLevel in 1..29 -> if (ctx.battery.isCharging) "Replenishing energy" else "Low energy"
-            else -> "Nominal"
-        }
-
-        if (isForNotification) {
-            val battIcon = if (battLevel <= 15) "🪫" else "🔋"
-            val chargeSymbol = if (ctx.battery.isCharging) "⚡" else ""
-            sb.append("$battIcon $levelStr$chargeSymbol")
-            sb.append(" | 🌡️ ${Math.round(ctx.battery.temperature)}°C")
-            val ramUsed = ctx.system.ramUsedPercent
-            sb.append(" | 🧠 RAM: $ramUsed%")
-            sb.append(" | 💿 ${String.format(java.util.Locale.US, "%.1f", ctx.system.storageFreeGB)}GB free")
-            sb.append("\n")
-        } else {
-            val verbalBattery = formatBatteryVerbal(battLevel, ctx.battery.isCharging)
-            sb.append("Battery: $verbalBattery\n")
-            sb.append("Thermals: ${Math.round(ctx.battery.temperature)}°C nominal | RAM: ${ctx.system.ramUsedPercent}% utilized | Storage: ${String.format(java.util.Locale.US, "%.1f", ctx.system.storageFreeGB)}GB free\n")
-        }
+        val verbalBattery = formatBatteryVerbal(battLevel, ctx.battery.isCharging)
+        sb.append("Battery: $verbalBattery\n")
+        sb.append("Thermals: ${Math.round(ctx.battery.temperature)}°C nominal | RAM: ${ctx.system.ramUsedPercent}% utilized | Storage: ${String.format(java.util.Locale.US, "%.1f", ctx.system.storageFreeGB)}GB free\n")
 
         // --- ROW 2: ENVIRONMENT ---
         val env = ctx.environment

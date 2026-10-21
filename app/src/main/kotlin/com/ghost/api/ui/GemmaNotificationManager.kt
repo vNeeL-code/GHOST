@@ -60,10 +60,20 @@ class GemmaNotificationManager(private val context: Context) {
                 "GHOST Status",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "GHOST background status"
+                description = "GHOST background status and telemetry"
                 setShowBadge(false)
             }
+            val convoChannel = NotificationChannel(
+                CONVO_CHANNEL_ID,
+                "GHOST Responses",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Agentic companion responses, interactions, and alerts"
+                setShowBadge(true)
+                enableVibration(true)
+            }
             notificationManager.createNotificationChannel(statusChannel)
+            notificationManager.createNotificationChannel(convoChannel)
         }
     }
 
@@ -108,7 +118,7 @@ class GemmaNotificationManager(private val context: Context) {
         val cleanDeviceName = com.ghost.api.logic.ContextManager.resolveDeviceCallSign(context)
         val notifTitle = "✧ $cleanDeviceName:"
 
-        val notification = NotificationCompat.Builder(context, STATUS_CHANNEL_ID)
+        val notification = NotificationCompat.Builder(context, CONVO_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_notify_chat)
             .setContentTitle(notifTitle)
             .setContentText(shortResponse)
@@ -142,7 +152,7 @@ class GemmaNotificationManager(private val context: Context) {
             browserIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val notification = NotificationCompat.Builder(context, STATUS_CHANNEL_ID)
+        val notification = NotificationCompat.Builder(context, CONVO_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_notify_chat)
             .setContentTitle(notifTitle)
             .setContentText(url)

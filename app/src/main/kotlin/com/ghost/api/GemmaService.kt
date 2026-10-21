@@ -127,6 +127,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     private val isCoolingDown = java.util.concurrent.atomic.AtomicBoolean(false)
     private val criticalCount = java.util.concurrent.atomic.AtomicInteger(0)
     private var lastAutoReloadAttemptTime = 0L
+    private val diaryMutex = kotlinx.coroutines.sync.Mutex()
 
 
     // ==========================================
@@ -1362,13 +1363,28 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     }
 
     /**
-     * Broadcast deterministic device status cues (battery, power, thermal, physical reflexes, lock/unlock)
+     * Broadcast deterministic device status cues (battery, power, thermal, physical reflexes, lock/unlock, peripherals)
      */
-    fun processDeviceStatusCue(cueText: String, showInChat: Boolean = true) {
+    fun processDeviceStatusCue(
+        cueText: String,
+        category: com.ghost.api.logic.CueCategory = com.ghost.api.logic.CueCategory.POWER,
+        showInChat: Boolean = true
+    ) {
         val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
         if (!prefs.getBoolean(Constants.PREF_PASSIVE_TTS, true)) return
 
-        Timber.i("⚡ Device Status Cue: $cueText (showInChat=$showInChat)")
+        val catKey = when (category) {
+            com.ghost.api.logic.CueCategory.BATTERY -> Constants.PREF_BARK_BATTERY
+            com.ghost.api.logic.CueCategory.POWER -> Constants.PREF_BARK_POWER
+            com.ghost.api.logic.CueCategory.MOTION -> Constants.PREF_BARK_MOTION
+            com.ghost.api.logic.CueCategory.PRESENCE -> Constants.PREF_BARK_PRESENCE
+            com.ghost.api.logic.CueCategory.PERIPHERALS -> Constants.PREF_BARK_PERIPHERALS
+            com.ghost.api.logic.CueCategory.THERMAL -> Constants.PREF_BARK_THERMAL
+            com.ghost.api.logic.CueCategory.NOTIFICATIONS -> Constants.PREF_BARK_NOTIFS
+        }
+        if (!prefs.getBoolean(catKey, true)) return
+
+        Timber.i("⚡ Device Status Cue [$category]: $cueText (showInChat=$showInChat)")
         if (::ttsManager.isInitialized) {
             ttsManager.speakPassiveAnnouncement(cueText)
         }
@@ -1669,16 +1685,36 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     }
 
 
-    private fun buildNotification(textToNotify: String): Notification {
-        // Internal fallback animation timing (Synchronized to 250ms)
-        val frame = try {
-            val seq = animations[(System.currentTimeMillis() / 10000 % animations.size).toInt()]
-            val idx = (System.currentTimeMillis() / 250 % seq.size).toInt()
-            seq[idx]
-        } catch(e:Exception) { "Δ \uD83D\uDC7E ∇" }
+    private var currentAnimationFrame: String = "✦✧✧✧✧✧✧✧✧✧✧✧"
+
+    private fun getMachineStatus(): String {
+        val ctx = if (::sensorFusionManager.isInitialized) sensorFusionManager.getContextSnapshot() else null
+        val battLevel = ctx?.battery?.level ?: 100
+        val cpuTemp = ctx?.environment?.cpuTemp?.toInt() ?: (ctx?.battery?.temperature?.toInt() ?: 25)
+        val ramUsedPercent = ctx?.system?.ramUsedPercent ?: 0
+        val isThermalStress = try {
+            (::hardwarePropertiesManager.isInitialized && hardwarePropertiesManager.thermalState.value.name != "COOL") || cpuTemp >= 48
+        } catch (e: Exception) { false }
+        val isBatteryCritical = battLevel <= 15
+        val userBackend = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE).getString(Constants.PREF_USER_BACKEND, "AUTO")
+
+        return when {
+            // Worried: Battery critical or thermal throttling/stress
+            isBatteryCritical || isThermalStress -> "🔴 Worried 🪫✧💦"
+            // Busy: RAM too busy/pressured, or actively inferencing/downloading
+            isInferencing || (isSuspendedDueToRam.get() && ramUsedPercent >= 54) || modelDownloader.downloadStatus.value is ModelDownloader.DownloadState.Downloading -> "🟠 Busy 🔥✧💦"
+            // Napping: Engine unloaded / suspended due to RAM or user setting
+            !isGemmaLoaded() || isSuspendedDueToRam.get() || userBackend == "OFF" -> "🔵 Napping ⚡🐑⚡"
+            // Fully operational: Engine loaded & nominal
+            else -> "🟢 Fully operational ✧"
+        }
+    }
+
+    private fun buildNotification(textToNotify: String? = null): Notification {
+        val machineStatus = getMachineStatus()
 
         val iconRes = if (::sensorFusionManager.isInitialized) {
-            val battery = try { sensorFusionManager.getContextSnapshot().battery } catch(e:Exception) { null }
+            val battery = try { sensorFusionManager.getContextSnapshot().battery } catch (e: Exception) { null }
             when {
                 battery != null && battery.level <= 15 -> android.R.drawable.stat_notify_error
                 else -> android.R.drawable.ic_dialog_info
@@ -1687,46 +1723,39 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             android.R.drawable.ic_dialog_info
         }
 
-        val text = if (textToNotify.length < 32) textToNotify else frame
+        // Transitory status messages (e.g. downloads, critical recovery, or crash alerts)
+        val isTransitoryStatus = textToNotify != null && (
+            textToNotify.contains("download", ignoreCase = true) ||
+            textToNotify.contains("offline", ignoreCase = true) ||
+            textToNotify.contains("error", ignoreCase = true) ||
+            textToNotify.contains("crash", ignoreCase = true) ||
+            textToNotify.contains("switched to", ignoreCase = true) ||
+            textToNotify.contains("recovering", ignoreCase = true)
+        )
+        // Collapsed view exclusively shows the active animation frame, never raw machine statuses
+        val collapsedText = if (isTransitoryStatus) textToNotify!! else currentAnimationFrame
+
         val title = "Δ \uD83D\uDC7E ∇"
 
-        // Full Telemetry for expanded view
-        val ctx = if (::sensorFusionManager.isInitialized) sensorFusionManager.getContextSnapshot() else null
-        val ramUsed = ctx?.system?.let { it.ramTotalMB - it.ramAvailableMB } ?: 0
-        val cpuTemp = ctx?.environment?.cpuTemp?.toInt() ?: 0
-        val telemetry = "SYS_OPERATIONAL | CPU: ${cpuTemp}°C [THERMAL_LOAD] | RAM: ${ramUsed}MB [RESERVED_POOL]"
-
-        // Build expanded telemetry view for notification expansion
-        val expandedText = try {
-            if (::hardwarePropertiesManager.isInitialized && hardwarePropertiesManager.thermalState.value.name != "COOL") {
-                 "\uD83C\uDF21\uFE0F ${hardwarePropertiesManager.thermalState.value.name} | ${text}"
-            } else {
-                text
-            }
-        } catch (e: Exception) {
-            text
-        }
-
-        // Expanded style text (BigText)
-        val bigTextContent = if (::sensorFusionManager.isInitialized) {
-             // Use concise telemetry for expanded view
-             sensorFusionManager.getNotificationTelemetryString()
+        // Expanded telemetry card for notification expansion
+        val cardTelemetry = if (::sensorFusionManager.isInitialized) {
+            sensorFusionManager.getNotificationTelemetryString(machineStatus)
         } else {
-             text
+            "Machine status: $machineStatus\n⏱️ Uptime: active"
         }
 
         val builder = Notification.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
-            .setContentText(text)
+            .setContentText(collapsedText)
             .setSmallIcon(iconRes)
             .setSubText("Agentic Gemma Inference")
             .setOnlyAlertOnce(true)
             .setStyle(Notification.BigTextStyle()
-                .bigText(if (::sensorFusionManager.isInitialized) sensorFusionManager.getNotificationTelemetryString() else telemetry)
+                .bigText(cardTelemetry)
                 .setBigContentTitle("Δ \uD83D\uDC7E ∇")
                 .setSummaryText("Agentic Gemma Inference"))
 
-        if (text.contains("offline", ignoreCase = true) || text.contains("Model weights offline", ignoreCase = true)) {
+        if (collapsedText.contains("offline", ignoreCase = true) || collapsedText.contains("Model weights offline", ignoreCase = true)) {
             val downloadIntent = Intent(this, GemmaService::class.java).apply {
                 action = Constants.ACTION_RECOVER_MODEL
             }
@@ -1745,21 +1774,6 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     }
 
     private val animations = listOf(
-        // Electric sheep - grazing pattern (Moving)
-        listOf(
-            "⚡🐑⚡      ",
-            " ⚡🐑⚡     ",
-            "  ⚡🐑⚡    ",
-            "   ⚡🐑⚡   ",
-            "    ⚡🐑⚡  ",
-            "     ⚡🐑⚡ ",
-            "      ⚡🐑⚡",
-            "     ⚡🐑⚡ ",
-            "    ⚡🐑⚡  ",
-            "   ⚡🐑⚡   ",
-            "  ⚡🐑⚡    ",
-            " ⚡🐑⚡     "
-        ),
         // gem loading
         listOf(
             "✧✧✧✧✧✧✧✧✧✧✧✧",
@@ -1836,9 +1850,10 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             while (isActive) {
                 val isInteractive = powerManager?.isInteractive ?: true
                 
-                if (isIdle() && isInteractive) {
-                    val frame = getNextAnimationFrame()
-                    updateNotification(" $frame")
+                if (isInteractive) {
+                    currentAnimationFrame = getNextAnimationFrame()
+                    val manager = getSystemService(NotificationManager::class.java)
+                    manager.notify(NOTIFICATION_ID, buildNotification())
                 }
 
                 // RAM Safety Valve: Check if system is under critical memory pressure (>= 94% or < 400MB free)
@@ -1848,14 +1863,11 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
                 val now = System.currentTimeMillis()
 
-                // Auto-Reload Safety Valve: If engine was suspended due to memory pressure,
-                // check if system memory utilization has cooled below 54% (< 0.54 utilization & >= 2.5GB free).
-                // Automatically re-initializes engine weights back into RAM without user intervention!
+                // Auto-Reload Safety Valve: Proactively reload Gemma as soon as memory cools below 54%
+                // and available RAM >= 2.0GB, without waiting for screen-off or app poke!
                 val userBackend = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
                     .getString(Constants.PREF_USER_BACKEND, "AUTO")
-                val isGhostForeground = ::overlayManager.isInitialized && overlayManager.isAppInForeground
-                val safeToReload = !isInteractive || isGhostForeground
-                if (isSuspendedDueToRam.get() && userBackend != "OFF" && !isInferencing && safeToReload && (now - lastAutoReloadAttemptTime > 45000L)) {
+                if (isSuspendedDueToRam.get() && userBackend != "OFF" && !isInferencing && (now - lastAutoReloadAttemptTime > 15000L)) {
                     val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
                     if (activityManager != null) {
                         val memInfo = ActivityManager.MemoryInfo()
@@ -1867,19 +1879,22 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                             memInfo.availMem >= Constants.RAM_RELOAD_MIN_FREE_BYTES && 
                             !memInfo.lowMemory) {
                             lastAutoReloadAttemptTime = now
-                            Timber.i("♻️ System RAM cooled to ${(utilization * 100).toInt()}% (${memInfo.availMem / (1024 * 1024)}MB free). Auto-reloading suspended engine weights...")
-                            updateNotification("✧ Memory calm: Reloading Gemma...")
+                            Timber.i("♻️ System RAM cooled to ${(utilization * 100).toInt()}% (${memInfo.availMem / (1024 * 1024)}MB free). Proactively auto-reloading suspended engine weights...")
+                            isSuspendedDueToRam.set(false)
                             serviceScope.launch {
                                 val ready = ensureEngineReady()
                                 if (!ready) {
-                                    Timber.w("Auto-reload attempt failed; cooling down for 45s")
+                                    Timber.w("Auto-reload attempt failed; cooling down for 20s")
+                                    isSuspendedDueToRam.set(true)
+                                } else {
+                                    refreshNotificationTelemetry()
                                 }
                             }
                         }
                     }
                 }
-                // Audit 3.0: Reduced refresh rate to 5s to slash IPC overhead
-                val delayMs = if (isInteractive) 5000L else 30000L 
+                // Animation frame cadence: 2500ms when screen is on, 30s when screen is off to conserve battery
+                val delayMs = if (isInteractive) 2500L else 30000L 
                 
                 if (now - lastActivityTime > 15 * 60 * 1000 && now - lastKvFlushTime > 15 * 60 * 1000) {
                     lastKvFlushTime = now
@@ -1930,12 +1945,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     fun refreshNotificationTelemetry() {
         try {
             val manager = getSystemService(NotificationManager::class.java)
-            val currentText = when {
-                isSuspendedDueToRam.get() -> "✧ GHOST: Suspended (Standby)"
-                isInferencing -> "✧ Inferencing..."
-                else -> "✧ Machine Status: Operational"
-            }
-            manager.notify(NOTIFICATION_ID, buildNotification(currentText))
+            manager.notify(NOTIFICATION_ID, buildNotification())
         } catch (e: Exception) {
             Timber.w(e, "Failed to refresh notification telemetry")
         }
@@ -2579,26 +2589,36 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     }
 
     suspend fun runDiaryCycleSuspend(): Boolean {
+        if (!diaryMutex.tryLock()) {
+            Timber.w("📔 Diary cycle skipped — already executing in another coroutine (mutex locked)")
+            return false
+        }
         val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
         val userBackend = prefs.getString(Constants.PREF_USER_BACKEND, "AUTO")
         if (userBackend == "OFF") {
             Timber.w("📔 Diary cycle skipped — engine is OFF")
+            diaryMutex.unlock()
             return false
         }
 
-        // Debounce safety guard: prevent duplicate execution within 30 minutes
+        // Hard debounce safety guard: prevent duplicate execution within 55 minutes
         val lastExecution = prefs.getLong("last_diary_execution_time", 0L)
         val nowMs = System.currentTimeMillis()
-        if (nowMs - lastExecution < 30 * 60 * 1000L) {
-            Timber.i("📔 Diary cycle skipped — already executed within the last 30 minutes (debounce guard)")
+        if (lastExecution > 0L && (nowMs - lastExecution) < 55 * 60 * 1000L) {
+            Timber.i("📔 Diary cycle skipped — already executed within the last 55 minutes (${(nowMs - lastExecution) / 60000}m elapsed)")
+            diaryMutex.unlock()
             return false
         }
+
+        // Immediately mark execution start in SharedPreferences to prevent race conditions from concurrent workers/alarms
+        prefs.edit().putLong("last_diary_execution_time", nowMs).apply()
 
         // Thermal safety guard: Defer diary if SoC is under heavy load/gaming (HOT or CRITICAL)
         if (::hardwarePropertiesManager.isInitialized) {
             val thermal = hardwarePropertiesManager.thermalState.value
             if (thermal == HardwarePropertiesManager.ThermalState.CRITICAL || thermal == HardwarePropertiesManager.ThermalState.HOT) {
                 Timber.w("📔 Diary cycle deferred — thermal state is $thermal (device under heavy GPU/gaming load)")
+                diaryMutex.unlock()
                 return false
             }
         }
@@ -2777,6 +2797,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             Timber.e(e, "📔 Diary cycle failed")
             scheduleNextDiaryAlarm(forceReschedule = true)
             false
+        } finally {
+            diaryMutex.unlock()
         }
     }
 

@@ -47,10 +47,10 @@ class DiaryWorker(
             "24" -> 24L
             else -> 12L
         }
-        val minElapsedMs = (cadenceHours * 3600 * 1000L) - (10 * 60 * 1000L)
+        val minElapsedMs = ((cadenceHours * 3600 * 1000L) - (10 * 60 * 1000L)).coerceAtLeast(55 * 60 * 1000L)
         val elapsed = System.currentTimeMillis() - lastRun
         if (lastRun > 0 && elapsed < minElapsedMs) {
-            Timber.i("📔 DiaryWorker skipped: Only ${elapsed / 60000} mins elapsed (cadence is ${cadenceHours}h)")
+            Timber.i("📔 DiaryWorker skipped: Only ${elapsed / 60000} mins elapsed (cadence is ${cadenceHours}h, min required is ${minElapsedMs / 60000}m)")
             return Result.success()
         }
 

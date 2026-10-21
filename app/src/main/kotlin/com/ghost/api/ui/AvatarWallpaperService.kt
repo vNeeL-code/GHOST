@@ -1,6 +1,7 @@
 package com.ghost.api.ui
 
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.*
 import android.hardware.Sensor
@@ -289,6 +290,21 @@ class AvatarWallpaperService : WallpaperService() {
             }
         }
         
+        private var isCharging = false
+        private val powerReceiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                when (intent?.action) {
+                    android.content.Intent.ACTION_POWER_CONNECTED -> isCharging = true
+                    android.content.Intent.ACTION_POWER_DISCONNECTED -> isCharging = false
+                    android.content.Intent.ACTION_BATTERY_CHANGED -> {
+                        val status = intent.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1)
+                        isCharging = (status == android.os.BatteryManager.BATTERY_STATUS_CHARGING ||
+                                      status == android.os.BatteryManager.BATTERY_STATUS_FULL)
+                    }
+                }
+            }
+        }
+
         init {
             sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
             rotationSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
@@ -298,6 +314,14 @@ class AvatarWallpaperService : WallpaperService() {
             logoPaint.textAlign = Paint.Align.CENTER
             logoPaint.typeface = Typeface.DEFAULT_BOLD
             logoPaint.clearShadowLayer()
+
+            // Initialize charging status at creation
+            try {
+                val bIntent = this@AvatarWallpaperService.registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
+                val status = bIntent?.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1) ?: -1
+                isCharging = (status == android.os.BatteryManager.BATTERY_STATUS_CHARGING ||
+                              status == android.os.BatteryManager.BATTERY_STATUS_FULL)
+            } catch (e: Exception) {}
         }
 
         override fun onCreate(surfaceHolder: SurfaceHolder?) {
@@ -306,6 +330,17 @@ class AvatarWallpaperService : WallpaperService() {
             val prefs = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
             prefs.registerOnSharedPreferenceChangeListener(prefsListener)
             updateCachedPreferences()
+
+            val filter = android.content.IntentFilter().apply {
+                addAction(android.content.Intent.ACTION_POWER_CONNECTED)
+                addAction(android.content.Intent.ACTION_POWER_DISCONNECTED)
+                addAction(android.content.Intent.ACTION_BATTERY_CHANGED)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                this@AvatarWallpaperService.registerReceiver(powerReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                this@AvatarWallpaperService.registerReceiver(powerReceiver, filter)
+            }
         }
 
         override fun onVisibilityChanged(visible: Boolean) {
@@ -482,8 +517,10 @@ class AvatarWallpaperService : WallpaperService() {
                     val width = canvas.width.toFloat()
                     val height = canvas.height.toFloat()
                     
-                    // Small base so rings start tight to center and explode outward on beats
-                    val dynamicBaseRadius = min(width, height) * 0.08f
+                    // Charging pulsation & breathing aura (Mora companion state animation)
+                    val chargingPulse = if (isCharging) (sin(animTime * 2.5f) * 0.5f + 0.5f) else 0f
+                    // Small base so rings start tight to center and explode outward on beats / breathe on charging
+                    val dynamicBaseRadius = min(width, height) * (0.08f + if (isCharging) 0.007f * chargingPulse else 0f)
                     
                     val density = resources.displayMetrics.density
                     val isLandscape = width > height
@@ -516,10 +553,44 @@ class AvatarWallpaperService : WallpaperService() {
                     albumArtAlpha += (targetAlbumArtAlpha - albumArtAlpha) * 0.08f
 
                     val hasAudio = isMedia || smoothedIntensity > 3f || smoothedBass > 3f
-                    val targetRingsAlpha = if (hasAudio) 1f else 0f
+                    val targetRingsAlpha = when {
+                        hasAudio -> 1f
+                        isCharging -> 0.35f + 0.35f * chargingPulse
+                        else -> 0f
+                    }
                     ringsAlpha += (targetRingsAlpha - ringsAlpha) * 0.08f
 
                     canvas.drawColor(COLOR_BACKGROUND)
+
+                    // Draw soft pulsating electric charging aura around avatar core matching preset geometry
+                    if (isCharging) {
+                        val chargeAlpha = (28 + (42 * chargingPulse).toInt()).coerceIn(0, 255)
+                        paint.style = Paint.Style.STROKE
+                        paint.strokeWidth = 2.4f * density
+                        paint.color = ColorUtils.setAlphaComponent(COLOR_CYAN_ACCENT, chargeAlpha)
+                        val r1 = dynamicBaseRadius * (1.65f + 0.35f * chargingPulse)
+                        val r2 = dynamicBaseRadius * (2.2f + 0.45f * chargingPulse)
+                        when (cachedPreset) {
+                            "OPTION_B" -> {
+                                drawHexagon(canvas, baseCx, baseCy, r1, paint)
+                                paint.strokeWidth = 1.2f * density
+                                paint.color = ColorUtils.setAlphaComponent(COLOR_COBALT_GLOW, (chargeAlpha * 0.65f).toInt())
+                                drawHexagon(canvas, baseCx, baseCy, r2, paint)
+                            }
+                            "OPTION_C" -> {
+                                drawEquilateralTriangle(canvas, baseCx, baseCy, r1, 0f, paint)
+                                paint.strokeWidth = 1.2f * density
+                                paint.color = ColorUtils.setAlphaComponent(COLOR_COBALT_GLOW, (chargeAlpha * 0.65f).toInt())
+                                drawEquilateralTriangle(canvas, baseCx, baseCy, r2, 0f, paint)
+                            }
+                            else -> {
+                                canvas.drawCircle(baseCx, baseCy, r1, paint)
+                                paint.strokeWidth = 1.2f * density
+                                paint.color = ColorUtils.setAlphaComponent(COLOR_COBALT_GLOW, (chargeAlpha * 0.65f).toInt())
+                                canvas.drawCircle(baseCx, baseCy, r2, paint)
+                            }
+                        }
+                    }
                     
                     rotationAngle += 0.2f + (smoothedBass / 100f)
                     
@@ -1065,8 +1136,9 @@ class AvatarWallpaperService : WallpaperService() {
             val avatarCy = baseCy + tiltY * 1.20f
 
             // 1. Stepped Concentric Blooming Hexagons behind Mother Hexagon
+            val chargingHexBloom = if (isCharging) (sin(animTime * 2.5f) * 0.5f + 0.5f) * 14f else 0f
             for (hb in 0 until 4) {
-                val radius = coreRadius * HEX_BLOOM_CORE_MULTS[hb] + (hallwayGentleSpread * (0.20f + hb * 0.12f))
+                val radius = coreRadius * HEX_BLOOM_CORE_MULTS[hb] + (hallwayGentleSpread * (0.20f + hb * 0.12f)) + (chargingHexBloom * (hb + 1) * 0.5f)
                 val swatchIndex = when (hb) {
                     3 -> 1 % currentColors.size
                     2 -> 0 % currentColors.size
@@ -1079,7 +1151,7 @@ class AvatarWallpaperService : WallpaperService() {
                 // Translucent aura fill
                 paint.style = Paint.Style.FILL
                 paint.color = hexGlowColor
-                val fillAlphaMult = 0.35f + (smoothedIntensity / 140f) + (strobeFlash * 0.30f)
+                val fillAlphaMult = 0.35f + (smoothedIntensity / 140f) + (strobeFlash * 0.30f) + (if (isCharging) 0.18f * (chargingHexBloom / 14f) else 0f)
                 paint.alpha = (HEX_BLOOM_ALPHAS[hb] * fillAlphaMult).toInt().coerceIn(15, 140)
                 drawHexagon(canvas, avatarCx, avatarCy, radius, paint)
 
@@ -1373,8 +1445,9 @@ class AvatarWallpaperService : WallpaperService() {
             canvas.save()
             canvas.translate(focalCx, focalCy)
 
+            val chargingTriPulse = if (isCharging) (sin(animTime * 2.5f) * 0.5f + 0.5f) * 14f else 0f
             for (tb in 0 until 4) {
-                val radius = focalRadius * TRI_BLOOM_FOCAL_MULTS[tb] + (melodyExpansion * TRI_BLOOM_MELODY_MULTS[tb])
+                val radius = focalRadius * TRI_BLOOM_FOCAL_MULTS[tb] + (melodyExpansion * TRI_BLOOM_MELODY_MULTS[tb]) + (chargingTriPulse * (tb + 1) * 0.5f)
                 val swatchIndex = when (tb) {
                     3 -> 1 % currentColors.size
                     2 -> 0 % currentColors.size
@@ -1386,7 +1459,8 @@ class AvatarWallpaperService : WallpaperService() {
 
                 paint.style = Paint.Style.FILL
                 paint.color = bloomColor
-                paint.alpha = (TRI_BLOOM_ALPHAS[tb] * 0.45f).toInt().coerceIn(15, 95)
+                val fillAlpha = ((TRI_BLOOM_ALPHAS[tb] + (chargingTriPulse * 2f).toInt()) * 0.45f).toInt().coerceIn(15, 110)
+                paint.alpha = fillAlpha
                 drawEquilateralTriangle(canvas, 0f, 0f, radius, 0f, paint)
 
                 paint.style = Paint.Style.STROKE
@@ -1778,6 +1852,9 @@ class AvatarWallpaperService : WallpaperService() {
             sensorManager?.unregisterListener(this)
             try {
                 android.view.Choreographer.getInstance().removeFrameCallback(frameCallback)
+            } catch (e: Exception) {}
+            try {
+                this@AvatarWallpaperService.unregisterReceiver(powerReceiver)
             } catch (e: Exception) {}
         }
     }

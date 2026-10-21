@@ -105,7 +105,7 @@ class GemmaNotificationListener : NotificationListenerService() {
         
         // Passive Notification Announcement: Snappy spoken alert & inline chat bubble without 20s LLM loop
         val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
-        if (prefs.getBoolean(Constants.PREF_PASSIVE_TTS, false) && (text.isNotBlank() || title.isNotBlank())) {
+        if (prefs.getBoolean(Constants.PREF_PASSIVE_TTS, false) && prefs.getBoolean(Constants.PREF_BARK_NOTIFS, true) && (text.isNotBlank() || title.isNotBlank())) {
             val isMedia = pkg.contains("music") || pkg.contains("audio") || pkg.contains("player") || pkg.contains("youtube") || title.contains("playing", ignoreCase = true)
             val isGroupSummary = (sbn.notification.flags and android.app.Notification.FLAG_GROUP_SUMMARY) != 0
             val category = sbn.notification.category

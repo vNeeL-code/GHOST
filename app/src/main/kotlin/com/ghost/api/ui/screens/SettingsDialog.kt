@@ -9,9 +9,12 @@ import android.net.Uri
 import android.provider.Settings
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
@@ -51,6 +54,14 @@ fun SettingsDialog(
     var edgeLightsEnabled by remember { mutableStateOf(EdgeLightsManager.isShowing) }
     var edgeLightsStyle by remember { mutableStateOf(prefs.getString(Constants.PREF_EDGE_LIGHT_STYLE, Constants.EDGE_STYLE_BARS) ?: Constants.EDGE_STYLE_BARS) }
     var passiveTtsEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_PASSIVE_TTS, true)) }
+    var barkBattery by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_BARK_BATTERY, true)) }
+    var barkPower by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_BARK_POWER, true)) }
+    var barkMotion by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_BARK_MOTION, true)) }
+    var barkPresence by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_BARK_PRESENCE, true)) }
+    var barkPeripherals by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_BARK_PERIPHERALS, true)) }
+    var barkThermal by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_BARK_THERMAL, true)) }
+    var barkNotifs by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_BARK_NOTIFS, true)) }
+    var showPassiveCuesSubmenu by remember { mutableStateOf(false) }
     var diaryActive by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_AUTONOMOUS_DIARY, true)) }
     var diaryCadence by remember { mutableStateOf(prefs.getString(Constants.PREF_DIARY_CADENCE, "12") ?: "12") }
     var diarySyncCalendar by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_DIARY_SYNC_CALENDAR, false)) }
@@ -199,6 +210,135 @@ fun SettingsDialog(
             dismissButton = {
                 TextButton(onClick = { showAccessibilityDisclosureDialog = false }) {
                     Text("Cancel", color = Color(0x99FFFFFF))
+                }
+            },
+            containerColor = Color(0xFF141418),
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
+    if (showPassiveCuesSubmenu) {
+        AlertDialog(
+            onDismissRequest = { showPassiveCuesSubmenu = false },
+            title = {
+                Text(
+                    text = "✧ Deterministic Barks & Cues",
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF8BB4F6),
+                    fontSize = 17.sp
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Text(
+                        text = "Customize spoken personality lines for hardware events and ambient states (Mora companion reflexes):",
+                        fontSize = 12.sp,
+                        color = Color(0xCCFFFFFF),
+                        lineHeight = 16.sp,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+
+                    SettingsSubmenuToggle(
+                        icon = "⚡",
+                        title = "Power & Charging",
+                        subtitle = "Charger coupled / decoupled & external feed announcements",
+                        checked = barkPower,
+                        onCheckedChange = { checked ->
+                            barkPower = checked
+                            prefs.edit().putBoolean(Constants.PREF_BARK_POWER, checked).apply()
+                        }
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    SettingsSubmenuToggle(
+                        icon = "🔋",
+                        title = "Battery Telemetry",
+                        subtitle = "Alerts at 15%, 10%, 5% critical ('energy low.. consciousness fading... need volts'), and 100% full charge",
+                        checked = barkBattery,
+                        onCheckedChange = { checked ->
+                            barkBattery = checked
+                            prefs.edit().putBoolean(Constants.PREF_BARK_BATTERY, checked).apply()
+                        }
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    SettingsSubmenuToggle(
+                        icon = "🌀",
+                        title = "Physical Reflexes",
+                        subtitle = "Deliberate shake vertigo ('dizzy gyros'), free-fall drop landings, and collision shocks",
+                        checked = barkMotion,
+                        onCheckedChange = { checked ->
+                            barkMotion = checked
+                            prefs.edit().putBoolean(Constants.PREF_BARK_MOTION, checked).apply()
+                        }
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    SettingsSubmenuToggle(
+                        icon = "👁️",
+                        title = "Standby & Presence",
+                        subtitle = "Greetings on unlock ('Eyes up', 'I see you') and standby nap cues on screen lock",
+                        checked = barkPresence,
+                        onCheckedChange = { checked ->
+                            barkPresence = checked
+                            prefs.edit().putBoolean(Constants.PREF_BARK_PRESENCE, checked).apply()
+                        }
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    SettingsSubmenuToggle(
+                        icon = "🎧",
+                        title = "Peripherals & Connectivity",
+                        subtitle = "Bluetooth devices coupling/decoupling and Wi-Fi uplink changes",
+                        checked = barkPeripherals,
+                        onCheckedChange = { checked ->
+                            barkPeripherals = checked
+                            prefs.edit().putBoolean(Constants.PREF_BARK_PERIPHERALS, checked).apply()
+                        }
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    SettingsSubmenuToggle(
+                        icon = "🌡️",
+                        title = "Hardware Health",
+                        subtitle = "Thermal throttling warnings and low flash storage capacity alerts",
+                        checked = barkThermal,
+                        onCheckedChange = { checked ->
+                            barkThermal = checked
+                            prefs.edit().putBoolean(Constants.PREF_BARK_THERMAL, checked).apply()
+                        }
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    SettingsSubmenuToggle(
+                        icon = "💬",
+                        title = "Spoken Notifications",
+                        subtitle = "Snappy announcements for incoming messaging app dispatches",
+                        checked = barkNotifs,
+                        onCheckedChange = { checked ->
+                            barkNotifs = checked
+                            prefs.edit().putBoolean(Constants.PREF_BARK_NOTIFS, checked).apply()
+                        }
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showPassiveCuesSubmenu = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8BB4F6)),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Done", color = Color.Black, fontWeight = FontWeight.Bold)
                 }
             },
             containerColor = Color(0xFF141418),
@@ -594,16 +734,72 @@ fun SettingsDialog(
                             )
                         }
                         item {
-                            SettingsToggleRow(
-                                title = "Passive Presence & Cues",
-                                subtitle = "Spoken notifications, hardware ticks & ambient announcements",
-                                checked = passiveTtsEnabled,
-                                onCheckedChange = { checked ->
-                                    passiveTtsEnabled = checked
-                                    prefs.edit().putBoolean(Constants.PREF_PASSIVE_TTS, checked).apply()
-                                    Toast.makeText(context, if (checked) "Passive cues enabled" else "Passive cues disabled", Toast.LENGTH_SHORT).show()
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFF141418))
+                                    .padding(14.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                                        Text(
+                                            text = "Passive Presence & Cues",
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = Color.White
+                                        )
+                                        Text(
+                                            text = "Spoken notifications, hardware ticks & ambient announcements",
+                                            fontSize = 11.sp,
+                                            color = Color(0x99FFFFFF),
+                                            lineHeight = 15.sp
+                                        )
+                                    }
+                                    Switch(
+                                        checked = passiveTtsEnabled,
+                                        onCheckedChange = { checked ->
+                                            passiveTtsEnabled = checked
+                                            prefs.edit().putBoolean(Constants.PREF_PASSIVE_TTS, checked).apply()
+                                            Toast.makeText(context, if (checked) "Passive cues enabled" else "Passive cues disabled", Toast.LENGTH_SHORT).show()
+                                        },
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = Color(0xFF8BB4F6),
+                                            checkedTrackColor = Color(0xFF334B77),
+                                            uncheckedThumbColor = Color(0xFF666666),
+                                            uncheckedTrackColor = Color(0xFF222222)
+                                        )
+                                    )
                                 }
-                            )
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(0xFF1C1C22))
+                                        .clickable { showPassiveCuesSubmenu = true }
+                                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Customize",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = Color(0xFF8BB4F6)
+                                    )
+                                    Text(
+                                        text = "⚙️",
+                                        fontSize = 14.sp
+                                    )
+                                }
+                            }
                         }
 
                         // 4. === Autonomous Diary === (Category 4: Second to last)
@@ -901,20 +1097,6 @@ fun SettingsDialog(
                                             )
                                         }
                                     }
-                                }
-
-                                val isNubiaDevice = remember {
-                                    android.os.Build.MANUFACTURER.contains("Nubia", ignoreCase = true) ||
-                                    android.os.Build.BRAND.contains("Nubia", ignoreCase = true) ||
-                                    android.os.Build.MANUFACTURER.contains("ZTE", ignoreCase = true)
-                                }
-                                if (isNubiaDevice && !is8GbDevice) {
-                                    Text(
-                                        text = "🎮 REDMAGIC Tip: Add GHOST to Game Space for high-priority memory & 24/7 background immunity.",
-                                        fontSize = 10.sp,
-                                        color = Color(0xFFFFB74D),
-                                        modifier = Modifier.padding(top = 6.dp)
-                                    )
                                 }
                             }
                         }
@@ -1525,6 +1707,54 @@ private fun SettingsActionCard(
             fontSize = 20.sp,
             color = (if (isWarning) Color(0xFFF59E0B) else Color(0x66FFFFFF)).copy(alpha = alpha),
             fontWeight = FontWeight.Light
+        )
+    }
+}
+
+@Composable
+private fun SettingsSubmenuToggle(
+    icon: String,
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color(0xFF1C1C22))
+            .clickable { onCheckedChange(!checked) }
+            .padding(10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(modifier = Modifier.weight(1f).padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(text = icon, fontSize = 16.sp, modifier = Modifier.padding(end = 10.dp))
+            Column {
+                Text(
+                    text = title,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.White
+                )
+                Text(
+                    text = subtitle,
+                    fontSize = 10.sp,
+                    color = Color(0x99FFFFFF),
+                    lineHeight = 13.sp
+                )
+            }
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color(0xFF8BB4F6),
+                checkedTrackColor = Color(0xFF334B77),
+                uncheckedThumbColor = Color(0xFF666666),
+                uncheckedTrackColor = Color(0xFF222222)
+            )
         )
     }
 }

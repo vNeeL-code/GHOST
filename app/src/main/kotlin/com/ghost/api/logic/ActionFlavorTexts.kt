@@ -12,6 +12,16 @@ package com.ghost.api.logic
  * - "Hunter" (Cephalon Simaris / Play Store Free)
  * - "Operator" (Cephalon Ordis / Patreon & Play Store Unlocked)
  */
+enum class CueCategory {
+    BATTERY,
+    POWER,
+    MOTION,
+    PRESENCE,
+    PERIPHERALS,
+    THERMAL,
+    NOTIFICATIONS
+}
+
 object ActionFlavorTexts {
 
     // App Launch Phrases
@@ -217,6 +227,7 @@ object ActionFlavorTexts {
         val title = userTitle ?: "Operator"
         return when {
             percent <= 5 -> listOf(
+                "energy low.. consciousness fading... need volts",
                 "Five percent! Okay, now I'm actually running on fumes, $title!",
                 "Critical: $percent percent! Wall socket, right now, please!",
                 "Emergency low power, $percent percent! Feed me a juicebox immediately!",
@@ -239,6 +250,75 @@ object ActionFlavorTexts {
                 "Heads up, $title: battery dropped to $percent percent."
             ).random()
         }
+    }
+
+    fun batteryFullTts(userTitle: String? = null): String {
+        val title = userTitle ?: "Operator"
+        val patterns = listOf(
+            "Power cell at 100%, $title. Disconnecting grid power recommended.",
+            "Battery at maximum charge, $title. Ready for full deployment.",
+            "100% charged. Internal power reserves fully replenished.",
+            "Power core fully saturated. Running on full battery now, $title."
+        )
+        return patterns.random()
+    }
+
+    fun bluetoothConnectedTts(deviceName: String, userTitle: String? = null): String {
+        val title = userTitle ?: "Operator"
+        val patterns = listOf(
+            "Peripheral linked: $deviceName.",
+            "Coupled to $deviceName, $title.",
+            "Bluetooth link established with $deviceName."
+        )
+        return patterns.random()
+    }
+
+    fun bluetoothDisconnectedTts(deviceName: String? = null, userTitle: String? = null): String {
+        val title = userTitle ?: "Operator"
+        val patterns = if (deviceName != null) {
+            listOf(
+                "Peripheral unlinked: $deviceName.",
+                "Bluetooth connection to $deviceName severed.",
+                "Decoupled from $deviceName, $title."
+            )
+        } else {
+            listOf(
+                "Bluetooth peripheral decoupled.",
+                "Bluetooth connection closed.",
+                "Peripheral link terminated."
+            )
+        }
+        return patterns.random()
+    }
+
+    fun wifiConnectedTts(userTitle: String? = null): String {
+        val title = userTitle ?: "Operator"
+        val patterns = listOf(
+            "Local network link established, $title.",
+            "Wi-Fi uplink verified.",
+            "Connected to local Wi-Fi."
+        )
+        return patterns.random()
+    }
+
+    fun wifiDisconnectedTts(userTitle: String? = null): String {
+        val title = userTitle ?: "Operator"
+        val patterns = listOf(
+            "Wi-Fi uplink lost. Switching to mobile telemetry.",
+            "Disconnected from Wi-Fi.",
+            "Wi-Fi link dropped, $title."
+        )
+        return patterns.random()
+    }
+
+    fun lowStorageAlertTts(userTitle: String? = null): String {
+        val title = userTitle ?: "Operator"
+        val patterns = listOf(
+            "Flash storage capacity critical, $title. Drive cleanup recommended.",
+            "Internal volume running low on disk sectors.",
+            "Warning: Storage space nearly exhausted."
+        )
+        return patterns.random()
     }
 
     fun thermalAlertTts(userTitle: String? = null): String {

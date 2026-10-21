@@ -38,7 +38,7 @@ object Constants {
 
     // Auto-reload safety valve: automatically boots suspended engine back up when memory is calm (<54% utilization)
     const val RAM_RELOAD_UTILIZATION_THRESHOLD = 0.54f // 54% RAM utilization floor for automatic wake-up (tuned for zRAM idle)
-    const val RAM_RELOAD_MIN_FREE_BYTES = 2500L * 1024 * 1024 // 2.5 GB free memory required to auto-reload
+    const val RAM_RELOAD_MIN_FREE_BYTES = 2000L * 1024 * 1024 // 2.0 GB free memory required to auto-reload
 
     /**
      * Reads total physical RAM in GB.
@@ -107,6 +107,13 @@ object Constants {
     const val PREFS_NAME = "gemma_instance_settings"
     const val PREF_TTS_ENABLED = "tts_enabled"
     const val PREF_PASSIVE_TTS = "passive_notification_tts"
+    const val PREF_BARK_BATTERY = "pref_bark_battery"
+    const val PREF_BARK_POWER = "pref_bark_power"
+    const val PREF_BARK_MOTION = "pref_bark_motion"
+    const val PREF_BARK_PRESENCE = "pref_bark_presence"
+    const val PREF_BARK_PERIPHERALS = "pref_bark_peripherals"
+    const val PREF_BARK_THERMAL = "pref_bark_thermal"
+    const val PREF_BARK_NOTIFS = "pref_bark_notifs"
     const val PREF_AUTONOMOUS_DIARY = "autonomous_diary_enabled"
     const val PREF_DIARY_CADENCE = "autonomous_diary_cadence" // "1", "3", "12", "OFF"
     const val PREF_DIARY_SYNC_CALENDAR = "diary_sync_calendar"
