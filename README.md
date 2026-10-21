@@ -67,7 +67,7 @@ $$\mathbf{Integrated\ AI\ System} = \mathbf{Chassis} + \mathbf{Model} + \mathbf{
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        ✧ GHOST ARCHITECTURE                            │
+│                        ✧ GHOST ARCHITECTURE                           │
 ├─────────────────────────────────────────────────────────────┤
 │ 1. CHASSIS (Physical Android Hardware)                                 │
 │    • Qualcomm Snapdragon / Tensor / Dimensity Silicon                  │
@@ -83,7 +83,7 @@ $$\mathbf{Integrated\ AI\ System} = \mathbf{Chassis} + \mathbf{Model} + \mathbf{
 │    • Infinite Rolling Scratchpad: SessionMemoryCompactor + KV-Cache    │
 │    • MCP Tool Mesh: Torch, Apps, Termux, Web Search, Media, Files      │
 │    • Presentation: Ephemeral Shake Launcher, HUD, Prismatic Avatars    │
-└──────────────────────────────────────────────────────────────┘
+└─────────────────────────────────────────────────────────────┘
 ```
 
 1. **The Chassis (Substrate):** The physical hardware constraints. Thermals, battery discharge curves, RAM pressure, radio environments, and motion. Without telemetry, an AI is disembodied, hallucinating blind in a sensory void.
