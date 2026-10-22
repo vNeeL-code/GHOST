@@ -209,6 +209,7 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
     @Volatile private var fallenEscalationTier: Int = 0
     @Volatile private var lastChargedMilestoneTier: Int = 0
     @Volatile private var lastChargingMilestoneTime: Long = 0L
+    @Volatile private var wasCharging: Boolean = false
     @Volatile private var wasStorageLow: Boolean = false
     @Volatile private var lastWifiConnected: Boolean? = null
     @Volatile private var lastWifiBarkTime: Long = 0L
@@ -324,12 +325,23 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
                 }
                 Intent.ACTION_POWER_CONNECTED -> {
                     lastWarnedBatteryTier = 100
+                    val snapshot = getContextSnapshot()
+                    val level = snapshot.battery.level
+                    // Initialize milestone tier to current level so plugging in at >=30% or >=80% does not fire past milestone barks
+                    lastChargedMilestoneTier = when {
+                        level >= 80 -> 80
+                        level >= 30 -> 30
+                        else -> 0
+                    }
+                    wasCharging = true
+                    lastChargingMilestoneTime = System.currentTimeMillis()
                     val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
                     val cue = com.ghost.api.logic.ActionFlavorTexts.powerConnectedTts(userTitle)
                     com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.POWER)
                     com.ghost.api.GemmaService.instance?.refreshNotificationTelemetry()
                 }
                 Intent.ACTION_POWER_DISCONNECTED -> {
+                    wasCharging = false
                     lastWarnedBatteryTier = 100
                     lastChargedMilestoneTier = 0
                     val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
@@ -347,6 +359,15 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
                         com.ghost.api.GemmaService.instance?.refreshNotificationTelemetry()
                     }
                     if (snapshot.battery.isCharging) {
+                        if (!wasCharging) {
+                            wasCharging = true
+                            lastChargedMilestoneTier = when {
+                                level >= 80 -> 80
+                                level >= 30 -> 30
+                                else -> 0
+                            }
+                            lastChargingMilestoneTime = now
+                        }
                         if (level in 30..79 && lastChargedMilestoneTier < 30 && (now - lastChargingMilestoneTime > 60_000L)) {
                             lastChargedMilestoneTier = 30
                             lastChargingMilestoneTime = now
@@ -368,21 +389,25 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
                         } else if (level < 99) {
                             lastWarnedBatteryTier = 100
                         }
-                    } else if (level > 20) {
-                        lastWarnedBatteryTier = 100
                     } else {
-                        val tierToWarn = when {
-                            level in 1..5 && lastWarnedBatteryTier > 5 -> 5
-                            level in 6..10 && lastWarnedBatteryTier > 10 -> 10
-                            level in 11..15 && lastWarnedBatteryTier > 15 -> 15
-                            else -> null
-                        }
-                        if (tierToWarn != null && (now - lastLowBatteryCueTime > 30000L)) {
-                            lastWarnedBatteryTier = tierToWarn
-                            lastLowBatteryCueTime = now
-                            val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
-                            val cue = com.ghost.api.logic.ActionFlavorTexts.batteryLowTts(level, userTitle)
-                            com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.BATTERY)
+                        wasCharging = false
+                        lastChargedMilestoneTier = 0
+                        if (level > 20) {
+                            lastWarnedBatteryTier = 100
+                        } else {
+                            val tierToWarn = when {
+                                level in 1..5 && lastWarnedBatteryTier > 5 -> 5
+                                level in 6..10 && lastWarnedBatteryTier > 10 -> 10
+                                level in 11..15 && lastWarnedBatteryTier > 15 -> 15
+                                else -> null
+                            }
+                            if (tierToWarn != null && (now - lastLowBatteryCueTime > 30000L)) {
+                                lastWarnedBatteryTier = tierToWarn
+                                lastLowBatteryCueTime = now
+                                val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
+                                val cue = com.ghost.api.logic.ActionFlavorTexts.batteryLowTts(level, userTitle)
+                                com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.BATTERY)
+                            }
                         }
                     }
                 }

@@ -2691,18 +2691,22 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
         // Substrate state
         val batteryManager = getSystemService(Context.BATTERY_SERVICE) as? android.os.BatteryManager
-        val batteryLevel = batteryManager?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
-        val isCharging = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+        val rawBatteryLevel = batteryManager?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
+        val rawIsCharging = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             val status = batteryManager?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_STATUS) ?: -1
             status == android.os.BatteryManager.BATTERY_STATUS_CHARGING || status == android.os.BatteryManager.BATTERY_STATUS_FULL
         } else false
-        val chargeStatus = if (isCharging) "Charging" else "On Battery"
-        val thermal = getCurrentThermalState()
 
         // Media & Ambient Sound Telemetry
         val snapshot = if (::sensorFusionManager.isInitialized) {
             try { sensorFusionManager.getContextSnapshot() } catch (e: Exception) { null }
         } else null
+
+        val batteryLevel = snapshot?.battery?.level ?: rawBatteryLevel
+        val isCharging = snapshot?.battery?.isCharging ?: rawIsCharging
+        val verbalBattery = com.ghost.api.hardware.SensorFusionManager.formatBatteryVerbal(batteryLevel, isCharging)
+        val chargeStatus = if (isCharging) "Charging" else "On Battery"
+        val thermal = getCurrentThermalState()
 
         val nowPlaying = snapshot?.audio?.nowPlaying
         val mediaTelemetry = when {
@@ -2733,12 +2737,19 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 |The current date and time is $currentDateTime ($label cycle).
                 |
                 |## Ambient Substrate & Interaction Telemetry
-                |- Substrate State: Battery at ${if (batteryLevel >= 0) "$batteryLevel% ($chargeStatus)" else "Unknown"}, Thermals: $thermal
+                |- Substrate State: Battery: $verbalBattery, Thermals: $thermal
                 |- Media / Ambient Sound: $mediaTelemetry
                 |- Interaction Telemetry: $interactionSummary
                 |- Long-term Fact Memory: $compactedMemory
                 |- Recent Conversation Turns:
                 |$historyText
+                |
+                |## Substrate Energy Grounding Rules
+                |- Physical Energy: Battery percentage reflects physical energy reserves.
+                |- 50%+ is high/moderate alert energy (70%+ is full vigor). You are feeling energetic, alert, and healthy.
+                |- 20-49% is steady working reserves.
+                |- ONLY under 15% is low battery fatigue.
+                |- CRITICAL: Never claim your battery is dying, depleted, exhausted, low, or on fumes when it is at 50%+ or nominal!
                 |
                 |## Autonomous Memory Log Directive
                 |CRITICAL: You are recording an autonomous episodic memory reflection to your persistent diary substrate.
@@ -2754,6 +2765,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             if (text.contains("<think>") || text.contains("</think>")) {
                 text = text.replace(Regex("<think>.*?</think>", RegexOption.DOT_MATCHES_ALL), "").trim()
             }
+
+            // Clean stuttering time tokens and normalize numbers
+            text = com.ghost.api.logic.TimePreprocessor.sanitizeTimeTokens(text)
 
             val isErrorOrDegenerate = text.isBlank() ||
                 text.length < 25 ||
@@ -2772,7 +2786,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             if (isErrorOrDegenerate) {
                 Timber.w("📔 Diary generation returned error or degenerate output ('$text'). Generating autonomous fallback reflection.")
                 val summaryPeriod = if (recentTurns.isNotEmpty()) "Active session period with operator interactions." else "Quiet substrate stretch across cycles."
-                "**MEMORY LOG**\n$summaryPeriod Substrates nominal at $thermal with battery standing at ${if (batteryLevel >= 0) "$batteryLevel% ($chargeStatus)" else "nominal"}. Background media: $mediaTelemetry. Idling smoothly in low-power state."
+                "**MEMORY LOG**\n$summaryPeriod Substrates nominal at $thermal with battery standing at ${if (batteryLevel >= 0) "$batteryLevel% ($chargeStatus · nominal)" else "nominal"}. Background media: $mediaTelemetry. Idling smoothly in low-power state."
             } else if (!text.startsWith("**MEMORY LOG**", ignoreCase = true)) {
                 "**MEMORY LOG**\n$text"
             } else {
@@ -2781,7 +2795,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         } else {
             Timber.i("📔 Diary cycle ($label) — engine suspended or not resident; recording direct telemetry log without GPU cold load")
             val summaryPeriod = if (recentTurns.isNotEmpty()) "Active session period with operator interactions." else "Quiet substrate stretch across cycles."
-            "**MEMORY LOG**\n$summaryPeriod Substrates nominal at $thermal with battery standing at ${if (batteryLevel >= 0) "$batteryLevel% ($chargeStatus)" else "nominal"}. Background media: $mediaTelemetry. Low-power telemetry recorded without engine wake."
+            "**MEMORY LOG**\n$summaryPeriod Substrates nominal at $thermal with battery standing at ${if (batteryLevel >= 0) "$batteryLevel% ($chargeStatus · nominal)" else "nominal"}. Background media: $mediaTelemetry. Low-power telemetry recorded without engine wake."
         }
 
             // 1. Persist to SQLite Room Database (Local persistent memory & diary history)
