@@ -906,6 +906,10 @@ fun VoiceMessageBubble(
 
             val existing = mediaPlayer
             if (existing != null) {
+                if (currentProgress >= 0.98f) {
+                    existing.seekTo(0)
+                    currentProgress = 0f
+                }
                 existing.start()
                 isPlaying = true
                 coroutineScope.launch {
@@ -914,6 +918,9 @@ fun VoiceMessageBubble(
                         val dur = existing.duration.coerceAtLeast(1).toFloat()
                         currentProgress = (pos / dur).coerceIn(0f, 1f)
                         kotlinx.coroutines.delay(100)
+                    }
+                    if (!existing.isPlaying) {
+                        isPlaying = false
                     }
                 }
                 return

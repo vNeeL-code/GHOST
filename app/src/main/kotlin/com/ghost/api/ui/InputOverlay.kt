@@ -592,22 +592,19 @@ class InputOverlay(
                                 if (dx > 0) {
                                     // Right -> Next Track
                                     hapticPulse()
-                                    audioManager?.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_NEXT))
-                                    audioManager?.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_NEXT))
+                                    com.ghost.api.hardware.TuiCommandEngine.dispatchMediaAction(context, "next")
                                     Toast.makeText(context, "⏭", Toast.LENGTH_SHORT).show()
                                 } else {
                                     // Left -> Previous Track
                                     hapticPulse()
-                                    audioManager?.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS))
-                                    audioManager?.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS))
+                                    com.ghost.api.hardware.TuiCommandEngine.dispatchMediaAction(context, "prev")
                                     Toast.makeText(context, "⏮", Toast.LENGTH_SHORT).show()
                                 }
                             } else {
                                 if (dy > 0) {
-                                    // Down -> Play/Pause
+                                    // Down -> Play/Pause Toggle (Synchronized with MediaSession PlaybackState)
                                     hapticPulse()
-                                    audioManager?.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE))
-                                    audioManager?.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE))
+                                    com.ghost.api.hardware.TuiCommandEngine.dispatchMediaAction(context, "toggle")
                                     Toast.makeText(context, "⏯", Toast.LENGTH_SHORT).show()
                                 } else {
                                     // Up -> Summon Scratchpad PiP

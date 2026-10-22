@@ -2,6 +2,7 @@ package com.ghost.api.hardware
 
 import android.app.NotificationManager
 import android.bluetooth.BluetoothAdapter
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -238,48 +239,60 @@ class TuiCommandEngine(
             }
         }
 
-        // Targeted MediaSessionManager pass (avoids waking sleeping apps)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            try {
-                val sessionManager = context.getSystemService(Context.MEDIA_SESSION_SERVICE) as? MediaSessionManager
-                val activeControllers = sessionManager?.getActiveSessions(null)
-                val playingController = activeControllers?.firstOrNull {
-                    it.playbackState?.state == PlaybackState.STATE_PLAYING
-                } ?: activeControllers?.firstOrNull()
+        dispatchMediaAction(context, action)
+        return mapOf("result" to "success", "message" to "Media $action dispatched")
+    }
 
-                if (playingController != null) {
-                    when (action) {
-                        "PAUSE", "STOP" -> playingController.transportControls.pause()
-                        "PLAY", "RESUME" -> playingController.transportControls.play()
-                        "NEXT", "SKIP" -> playingController.transportControls.skipToNext()
-                        "PREV", "PREVIOUS" -> playingController.transportControls.skipToPrevious()
-                        else -> {
-                            if (playingController.playbackState?.state == PlaybackState.STATE_PLAYING) {
-                                playingController.transportControls.pause()
-                            } else {
-                                playingController.transportControls.play()
+    companion object {
+        fun dispatchMediaAction(context: Context, action: String) {
+            val upperAction = action.uppercase(Locale.ROOT)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                try {
+                    val sessionManager = context.getSystemService(Context.MEDIA_SESSION_SERVICE) as? MediaSessionManager
+                    val listenerComponent = ComponentName(context, com.ghost.api.GemmaNotificationListener::class.java)
+                    val activeControllers = try {
+                        sessionManager?.getActiveSessions(listenerComponent)
+                    } catch (e: SecurityException) {
+                        sessionManager?.getActiveSessions(null)
+                    }
+                    val playingController = activeControllers?.firstOrNull {
+                        it.playbackState?.state == PlaybackState.STATE_PLAYING
+                    } ?: activeControllers?.firstOrNull()
+
+                    if (playingController != null) {
+                        when (upperAction) {
+                            "PAUSE", "STOP" -> playingController.transportControls.pause()
+                            "PLAY", "RESUME" -> playingController.transportControls.play()
+                            "NEXT", "SKIP" -> playingController.transportControls.skipToNext()
+                            "PREV", "PREVIOUS" -> playingController.transportControls.skipToPrevious()
+                            else -> {
+                                if (playingController.playbackState?.state == PlaybackState.STATE_PLAYING) {
+                                    playingController.transportControls.pause()
+                                } else {
+                                    playingController.transportControls.play()
+                                }
                             }
                         }
+                        return
                     }
-                    return mapOf("result" to "success", "message" to "Media $action dispatched to ${playingController.packageName}")
+                } catch (e: Exception) {
+                    Timber.w(e, "TuiCommandEngine: MediaSessionManager dispatch failed, falling back to key events")
                 }
-            } catch (e: Exception) {
-                Timber.w(e, "TuiCommandEngine: MediaSessionManager dispatch failed, falling back to key events")
             }
-        }
 
-        // Fallback to global AudioManager media key event
-        val keyEvent = when (action) {
-            "PLAY" -> KeyEvent.KEYCODE_MEDIA_PLAY
-            "PAUSE" -> KeyEvent.KEYCODE_MEDIA_PAUSE
-            "NEXT", "SKIP" -> KeyEvent.KEYCODE_MEDIA_NEXT
-            "PREV", "PREVIOUS" -> KeyEvent.KEYCODE_MEDIA_PREVIOUS
-            "STOP" -> KeyEvent.KEYCODE_MEDIA_STOP
-            else -> KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
-        }
+            // Fallback to global AudioManager media key event
+            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+            val keyEvent = when (upperAction) {
+                "PLAY" -> KeyEvent.KEYCODE_MEDIA_PLAY
+                "PAUSE" -> KeyEvent.KEYCODE_MEDIA_PAUSE
+                "NEXT", "SKIP" -> KeyEvent.KEYCODE_MEDIA_NEXT
+                "PREV", "PREVIOUS" -> KeyEvent.KEYCODE_MEDIA_PREVIOUS
+                "STOP" -> KeyEvent.KEYCODE_MEDIA_STOP
+                else -> KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
+            }
 
-        audioManager.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyEvent))
-        audioManager.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, keyEvent))
-        return mapOf("result" to "success", "message" to "Media $action sent")
+            audioManager.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyEvent))
+            audioManager.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, keyEvent))
+        }
     }
 }

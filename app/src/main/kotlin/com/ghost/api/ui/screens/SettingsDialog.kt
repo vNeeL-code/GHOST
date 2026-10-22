@@ -235,7 +235,7 @@ fun SettingsDialog(
                         .verticalScroll(rememberScrollState())
                 ) {
                     Text(
-                        text = "Customize spoken personality lines for hardware events and ambient states (Mora companion reflexes):",
+                        text = "Customize spoken personality lines for hardware events and ambient states (GHOST companion reflexes):",
                         fontSize = 12.sp,
                         color = Color(0xCCFFFFFF),
                         lineHeight = 16.sp,

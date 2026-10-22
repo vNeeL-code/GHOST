@@ -517,7 +517,7 @@ class AvatarWallpaperService : WallpaperService() {
                     val width = canvas.width.toFloat()
                     val height = canvas.height.toFloat()
                     
-                    // Charging pulsation & breathing aura (Mora companion state animation)
+                    // Charging pulsation & breathing aura (GHOST companion state animation)
                     val chargingPulse = if (isCharging) (sin(animTime * 2.5f) * 0.5f + 0.5f) else 0f
                     // Small base so rings start tight to center and explode outward on beats / breathe on charging
                     val dynamicBaseRadius = min(width, height) * (0.08f + if (isCharging) 0.007f * chargingPulse else 0f)

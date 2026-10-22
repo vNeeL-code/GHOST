@@ -204,8 +204,70 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
     @Volatile private var primarySpikeTimeMs: Long = 0L
     @Volatile private var sawReboundDipAfterSpike: Boolean = false
 
+    // Recovery & Escalation State Machine
+    @Volatile private var fallenFlatStartTimeMs: Long = 0L
+    @Volatile private var fallenEscalationTier: Int = 0
+    @Volatile private var lastChargedMilestoneTier: Int = 0
+    @Volatile private var lastChargingMilestoneTime: Long = 0L
+    @Volatile private var wasStorageLow: Boolean = false
+    @Volatile private var lastWifiConnected: Boolean? = null
+    @Volatile private var lastWifiBarkTime: Long = 0L
+    @Volatile private var lastAudioOutputEventTime: Long = 0L
+
     @Volatile private var cachedBtConnected: Boolean = false
     @Volatile private var cachedBtDeviceName: String? = null
+
+    // Audio Output Device Callback (Debounced connection/reconnection alerts)
+    private val audioDeviceCallback = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        object : android.media.AudioDeviceCallback() {
+            override fun onAudioDevicesAdded(addedDevices: Array<out android.media.AudioDeviceInfo>?) {
+                val now = System.currentTimeMillis()
+                if (now - lastAudioOutputEventTime < 8_000L) return
+                val output = addedDevices?.firstOrNull { dev ->
+                    dev.isSink && (
+                        dev.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                        dev.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                        dev.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                        dev.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                        dev.type == android.media.AudioDeviceInfo.TYPE_USB_HEADSET ||
+                        dev.type == android.media.AudioDeviceInfo.TYPE_USB_DEVICE
+                    )
+                }
+                if (output != null) {
+                    lastAudioOutputEventTime = now
+                    val devName = try {
+                        val name = output.productName?.toString()
+                        if (!name.isNullOrBlank()) name else "Audio Output"
+                    } catch (_: Exception) { "Audio Output" }
+                    val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
+                    val cue = com.ghost.api.logic.ActionFlavorTexts.audioOutputConnectedTts(devName, userTitle)
+                    com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.PERIPHERALS, showInChat = false)
+                }
+            }
+
+            override fun onAudioDevicesRemoved(removedDevices: Array<out android.media.AudioDeviceInfo>?) {
+                val now = System.currentTimeMillis()
+                if (now - lastAudioOutputEventTime < 8_000L) return
+                val output = removedDevices?.firstOrNull { dev ->
+                    dev.isSink && (
+                        dev.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                        dev.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                        dev.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                        dev.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                        dev.type == android.media.AudioDeviceInfo.TYPE_USB_HEADSET ||
+                        dev.type == android.media.AudioDeviceInfo.TYPE_USB_DEVICE
+                    )
+                }
+                if (output != null) {
+                    lastAudioOutputEventTime = now
+                    val devName = try { output.productName?.toString() } catch (_: Exception) { null }
+                    val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
+                    val cue = com.ghost.api.logic.ActionFlavorTexts.audioOutputDisconnectedTts(devName, userTitle)
+                    com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.PERIPHERALS, showInChat = false)
+                }
+            }
+        }
+    } else null
 
     // Store listener reference for cleanup
     private var sensorListener: SensorEventListener? = null
@@ -269,6 +331,7 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
                 }
                 Intent.ACTION_POWER_DISCONNECTED -> {
                     lastWarnedBatteryTier = 100
+                    lastChargedMilestoneTier = 0
                     val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
                     val cue = com.ghost.api.logic.ActionFlavorTexts.powerDisconnectedTts(userTitle)
                     com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.POWER)
@@ -284,7 +347,19 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
                         com.ghost.api.GemmaService.instance?.refreshNotificationTelemetry()
                     }
                     if (snapshot.battery.isCharging) {
-                        if (level == 100 && lastWarnedBatteryTier != 1000 && (now - lastLowBatteryCueTime > 60_000L)) {
+                        if (level in 30..79 && lastChargedMilestoneTier < 30 && (now - lastChargingMilestoneTime > 60_000L)) {
+                            lastChargedMilestoneTier = 30
+                            lastChargingMilestoneTime = now
+                            val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
+                            val cue = com.ghost.api.logic.ActionFlavorTexts.batteryChargedMilestoneTts(30, userTitle)
+                            com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.BATTERY)
+                        } else if (level in 80..99 && lastChargedMilestoneTier < 80 && (now - lastChargingMilestoneTime > 60_000L)) {
+                            lastChargedMilestoneTier = 80
+                            lastChargingMilestoneTime = now
+                            val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
+                            val cue = com.ghost.api.logic.ActionFlavorTexts.batteryChargedMilestoneTts(80, userTitle)
+                            com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.BATTERY)
+                        } else if (level == 100 && lastWarnedBatteryTier != 1000 && (now - lastLowBatteryCueTime > 60_000L)) {
                             lastWarnedBatteryTier = 1000
                             lastLowBatteryCueTime = now
                             val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
@@ -371,6 +446,14 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
         } else {
             context.registerReceiver(stateReceiver, filter)
         }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && audioDeviceCallback != null) {
+            try {
+                audioManager?.registerAudioDeviceCallback(audioDeviceCallback, sensorHandler)
+            } catch (e: Exception) {
+                Timber.w(e, "Failed to register audioDeviceCallback")
+            }
+        }
         
         Timber.i("🌀 SensorFusion active in Event-Driven mode (Polling disabled)")
     }
@@ -391,6 +474,9 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
 
         try {
             context.unregisterReceiver(stateReceiver)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && audioDeviceCallback != null) {
+                try { audioManager?.unregisterAudioDeviceCallback(audioDeviceCallback) } catch (_: Exception) {}
+            }
             scope.cancel()
             sensorListener?.let {
                 sensorManager?.unregisterListener(it)
@@ -412,6 +498,9 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
         scope.cancel() // Stop polling
 
         try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && audioDeviceCallback != null) {
+                try { audioManager?.unregisterAudioDeviceCallback(audioDeviceCallback) } catch (_: Exception) {}
+            }
             sensorListener?.let { listener ->
                 sensorManager?.unregisterListener(listener)
                 Timber.d("SensorFusionManager: Unregistered all sensor listeners")
@@ -532,6 +621,12 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
                             sawReboundDipAfterSpike = false
                             val landedFlat = kotlin.math.abs(az) > 7.5f
                             lastDropLandedFlat = landedFlat
+                            if (landedFlat) {
+                                fallenFlatStartTimeMs = now
+                                fallenEscalationTier = 0
+                            } else {
+                                fallenFlatStartTimeMs = 0L
+                            }
                             val userTitle = com.ghost.api.Constants.getUserTitle(context)
                             val cue = com.ghost.api.logic.ActionFlavorTexts.fallenImpactTts(userTitle, landedFlat)
                             com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.MOTION, showInChat = false)
@@ -563,6 +658,38 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
                                     sawReboundDipAfterSpike = false
                                     val userTitle = com.ghost.api.Constants.getUserTitle(context)
                                     val cue = com.ghost.api.logic.ActionFlavorTexts.impactSpikeTts(userTitle)
+                                    com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.MOTION, showInChat = false)
+                                }
+                            }
+                        }
+
+                        // 4. Fallen Lying Flat Escalation (30s, 2min, 5min) & Upright Pickup Recovery
+                        if (fallenFlatStartTimeMs > 0L) {
+                            val isUprightOrHeld = kotlin.math.abs(az) < 5.0f && kotlin.math.abs(ay) > 5.5f
+                            val isStillFlat = kotlin.math.abs(az) > 7.0f
+                            val elapsedFlat = now - fallenFlatStartTimeMs
+
+                            if (isUprightOrHeld && elapsedFlat > 3_000L) {
+                                fallenFlatStartTimeMs = 0L
+                                fallenEscalationTier = 0
+                                val userTitle = com.ghost.api.Constants.getUserTitle(context)
+                                val cue = com.ghost.api.logic.ActionFlavorTexts.fallenRecoveredTts(userTitle)
+                                com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.MOTION, showInChat = false)
+                            } else if (isStillFlat) {
+                                if (elapsedFlat >= 300_000L && fallenEscalationTier < 3) {
+                                    fallenEscalationTier = 3
+                                    val userTitle = com.ghost.api.Constants.getUserTitle(context)
+                                    val cue = com.ghost.api.logic.ActionFlavorTexts.fallenEscalationTts(300, userTitle)
+                                    com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.MOTION, showInChat = false)
+                                } else if (elapsedFlat >= 120_000L && fallenEscalationTier < 2) {
+                                    fallenEscalationTier = 2
+                                    val userTitle = com.ghost.api.Constants.getUserTitle(context)
+                                    val cue = com.ghost.api.logic.ActionFlavorTexts.fallenEscalationTts(120, userTitle)
+                                    com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.MOTION, showInChat = false)
+                                } else if (elapsedFlat >= 30_000L && fallenEscalationTier < 1) {
+                                    fallenEscalationTier = 1
+                                    val userTitle = com.ghost.api.Constants.getUserTitle(context)
+                                    val cue = com.ghost.api.logic.ActionFlavorTexts.fallenEscalationTts(30, userTitle)
                                     com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.MOTION, showInChat = false)
                                 }
                             }
@@ -748,6 +875,15 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
             val storageFreeGB = (stat.blockSizeLong * stat.availableBlocksLong) / (1024f * 1024f * 1024f)
             val storageUsedPercent = (((storageTotalGB - storageFreeGB) / storageTotalGB) * 100).toInt()
 
+            if (storageFreeGB < 2.0f) {
+                wasStorageLow = true
+            } else if (wasStorageLow && storageFreeGB > 5.0f) {
+                wasStorageLow = false
+                val userTitle = com.ghost.api.Constants.getUserTitle(context)
+                val cue = com.ghost.api.logic.ActionFlavorTexts.storageRecoveredTts(userTitle)
+                com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.PERIPHERALS, showInChat = false)
+            }
+
             // Uptime
             val uptimeMs = SystemClock.elapsedRealtime()
             val uptimeMinutes = uptimeMs / (1000 * 60)
@@ -791,7 +927,6 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
             // Audit 4.1: NET_CAPABILITY_VALIDATED ensures the internet is ACTUALLY reachable
             val isOnline = capabilities?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true &&
                            capabilities?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
-
             val isWifi = capabilities?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) == true
             val isCell = capabilities?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) == true
 
@@ -816,6 +951,21 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
             ssid = if (wifiConnected) {
                 wifiInfo.ssid?.removeSurrounding("\"")?.takeIf { it != "<unknown ssid>" } ?: "Connected"
             } else null
+
+            // Wi-Fi Reconnect & Drop Detection (Debounced)
+            val prevWifi = lastWifiConnected
+            lastWifiConnected = wifiConnected
+            val now = System.currentTimeMillis()
+            if (prevWifi != null && prevWifi != wifiConnected && (now - lastWifiBarkTime > 15_000L)) {
+                lastWifiBarkTime = now
+                val userTitle = com.ghost.api.Constants.getUserTitle(context)
+                val cue = if (wifiConnected) {
+                    com.ghost.api.logic.ActionFlavorTexts.wifiConnectedTts(userTitle)
+                } else {
+                    com.ghost.api.logic.ActionFlavorTexts.wifiDisconnectedTts(userTitle)
+                }
+                com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.PERIPHERALS, showInChat = false)
+            }
 
             // Signal strength as percentage (0-100)
             val signalPercent = if (wifiConnected) {
@@ -1139,14 +1289,14 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
             val ctx = getContextSnapshot()
             buildNotificationCardString(ctx, machineStatus)
         } catch (e: Exception) {
-            "Machine status: ${machineStatus ?: "🟢 Fully operational ✧"}\n🧠 RAM: nominal | ⏱️ Uptime: active"
+            "📱 Machine status: ${machineStatus ?: "🟢 Fully operational ✧"}\n🧠 RAM: nominal | ⏱️ Uptime: active"
         }
     }
 
     private fun buildNotificationCardString(ctx: DeviceContext, machineStatus: String?): String {
         val sb = StringBuilder()
         val status = machineStatus ?: "🟢 Fully operational ✧"
-        sb.append("Machine status: $status\n")
+        sb.append("📱 Machine status: $status\n")
 
         val ramUsed = ctx.system.ramUsedPercent
         val ramAvailGB = String.format(java.util.Locale.US, "%.1f", ctx.system.ramAvailableMB / 1024.0)

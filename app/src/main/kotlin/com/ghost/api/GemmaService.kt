@@ -396,11 +396,33 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             val overlayPerm = android.provider.Settings.canDrawOverlays(this)
             reportStatus("Service Created (Overlay Perm: $overlayPerm), Initializing...")
 
-            reportStatus("Init: HardwarePropertiesManager...")
             hardwarePropertiesManager = HardwarePropertiesManager(this)
 
-
-            reportStatus("Init: TTS...")
+            // Dynamic Thermal Monitoring: Alert on severe throttling & recovery on cooling
+            serviceScope.launch {
+                var wasHot = false
+                var lastThermalBarkTime = 0L
+                hardwarePropertiesManager.thermalState.collect { state ->
+                    val now = System.currentTimeMillis()
+                    if (state == com.ghost.api.hardware.HardwarePropertiesManager.ThermalState.HOT ||
+                        state == com.ghost.api.hardware.HardwarePropertiesManager.ThermalState.CRITICAL) {
+                        if (!wasHot && (now - lastThermalBarkTime > 120_000L)) {
+                            wasHot = true
+                            lastThermalBarkTime = now
+                            val userTitle = Constants.getUserTitle(this@GemmaService)
+                            val cue = com.ghost.api.logic.ActionFlavorTexts.thermalAlertTts(userTitle)
+                            processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.THERMAL)
+                        }
+                    } else if (state == com.ghost.api.hardware.HardwarePropertiesManager.ThermalState.COOL) {
+                        if (wasHot) {
+                            wasHot = false
+                            val userTitle = Constants.getUserTitle(this@GemmaService)
+                            val cue = com.ghost.api.logic.ActionFlavorTexts.thermalRecoveredTts(userTitle)
+                            processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.THERMAL)
+                        }
+                    }
+                }
+            }
             ttsManager = com.ghost.api.services.TTSManager(this)
             reportStatus("Init: Diary...")
             diaryManager = com.ghost.api.hardware.DiaryManager(this)
@@ -1388,6 +1410,14 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         if (::ttsManager.isInitialized) {
             ttsManager.speakPassiveAnnouncement(cueText)
         }
+        // Non-intrusive HUD chip / toast visual reading for every spoken bark
+        // If toast unavailable or silenced, work signal / flavortext spinner shows on overlay
+        serviceScope.launch(Dispatchers.Main) {
+            try {
+                android.widget.Toast.makeText(this@GemmaService, "✧ $cueText", android.widget.Toast.LENGTH_SHORT).show()
+            } catch (_: Exception) {}
+            showWorkSignal("✧ $cueText", 3500L)
+        }
         val bubble = "✧ $cueText"
         if (showInChat) {
             serviceScope.launch(Dispatchers.Main) {
@@ -1741,7 +1771,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         val cardTelemetry = if (::sensorFusionManager.isInitialized) {
             sensorFusionManager.getNotificationTelemetryString(machineStatus)
         } else {
-            "Machine status: $machineStatus\n⏱️ Uptime: active"
+            "📱 Machine status: $machineStatus\n⏱️ Uptime: active"
         }
 
         val builder = Notification.Builder(this, CHANNEL_ID)
@@ -2263,6 +2293,13 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             webviewUrl = webviewUrl,
             webviewAspectRatio = webviewAspectRatio
         )
+        // Show Gemma response in notification tray alongside sensor card
+        // Ensures user sees response without opening the app, especially when TTS is disabled
+        if (!isUser && isComplete && message.isNotBlank()) {
+            if (::responseNotificationManager.isInitialized) {
+                responseNotificationManager.showResponse(message)
+            }
+        }
     }
 
     override fun onEmotionSignal(emoji: String) {
