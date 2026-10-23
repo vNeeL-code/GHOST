@@ -1,3 +1,7 @@
+import java.util.Properties
+import java.io.FileInputStream
+import java.io.File
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -23,14 +27,33 @@ android {
         }
     }
 
+    val keystorePropsFile = rootProject.file("keystore.properties")
+    val keystoreProps = Properties().apply {
+        if (keystorePropsFile.exists()) {
+            FileInputStream(keystorePropsFile).use { stream -> load(stream) }
+        }
+    }
+
     signingConfigs {
         create("release") {
-            val ksFile = System.getenv("KEYSTORE_FILE")
-            if (ksFile != null && File(ksFile).exists()) {
-                storeFile = File(ksFile)
-                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
-                keyAlias = System.getenv("KEY_ALIAS") ?: "GHOST"
-                keyPassword = System.getenv("KEY_PASSWORD") ?: ""
+            val ksFilePath = keystoreProps.getProperty("storeFile")
+                ?: System.getenv("KEYSTORE_FILE")
+                ?: System.getenv("KEYSTORE_PATH")
+            val ksFile = if (!ksFilePath.isNullOrBlank()) {
+                val candidate = File(ksFilePath)
+                if (candidate.isAbsolute) candidate else rootProject.file(ksFilePath)
+            } else {
+                rootProject.file("ghost-release.jks").takeIf { it.exists() }
+            }
+
+            if (ksFile != null && ksFile.exists()) {
+                storeFile = ksFile
+                storePassword = keystoreProps.getProperty("storePassword")
+                    ?: System.getenv("KEYSTORE_PASSWORD") ?: ""
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                    ?: System.getenv("KEY_ALIAS") ?: "ghost"
+                keyPassword = keystoreProps.getProperty("keyPassword")
+                    ?: System.getenv("KEY_PASSWORD") ?: ""
             }
         }
     }
@@ -38,9 +61,10 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            val ksFile = System.getenv("KEYSTORE_FILE")
-            if (ksFile != null && File(ksFile).exists()) {
-                signingConfig = signingConfigs.getByName("release")
+            isDebuggable = false
+            val releaseSigning = signingConfigs.getByName("release")
+            if (releaseSigning.storeFile != null && releaseSigning.storeFile!!.exists()) {
+                signingConfig = releaseSigning
             }
         }
     }

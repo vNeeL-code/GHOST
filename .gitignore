@@ -18,3 +18,7 @@ local.properties
 !fastlane/**/*.txt
 !app/src/main/assets/**
 
+# Keystores and signing credentials
+*.jks
+*.keystore
+keystore.properties
