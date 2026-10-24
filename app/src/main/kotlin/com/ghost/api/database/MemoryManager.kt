@@ -93,6 +93,7 @@ class MemoryManager(private val context: Context) {
     suspend fun storeTurn(turn: ConversationTurn) = withContext(Dispatchers.IO) {
         conversationDao.insertTurn(turn)
         appendToMemoryLog("CHAT", "User: ${turn.userMessage} ↔ Gemma: ${turn.assistantResponse}")
+        MemoryDatabase.backupDatabaseToExternal(context)
     }
 
     suspend fun getFormattedHistory(limit: Int = 10): String = withContext(Dispatchers.IO) {
@@ -161,6 +162,7 @@ class MemoryManager(private val context: Context) {
         )
         semanticFactDao.insertFact(fact)
         appendToMemoryLog("FACT", "$title: $content")
+        MemoryDatabase.backupDatabaseToExternal(context)
     }
 
     suspend fun searchSemanticFacts(query: String): List<SemanticFact> = withContext(Dispatchers.IO) {
@@ -180,6 +182,7 @@ class MemoryManager(private val context: Context) {
         diaryDao.insertEntry(entry)
         diaryDao.trimOldEntries(keepCount = 25)
         appendToMemoryLog(entry.eventType, entry.observation)
+        MemoryDatabase.backupDatabaseToExternal(context)
     }
 
     suspend fun writeDiaryEntry(eventType: String, observation: String, contextData: String) = withContext(Dispatchers.IO) {
@@ -192,6 +195,7 @@ class MemoryManager(private val context: Context) {
         diaryDao.insertEntry(entry)
         diaryDao.trimOldEntries(keepCount = 25)
         appendToMemoryLog(eventType, observation)
+        MemoryDatabase.backupDatabaseToExternal(context)
     }
 
     suspend fun clearAll() = withContext(Dispatchers.IO) {

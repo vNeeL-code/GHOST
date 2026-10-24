@@ -108,6 +108,24 @@ abstract class MemoryDatabase : RoomDatabase() {
         fun getDatabase(context: Context): MemoryDatabase {
             return INSTANCE ?: synchronized(this) {
                 val dbName = "ghost_memory_database"
+                val dbFile = context.getDatabasePath(dbName)
+                if (!dbFile.exists()) {
+                    val backupDir = context.getExternalFilesDir("backup")
+                    val backupDb = backupDir?.let { java.io.File(it, "ghost_memory_database") }
+                    if (backupDb != null && backupDb.exists() && backupDb.length() > 0) {
+                        try {
+                            dbFile.parentFile?.mkdirs()
+                            backupDb.copyTo(dbFile, overwrite = true)
+                            val backupWal = java.io.File(backupDir, "ghost_memory_database-wal")
+                            if (backupWal.exists()) backupWal.copyTo(java.io.File(dbFile.parentFile, "ghost_memory_database-wal"), overwrite = true)
+                            val backupShm = java.io.File(backupDir, "ghost_memory_database-shm")
+                            if (backupShm.exists()) backupShm.copyTo(java.io.File(dbFile.parentFile, "ghost_memory_database-shm"), overwrite = true)
+                            Timber.i("MemoryDatabase: Restored database from external backup ($backupDb)")
+                        } catch (e: Exception) {
+                            Timber.e(e, "MemoryDatabase: Failed to restore external backup")
+                        }
+                    }
+                }
 
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
@@ -123,6 +141,25 @@ abstract class MemoryDatabase : RoomDatabase() {
                 INSTANCE = instance
                 Timber.i("MemoryDatabase: Initialized (version 6, file=$dbName)")
                 instance
+            }
+        }
+
+        fun backupDatabaseToExternal(context: Context) {
+            try {
+                val dbName = "ghost_memory_database"
+                val dbFile = context.getDatabasePath(dbName)
+                if (dbFile.exists() && dbFile.length() > 0) {
+                    val backupDir = context.getExternalFilesDir("backup") ?: return
+                    backupDir.mkdirs()
+                    dbFile.copyTo(java.io.File(backupDir, "ghost_memory_database"), overwrite = true)
+                    val wal = java.io.File(dbFile.parentFile, "ghost_memory_database-wal")
+                    if (wal.exists()) wal.copyTo(java.io.File(backupDir, "ghost_memory_database-wal"), overwrite = true)
+                    val shm = java.io.File(dbFile.parentFile, "ghost_memory_database-shm")
+                    if (shm.exists()) shm.copyTo(java.io.File(backupDir, "ghost_memory_database-shm"), overwrite = true)
+                    Timber.d("MemoryDatabase: Backed up database to external storage ($backupDir)")
+                }
+            } catch (e: Exception) {
+                Timber.w(e, "MemoryDatabase: External backup failed")
             }
         }
     }
