@@ -109,7 +109,8 @@ GHOST dynamically inspects your physical device RAM on first launch, automatical
 
 ### Core Capabilities
 
-<img width="922" height="2048" alt="GHOST Notification HUD" src="https://github.com/user-attachments/assets/c853d60d-5364-470a-a911-589dc8133b25" />
+<img width="912" height="2026" alt="34487455-b63e-4c83-8977-bceb94949068" src="https://github.com/user-attachments/assets/8fc4ddc4-b9b7-4061-8dbf-eb2a4d0a2fff" />
+
 
 #### 1. Real-Time Sensory Grounding
 Every inference turn begins with an unconscious peripheral nervous system snapshot:
