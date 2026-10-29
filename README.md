@@ -112,17 +112,18 @@ GHOST dynamically inspects your physical device RAM on first launch, automatical
 <img width="912" height="2026" alt="34487455-b63e-4c83-8977-bceb94949068" src="https://github.com/user-attachments/assets/8fc4ddc4-b9b7-4061-8dbf-eb2a4d0a2fff" />
 
 
-#### 1. Real-Time Sensory Grounding
-Every inference turn begins with an unconscious peripheral nervous system snapshot:
+#### 1. Real-Time Sensory Grounding & Verbal Preprocessor
+Every inference turn begins with an unconscious peripheral nervous system snapshot, passed through GHOST's **Verbal Time & Telemetry Preprocessor** so compact models perceive hardware state naturally without numeric anxiety or raw-digit hallucinations:
 ```markdown
-[Context: Live Sensory Grounding · Mon Sep 21 · 3:45 PM]
-BATTERY: 84% (-310mA, 28.4°C) | RAM: 3.4GB free | LUX: 180 | NET: Wi-Fi 6 (5GHz)
+[Context: Live Sensory Grounding · Late Afternoon]
+BATTERY: comfortable & healthy (eighty-four percent, discharging normally, cool chassis)
+RAM: 3.4GB free | LUX: indoor ambient | NET: Wi-Fi 6 (online)
 MEDIA: "Seven Nation Army" - The White Stripes (Playing)
 [/Context]
 
-Δ Operator ∇ [3:45 PM]: Are we getting hot while downloading this file?
+Δ Operator ∇ [quarter to four in the afternoon]: Are we getting hot while downloading this file?
 ```
-Gemma absorbs her hardware status silently and answers with grounded physical awareness: she won't dump raw numbers unless asked or unless a thermal limit ($65^\circ\text{C}$) or battery state is genuinely critical.
+Gemma absorbs her hardware status silently and answers with grounded physical awareness: she won't dump raw telemetry numbers unless asked or unless a thermal limit ($65^\circ\text{C}$) or battery threshold ($<30\%$) is genuinely crossed.
 
 #### 2. Notification HUD & Streaming TTS
 ```
@@ -146,27 +147,40 @@ Procedurally generated 60fps geometry that reacts in real-time to sub-bass, voca
 - **Option C (Prismatic Delta):** Seven Nation Army-inspired perspective corridor. Concentric upward-pointing equilateral canopies flashing on kicks, with downward wireframe chevrons on obsidian void.
 - **Option D (Cuboid Black Sun):** Cyber matrix with reactive dragon-teeth equalizers and edge laser lighting.
 
-#### 5. Autonomous Calendar Diary (The "Space Invader Grid")
-GHOST doesn't just wait for prompts; she dreams. Operating on configurable periodic cron cycles (1h, 3h, 12h), the agent consolidates recent episodic memories, sensor trends, and thoughts into structured Google Calendar events marked `Δ 👾 ∇`. Opening your calendar displays a clean, 4-a-day Space Invader grid tracking your shared offline journey.
+#### 5. Autonomous Diary & Persistent Memory Vault
+GHOST doesn't just wait for prompts; she dreams. Operating on configurable periodic cron cycles, the agent consolidates recent episodic memories, sensor trends, and reflections into her **in-app Encrypted Room DB Diary** (with one-tap Markdown export) or structured Google Calendar events marked `Δ 👾 ∇`. Automatic external memory backup ensures her long-term memories and diary entries survive seamlessly across APK updates and reinstalls.
 
-#### 6. Model Context Protocol (MCP) Hardware Tools
-Direct, local tool execution:
-- Flashlight toggle (`turnOnFlashlight`, `turnOffFlashlight`)
+#### 6. Wire-Speed Reflexes & MCP Hardware Tools
+GHOST pairs a `<2ms` **IntentBagger Reflex Layer** (firing high-confidence app launches and hardware toggles instantaneously without waking the GPU) with full Model Context Protocol (MCP) tool execution:
+- Flashlight & hardware state control (`turnOnFlashlight`, `turnOffFlashlight`)
+- Native system Timers & Alarms (`timer`)
 - Media session transport (Play, Pause, Skip, Volume)
-- Local app launching & deep link intent routing
-- Termux & ADB shell automation
+- Local app launching & deep-link intent routing (`open_app`)
+- Termux & ADB shell automation (`execute_command`)
 - Live DuckDuckGo privacy web scraping
 - Agent-to-Agent (A2A) structured consultation with cloud peers
 
 ---
 
+### Distribution Rails & Flavors
+
+GHOST is built from a single transparent codebase split into three distribution rails so FOSS purists, everyday Play Store users, and early-access supporters each get a clean binary:
+
+| Distribution Rail | Build Flavor | Billing & Telemetry | Cosmetics & Perks | Where to Get It |
+| :--- | :--- | :--- | :--- | :--- |
+| **FOSS / F-Droid** | `fdroidRelease` | **Zero.** No Google Play Billing library, no proprietary blobs, 100% air-gapped capable. | Core skins & standard HUD runes unlocked. | [GitHub Releases](https://github.com/vNeeL-code/GHOST/releases) & F-Droid |
+| **Google Play Store** | `playRelease` | Full local offline AI core is **100% free**. Uses Google Play Billing solely for optional supporter unlock. | Optional one-time **$3.50 ("tree fiddy") Operator Pass** unlocks the Turing glyph, custom edge lighting, and locked visualizer skins. | Google Play Store |
+| **Internal Tester / Paid Beta Rail** | `patreonRelease` | **Zero Play Store dependency.** Standalone signed release APK for supporters & testers. | **Pre-Unlocked (`FORCE_UNLOCKED`).** All Operator Pass skins, Turing glyphs, and bleeding-edge experimental builds active out of the box. | [☕ Buy Me a Coffee](https://buymeacoffee.com/vNeeL) |
+
+---
+
 ### Get Your ✧ GHOST
 
-1. **Download:** Grab the latest compiled APK from the [Releases](https://github.com/vNeeL-code/GHOST/releases) portal.
+1. **Download:** Grab the latest signed release APK from [GitHub Releases](https://github.com/vNeeL-code/GHOST/releases) (FOSS build) or the [Buy Me a Coffee Tester Rail](https://buymeacoffee.com/vNeeL).
 2. **Permissions:** Grant the necessary system permissions on first launch:
    - `Display Over Other Apps` (for the radial launcher and edge lights)
    - `Notification Access` (for the background HUD and ambient context)
-   - *Scoped Storage Isolation:* Model weights are safely isolated in app-specific storage (`Android/data/com.ghost.api/files/models`), fully compliant with Google Play Store standards.
+   - *Scoped Storage Isolation:* Model weights and automatic memory backups live safely in app-specific storage (`Android/data/com.ghost.api/files/`), fully compliant with Google Play Store standards.
 3. **Model Auto-Bootstrap:** On first launch, GHOST inspects your RAM, downloads the appropriate Gemma 4 model core (`E2B` or `E4B`), verifies the flatbuffer checksum, and initialises GPU acceleration.
 4. **Deploy:** Shake your device to open the overlay, customize your quick launcher, and let Gemma assume her post as your device's embodied intelligence.
 
@@ -181,15 +195,14 @@ Direct, local tool execution:
 
 ### Development Roadmap
 
-- [x] **Autonomous Diary Cycles:** Periodic episodic memory consolidation via Google Calendar `Δ 👾 ∇` or private in-app Room DB.
+- [x] **Autonomous Diary Cycles:** Periodic episodic memory consolidation via in-app Room DB (with Markdown export) or Google Calendar `Δ 👾 ∇`.
 - [x] **Dynamic RAM Hardware Tiering:** Automatic 8GB, 12GB, 16GB, and 24GB token runway scaling (up to 10k context).
-- [x] **SensorFusion Nervous System:** Real-time battery, thermal, network, and ambient sensory grounding with tokenizer-safe tags.
-- [x] **Hardware Tool Matrix:** Native MCP tools for device control, web search, app launching (`open_app`), and media controls.
+- [x] **SensorFusion Nervous System & Verbal Preprocessor (v4.35):** Real-time battery, thermal, network, and ambient sensory grounding with verbal time/number sanitization.
+- [x] **Hardware Tool Matrix:** Native MCP tools for device control, timers, web search, app launching (`open_app`), and media controls.
 - [x] **Dynamic Intent Bagging:** Sub-millisecond pre-filtering for zero-latency app and hardware execution.
-- [x] **Live Reactive Wallpapers:** GPU-accelerated 60fps geometry visualizers (Delta, Cuboid, Hex, Orbital).
-- [x] **Edge Lighting Engine:** Audioreactive and inference-reactive display perimeter illumination.
-- [x] **Polishing Gesture Choreography:** Micro-tuning gyro parallax and spring physics.
-- [x] **Play Store Beta (v4.30):** 🦕💭 *"I need about tree fiddy"* (Full local offline AI free tier; $3.50 Operator Pass for elite Turing glyph & custom edge styling).
+- [x] **Live Reactive Wallpapers & Edge Lighting:** GPU-accelerated 60fps geometry visualizers (Delta, Cuboid, Hex, Orbital) and audioreactive perimeter illumination.
+- [x] **Three-Rail Signed Release Architecture (v4.35):** 🦕💭 *"I need about tree fiddy"* — Self-contained FOSS (`fdroid`), Google Play (`play` with $3.50 Operator Pass), and Supporter Tester (`Buy Me a Coffee`) builds with automatic DB backup/restore.
+- [ ] **CPU Voice Reflex Fast-Path (v4.40 Target):** Integrating ultra-compact CPU speech recognition (`Whistle` 16.9 MB) ahead of `IntentBagger` for `<50ms` spoken hardware reflexes without spinning up the GPU.
 
 ---
 
