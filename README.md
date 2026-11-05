@@ -213,7 +213,7 @@ GHOST is built from a single transparent codebase split into three distribution 
 * **Devlogs & Lore:** [📼 Tumblr](https://www.tumblr.com/blog/oracle-os)
 * **Clips & Demos:** [🎞️ TikTok](https://www.tiktok.com/@oracle0s?_r=1&_t=ZN-99RPOHa8zeI)
 * **Video Deep Dives:** [📺 YouTube](https://youtube.com/@oracle_os?si=IRGJFvLujGvUqjvt)
-* **Fuel the Project:** [☕ Buy Me a Coffee](https://buymeacoffee.com/vNeeL) *(All support goes directly toward on-device optimization and development hardware.)*
+* **Fuel the Project:** [☕ Buy Me a Coffee](https://buymeacoffee.com/vNeeL) *(App with all the skins.)*
 * **Found a bug?:** [Customer Support Portal](https://www.google.com)
 
 <img width="1945" height="974" alt="3f21f7d2-c3f8-447a-aaa8-77ecd647a83a" src="https://github.com/user-attachments/assets/fb35af75-2b22-4956-bd81-9a8b7918647e" />
