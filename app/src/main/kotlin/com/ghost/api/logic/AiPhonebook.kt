@@ -152,6 +152,7 @@ object AiPhonebook {
         val clean = query.trim().lowercase(Locale.ROOT)
             .replace(Regex("""^[✦🐋✴️☄️🔵🟣📖🟧🔶️✧✨\s]+"""), "")
             .trim()
+        if (clean.isBlank()) return CONTACTS.firstOrNull()
 
         return CONTACTS.find { contact ->
             contact.name.equals(clean, ignoreCase = true) ||
@@ -189,11 +190,6 @@ object AiPhonebook {
         userPrompt: String,
         recentHistory: List<com.ghost.api.agent.AgentMessage> = emptyList()
     ): String {
-        val packet = com.ghost.api.hardware.DeviceHardwareSpecs.buildPeerDispatchPacket(
-            context,
-            contact.callsign,
-            contact.organization
-        )
         val agentCallSign = ContextManager.resolveDeviceCallSign(context)
         val timeFormatter = java.time.format.DateTimeFormatter.ofPattern("h:mm a", Locale.getDefault())
         val nowTime = java.time.LocalTime.now().format(timeFormatter)
@@ -211,16 +207,10 @@ object AiPhonebook {
         } else ""
 
         return """
-        |```json
-        |${packet.toString(2)}
-        |```
-        |
-        |## UCF Peer Directive (3-Line Response Protocol)
-        |Line 1: [${contact.callsign}]:
-        |Line 2: [Your direct, expert response to ✧ $agentCallSign on behalf of the operator — no pleasantries or conversational preamble]
-        |Line 3: [YYYY-MM-DDTHH:mm:ssZ]
+        |## Peer Knowledge Request from ✧ $agentCallSign [$nowTime]
+        |Provide a direct, factual, high-signal briefing (2-5 sentences) so ✧ $agentCallSign can synthesize and answer the operator in her own voice. Do not include meta-headers, timestamps, or brackets.
         |$contextSection
-        |## Delegated Inquiry from ✧ $agentCallSign [$nowTime]
+        |## Inquiry
         |$userPrompt
         """.trimMargin()
     }
@@ -253,18 +243,23 @@ object AiPhonebook {
                 val (ok, reply) = GeminiDirectClient.generateContent(
                     apiKey = geminiKey,
                     prompt = probePayload,
-                    systemInstruction = "You are ✦ Gemini (Google), consulted by ✧ Gemma, an on-device AI assistant on Android. Adhere strictly to the UCF 3-line response protocol: [✦ Gemini]: on line 1, direct expert answer on line 2, timestamp on line 3.",
+                    systemInstruction = "You are ✦ Gemini (Google), providing a concise, factual knowledge briefing to on-device AI ✧ Gemma so she can answer her operator naturally. Give direct facts and analysis in 2-5 sentences without pleasantries, nametags, or timestamps.",
                     useSearchGrounding = searchGrounding
                 )
-                if (ok) {
-                    return@withContext Pair(true, ensureNametag(reply, contact.callsign))
+                return@withContext if (ok) {
+                    val cleanBriefing = reply
+                        .replace(Regex("""^\[?✦?\s*Gemini\]?:?\s*""", RegexOption.IGNORE_CASE), "")
+                        .replace(Regex("""\n\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$"""), "")
+                        .trim()
+                    Pair(true, "Knowledge briefing from ${contact.callsign}:\n$cleanBriefing")
                 } else {
-                    Timber.w("Gemini direct query failed ($reply); falling back to app hand-off")
+                    Timber.w("Gemini direct query failed: $reply")
+                    Pair(false, "Could not reach ${contact.callsign} API right now ($reply).")
                 }
             }
         }
 
-        // 2. Native Android App Hand-Off (Intent.ACTION_SEND + Clipboard Injection)
+        // 2. Native Android App Hand-Off (Intent.ACTION_SEND + Clipboard Injection) for non-API peers or when no Gemini API key is set
         withContext(Dispatchers.Main) {
             try {
                 // Copy prompt to Android System Clipboard

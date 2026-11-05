@@ -187,7 +187,21 @@ class NetworkToolSet(private val context: Context) : ToolSet {
                 )
 
             val recentHistory = com.ghost.api.GemmaService.instance?.ghostAgent?.getRecentConversationTurns(3) ?: emptyList()
-            val (success, reply) = com.ghost.api.logic.AiPhonebook.queryPeer(context, contact, prompt, recentHistory)
+            val effectivePrompt = if (prompt.isBlank() || prompt.length < 15 || prompt.contains("consulting", ignoreCase = true) || prompt.contains("consult_peer", ignoreCase = true)) {
+                val prevUserMsg = recentHistory
+                    .filter { it.role == "user" }
+                    .map { it.content.replace(Regex("""^Δ\s*.*?\s*∇(\s*\[.*?\])?:\s*"""), "").trim() }
+                    .firstOrNull { !it.contains("consult", ignoreCase = true) && it.length > 10 }
+                if (!prevUserMsg.isNullOrBlank() && prevUserMsg != prompt) {
+                    "$prevUserMsg\n(Follow-up context: $prompt)"
+                } else {
+                    prompt.ifBlank { "Provide an expert perspective on the recent dialogue context above." }
+                }
+            } else {
+                prompt
+            }
+
+            val (success, reply) = com.ghost.api.logic.AiPhonebook.queryPeer(context, contact, effectivePrompt, recentHistory)
             val cleanReply = sanitizeToolString(reply, 1800)
             if (success) {
                 com.ghost.api.GemmaService.instance?.recordToolOutput(cleanReply.length)

@@ -716,6 +716,8 @@ class GhostAgent(
                 rawResponse.contains("run_js") ||
                 rawResponse.contains("load_skill") ||
                 rawResponse.contains("run_intent") ||
+                rawResponse.contains("consult_peer") ||
+                rawResponse.contains("consultpeer") ||
                 rawResponse.contains("set_alarm(") || rawResponse.contains("set_alarm{") ||
                 rawResponse.contains("alarm(") || rawResponse.contains("alarm{") ||
                 rawResponse.contains("timer(") || rawResponse.contains("timer{") ||
@@ -728,8 +730,12 @@ class GhostAgent(
                 if (recovered != null) {
                     rawResponse = recovered
                     toolExecutedInCurrentTurn = true
-                    lastExecutedToolName = "fallback"
-                    lastExecutedToolResult = recovered
+                    if (lastExecutedToolName == null) {
+                        lastExecutedToolName = "fallback"
+                    }
+                    if (lastExecutedToolResult.isNullOrBlank()) {
+                        lastExecutedToolResult = recovered
+                    }
                 }
             }
 
@@ -881,7 +887,8 @@ class GhostAgent(
                             toolExecutedInCurrentTurn = true
                             lastExecutedToolName = "consult_peer"
                             lastExecutedToolResult = out
-                            cleanResponse = out
+                            // Clear pre-tool stalling text so 5C Tool Continuation Pass synthesizes Gemini's output in Gemma's own voice
+                            cleanResponse = ""
                         }
                     }
                 }
@@ -904,15 +911,27 @@ class GhostAgent(
             }
 
             // 5C. Tool Continuation Pass:
-            // When LiteRT-LM executes a tool in sendMessageAsync, C++ appends tool results to context
-            // but does not resume token streaming. If a tool was executed and the model emitted only a stub (<25 chars),
-            // run a continuation pass or adopt the tool result!
-            if (toolExecutedInCurrentTurn && (cleanResponse.length < 25 || cleanResponse == "I'")) {
-                Timber.i("GhostAgent: Tool was executed ($lastExecutedToolName). Running continuation decode pass...")
+            // When LiteRT-LM executes an information-gathering tool (like consult_peer, search, recall, etc.),
+            // or when a tool was executed and the model only emitted a stub or pre-tool stalling sentence,
+            // feed the retrieved knowledge back to Gemma so she reads it and answers in her own voice!
+            val isKnowledgeRetrievalTool = lastExecutedToolName?.lowercase(Locale.ROOT) in setOf(
+                "consult_peer", "consultpeer", "search", "web_search", "fetch_webpage",
+                "recall", "read_diary", "read_calendar"
+            )
+            if (toolExecutedInCurrentTurn && (isKnowledgeRetrievalTool || cleanResponse.length < 25 || cleanResponse == "I'")) {
+                Timber.i("GhostAgent: Tool was executed ($lastExecutedToolName, knowledge=$isKnowledgeRetrievalTool). Running continuation decode pass...")
                 val continuationBuffer = StringBuilder()
+                val toolData = lastExecutedToolResult?.takeIf { it.isNotBlank() }
+                val continuationPrompt = if (toolData != null && isKnowledgeRetrievalTool) {
+                    "[Information Retrieved via $lastExecutedToolName]:\n$toolData\n\n" +
+                    "Read the information above and use it as your own knowledge to answer the ${Constants.getUserTitle(context)} directly and naturally in your own voice. " +
+                    "Do not say you are waiting for a response or that you sent a query—you already have the findings right here."
+                } else {
+                    "Synthesize the findings from the tool result above concisely for the ${Constants.getUserTitle(context)}."
+                }
                 try {
                     llmEngine.streamResponse(
-                        prompt = "Synthesize the findings from the tool result above concisely for the ${Constants.getUserTitle(context)}.",
+                        prompt = continuationPrompt,
                         images = emptyList(),
                         audioData = null,
                         onToken = { contToken ->
@@ -943,11 +962,53 @@ class GhostAgent(
                 val contResult = continuationBuffer.toString().trim()
                 if (contResult.isNotBlank() && contResult.length >= 10) {
                     rawResponse = contResult
+                    spokenAnyStreamingTts = false
                 } else if (!lastExecutedToolResult.isNullOrBlank()) {
                     rawResponse = lastExecutedToolResult!!
+                    spokenAnyStreamingTts = false
                 }
 
                 cleanResponse = sanitizeAgentOutput(rawResponse)
+            }
+
+            // 5D. Cross-Turn State Attractor / Repetition Guard:
+            // Compare sentences in cleanResponse against the last 2 assistant responses in _conversationHistory.
+            // If Gemma repeats a sentence verbatim (or with >0.70 word overlap) from a recent turn, strip the repeated sentence.
+            if (!isDream && cleanResponse.length >= 24) {
+                val recentAssistantSentences = synchronized(_conversationHistory) {
+                    _conversationHistory.asReversed()
+                        .asSequence()
+                        .filter { it.role == "assistant" }
+                        .take(2)
+                        .flatMap { msg ->
+                            msg.content.split(Regex("""(?<=[.!?])\s+|\n+"""))
+                                .map { it.trim() }
+                                .filter { it.length >= 24 }
+                                .asSequence()
+                        }
+                        .toList()
+                }
+                if (recentAssistantSentences.isNotEmpty()) {
+                    val currentSentences = cleanResponse.split(Regex("""(?<=[.!?])\s+"""))
+                    if (currentSentences.isNotEmpty()) {
+                        val filteredSentences = currentSentences.filter { sentence ->
+                            val trimmed = sentence.trim()
+                            if (trimmed.length < 24) true
+                            else {
+                                val norm = trimmed.lowercase(Locale.ROOT).replace(Regex("""[^a-z0-9\s]"""), "")
+                                val isCrossTurnRepeat = recentAssistantSentences.any { prev ->
+                                    val prevNorm = prev.lowercase(Locale.ROOT).replace(Regex("""[^a-z0-9\s]"""), "")
+                                    norm == prevNorm || SessionMemoryCompactor.wordOverlapRatio(norm, prevNorm) > 0.72
+                                }
+                                !isCrossTurnRepeat
+                            }
+                        }
+                        if (filteredSentences.size < currentSentences.size) {
+                            Timber.w("GhostAgent: Stripped ${currentSentences.size - filteredSentences.size} cross-turn repeated state-attractor sentence(s).")
+                            cleanResponse = filteredSentences.joinToString(" ").trim()
+                        }
+                    }
+                }
             }
 
             val isStub = cleanResponse.length < 5 || cleanResponse == "I'" || cleanResponse.endsWith("]:")
@@ -1002,8 +1063,10 @@ class GhostAgent(
                 if (retryError == null && !retryStub) {
                     Timber.i("✅ GhostAgent: Auto-recovery retry SUCCEEDED! User prompt preserved.")
                     cleanResponse = retryClean
+                    spokenAnyStreamingTts = false
                 } else if (toolExecutedInCurrentTurn && !lastExecutedToolResult.isNullOrBlank()) {
                     cleanResponse = lastExecutedToolResult!!
+                    spokenAnyStreamingTts = false
                 } else {
                     val errorMsg = if (retryError != null || streamError != null) {
                         "Processing interrupted. Session reset completed."
@@ -1252,6 +1315,7 @@ class GhostAgent(
             if (completedMessages.isEmpty()) ""
             else {
                 val assistantCallSign = getAssistantCallSign()
+                val seenNormalized = mutableListOf<String>()
                 val lines = completedMessages.takeLast(6).mapNotNull { msg ->
                     val clean = if (msg.role == "assistant") sanitizeAgentOutput(msg.content) else msg.content.trim()
                     if (clean.isBlank()) return@mapNotNull null
@@ -1262,7 +1326,15 @@ class GhostAgent(
                         .replace(Regex("""^✧\s*.*?:"""), "")
                         .trim()
                     val singleLine = contentWithoutPrefix.replace(Regex("""\s+"""), " ")
-                    val snippet = if (singleLine.length > 200) singleLine.take(197) + "..." else singleLine
+                    val maxLen = if (msg.role == "user") 160 else 120
+                    val snippet = SessionMemoryCompactor.extractCleanSentenceSnippet(singleLine, maxLen)
+                    if (snippet.isBlank()) return@mapNotNull null
+                    val norm = snippet.lowercase(Locale.ROOT).replace(Regex("""[^a-z0-9\s]"""), "")
+                    val isDup = seenNormalized.any { prev ->
+                        prev == norm || SessionMemoryCompactor.wordOverlapRatio(prev, norm) > 0.60
+                    }
+                    if (isDup && msg.role == "assistant") return@mapNotNull null
+                    seenNormalized.add(norm)
                     "• $roleLabel: $snippet"
                 }
                 if (lines.isNotEmpty()) {
@@ -1405,6 +1477,16 @@ class GhostAgent(
         val output = result["output"] ?: result["result"] ?: "Success"
         val userTitle = Constants.getUserTitle(context)
         return when (actionName) {
+            "consult_peer", "consultpeer" -> {
+                lastExecutedToolName = "consult_peer"
+                lastExecutedToolResult = output
+                ""
+            }
+            "search", "execute_background_search" -> {
+                lastExecutedToolName = "search"
+                lastExecutedToolResult = output
+                ""
+            }
             "open_app", "openApp", "launch_app", "app" -> {
                 val appName = rawBody.removePrefix("{").removeSuffix("}")
                     .replace(Regex("""^"name"\s*[:=]\s*"""), "")
@@ -1486,7 +1568,23 @@ class GhostAgent(
                     _conversationHistory.addAll(sanitizedHistory)
                 }
                 turnCount.set(state.turnCount)
-                rollingMemory = sanitizeAgentOutput(state.rollingMemory)
+                // Self-heal rollingMemory from any older mid-word "..." truncations or repeated state-attractor bullets
+                val seenMem = mutableListOf<String>()
+                val cleanedMemLines = sanitizeAgentOutput(state.rollingMemory)
+                    .lines()
+                    .mapNotNull { line ->
+                        val trimmed = line.trim().replace(Regex("""\w*\.\.\.$"""), "").trim()
+                        if (trimmed.isBlank()) return@mapNotNull null
+                        val norm = trimmed.lowercase(Locale.ROOT).replace(Regex("""[^a-z0-9\s]"""), "")
+                        val isDup = seenMem.any { prev ->
+                            prev == norm || SessionMemoryCompactor.wordOverlapRatio(prev, norm) > 0.55
+                        }
+                        if (isDup) null else {
+                            seenMem.add(norm)
+                            trimmed
+                        }
+                    }
+                rollingMemory = cleanedMemLines.takeLast(8).joinToString("\n")
                 Timber.i("GhostAgent: Restored checkpoint with ${_conversationHistory.size} messages (Turn: ${state.turnCount})")
             }
         } catch (e: Exception) {
@@ -1551,6 +1649,16 @@ class GhostAgent(
 
         // 6. Clean stuttering time tokens (e.g. "8:0000 PM" -> "8:00 PM", "2:000" -> "2:00")
         text = com.ghost.api.logic.TimePreprocessor.sanitizeTimeTokens(text)
+
+        // 7. Clean degenerate contraction stutters (e.g. "It's's", "I'm's", "I's", "don'm", repeated pronoun sequences)
+        text = text
+            .replace(Regex("""\bIt's(?:'s)+\b""", RegexOption.IGNORE_CASE), "It's")
+            .replace(Regex("""\bI'm(?:'[ms])+\b""", RegexOption.IGNORE_CASE), "I'm")
+            .replace(Regex("""\bdon'm\b""", RegexOption.IGNORE_CASE), "don't")
+            .replace(Regex("""\bI's\b"""), "I'm")
+            .replace(Regex("""(?:\b(?:I'm|I's|It's|I)\s+){2,}(?:I'm|I's|It's|I)\b""", RegexOption.IGNORE_CASE), "I'm")
+            .replace(Regex("""\b(\w+)(?:\s+\1\b){2,}""", RegexOption.IGNORE_CASE), "$1")
+            .replace(Regex("""\bmuch more eff\.{2,}""", RegexOption.IGNORE_CASE), "much more efficient.")
 
         return text.trim()
     }

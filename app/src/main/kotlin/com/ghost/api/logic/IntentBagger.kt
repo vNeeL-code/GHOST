@@ -205,6 +205,7 @@ object IntentBagger {
         val peer = matchPeerConsultation(clean, trimmed)
         if (peer != null) {
             val (peerName, prompt) = peer
+            bagged.removeAll { it.tool == "open_app" && it.appLabel.equals(peerName, ignoreCase = true) }
             val jsonStr = org.json.JSONObject().put("peer", peerName).put("prompt", prompt).toString()
             bagged.add(BaggedIntent("consult_peer", jsonStr, "Consult peer AI $peerName"))
         }
@@ -437,9 +438,30 @@ object IntentBagger {
     }
 
     private fun matchPeerConsultation(clean: String, raw: String): Pair<String, String>? {
+        // Ignore meta-discussions about the tool itself (e.g. 'as a "consult peer"', 'you have a consult_peer tool')
+        val isMetaDiscussion = raw.contains("\"consult peer\"", ignoreCase = true) ||
+            raw.contains("'consult peer'", ignoreCase = true) ||
+            clean.contains("consult_peer tool") ||
+            clean.contains("consult peer tool") ||
+            clean.contains("headless api") ||
+            clean.contains("opened the app") ||
+            clean.contains("opening app")
+        if (isMetaDiscussion) return null
+
+        val normalized = clean
+            .replace(Regex("""[✦🐋✴️☄️🔵🟣📖🟧🔶️✧✨/]+"""), " ")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+
         val peers = listOf("claude", "gemini", "deepseek", "perplexity", "qwen", "kimi", "mistral", "copilot", "chatgpt", "grok")
         val foundPeer = peers.firstOrNull {
-            clean.contains("ask $it") || clean.contains("consult $it") || clean.contains("check with $it") || clean.contains("message $it")
+            normalized.contains("ask $it") ||
+                normalized.contains("consult $it") ||
+                normalized.contains("consulting $it") ||
+                normalized.contains("consulting peer $it") ||
+                normalized.contains("consult peer $it") ||
+                normalized.contains("check with $it") ||
+                normalized.contains("message $it")
         }
         if (foundPeer != null) {
             val regex = Regex("""\b${Regex.escape(foundPeer)}\b""", RegexOption.IGNORE_CASE)
@@ -447,17 +469,16 @@ object IntentBagger {
             val extracted = if (match != null) {
                 raw.substring(match.range.last + 1).trim().trimStart(':', ',', '-', ' ')
             } else {
-                raw
+                ""
             }
-            val prompt = extracted.ifBlank { raw }
             val capitalizedPeer = foundPeer.replaceFirstChar { it.uppercase() }
-            return Pair(capitalizedPeer, prompt)
+            return Pair(capitalizedPeer, extracted)
         }
-        if (clean.contains("consult peer") || clean.contains("consult_peer")) {
-            val mentionedPeer = peers.firstOrNull { clean.contains(it) } ?: "gemini"
+        if (normalized.contains("try consulting peer") || normalized.startsWith("consult peer") || normalized.startsWith("use consult_peer") || normalized.startsWith("use consult peer")) {
+            val mentionedPeer = peers.firstOrNull { normalized.contains(it) } ?: "gemini"
             val capitalizedPeer = mentionedPeer.replaceFirstChar { it.uppercase() }
-            val prompt = raw.replace(Regex("""(?i)use\s+consult[_ ]peer|consult[_ ]peer"""), "").trim().trimStart(':', ',', '-', ' ').ifBlank { raw }
-            return Pair(capitalizedPeer, prompt)
+            val extracted = raw.replace(Regex("""(?i).*?(?:consult[_ ]peer|consulting[_ ]peer)[/\s✦🐋✴️☄️🔵🟣📖🟧🔶️✧✨]*([a-zA-Z0-9_-]+)?"""), "").trim().trimStart(':', ',', '-', ' ')
+            return Pair(capitalizedPeer, extracted)
         }
         return null
     }

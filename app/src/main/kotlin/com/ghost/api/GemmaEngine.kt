@@ -646,25 +646,37 @@ class GemmaEngine(private val context: Context) : LlmBackend {
 
     private fun truncateRepetition(response: String): String {
         if (response.length < 20) return response
-        
-        // 1. Sentence-level repetition
-        val sentences = response.split(Regex("""(?<=[.!?])\s+""")).filter { it.length >= 15 }
-        if (sentences.size >= 8) {
-            val seen = java.util.HashSet<String>()
-            for ((i, sentence) in sentences.withIndex()) {
-                val normalized = sentence.trim().lowercase()
-                if (!seen.add(normalized) && i > 4) {
-                    return sentences.take(i).joinToString(" ")
+
+        // 1. Sentence-level deduplication within the same turn (prevents repeating the same sentence 2-3x in one reply)
+        val rawSentences = response.split(Regex("""(?<=[.!?])\s+"""))
+        if (rawSentences.size >= 2) {
+            val kept = mutableListOf<String>()
+            val seenNormalized = mutableListOf<String>()
+            for (sentence in rawSentences) {
+                val norm = sentence.trim().lowercase().replace(Regex("""[^a-z0-9\s]"""), "").replace(Regex("""\s+"""), " ")
+                if (norm.length >= 20 && seenNormalized.any { it == norm || it.contains(norm) || norm.contains(it) }) {
+                    // Duplicate sentence within the same turn — drop it
+                    continue
+                }
+                kept.add(sentence)
+                if (norm.length >= 20) {
+                    seenNormalized.add(norm)
+                }
+            }
+            if (kept.size < rawSentences.size) {
+                val rejoined = kept.joinToString(" ").trim()
+                if (rejoined.isNotBlank()) {
+                    return rejoined
                 }
             }
         }
-        
+
         // 2. Token / word / phrase repetition
         val match = findDegenerateLoopMatch(response)
         if (match != null) {
             return response.substring(0, match.range.first).trimEnd()
         }
-        
+
         return response
     }
 
@@ -728,11 +740,10 @@ class GemmaEngine(private val context: Context) : LlmBackend {
         /**
          * Detects runaway degenerative token/phrase loops:
          * - Single letter repeated 8+ times (e.g. "aaaaaaaa")
+         * - Contraction/pronoun stutters repeated 4+ times (e.g. "I'm's I's I'm I'm")
          * - Short units (2-3 chars) repeated 6+ times (e.g. "a,a,a,a,a,a")
-         * - Medium phrases (4-9 chars) repeated 4+ times (e.g. "test test test test ")
-         * - Long phrases (10-40 chars) repeated 3+ times (e.g. "a fascinating example of a fascinating example of a fascinating example of ")
-         *
-         * Enforces that repeating sequences MUST contain alphabetic letters.
+         * - Medium phrases (4-9 chars) repeated 3+ times (e.g. "keep keep keep ")
+         * - Long phrases (10-60 chars) repeated 2+ times back-to-back
          */
         fun findDegenerateLoopMatch(text: String): MatchResult? {
             if (text.length < 8) return null
@@ -741,17 +752,21 @@ class GemmaEngine(private val context: Context) : LlmBackend {
             val singleLetterMatch = Regex("""([a-zA-Z])\1{7,}""").find(text)
             if (singleLetterMatch != null) return singleLetterMatch
 
-            // 2. Long phrases (10..40 chars) repeated 3+ times (e.g. "a fascinating example of ")
-            val longPattern = Regex("""(.{10,40}?)\1{2,}""")
+            // 2. Contraction / pronoun stutter loop (e.g. "I'm's I's I'm'm", "It's's it's's")
+            val stutterMatch = Regex("""(?i)(?:\b(?:i'm|i's|it's)(?:'[ms])*\s+){3,}""").find(text)
+            if (stutterMatch != null) return stutterMatch
+
+            // 3. Long phrases (12..60 chars) repeated 2+ times contiguously (or 10..40 repeated 3+ times)
+            val longPattern = Regex("""(.{14,60}?)\1{1,}""")
             for (m in longPattern.findAll(text)) {
                 val unit = m.groupValues[1]
-                if (unit.any { it.isLetter() }) {
+                if (unit.count { it.isLetter() } >= 8) {
                     return m
                 }
             }
 
-            // 3. Medium phrases (4..9 chars) repeated 4+ times (e.g. "test ")
-            val mediumPattern = Regex("""(.{4,9}?)\1{3,}""")
+            // 4. Medium phrases / words (4..13 chars) repeated 3+ times (e.g. "keep keep keep")
+            val mediumPattern = Regex("""(.{4,13}?)\1{2,}""")
             for (m in mediumPattern.findAll(text)) {
                 val unit = m.groupValues[1]
                 if (unit.any { it.isLetter() }) {
@@ -759,8 +774,8 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                 }
             }
 
-            // 4. Short units (2..3 chars) repeated 6+ times (e.g. "s'")
-            val shortPattern = Regex("""(.{2,3}?)\1{5,}""")
+            // 5. Short units (2..3 chars) repeated 5+ times (e.g. "'s's's's's")
+            val shortPattern = Regex("""(.{2,3}?)\1{4,}""")
             for (m in shortPattern.findAll(text)) {
                 val unit = m.groupValues[1]
                 if (unit.any { it.isLetter() }) {
