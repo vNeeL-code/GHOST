@@ -23,7 +23,7 @@ class MCPServer(
     private val networkTools: NetworkToolSet,
     private val systemTools: SystemToolSet,
     private val uiMacroTools: com.ghost.api.hardware.UiMacroToolSet,
-    private val termuxTools: com.ghost.api.hardware.TermuxAdbToolSet,
+    val automationTools: com.ghost.api.hardware.AutomationToolSet,
     private val audioRecorder: AudioRecorder,
     val sensorManager: SensorFusionManager,
     private val memoryManager: MemoryManager,
@@ -73,6 +73,18 @@ class MCPServer(
         "read_diary"      to ToolDefinition("read_diary", "Read recent diary entries and reflections from persistent memory and calendar", mapOf(
             "days" to ParameterSpec("integer", "Number of days in the past to look back", required = false)
         )),
+        // Autonomous Scheduling & Routines
+        "schedule_task"   to ToolDefinition("schedule_task", "Schedule a one-shot or recurring background routine/cron task (deferred to screen-off by default)", mapOf(
+            "prompt"          to ParameterSpec("string", "Instructions or prompt to execute"),
+            "title"           to ParameterSpec("string", "Short task title", required = false),
+            "delayMinutes"    to ParameterSpec("integer", "Delay in minutes before first run (default 30)", required = false),
+            "intervalMinutes" to ParameterSpec("integer", "Recurring interval in minutes (0 for one-shot)", required = false),
+            "screenOffOnly"   to ParameterSpec("boolean", "Defer until screen is off (default true)", required = false)
+        )),
+        "list_tasks"      to ToolDefinition("list_tasks", "List all active scheduled tasks, cron jobs, and pending screen-off tasks/reports", emptyMap()),
+        "cancel_task"     to ToolDefinition("cancel_task", "Cancel and tear down a scheduled task by ID, title, or 'all'", mapOf(
+            "target" to ParameterSpec("string", "Task ID, title, or 'all'")
+        )),
         // Screen / Accessibility
         "click"           to ToolDefinition("click", "Click a UI element by visible text", mapOf("target" to ParameterSpec("string", "Text of element to click"))),
         "scroll"          to ToolDefinition("scroll", "Scroll the screen", mapOf("direction" to ParameterSpec("string", "UP, DOWN, LEFT, or RIGHT"))),
@@ -84,8 +96,6 @@ class MCPServer(
             "content" to ParameterSpec("string", "Memory content")
         )),
         "recall"          to ToolDefinition("recall", "Search stored memories", mapOf("query" to ParameterSpec("string", "Search query"))),
-        // Shell
-        "bash"            to ToolDefinition("bash", "Run a shell command (Termux pipe)", mapOf("command" to ParameterSpec("string", "Shell command"))),
         "search"          to ToolDefinition("search", "DEFAULT SEARCH TOOL. Use naturally to silently scrape the web for info or unknown topics.", mapOf("query" to ParameterSpec("string", "Search query"))),
         "execute_background_search" to ToolDefinition("execute_background_search", "DEFAULT SEARCH TOOL. Use naturally to silently scrape the web for info or unknown topics.", mapOf("query" to ParameterSpec("string", "Search query"))),
         "fetch_webpage"   to ToolDefinition("fetch_webpage", "Fetches plaintext content from a webpage URL", mapOf("url" to ParameterSpec("string", "URL to fetch"))),
@@ -245,11 +255,30 @@ class MCPServer(
                     val res = systemTools.recall(query)
                     ToolResult(res["result"] == "success", res["memories"] ?: "")
                 }
-                // Shell (Termux pipe)
-                "bash" -> {
-                    val command = params["command"]?.toString() ?: ""
-                    val res = termuxTools.bash(command)
+                // Autonomous Scheduling & Routines
+                "schedule_task", "scheduletask" -> {
+                    val prompt = params["prompt"]?.toString() ?: params["input"]?.toString() ?: ""
+                    val title = params["title"]?.toString() ?: "Routine Task"
+                    val delayMinutes = (params["delayMinutes"] ?: params["delay_minutes"] ?: params["minutes"])?.toString()?.toIntOrNull() ?: 30
+                    val intervalMinutes = (params["intervalMinutes"] ?: params["interval_minutes"] ?: params["interval"])?.toString()?.toIntOrNull() ?: 0
+                    val screenOffOnly = (params["screenOffOnly"] ?: params["screen_off_only"])?.toString()?.let { !it.equals("false", ignoreCase = true) } ?: true
+                    val res = automationTools.schedule_task(
+                        delayMinutes = delayMinutes,
+                        prompt = prompt,
+                        title = title,
+                        intervalMinutes = intervalMinutes,
+                        screenOffOnly = screenOffOnly
+                    )
+                    ToolResult(res["result"] == "success", res["message"] ?: "")
+                }
+                "list_tasks", "listtasks", "tasks" -> {
+                    val res = automationTools.list_tasks()
                     ToolResult(res["result"] == "success", res["output"] ?: res["message"] ?: "")
+                }
+                "cancel_task", "canceltask", "unschedule_task", "remove_task" -> {
+                    val target = params["target"]?.toString() ?: params["id"]?.toString() ?: params["input"]?.toString() ?: ""
+                    val res = automationTools.cancel_task(target)
+                    ToolResult(res["result"] == "success", res["message"] ?: "")
                 }
                 "search", "web_search", "google", "execute_background_search" -> {
                     val query = params["query"]?.toString() ?: params["input"]?.toString() ?: ""

@@ -24,6 +24,9 @@ interface ConversationDao {
     """)
     suspend fun searchByKeyword(keyword: String): List<ConversationTurn>
 
+    @Query("DELETE FROM conversations WHERE id NOT IN (SELECT id FROM conversations ORDER BY timestamp DESC LIMIT :keepCount)")
+    suspend fun trimOldTurns(keepCount: Int = 200): Int
+
     @Query("DELETE FROM conversations")
     suspend fun deleteAll(): Int
 }
@@ -36,7 +39,7 @@ interface SemanticFactDao {
     @Query("SELECT * FROM semantic_facts WHERE factType = :type ORDER BY extractedAt DESC")
     suspend fun getFactsByType(type: String): List<SemanticFact>
 
-    @Query("SELECT * FROM semantic_facts WHERE subject LIKE '%' || :query || '%' OR object_ LIKE '%' || :query || '%' ORDER BY confidence DESC")
+    @Query("SELECT * FROM semantic_facts WHERE subject LIKE '%' || :query || '%' ORDER BY confidence DESC")
     suspend fun searchFacts(query: String): List<SemanticFact>
 
     @Query("SELECT * FROM semantic_facts ORDER BY extractedAt DESC LIMIT :limit")
@@ -49,6 +52,15 @@ interface SemanticFactDao {
         ORDER BY sf.confidence DESC
     """)
     suspend fun searchByKeyword(keyword: String): List<SemanticFact>
+
+    @Query("DELETE FROM semantic_facts WHERE subject LIKE 'Diary Entry (%'")
+    suspend fun purgeLegacyDuplicateDiaryFacts(): Int
+
+    @Query("DELETE FROM semantic_facts WHERE id NOT IN (SELECT id FROM semantic_facts ORDER BY extractedAt DESC LIMIT :keepCount)")
+    suspend fun trimOldFacts(keepCount: Int = 150): Int
+
+    @Query("DELETE FROM semantic_facts")
+    suspend fun deleteAll(): Int
 }
 
 @Dao

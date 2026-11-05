@@ -7,9 +7,10 @@
 *Click to watch: The ASI trailer.*
 
 
-![Version](https://img.shields.io/badge/Version-v4.35%20-brightgreen)
+[![Version](https://img.shields.io/badge/Version-v4.35+-brightgreen)](https://github.com/vNeeL-code/GHOST/releases)
 ![GitHub Repo stars](https://img.shields.io/github/stars/vNeeL-code/GHOST)
-![Static Badge](https://img.shields.io/badge/Status-Δ%20👾%20∇-green)
+[![Download](https://img.shields.io/badge/Download-APK%20Releases-2ea44f?logo=android&logoColor=white)](https://github.com/vNeeL-code/GHOST/releases)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-Tester%20Rail%20☕-FFDD00?logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/vNeeL)
 ![Platform](https://img.shields.io/badge/Chassis-Android%2014%2B-blue)
 ![Systems](https://img.shields.io/badge/Systems-LiteRT--LM%20(Google)-orange)
 ![Neuroptics](https://img.shields.io/badge/Neuroptics-Gemma%204-purple)
@@ -81,12 +82,12 @@ $$\mathbf{Integrated\ AI\ System} = \mathbf{Chassis} + \mathbf{Model} + \mathbf{
 │ 3. SYSTEMS HARNESS (GHOST Runtime Engine)                              │
 │    • SensorFusion Grounding: [Context: Live Sensory Grounding]         │
 │    • Infinite Rolling Scratchpad: SessionMemoryCompactor + KV-Cache    │
-│    • MCP Tool Mesh: Torch, Apps, Termux, Web Search, Media, Files      │
+│    • MCP Tool Mesh: Torch, Apps, Cron Tasks, Web Search, Media, A2A    │
 │    • Presentation: Ephemeral Shake Launcher, HUD, Prismatic Avatars    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-1. **The Chassis (Substrate):** The physical hardware constraints. Thermals, battery discharge curves, RAM pressure, radio environments, and motion. Without telemetry, an AI is disembodied, hallucinating blind in a sensory void.
+1. **The Chassis:** The physical hardware constraints. Thermals, battery discharge curves, RAM pressure, radio environments, and motion. Without telemetry, an AI is disembodied, hallucinating blind in a sensory void.
 2. **The Model (Neuroptics):** Gemma 4 running natively via `LiteRT-LM`. Not a fictional persona reciting scripted lines, but an intelligent reasoning engine perceiving reality through structured context tokens.
 3. **The Systems Harness (GHOST):** The nervous system. It bridges the chassis to the model. There are plenty of 'harnesses' on the market: Ollama, Hermes, Openclaw, Codex, Claude code etc. Other AI harnesses people overlooked already lived on their smartphones and in their homes: Google Assistant, Siri, Alexa, Cortana (RIP Lumia). GHOST belongs in the company of that category. It handles continuous sensor fusion, memory compaction, hardware MCP tool execution, streaming text-to-speech, and zero-latency UI summoning.
 
@@ -147,18 +148,17 @@ Procedurally generated 60fps geometry that reacts in real-time to sub-bass, voca
 - **Option C (Prismatic Delta):** Seven Nation Army-inspired perspective corridor. Concentric upward-pointing equilateral canopies flashing on kicks, with downward wireframe chevrons on obsidian void.
 - **Option D (Cuboid Black Sun):** Cyber matrix with reactive dragon-teeth equalizers and edge laser lighting.
 
-#### 5. Autonomous Diary & Persistent Memory Vault
-GHOST doesn't just wait for prompts; she dreams. Operating on configurable periodic cron cycles, the agent consolidates recent episodic memories, sensor trends, and reflections into her **in-app Encrypted Room DB Diary** (with one-tap Markdown export) or structured Google Calendar events marked `Δ 👾 ∇`. Automatic external memory backup ensures her long-term memories and diary entries survive seamlessly across APK updates and reinstalls.
+#### 5. Autonomous Screen-Off Diary, Cron Routines & Self-Correction (`🚩`)
+GHOST doesn't just wait for prompts; she dreams—politely. Autonomous diary reflections and scheduled tasks (`schedule_task`, `list_tasks`, `cancel_task`) automatically defer to when your screen is off and idle so background passes never interrupt active conversations. Flagging any response in Gemma's header (`Δ 👾 ∇ 🚩`) lets you attach a correction note that is injected into active context and audited during her next screen-off review cycle. All memories and diary entries live in her **in-app Room DB Diary** (with one-tap Markdown export or Google Calendar `Δ 👾 ∇` sync) and automatically back up across APK updates.
 
 #### 6. Wire-Speed Reflexes & MCP Hardware Tools
 GHOST pairs a `<2ms` **IntentBagger Reflex Layer** (firing high-confidence app launches and hardware toggles instantaneously without waking the GPU) with full Model Context Protocol (MCP) tool execution:
 - Flashlight & hardware state control (`turnOnFlashlight`, `turnOffFlashlight`)
-- Native system Timers & Alarms (`timer`)
+- Native system Timers, Alarms & Screen-Off Task Scheduling (`timer`, `schedule_task`, `list_tasks`, `cancel_task`)
 - Media session transport (Play, Pause, Skip, Volume)
 - Local app launching & deep-link intent routing (`open_app`)
-- Termux & ADB shell automation (`execute_command`)
-- Live DuckDuckGo privacy web scraping
-- Agent-to-Agent (A2A) structured consultation with cloud peers
+- Live DuckDuckGo privacy web scraping (`web_search`)
+- Agent-to-Agent (`consult_peer`) structured consultation with cloud peers
 
 ---
 
@@ -195,10 +195,11 @@ GHOST is built from a single transparent codebase split into three distribution 
 
 ### Development Roadmap
 
-- [x] **Autonomous Diary Cycles:** Periodic episodic memory consolidation via in-app Room DB (with Markdown export) or Google Calendar `Δ 👾 ∇`.
+- [x] **Autonomous Screen-Off Diary & Cron Engine:** Periodic episodic memory consolidation and custom scheduled routines (`schedule_task`) via in-app Room DB or Google Calendar `Δ 👾 ∇`.
+- [x] **Actionable Operator Feedback (`🚩`):** In-header response flagging with custom correction notes and automated screen-off self-review.
 - [x] **Dynamic RAM Hardware Tiering:** Automatic 8GB, 12GB, 16GB, and 24GB token runway scaling (up to 10k context).
 - [x] **SensorFusion Nervous System & Verbal Preprocessor (v4.35):** Real-time battery, thermal, network, and ambient sensory grounding with verbal time/number sanitization.
-- [x] **Hardware Tool Matrix:** Native MCP tools for device control, timers, web search, app launching (`open_app`), and media controls.
+- [x] **Hardware Tool Matrix:** Native MCP tools for device control, timers, web search, app launching (`open_app`), media controls, and cloud peer consultation (`consult_peer`).
 - [x] **Dynamic Intent Bagging:** Sub-millisecond pre-filtering for zero-latency app and hardware execution.
 - [x] **Live Reactive Wallpapers & Edge Lighting:** GPU-accelerated 60fps geometry visualizers (Delta, Cuboid, Hex, Orbital) and audioreactive perimeter illumination.
 - [x] **Three-Rail Signed Release Architecture (v4.35):** 🦕💭 *"I need about tree fiddy"* — Self-contained FOSS (`fdroid`), Google Play (`play` with $3.50 Operator Pass), and Supporter Tester (`Buy Me a Coffee`) builds with automatic DB backup/restore.

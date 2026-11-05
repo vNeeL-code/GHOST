@@ -258,10 +258,11 @@
         <!-- Internal Alarm Receiver -->
         <receiver android:name=".hardware.GhostAlarmReceiver" android:exported="false" />
 
-        <!-- Autonomous Diary Exact Alarm Receiver -->
+        <!-- Autonomous Diary & Scheduled Routine Exact Alarm Receiver -->
         <receiver android:name=".hardware.DiaryAlarmReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="com.ghost.api.ACTION_DIARY_CYCLE" />
+                <action android:name="com.ghost.api.ACTION_SCHEDULED_TASK" />
             </intent-filter>
         </receiver>
         

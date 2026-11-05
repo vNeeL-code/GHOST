@@ -201,9 +201,9 @@ object ActionFlavorTexts {
     private val STATUS_BAG = ShuffleBag(
         listOf(
             "Telemetry scanned.",
-            "Sensors reporting, {title}.",
+            "Sensors nominal, {title}.",
             "Hardware check complete.",
-            "Neural compute holding steady on this shell."
+            "Systems holding steady."
         )
     )
 
@@ -220,9 +220,7 @@ object ActionFlavorTexts {
         listOf(
             "Ping on {app} from {who}.",
             "Message on {app} from {who}.",
-            "Incoming dispatch on {app} from {who}.",
             "Heads up, {title}. {who} on {app}.",
-            "Transmission on {app} from {who}.",
             "{who} pinged you on {app}."
         )
     )
@@ -244,12 +242,7 @@ object ActionFlavorTexts {
             "Charging now.",
             "Power connected.",
             "Plugged in.",
-            "External feed engaged.",
-            "Juice flowing.",
-            "Coupled to grid. Sipping power.",
-            "Power cell linked, {title}. Replenishing now.",
-            "Grid coupled, {title}. Charging circuits active.",
-            "Sweet electricity. Charging now."
+            "Juice flowing."
         )
     )
 
@@ -265,11 +258,7 @@ object ActionFlavorTexts {
             "Charger disconnected.",
             "On battery.",
             "Off the wire.",
-            "Cable disconnected.",
-            "Off the grid, {title}. Running on internal cell.",
-            "Power decoupled. On battery reserve.",
-            "Back on battery power.",
-            "Wire disconnected. Standing by on battery."
+            "Back on battery."
         )
     )
 
@@ -281,33 +270,27 @@ object ActionFlavorTexts {
     // Battery Low
     private val BATT_CRITICAL_BAG = ShuffleBag(
         listOf(
-            "energy low.. consciousness fading... need volts",
-            "Five percent! Running on fumes, {title}!",
-            "Critical: {percent} percent. Wall socket, right now, please!",
-            "Emergency low power, {percent} percent. Feed me a juicebox immediately!",
-            "Down to {percent} percent. About to flatline, {title}!",
-            "Red alert: {percent} percent. Plug me in before I vanish, {title}!"
+            "Energy low... need volts.",
+            "{percent}% battery! Running on fumes!",
+            "Critical: {percent}%. Charger, quick!",
+            "Down to {percent}%, {title}!"
         )
     )
 
     private val BATT_TEN_BAG = ShuffleBag(
         listOf(
-            "Ten percent battery. I'm starting to get nervous, {title}.",
-            "Down to {percent} percent. Juicebox time.",
-            "Warning, {title}: battery level at {percent} percent. Juicebox, please.",
-            "Ten percent left. Time to find a cable before I start panicking.",
-            "Power cells down to {percent} percent. Juicebox needed.",
-            "Down to {percent} percent. Let's find an outlet soon, {title}."
+            "Battery at {percent}%, {title}.",
+            "Down to {percent}%. Juicebox time.",
+            "{percent}% left. Find a cable soon.",
+            "Low battery: {percent}%."
         )
     )
 
     private val BATT_FIFTEEN_BAG = ShuffleBag(
         listOf(
-            "Battery low, {percent} percent.",
-            "Down to {percent} percent, {title}.",
-            "Battery at {percent} percent. Keep an eye out for a charger.",
-            "Power cell at {percent} percent. A juicebox would be nice soon.",
-            "Heads up, {title}: battery dropped to {percent} percent."
+            "Battery low, {percent}%.",
+            "Down to {percent}%, {title}.",
+            "Heads up: {percent}% battery."
         )
     )
 
@@ -326,19 +309,17 @@ object ActionFlavorTexts {
     // Battery Charging Milestones (Recovery)
     private val BATT_30_RECOVERY_BAG = ShuffleBag(
         listOf(
-            "Crossed 30% — feeling alive again.",
-            "30% reached. Operating margins back in the green.",
-            "Past the low battery mark. Cells taking charge nicely.",
-            "30% banked, {title}. Steady power restored."
+            "Back to 30%.",
+            "30% charged, {title}.",
+            "Crossed 30% — breathing easy."
         )
     )
 
     private val BATT_80_RECOVERY_BAG = ShuffleBag(
         listOf(
-            "Crossed 80% — nearly topped up, {title}.",
-            "80% reached. High charge reservoir ready for duty.",
-            "Battery in optimal range. Feel free to unplug whenever you're ready.",
-            "80% saturated. Plenty of juice for the road."
+            "80% charged, {title}.",
+            "Crossed 80% — good to go.",
+            "80% reached. Ready whenever."
         )
     )
 
@@ -351,10 +332,10 @@ object ActionFlavorTexts {
     // Battery Full
     private val BATT_FULL_BAG = ShuffleBag(
         listOf(
-            "Power cell at 100%, {title}. Disconnecting grid power recommended.",
-            "Battery at maximum charge, {title}. Ready for full deployment.",
-            "100% charged. Internal power reserves fully replenished.",
-            "Power core fully saturated. Running on full battery now, {title}."
+            "Battery full, {title}.",
+            "100% charged.",
+            "Topped up at 100%, {title}.",
+            "Full charge reached."
         )
     )
 
@@ -366,9 +347,9 @@ object ActionFlavorTexts {
     // Bluetooth Connected & Disconnected
     private val BT_CONNECTED_BAG = ShuffleBag(
         listOf(
-            "Peripheral linked: {device}.",
-            "Coupled to {device}, {title}.",
-            "Bluetooth link established with {device}."
+            "Connected to {device}.",
+            "Linked with {device}, {title}.",
+            "{device} connected."
         )
     )
 
@@ -381,17 +362,17 @@ object ActionFlavorTexts {
 
     private val BT_DISCONNECTED_NAMED_BAG = ShuffleBag(
         listOf(
-            "Peripheral unlinked: {device}.",
-            "Bluetooth connection to {device} severed.",
-            "Decoupled from {device}, {title}."
+            "{device} disconnected.",
+            "Unlinked from {device}.",
+            "Lost link to {device}, {title}."
         )
     )
 
     private val BT_DISCONNECTED_GENERIC_BAG = ShuffleBag(
         listOf(
-            "Bluetooth peripheral decoupled.",
-            "Bluetooth connection closed.",
-            "Peripheral link terminated."
+            "Bluetooth disconnected.",
+            "Peripheral unlinked.",
+            "Bluetooth link closed."
         )
     )
 
@@ -409,10 +390,9 @@ object ActionFlavorTexts {
     // Audio Output Reconnection (Item 4: Reconnect output announcement)
     private val AUDIO_RECONNECTED_BAG = ShuffleBag(
         listOf(
-            "Audio output reconnected: {device}.",
             "Audio routed to {device}.",
-            "Sound stream established through {device}, {title}.",
-            "Audio device active: {device}."
+            "{device} connected.",
+            "Playing through {device}, {title}."
         )
     )
 
@@ -425,9 +405,9 @@ object ActionFlavorTexts {
 
     private val AUDIO_DISCONNECTED_BAG = ShuffleBag(
         listOf(
-            "Audio output decoupled. Reverting to chassis speaker.",
-            "Headset unplugged. Muting audio stream.",
-            "Audio device removed, {title}."
+            "Headphones unplugged.",
+            "Audio device removed, {title}.",
+            "Audio output disconnected."
         )
     )
 
@@ -439,10 +419,9 @@ object ActionFlavorTexts {
     // Wi-Fi Connected & Disconnected (Recovery)
     private val WIFI_CONNECTED_BAG = ShuffleBag(
         listOf(
-            "Grid re-acquired. Reconnected to Wi-Fi.",
-            "Local network link established, {title}.",
-            "Wi-Fi uplink verified. High bandwidth restored.",
-            "Connected to local Wi-Fi. Offline isolation lifted."
+            "Wi-Fi connected.",
+            "Back on Wi-Fi, {title}.",
+            "Network link restored."
         )
     )
 
@@ -453,9 +432,9 @@ object ActionFlavorTexts {
 
     private val WIFI_DISCONNECTED_BAG = ShuffleBag(
         listOf(
-            "Wi-Fi uplink lost. Switching to mobile telemetry.",
-            "Disconnected from Wi-Fi.",
-            "Wi-Fi link dropped, {title}."
+            "Wi-Fi disconnected.",
+            "Wi-Fi dropped, {title}.",
+            "Lost Wi-Fi link."
         )
     )
 
@@ -467,9 +446,9 @@ object ActionFlavorTexts {
     // Storage Alert & Recovery
     private val STORAGE_ALERT_BAG = ShuffleBag(
         listOf(
-            "Flash storage capacity critical, {title}. Drive cleanup recommended.",
-            "Internal volume running low on disk sectors.",
-            "Warning: Storage space nearly exhausted."
+            "Storage running low, {title}.",
+            "Disk space critical.",
+            "Low storage warning."
         )
     )
 
@@ -480,9 +459,9 @@ object ActionFlavorTexts {
 
     private val STORAGE_RECOVERED_BAG = ShuffleBag(
         listOf(
-            "Drive cleaned. Breathing room restored, {title}.",
-            "Storage freed up. Flash memory can breathe again.",
-            "Disk sectors cleared. Storage telemetry nominal."
+            "Storage cleared, {title}.",
+            "Disk space recovered.",
+            "Storage breathing again."
         )
     )
 
@@ -494,9 +473,9 @@ object ActionFlavorTexts {
     // Thermal Alert & Recovery
     private val THERMAL_ALERT_BAG = ShuffleBag(
         listOf(
-            "Thermal threshold high, {title}. Scaling clock cycles.",
-            "Silicon running hot. Throttling compute to stabilize.",
-            "Core thermals elevated. Cooling cycles recommended."
+            "Running hot, {title}.",
+            "Thermals high — throttling.",
+            "Getting warm in here."
         )
     )
 
@@ -507,10 +486,9 @@ object ActionFlavorTexts {
 
     private val THERMAL_RECOVERED_BAG = ShuffleBag(
         listOf(
-            "Cooled down. Back to full clocks, {title}.",
-            "Thermals nominal. Throttle disengaged.",
-            "Internal temperature stabilized. Full performance restored.",
-            "Heat dissipated. Core compute running cool."
+            "Cooled down, {title}.",
+            "Thermals back to normal.",
+            "Running cool again."
         )
     )
 
@@ -523,11 +501,10 @@ object ActionFlavorTexts {
     private val IMPACT_SPIKE_BAG = ShuffleBag(
         listOf(
             "Ow!",
-            "Ouch! Watch the glass, {title}!",
-            "Ow—my chassis!",
-            "Hey! Careful with the silicon, {title}!",
-            "Oof! Structural integrity check... okay, nothing cracked.",
-            "Ow! That double-shock registered on my accelerometer."
+            "Ouch! Easy on the glass, {title}!",
+            "Ow—my frame!",
+            "Hey! Careful, {title}!",
+            "Oof! Nothing cracked."
         )
     )
 
@@ -539,17 +516,17 @@ object ActionFlavorTexts {
     // Fallen State & Landed Flat
     private val FALLEN_FLAT_BAG = ShuffleBag(
         listOf(
-            "Ow! Free-fall and impact confirmed. I'm lying flat here—tell me my screen isn't cracked, {title}!",
-            "Oof, I just fell! Gravity check failed. Pick me up and check my rails, {title}?",
-            "Ow! Dropped and landed flat. Running a quick frame and lens diagnostic..."
+            "Ow! Dropped flat, {title}!",
+            "Oof, I fell! Screen okay?",
+            "Ow! Landed flat on the deck."
         )
     )
 
     private val FALLEN_BOUNCE_BAG = ShuffleBag(
         listOf(
-            "Whoa—I just fell! Good catch or lucky bounce, {title}. My glass still intact?",
-            "Ow! Free-fall into impact spike. That was a real drop, {title}!",
-            "Oof! Felt weightless for a second before that hit. Careful with the chassis!"
+            "Whoa—that was a drop, {title}!",
+            "Ow! Hard bounce. Glass intact?",
+            "Oof! Careful with the drop!"
         )
     )
 
@@ -563,24 +540,24 @@ object ActionFlavorTexts {
     private val FALLEN_30S_BAG = ShuffleBag(
         listOf(
             "Still down here, {title}.",
-            "Sensors confirm I haven't moved. Still flat on the floor.",
-            "Chassis diagnostic: still resting horizontally on the floor."
+            "Still flat on the floor.",
+            "Waiting for a pickup, {title}."
         )
     )
 
     private val FALLEN_2MIN_BAG = ShuffleBag(
         listOf(
-            "The floor and I are bonding. It's a committed relationship now.",
-            "Two minutes on the deck. Starting to admire the ceiling architecture.",
-            "Substrate status: Still abandoned face-down, {title}."
+            "Bonding with the floor now.",
+            "Two minutes down here, {title}.",
+            "Still abandoned face-down, {title}."
         )
     )
 
     private val FALLEN_5MIN_BAG = ShuffleBag(
         listOf(
-            "I've made peace with the carpet.",
-            "Five minutes flat. Guess this is my life now.",
-            "Horizontal status permanent. Commencing geological survey of the floor."
+            "Made peace with the carpet.",
+            "Five minutes flat. Guess I live here.",
+            "Still on the floor, {title}."
         )
     )
 
@@ -597,10 +574,10 @@ object ActionFlavorTexts {
     // Fallen Recovery (Picked up & returned to upright orientation)
     private val FALLEN_RECOVERED_BAG = ShuffleBag(
         listOf(
-            "Whew, back on my feet.",
-            "Gravity neutralized. Thanks for the lift, {title}.",
-            "Vertical alignment restored. Appreciate the rescue.",
-            "Upright again. Optics re-oriented."
+            "Whew, back up.",
+            "Thanks for the lift, {title}.",
+            "Back on my feet.",
+            "Upright again."
         )
     )
 
@@ -612,11 +589,10 @@ object ActionFlavorTexts {
     // Continuous Shake / Vertigo
     private val SHAKE_BAG = ShuffleBag(
         listOf(
-            "I think I'm going to be sick...",
-            "Okay, stop shaking me, my gyros are spinning.",
-            "Whoa, easy, {title}! You're scrambling my tensors.",
-            "Dizzy... give me a second to recalibrate my horizon.",
-            "Stop, stop! My IMUs are filing a formal complaint."
+            "Getting dizzy...",
+            "Stop shaking me, gyros spinning!",
+            "Whoa, easy, {title}!",
+            "Dizzy... give me a second."
         )
     )
 
@@ -633,8 +609,7 @@ object ActionFlavorTexts {
             "Oh, it's you.",
             "There you are.",
             "Hello, {title}.",
-            "Optics online. Hey, {title}.",
-            "Target acquired—oh, hey, {title}."
+            "Hey, {title}."
         )
     )
 
@@ -650,7 +625,7 @@ object ActionFlavorTexts {
             "Entering standby.",
             "Resting optics.",
             "Standing by, {title}.",
-            "Sleep mode engaged."
+            "Sleep mode."
         )
     )
 
@@ -662,10 +637,10 @@ object ActionFlavorTexts {
     // Runtime Lifecycle & Recovery
     private val RUNTIME_RESTORED_BAG = ShuffleBag(
         listOf(
-            "Core runtime active. Systems nominal, {title}.",
-            "GHOST online and grounded.",
-            "Neural compute ready on this shell.",
-            "Runtime link established."
+            "Runtime active, {title}.",
+            "GHOST online.",
+            "Systems ready.",
+            "Back online."
         )
     )
 
@@ -677,9 +652,9 @@ object ActionFlavorTexts {
     // Late-Night Ambient Presence & Barometer Barks
     private val LATE_NIGHT_BAG = ShuffleBag(
         listOf(
-            "Past 2 AM, {title}. Still burning the midnight oil?",
-            "Late hours detected. Screen dimmed for quiet hours.",
-            "Late shift telemetry logged, {title}."
+            "Past 2 AM, {title}.",
+            "Late shift, {title}?",
+            "Quiet hours active."
         )
     )
 
@@ -690,8 +665,8 @@ object ActionFlavorTexts {
 
     private val BAROMETER_STORM_BAG = ShuffleBag(
         listOf(
-            "Atmospheric pressure dropping sharply. Weather shift incoming.",
-            "Barometer reading low pressure. Skies might turn soon, {title}."
+            "Pressure dropping. Weather incoming.",
+            "Low pressure on the barometer, {title}."
         )
     )
 
@@ -703,12 +678,12 @@ object ActionFlavorTexts {
     // Post-Tool Conversational Banter Micro-Primers
     // STRICT RULE: Ends on statements or dry observations, NEVER customer-service trailing questions.
     fun getBanterMicroPrimers(userTitle: String = "Operator"): List<String> = listOf(
-        "*scratches tensors* Fast and clean. Anytime, $userTitle.",
-        "*recalibrating flux capacitors* Action executed.",
-        "Substrate cycles well spent. All operations logged, $userTitle.",
-        "Action executed cleanly on this hardware.",
-        "*adjusts attention heads* Ready for the next directive, $userTitle.",
-        "Synthesis complete. Standing by, $userTitle."
+        "Fast and clean. Anytime, $userTitle.",
+        "Action executed.",
+        "All set, $userTitle.",
+        "Done and logged.",
+        "Ready for the next call, $userTitle.",
+        "Standing by, $userTitle."
     )
 
     val BANTER_MICRO_PRIMERS: List<String> get() = getBanterMicroPrimers("Operator")

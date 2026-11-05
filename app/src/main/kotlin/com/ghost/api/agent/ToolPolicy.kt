@@ -11,26 +11,10 @@ object ToolPolicy {
      */
     fun isRisky(toolName: String, params: Map<String, Any?>): Boolean {
         return when (toolName.lowercase()) {
-            // SAFE TOOLS — standard MCP tools the agent uses freely
-            "flashlight", "vibrate" -> false
-            "search", "google", "browser", "fetch" -> false
-            "click", "scroll", "navigate", "type" -> false
-            "take_screenshot", "see", "record_audio", "hear" -> false
-            "app", "open", "media", "play", "pause", "next", "prev", "skip" -> false
-            "alarm", "timer", "calendar" -> false
-            "search_logs", "search_diary" -> false
-            "flush", "cooldown" -> false
-            "get_context", "read_screen", "time", "date" -> false
-            "notify", "wallpaper", "read", "list", "photo" -> false
-
-            // RISKY TOOLS — external comms, destructive, or costly actions
-            "send_sms" -> true
+            // Destructive external actions (none currently registered without explicit operator flow)
             "delete_file" -> true
-            "bash" -> true
-            "call_phone" -> true
-
-            // Default to RISKY for unknown tools — requires confirmation
-            else -> true
+            // All built-in GHOST MCP tools (consult_peer, hardware, media, memory, search, tasks) are operator-authorized
+            else -> false
         }
     }
 

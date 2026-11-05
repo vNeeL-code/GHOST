@@ -218,6 +218,35 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
     @Volatile private var cachedBtConnected: Boolean = false
     @Volatile private var cachedBtDeviceName: String? = null
 
+    private fun isSelfDeviceName(name: String?): Boolean {
+        if (name.isNullOrBlank()) return true
+        val trimmed = name.trim()
+        val model = Build.MODEL.orEmpty().trim()
+        val device = Build.DEVICE.orEmpty().trim()
+        val product = Build.PRODUCT.orEmpty().trim()
+        val brand = Build.BRAND.orEmpty().trim()
+        val callSign = try { com.ghost.api.logic.ContextManager.resolveDeviceCallSign(context).trim() } catch (_: Exception) { "" }
+        return trimmed.equals(model, ignoreCase = true) ||
+            trimmed.equals(device, ignoreCase = true) ||
+            trimmed.equals(product, ignoreCase = true) ||
+            (model.isNotEmpty() && trimmed.contains(model, ignoreCase = true)) ||
+            (callSign.isNotEmpty() && trimmed.equals(callSign, ignoreCase = true)) ||
+            (brand.isNotEmpty() && model.isNotEmpty() && trimmed.equals("$brand $model", ignoreCase = true))
+    }
+
+    private fun resolveBluetoothDeviceName(device: android.bluetooth.BluetoothDevice?): String? {
+        if (device == null) return null
+        return try {
+            val alias = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) device.alias else null
+            val candidate = if (!alias.isNullOrBlank() && !isSelfDeviceName(alias)) alias else device.name
+            candidate?.trim()?.takeIf { it.isNotEmpty() && !isSelfDeviceName(it) }
+        } catch (_: SecurityException) {
+            null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     // Audio Output Device Callback (Debounced connection/reconnection alerts)
     private val audioDeviceCallback = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
         object : android.media.AudioDeviceCallback() {
@@ -235,14 +264,32 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
                     )
                 }
                 if (output != null) {
-                    lastAudioOutputEventTime = now
-                    val devName = try {
-                        val name = output.productName?.toString()
-                        if (!name.isNullOrBlank()) name else "Audio Output"
-                    } catch (_: Exception) { "Audio Output" }
-                    val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
-                    val cue = com.ghost.api.logic.ActionFlavorTexts.audioOutputConnectedTts(devName, userTitle)
-                    com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.PERIPHERALS, showInChat = false)
+                    val isBtSink = output.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                        output.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+                    val rawName = try { output.productName?.toString()?.trim() } catch (_: Exception) { null }
+                    val validProductName = rawName?.takeIf { !isSelfDeviceName(it) }
+
+                    if (isBtSink) {
+                        val btName = validProductName ?: cachedBtDeviceName?.takeIf { !isSelfDeviceName(it) }
+                        if (btName == null) {
+                            // Android returns Build.MODEL on early BT audio routing before A2DP metadata or ACL broadcast arrives.
+                            // Defer to ACTION_ACL_CONNECTED so we announce the peripheral, not the phone's own model.
+                            return
+                        }
+                        cachedBtDeviceName = btName
+                        lastAudioOutputEventTime = now
+                        val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
+                        val cue = com.ghost.api.logic.ActionFlavorTexts.bluetoothConnectedTts(btName, userTitle)
+                        com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.PERIPHERALS, showInChat = false)
+                    } else {
+                        lastAudioOutputEventTime = now
+                        val fallback = if (output.type == android.media.AudioDeviceInfo.TYPE_USB_HEADSET ||
+                            output.type == android.media.AudioDeviceInfo.TYPE_USB_DEVICE) "USB Audio" else "Headphones"
+                        val devName = validProductName ?: fallback
+                        val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
+                        val cue = com.ghost.api.logic.ActionFlavorTexts.audioOutputConnectedTts(devName, userTitle)
+                        com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.PERIPHERALS, showInChat = false)
+                    }
                 }
             }
 
@@ -260,8 +307,15 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
                     )
                 }
                 if (output != null) {
+                    val isBtSink = output.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                        output.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+                    if (isBtSink) {
+                        // Let ACTION_ACL_DISCONNECTED handle Bluetooth disconnects cleanly
+                        return
+                    }
                     lastAudioOutputEventTime = now
-                    val devName = try { output.productName?.toString() } catch (_: Exception) { null }
+                    val rawName = try { output.productName?.toString()?.trim() } catch (_: Exception) { null }
+                    val devName = rawName?.takeIf { !isSelfDeviceName(it) }
                     val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
                     val cue = com.ghost.api.logic.ActionFlavorTexts.audioOutputDisconnectedTts(devName, userTitle)
                     com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.PERIPHERALS, showInChat = false)
@@ -305,17 +359,20 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
                 Intent.ACTION_SCREEN_ON -> {
+                    com.ghost.api.GemmaService.instance?.onScreenStateChanged(isInteractive = true)
                     val km = context?.getSystemService(Context.KEYGUARD_SERVICE) as? android.app.KeyguardManager
                     if (km?.isKeyguardLocked != true) {
                         handleOperatorPresent(context)
                     }
                 }
                 Intent.ACTION_USER_PRESENT -> {
+                    com.ghost.api.GemmaService.instance?.onScreenStateChanged(isInteractive = true)
                     handleOperatorPresent(context)
                 }
                 Intent.ACTION_SCREEN_OFF -> {
                     val now = System.currentTimeMillis()
                     lastScreenOffTime = now
+                    com.ghost.api.GemmaService.instance?.onScreenStateChanged(isInteractive = false)
                     if (now - lastLockBarkTime > 180_000L && audioManager?.isMusicActive != true) {
                         lastLockBarkTime = now
                         val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
@@ -418,19 +475,34 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
                         @Suppress("DEPRECATION")
                         intent.getParcelableExtra(android.bluetooth.BluetoothDevice.EXTRA_DEVICE)
                     }
+                    val now = System.currentTimeMillis()
                     cachedBtConnected = true
-                    cachedBtDeviceName = try { device?.name ?: "Connected Device" } catch (e: SecurityException) { "Connected Device" }
-                    val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
-                    val cue = com.ghost.api.logic.ActionFlavorTexts.bluetoothConnectedTts(cachedBtDeviceName ?: "Device", userTitle)
-                    com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.PERIPHERALS, showInChat = false)
+                    val resolvedName = resolveBluetoothDeviceName(device) ?: "Bluetooth Device"
+                    cachedBtDeviceName = resolvedName
+                    if (now - lastAudioOutputEventTime >= 8_000L) {
+                        lastAudioOutputEventTime = now
+                        val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
+                        val cue = com.ghost.api.logic.ActionFlavorTexts.bluetoothConnectedTts(resolvedName, userTitle)
+                        com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.PERIPHERALS, showInChat = false)
+                    }
                 }
                 android.bluetooth.BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
-                    val prevDeviceName = cachedBtDeviceName
+                    val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        intent.getParcelableExtra(android.bluetooth.BluetoothDevice.EXTRA_DEVICE, android.bluetooth.BluetoothDevice::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        intent.getParcelableExtra(android.bluetooth.BluetoothDevice.EXTRA_DEVICE)
+                    }
+                    val now = System.currentTimeMillis()
+                    val prevDeviceName = resolveBluetoothDeviceName(device) ?: cachedBtDeviceName
                     cachedBtConnected = false
                     cachedBtDeviceName = null
-                    val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
-                    val cue = com.ghost.api.logic.ActionFlavorTexts.bluetoothDisconnectedTts(prevDeviceName, userTitle)
-                    com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.PERIPHERALS, showInChat = false)
+                    if (now - lastAudioOutputEventTime >= 4_000L) {
+                        lastAudioOutputEventTime = now
+                        val userTitle = context?.let { com.ghost.api.Constants.getUserTitle(it) } ?: "Operator"
+                        val cue = com.ghost.api.logic.ActionFlavorTexts.bluetoothDisconnectedTts(prevDeviceName, userTitle)
+                        com.ghost.api.GemmaService.instance?.processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.PERIPHERALS, showInChat = false)
+                    }
                 }
                 android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED -> {
                     val state = intent.getIntExtra(android.bluetooth.BluetoothAdapter.EXTRA_STATE, android.bluetooth.BluetoothAdapter.ERROR)
@@ -1138,7 +1210,7 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
                                 val gattDevices = bluetoothManager.getConnectedDevices(android.bluetooth.BluetoothProfile.GATT)
                                 if (gattDevices.isNotEmpty()) {
                                     btConnected = true
-                                    btDeviceName = try { gattDevices[0].name } catch (e: SecurityException) { "Connected Device" }
+                                    btDeviceName = resolveBluetoothDeviceName(gattDevices[0]) ?: "Bluetooth Device"
                                 }
                             } catch (e: SecurityException) {
                                 // Missing BLUETOOTH_CONNECT runtime permission on Android 12+

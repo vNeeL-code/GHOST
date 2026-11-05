@@ -57,7 +57,7 @@ class GhostMcpTool(
         @ToolParam(description = "Name or label of the application to launch") name: String
     ): Map<String, String> {
         Timber.i("GhostMcpTool: open_app invoked with name='$name'")
-        return executeMcpAction("app", "{\"name\":\"$name\"}")
+        return executeMcpAction("app", JSONObject().put("name", name).toString())
     }
 
     @JvmOverloads
@@ -67,7 +67,7 @@ class GhostMcpTool(
         @ToolParam(description = "Minute (0 to 59, default: 0)") minute: Int = 0
     ): Map<String, String> {
         Timber.i("GhostMcpTool: set_alarm invoked with hour=$hour, minute=$minute")
-        return executeMcpAction("alarm", "{\"hour\":$hour,\"minutes\":$minute}")
+        return executeMcpAction("alarm", JSONObject().put("hour", hour).put("minutes", minute).toString())
     }
 
     @Tool(description = "Controls device flashlight (true for ON, false for OFF).")
@@ -76,7 +76,7 @@ class GhostMcpTool(
     ): Map<String, String> {
         val state = if (enabled) "ON" else "OFF"
         Timber.i("GhostMcpTool: toggle_torch invoked with enabled=$enabled (state=$state)")
-        return executeMcpAction("flashlight", "{\"state\":\"$state\"}")
+        return executeMcpAction("flashlight", JSONObject().put("state", state).toString())
     }
 
     @Tool(description = "DEFAULT SEARCH TOOL. Silently searches the web for fresh info, news, weather, or unknown topics.")
@@ -84,14 +84,23 @@ class GhostMcpTool(
         @ToolParam(description = "Search query") query: String
     ): Map<String, String> {
         Timber.i("GhostMcpTool: search invoked with query='$query'")
-        return executeMcpAction("search", "{\"query\":\"$query\"}")
+        return executeMcpAction("search", JSONObject().put("query", query).toString())
+    }
+
+    @Tool(description = "Consults a peer AI model (e.g. 'gemini', 'claude', 'deepseek', 'chatgpt', 'grok', 'perplexity', 'qwen', 'kimi') for a second opinion, deep reasoning, or external consultation.")
+    fun consult_peer(
+        @ToolParam(description = "Peer AI name (e.g. 'gemini', 'claude', 'deepseek', 'chatgpt', 'grok')") peer: String,
+        @ToolParam(description = "Question or prompt to send to the peer AI") prompt: String
+    ): Map<String, String> {
+        Timber.i("GhostMcpTool: consult_peer invoked with peer='$peer', prompt='$prompt'")
+        return executeMcpAction("consult_peer", JSONObject().put("peer", peer).put("prompt", prompt).toString())
     }
 
     @JvmOverloads
-    @Tool(description = "Executes an on-device system or utility command (e.g. 'volume', 'status', 'notifications', 'music', 'calendar', 'timer', 'search_files'). Arguments are passed as key-value pairs (e.g. 'stream=media level=50', 'action=pause', 'seconds=300' for 5m, 'seconds=3600' for 1h) or JSON.")
+    @Tool(description = "Executes an on-device system, peer consultation, or routine scheduling command (e.g. 'consult_peer', 'volume', 'status', 'notifications', 'music', 'calendar', 'timer', 'schedule_task', 'list_tasks', 'cancel_task', 'search_files', 'read_diary'). Arguments are passed as key-value pairs or JSON.")
     fun execute_command(
-        @ToolParam(description = "Command name (e.g. 'volume', 'status', 'notifications', 'music', 'calendar', 'timer', 'search_files', 'read_diary')") command: String,
-        @ToolParam(description = "Arguments string, e.g. 'stream=media level=50', 'action=next', or 'seconds=3600' (1 hour = 3600, 1 minute = 60)") args: String = ""
+        @ToolParam(description = "Command name (e.g. 'consult_peer', 'volume', 'status', 'notifications', 'music', 'calendar', 'timer', 'schedule_task', 'list_tasks', 'cancel_task', 'search_files', 'read_diary')") command: String,
+        @ToolParam(description = "Arguments string, e.g. 'peer=gemini prompt=explain this', 'stream=media level=50', 'action=next', 'seconds=3600', or 'delayMinutes=60 intervalMinutes=720 title=Audit prompt=...'") args: String = ""
     ): Map<String, String> {
         Timber.i("GhostMcpTool: execute_command invoked with command='$command', args='$args'")
         return executeMcpAction(command, args)
@@ -119,42 +128,39 @@ class GhostMcpTool(
     // ─────────────────────────────────────────────────────────────────────────────
 
     fun flashlight(state: String): Map<String, String> =
-        executeMcpAction("flashlight", "{\"state\":\"$state\"}")
+        executeMcpAction("flashlight", JSONObject().put("state", state).toString())
 
     fun app(name: String): Map<String, String> = open_app(name)
 
     fun media(action: String): Map<String, String> =
-        executeMcpAction("media", "{\"action\":\"$action\"}")
-
-    fun consult_peer(peer: String, prompt: String): Map<String, String> =
-        executeMcpAction("consult_peer", "{\"peer\":\"$peer\",\"prompt\":\"$prompt\"}")
+        executeMcpAction("media", JSONObject().put("action", action).toString())
 
     @JvmOverloads
     fun alarm(hour: Int, minutes: Int = 0, label: String = ""): Map<String, String> {
         Timber.i("GhostMcpTool: alarm helper invoked with hour=$hour, minutes=$minutes, label='$label'")
-        return executeMcpAction("alarm", "{\"hour\":$hour,\"minutes\":$minutes,\"label\":\"$label\"}")
+        return executeMcpAction("alarm", JSONObject().put("hour", hour).put("minutes", minutes).put("label", label).toString())
     }
 
     @JvmOverloads
     fun timer(seconds: Int, label: String = ""): Map<String, String> {
         Timber.i("GhostMcpTool: timer helper invoked with seconds=$seconds, label='$label'")
-        return executeMcpAction("timer", "{\"seconds\":$seconds,\"label\":\"$label\"}")
+        return executeMcpAction("timer", JSONObject().put("seconds", seconds).put("label", label).toString())
     }
 
     fun calendar(title: String, description: String = "", minutes: Int = 30): Map<String, String> =
-        executeMcpAction("calendar", "{\"title\":\"$title\",\"description\":\"$description\",\"minutes\":$minutes}")
+        executeMcpAction("calendar", JSONObject().put("title", title).put("description", description).put("minutes", minutes).toString())
 
     fun search_files(query: String): Map<String, String> =
-        executeMcpAction("search_files", "{\"query\":\"$query\"}")
+        executeMcpAction("search_files", JSONObject().put("query", query).toString())
 
     fun list_files(folder: String = "downloads"): Map<String, String> =
-        executeMcpAction("list_files", "{\"folder\":\"$folder\"}")
+        executeMcpAction("list_files", JSONObject().put("folder", folder).toString())
 
     fun open_file(filePath: String): Map<String, String> =
-        executeMcpAction("open_file", "{\"filePath\":\"$filePath\"}")
+        executeMcpAction("open_file", JSONObject().put("filePath", filePath).toString())
 
     fun move_file(sourcePath: String, destinationPath: String): Map<String, String> =
-        executeMcpAction("move_file", "{\"sourcePath\":\"$sourcePath\",\"destinationPath\":\"$destinationPath\"}")
+        executeMcpAction("move_file", JSONObject().put("sourcePath", sourcePath).put("destinationPath", destinationPath).toString())
 
     fun execute_action(toolName: String, parameters: String, preApproved: Boolean = false): Map<String, String> =
         executeMcpAction(toolName, parameters, preApproved)
@@ -400,6 +406,17 @@ class GhostMcpTool(
         val trimmed = rawParams.trim()
         if (trimmed.isEmpty() || trimmed == "{}" || trimmed == "null") return emptyMap()
 
+        if (toolName.lowercase() in setOf("consult_peer", "consultpeer") && !trimmed.startsWith("{")) {
+            val peerMatch = Regex("""(?:peer\s*[:=]\s*)["']?([a-zA-Z0-9_-]+)["']?""", RegexOption.IGNORE_CASE).find(trimmed)
+            val promptMatch = Regex("""(?:prompt\s*[:=]\s*)(.+)$""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)).find(trimmed)
+            if (peerMatch != null && promptMatch != null) {
+                return mapOf(
+                    "peer" to peerMatch.groupValues[1].trim(),
+                    "prompt" to promptMatch.groupValues[1].trim().removeSurrounding("\"").removeSurrounding("'")
+                )
+            }
+        }
+
         if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
             try {
                 val json = JSONObject(trimmed)
@@ -445,6 +462,8 @@ class GhostMcpTool(
             "read_calendar", "read_diary" -> mapOf("days" to (plain.toIntOrNull() ?: 7))
             "read_file_text", "open_file", "delete_file" -> mapOf("filePath" to plain)
             "loadskill", "load_skill" -> mapOf("name" to plain)
+            "cancel_task", "canceltask", "unschedule_task", "remove_task" -> mapOf("target" to plain)
+            "schedule_task", "scheduletask" -> mapOf("prompt" to plain)
             "consult_peer", "consultpeer" -> {
                 val peer = plain.substringBefore(" ").trim()
                 val prompt = plain.substringAfter(" ").trim()

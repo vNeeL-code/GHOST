@@ -198,14 +198,24 @@ object IntentBagger {
         // 11. File Search Intent
         val fileQuery = matchFileSearch(clean, trimmed)
         if (fileQuery != null) {
-            bagged.add(BaggedIntent("search_files", "{\"query\":\"$fileQuery\"}", "Search device files for $fileQuery"))
+            bagged.add(BaggedIntent("search_files", org.json.JSONObject().put("query", fileQuery).toString(), "Search device files for $fileQuery"))
         }
 
         // 12. Peer Consultation Intent
         val peer = matchPeerConsultation(clean, trimmed)
         if (peer != null) {
             val (peerName, prompt) = peer
-            bagged.add(BaggedIntent("consult_peer", "{\"peer\":\"$peerName\",\"prompt\":\"$prompt\"}", "Consult peer AI $peerName"))
+            val jsonStr = org.json.JSONObject().put("peer", peerName).put("prompt", prompt).toString()
+            bagged.add(BaggedIntent("consult_peer", jsonStr, "Consult peer AI $peerName"))
+        }
+
+        // 13. Task Scheduling / Cron Inspection & Teardown
+        if (clean.contains("list task") || clean.contains("show task") || clean.contains("active task") || clean.contains("scheduled task") || clean.contains("cron job")) {
+            if (clean.contains("cancel") || clean.contains("clear") || clean.contains("stop") || clean.contains("tear down") || clean.contains("remove")) {
+                bagged.add(BaggedIntent("cancel_task", "target=all", "Cancel/tear down scheduled tasks"))
+            } else if (clean.contains("list") || clean.contains("show") || clean.contains("what") || clean.contains("check")) {
+                bagged.add(BaggedIntent("list_tasks", "", "List active scheduled tasks and cron routines"))
+            }
         }
 
         return bagged.take(2)
@@ -238,9 +248,8 @@ object IntentBagger {
         "not", "didn't", "didnt", "don't", "dont", "won't", "wont", "wasn't", "wasnt",
         "error", "bug", "crash", "crashed", "failed", "failing", "fail", "stuck",
         "broken", "problem", "issue", "again", "instead", "because", "sorry",
-        "assuming", "supposed", "was", "were", "is", "are", "tell", "explain",
-        "tried", "trying", "without", "need", "needed", "did", "does", "do",
-        "reflex", "repetitive", "bombarding"
+        "was", "were", "is", "are", "tell", "explain",
+        "tried", "trying", "without", "need", "needed", "did", "does", "do"
     )
 
     private fun matchAppLaunch(context: Context, clean: String, raw: String): AppMatch? {
@@ -270,7 +279,6 @@ object IntentBagger {
             .removeSuffix(" for me")
             .removeSuffix(" app")
             .removeSuffix(" please")
-            .removeSuffix(" dammit")
             .trim()
 
         if (candidate.isBlank()) {
@@ -429,11 +437,29 @@ object IntentBagger {
     }
 
     private fun matchPeerConsultation(clean: String, raw: String): Pair<String, String>? {
-        val peers = listOf("claude", "gemini", "deepseek", "perplexity", "qwen", "kimi", "mistral", "copilot")
-        val foundPeer = peers.firstOrNull { clean.contains("ask $it") || clean.contains("consult $it") } ?: return null
-        val prompt = raw.substringAfter(foundPeer, "").trim().trimStart(':', ',', ' ')
-        val capitalizedPeer = foundPeer.replaceFirstChar { it.uppercase() }
-        return Pair(capitalizedPeer, prompt)
+        val peers = listOf("claude", "gemini", "deepseek", "perplexity", "qwen", "kimi", "mistral", "copilot", "chatgpt", "grok")
+        val foundPeer = peers.firstOrNull {
+            clean.contains("ask $it") || clean.contains("consult $it") || clean.contains("check with $it") || clean.contains("message $it")
+        }
+        if (foundPeer != null) {
+            val regex = Regex("""\b${Regex.escape(foundPeer)}\b""", RegexOption.IGNORE_CASE)
+            val match = regex.find(raw)
+            val extracted = if (match != null) {
+                raw.substring(match.range.last + 1).trim().trimStart(':', ',', '-', ' ')
+            } else {
+                raw
+            }
+            val prompt = extracted.ifBlank { raw }
+            val capitalizedPeer = foundPeer.replaceFirstChar { it.uppercase() }
+            return Pair(capitalizedPeer, prompt)
+        }
+        if (clean.contains("consult peer") || clean.contains("consult_peer")) {
+            val mentionedPeer = peers.firstOrNull { clean.contains(it) } ?: "gemini"
+            val capitalizedPeer = mentionedPeer.replaceFirstChar { it.uppercase() }
+            val prompt = raw.replace(Regex("""(?i)use\s+consult[_ ]peer|consult[_ ]peer"""), "").trim().trimStart(':', ',', '-', ' ').ifBlank { raw }
+            return Pair(capitalizedPeer, prompt)
+        }
+        return null
     }
 
     private fun matchInteractiveSkill(clean: String, raw: String): BaggedIntent? {
@@ -513,6 +539,16 @@ object IntentBagger {
                         "run_js(skillName = \"qr-code\", scriptName = \"index.html\", data = \"{}\")"
                     }
                 }
+                "consult_peer" -> {
+                    try {
+                        val json = org.json.JSONObject(c.paramsJson)
+                        val peer = json.optString("peer", "Gemini")
+                        val prompt = json.optString("prompt", "").replace("\"", "\\\"")
+                        "consult_peer(peer = \"$peer\", prompt = \"$prompt\")"
+                    } catch (_: Exception) {
+                        "consult_peer(peer = \"Gemini\", prompt = \"...\")"
+                    }
+                }
                 "alarm", "set_alarm" -> {
                     val h = Regex("""["']?hour["']?\s*[:=]\s*(\d+)""").find(c.paramsJson)?.groupValues?.get(1)?.toIntOrNull() ?: 0
                     val m = Regex("""["']?min(?:ute)?s?["']?\s*[:=]\s*(\d+)""").find(c.paramsJson)?.groupValues?.get(1)?.toIntOrNull() ?: 0
@@ -540,9 +576,15 @@ object IntentBagger {
                 "status" -> {
                     "execute_command(\"status\", \"\")"
                 }
+                "list_tasks" -> {
+                    "execute_command(\"list_tasks\", \"\")"
+                }
+                "cancel_task" -> {
+                    "execute_command(\"cancel_task\", \"${c.paramsJson}\")"
+                }
                 "open_system_browser_bar" -> {
                     val url = c.browserUrl ?: ""
-                    "execute_command(\"open_system_browser_bar\", \"queryOrUrl=\\\"$url\\\"\")"
+                    "execute_command(\"open_system_browser_bar\", \"queryOrUrl=$url\")"
                 }
                 else -> {
                     val cleanParams = c.paramsJson.replace("\"", "\\\"")

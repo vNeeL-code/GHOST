@@ -14,21 +14,30 @@ import com.ghost.api.GemmaService
 class DiaryAlarmReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == "com.ghost.api.ACTION_DIARY_CYCLE") {
-            Timber.i("📔 Diary Alarm triggered by AlarmManager (RTC_WAKEUP)")
-            val service = GemmaService.instance
-            if (service != null) {
-                service.startDiaryCycle()
-            } else {
-                // Ensure service is running if it was killed by aggressive OS background management
-                Timber.w("📔 GemmaService instance was null on alarm trigger — starting foreground service")
-                val serviceIntent = Intent(context, GemmaService::class.java).apply {
-                    action = "com.ghost.api.ACTION_START_SERVICE"
-                }
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                    context.startForegroundService(serviceIntent)
+        when (intent.action) {
+            "com.ghost.api.ACTION_DIARY_CYCLE" -> {
+                Timber.i("📔 Diary Alarm triggered by AlarmManager (RTC_WAKEUP)")
+                val service = GemmaService.instance
+                if (service != null) {
+                    service.startDiaryCycle(manualTrigger = false)
                 } else {
-                    context.startService(serviceIntent)
+                    Timber.w("📔 GemmaService instance was null on alarm trigger — starting foreground service")
+                    val serviceIntent = Intent(context, GemmaService::class.java).apply {
+                        action = "com.ghost.api.ACTION_START_SERVICE"
+                    }
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        context.startForegroundService(serviceIntent)
+                    } else {
+                        context.startService(serviceIntent)
+                    }
+                }
+            }
+            "com.ghost.api.ACTION_SCHEDULED_TASK" -> {
+                val taskId = intent.getStringExtra("task_id")
+                Timber.i("⏱️ Scheduled task alarm triggered (task_id=$taskId)")
+                val service = GemmaService.instance
+                if (service != null) {
+                    service.checkAndRunScheduledTasks(specificTaskId = taskId)
                 }
             }
         }

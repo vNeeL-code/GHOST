@@ -1,9 +1,9 @@
-
 package com.ghost.api.database
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import timber.log.Timber
 
 class MemoryManager(private val context: Context) {
 
@@ -11,8 +11,9 @@ class MemoryManager(private val context: Context) {
     private val conversationDao = db.conversationDao()
     private val diaryDao = db.diaryDao()
     private val semanticFactDao = db.semanticFactDao()
-    
+
     private val sessionMemoryFile = java.io.File(context.filesDir, "session_memory.txt")
+    @Volatile private var lastExternalBackupTime = 0L
 
     val externalLogFile: java.io.File by lazy {
         try {
@@ -30,6 +31,14 @@ class MemoryManager(private val context: Context) {
         }
     }
 
+    private fun maybeBackupDatabase(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (force || now - lastExternalBackupTime > 5 * 60 * 1000L) {
+            lastExternalBackupTime = now
+            MemoryDatabase.backupDatabaseToExternal(context)
+        }
+    }
+
     fun appendToMemoryLog(type: String, content: String) {
         try {
             val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US).apply {
@@ -42,7 +51,7 @@ class MemoryManager(private val context: Context) {
                 externalLogFile.appendText(line, Charsets.UTF_8)
             }
         } catch (e: Exception) {
-            timber.log.Timber.w(e, "Failed to append to external memory_log.txt")
+            Timber.w(e, "Failed to append to external memory_log.txt")
         }
     }
 
@@ -92,8 +101,9 @@ class MemoryManager(private val context: Context) {
 
     suspend fun storeTurn(turn: ConversationTurn) = withContext(Dispatchers.IO) {
         conversationDao.insertTurn(turn)
+        conversationDao.trimOldTurns(keepCount = 200)
         appendToMemoryLog("CHAT", "User: ${turn.userMessage} ↔ Gemma: ${turn.assistantResponse}")
-        MemoryDatabase.backupDatabaseToExternal(context)
+        maybeBackupDatabase(force = false)
     }
 
     suspend fun getFormattedHistory(limit: Int = 10): String = withContext(Dispatchers.IO) {
@@ -105,55 +115,23 @@ class MemoryManager(private val context: Context) {
         }
     }
 
-    suspend fun getCompressedContext(): String = withContext(Dispatchers.IO) {
-        val allTurns = conversationDao.getAllRecentTurns(15)
-        if (allTurns.isEmpty()) return@withContext "No previous context."
-
-        val recentTurns = allTurns.take(3).reversed()
-        val olderTurns = allTurns.drop(3).take(7)
-
-        val sb = StringBuilder()
-        
-        if (olderTurns.isNotEmpty()) {
-            sb.append("[SESSION SUMMARY]\n")
-            olderTurns.reversed().forEach { turn ->
-                val summary = if (turn.assistantResponse.length > 50) 
-                    turn.assistantResponse.take(47) + "..." 
-                else turn.assistantResponse
-                sb.append("- User asked about '${turn.userMessage.take(30)}...'; I responded: $summary\n")
-            }
-            sb.append("\n")
-        }
-
-        sb.append("[RECENT TURNS]\n")
-        recentTurns.forEach { turn ->
-            sb.append("User: ${turn.userMessage}\nAssistant: ${turn.assistantResponse}\n")
-        }
-
-        sb.toString()
-    }
-    
     suspend fun getSessionHistory(limit: Int = 50): List<ConversationTurn> = withContext(Dispatchers.IO) {
         conversationDao.getAllRecentTurns(limit)
     }
-    
+
     suspend fun searchMemory(query: String): List<ConversationTurn> = withContext(Dispatchers.IO) {
         try {
             conversationDao.searchByKeyword(query)
         } catch (e: Exception) {
-            timber.log.Timber.e(e, "Search failed")
+            Timber.e(e, "Search failed")
             emptyList()
         }
     }
 
-    suspend fun rebuildSearchIndex() = withContext(Dispatchers.IO) {
-        timber.log.Timber.d("FTS index is managed automatically by Room")
-    }
-
-    suspend fun storeSemanticFact(title: String, content: String) = withContext(Dispatchers.IO) {
+    suspend fun storeSemanticFact(title: String, content: String, factType: String = "factoid") = withContext(Dispatchers.IO) {
         val fact = SemanticFact(
             extractedAt = System.currentTimeMillis(),
-            factType = "factoid",
+            factType = factType,
             subject = title,
             predicate = "is",
             object_ = content,
@@ -161,19 +139,23 @@ class MemoryManager(private val context: Context) {
             sourceConversationId = -1L
         )
         semanticFactDao.insertFact(fact)
+        semanticFactDao.trimOldFacts(keepCount = 150)
         appendToMemoryLog("FACT", "$title: $content")
-        MemoryDatabase.backupDatabaseToExternal(context)
+        maybeBackupDatabase(force = true)
     }
 
     suspend fun searchSemanticFacts(query: String): List<SemanticFact> = withContext(Dispatchers.IO) {
         try {
             semanticFactDao.searchByKeyword(query)
         } catch (e: Exception) {
-            timber.log.Timber.e(e, "Semantic Fact Search failed")
-            emptyList()
+            try {
+                semanticFactDao.searchFacts(query)
+            } catch (_: Exception) {
+                emptyList()
+            }
         }
     }
-    
+
     suspend fun getRecentDiaryEntries(limit: Int = 50): List<DiaryEntry> = withContext(Dispatchers.IO) {
         diaryDao.getRecentEntries(limit)
     }
@@ -182,7 +164,7 @@ class MemoryManager(private val context: Context) {
         diaryDao.insertEntry(entry)
         diaryDao.trimOldEntries(keepCount = 25)
         appendToMemoryLog(entry.eventType, entry.observation)
-        MemoryDatabase.backupDatabaseToExternal(context)
+        maybeBackupDatabase(force = true)
     }
 
     suspend fun writeDiaryEntry(eventType: String, observation: String, contextData: String) = withContext(Dispatchers.IO) {
@@ -195,12 +177,38 @@ class MemoryManager(private val context: Context) {
         diaryDao.insertEntry(entry)
         diaryDao.trimOldEntries(keepCount = 25)
         appendToMemoryLog(eventType, observation)
-        MemoryDatabase.backupDatabaseToExternal(context)
+        maybeBackupDatabase(force = true)
+    }
+
+    /**
+     * Cleans up duplicate diary entries that were historically written into semantic_facts,
+     * prunes old rows across tables, and caps external memory_log.txt size.
+     */
+    suspend fun runDatabaseCleanup() = withContext(Dispatchers.IO) {
+        try {
+            val purged = semanticFactDao.purgeLegacyDuplicateDiaryFacts()
+            if (purged > 0) {
+                Timber.i("🧹 MemoryManager: Purged $purged duplicate diary entries from semantic_facts")
+            }
+            conversationDao.trimOldTurns(keepCount = 200)
+            semanticFactDao.trimOldFacts(keepCount = 150)
+            diaryDao.trimOldEntries(keepCount = 25)
+
+            if (externalLogFile.exists() && externalLogFile.length() > 256 * 1024L) {
+                synchronized(this@MemoryManager) {
+                    val kept = externalLogFile.readLines(Charsets.UTF_8).takeLast(400)
+                    externalLogFile.writeText(kept.joinToString("\n") + "\n", Charsets.UTF_8)
+                }
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Database cleanup pass encountered non-fatal error")
+        }
     }
 
     suspend fun clearAll() = withContext(Dispatchers.IO) {
         conversationDao.deleteAll()
         diaryDao.deleteAll()
+        semanticFactDao.deleteAll()
     }
 
     fun close() {

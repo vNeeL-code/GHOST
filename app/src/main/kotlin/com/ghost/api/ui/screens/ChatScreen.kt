@@ -568,18 +568,20 @@ fun ChatMessageRow(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = if (isUser) {
-                        Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .clickable {
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable {
+                            if (isUser) {
                                 if (isOperatorTier) {
                                     showAvatarDialog = true
                                 } else {
                                     Toast.makeText(context, "Operator Pass required (🦕💭💸) to customize avatar", Toast.LENGTH_SHORT).show()
                                 }
+                            } else if (displayContent.isNotEmpty()) {
+                                showReportDialog = true
                             }
-                            .padding(vertical = 2.dp, horizontal = 4.dp)
-                    } else Modifier
+                        }
+                        .padding(vertical = 2.dp, horizontal = 4.dp)
                 ) {
                     Text(
                         text = headerText,
@@ -594,6 +596,12 @@ fun ChatMessageRow(
                             color = headerColor.copy(alpha = 0.6f),
                             fontSize = 11.sp
                         )
+                    } else if (displayContent.isNotEmpty()) {
+                        Text(
+                            text = " 🚩",
+                            color = headerColor.copy(alpha = 0.65f),
+                            fontSize = 10.sp
+                        )
                     }
                 }
 
@@ -601,7 +609,7 @@ fun ChatMessageRow(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // Speaker and Report only on AI / assistant cards!
+                    // Speaker on AI / assistant cards
                     if (!isUser && displayContent.isNotEmpty()) {
                         Box(
                             modifier = Modifier
@@ -611,19 +619,6 @@ fun ChatMessageRow(
                         ) {
                             Text(
                                 text = "🔊",
-                                fontSize = 13.sp,
-                                modifier = Modifier.alpha(0.7f)
-                            )
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .clickable { showReportDialog = true }
-                                .padding(horizontal = 6.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = "🚩",
                                 fontSize = 13.sp,
                                 modifier = Modifier.alpha(0.7f)
                             )
@@ -1212,10 +1207,11 @@ fun ReportResponseDialog(
     onSubmitReport: (reason: String, details: String) -> Unit
 ) {
     val reasons = listOf(
+        "Repeated Phrase / Gravity Well",
+        "Missed or Wrong Tool Call",
+        "Too Verbose / Robotic",
         "Inaccurate or Hallucination",
-        "Harmful or Inappropriate",
-        "Broken Output / Syntax Error",
-        "Other Issue"
+        "Harmful or Inappropriate"
     )
     var selectedReason by remember { mutableStateOf(reasons.first()) }
     var userNotes by remember { mutableStateOf("") }
@@ -1244,7 +1240,7 @@ fun ReportResponseDialog(
                         fontSize = 16.sp
                     )
                     Text(
-                        text = "REPORT AI OUTPUT",
+                        text = "FLAG FOR SELF-REVIEW",
                         color = Color(0xFF8BB4F6),
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
@@ -1253,10 +1249,10 @@ fun ReportResponseDialog(
                 }
 
                 Text(
-                    text = "Help improve GHOST's quality and safety. Reports are logged for review.",
+                    text = "Saved reports steer Gemma immediately and are analyzed during her screen-off self-review cron.",
                     color = Color(0x88FFFFFF),
                     fontSize = 11.sp,
-                    modifier = Modifier.padding(top = 4.dp, bottom = 14.dp)
+                    modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
                 )
 
                 // Snippet preview (truncated)
@@ -1265,7 +1261,7 @@ fun ReportResponseDialog(
                     color = Color(0x18FFFFFF),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 14.dp)
+                        .padding(bottom = 12.dp)
                 ) {
                     Text(
                         text = responseSnippet.take(120).let { if (responseSnippet.length > 120) "$it..." else it },
@@ -1278,7 +1274,7 @@ fun ReportResponseDialog(
                 }
 
                 Text(
-                    text = "REASON",
+                    text = "ISSUE TYPE",
                     color = Color(0xAA8BB4F6),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -1286,7 +1282,7 @@ fun ReportResponseDialog(
                 )
 
                 Column(
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     reasons.forEach { reason ->
@@ -1303,7 +1299,7 @@ fun ReportResponseDialog(
                                     RoundedCornerShape(8.dp)
                                 )
                                 .clickable { selectedReason = reason }
-                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                                .padding(horizontal = 12.dp, vertical = 7.dp)
                         ) {
                             Text(
                                 text = if (isSelected) "◉ " else "○ ",
@@ -1319,7 +1315,31 @@ fun ReportResponseDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(18.dp))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedTextField(
+                    value = userNotes,
+                    onValueChange = { userNotes = it },
+                    placeholder = {
+                        Text(
+                            text = "Note for Gemma (e.g. 'stop saying substrate', 'use consult_peer')...",
+                            color = Color(0x66FFFFFF),
+                            fontSize = 11.sp
+                        )
+                    },
+                    singleLine = false,
+                    maxLines = 3,
+                    textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 12.sp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF8BB4F6),
+                        unfocusedBorderColor = Color(0x33FFFFFF),
+                        focusedContainerColor = Color(0x12FFFFFF),
+                        unfocusedContainerColor = Color(0x0AFFFFFF)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1332,14 +1352,14 @@ fun ReportResponseDialog(
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = {
-                            onSubmitReport(selectedReason, userNotes)
+                            onSubmitReport(selectedReason, userNotes.trim())
                             onDismiss()
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8BB4F6)),
                         shape = RoundedCornerShape(8.dp)
                     ) {
                         Text(
-                            text = "Submit Report",
+                            text = "Save & Target Model",
                             color = Color(0xFF0D1219),
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.sp
@@ -1359,9 +1379,13 @@ private fun saveAiReport(context: Context, response: String, reason: String, det
             put("timestamp", System.currentTimeMillis())
             put("reason", reason)
             put("details", details)
+            put("user_notes", details)
             put("responseSnippet", response.take(1000))
+            put("flagged_response", response.take(1000))
+            put("reviewed", false)
         }
         file.appendText(json.toString() + "\n")
+        com.ghost.api.GemmaService.instance?.onOperatorFeedbackLogged(reason, details, response)
     } catch (e: Exception) {
         Timber.e(e, "Failed to persist AI report")
     }

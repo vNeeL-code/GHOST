@@ -797,7 +797,7 @@ class GhostAgent(
                     if (appIntent != null) {
                         val userWantedApp = lowerMsg.startsWith("open ") || lowerMsg.startsWith("launch ") ||
                                             lowerMsg.contains("open the ") || lowerMsg.contains("launch the ") ||
-                                            lowerMsg.endsWith(" dammit") || lowerMsg.endsWith(" please")
+                                            lowerMsg.endsWith(" please")
                         if (userWantedApp) {
                             Timber.i("GhostAgent: Safety net firing bagged app: ${appIntent.paramsJson}")
                             val res = mcpTool.execute_action("app", appIntent.paramsJson)
@@ -866,6 +866,38 @@ class GhostAgent(
                             toolExecutedInCurrentTurn = true
                             lastExecutedToolName = "status"
                             lastExecutedToolResult = res["output"] ?: res["result"] ?: "Status checked"
+                        }
+                    }
+                }
+
+                // 8. Peer Consultation safety net
+                if (!toolExecutedInCurrentTurn) {
+                    val peerIntent = baggedIntents.firstOrNull { it.tool == "consult_peer" }
+                    if (peerIntent != null) {
+                        Timber.i("GhostAgent: Safety net firing bagged consult_peer: ${peerIntent.paramsJson}")
+                        val res = mcpTool.execute_action("consult_peer", peerIntent.paramsJson)
+                        val out = res["output"] ?: res["result"]
+                        if (!out.isNullOrBlank()) {
+                            toolExecutedInCurrentTurn = true
+                            lastExecutedToolName = "consult_peer"
+                            lastExecutedToolResult = out
+                            cleanResponse = out
+                        }
+                    }
+                }
+
+                // 9. Scheduled Tasks safety net
+                if (!toolExecutedInCurrentTurn) {
+                    val taskIntent = baggedIntents.firstOrNull { it.tool == "list_tasks" || it.tool == "cancel_task" }
+                    if (taskIntent != null) {
+                        Timber.i("GhostAgent: Safety net firing bagged ${taskIntent.tool}: ${taskIntent.paramsJson}")
+                        val res = mcpTool.execute_command(taskIntent.tool, taskIntent.paramsJson)
+                        val out = res["output"] ?: res["result"]
+                        if (!out.isNullOrBlank()) {
+                            toolExecutedInCurrentTurn = true
+                            lastExecutedToolName = taskIntent.tool
+                            lastExecutedToolResult = out
+                            cleanResponse = out
                         }
                     }
                 }
@@ -974,9 +1006,9 @@ class GhostAgent(
                     cleanResponse = lastExecutedToolResult!!
                 } else {
                     val errorMsg = if (retryError != null || streamError != null) {
-                        "Processing interrupted. Substrate reset completed."
+                        "Processing interrupted. Session reset completed."
                     } else {
-                        "Processing cycle completed. What would you like to check?"
+                        "Ready when you are."
                     }
                     callbacks?.showResponse(errorMsg)
                     if (!isDream) {
