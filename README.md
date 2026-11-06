@@ -36,7 +36,7 @@ The same rule applies to an embodied mobile companion:
 
 ---
 
-### The Manifesto: SaaS AI Isn't *Your* AI
+### SaaS AI Isn't *Your* AI:
 
 > **"SaaS AI isn’t your AI, as much as your therapist or barber isn't your personal property."**
 
