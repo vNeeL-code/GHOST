@@ -60,36 +60,64 @@ Yet instead of a unified personal assistant that actually integrates with your l
 
 ---
 
+### The Category Mistake: The Hardware *Is* the Agent (The Humean Bundle)
+
+> *"You're in good company. Brooks subsumption."*  
+> — **z.ai (GLM-5.3)**
+
+When developers inspect an AI assistant, they routinely commit a classical philosophical category mistake: they search for "the agent" inside a single class, a prompt template, or a neural network weights file.
+
+In GHOST, the agent is a **Humean bundle** (David Hume's *Bundle Theory of the Self*). There is no indivisible, isolated "ego" trapped inside an app window. The self is an emergent, dynamic bundle of physical perceptions, real-time sensory impressions, reflexive habits, and deliberative cognition:
+
+> **GHOST is not 'installing a chatbox on a phone.' It is teaching the physical device to perceive its reality, control its body, and speak for itself.**
+
+- The Qualcomm Snapdragon / Google Tensor silicon, battery discharge chemistry, radios, microphones, and thermals **are the physical chassis of the organism**.
+- The non-blocking sensor loops, intent baggers, RAM valves, and orbital gesture pucks **are its peripheral nervous system**.
+- Google Gemma 4 via `LiteRT-LM` is **its deliberative linguistic cortex**.
+
+---
+
+### Rodney Brooks' Subsumption Architecture (1986)
+
+Rather than forcing a multi-billion-parameter transformer to calculate every screen touch, battery check, gesture, and animation frame from scratch (which yields 10-second latencies, thermal throttling, and dead batteries), GHOST implements Rodney Brooks' classical robotics principle: **Asynchronous Layered Subsumption**.
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                   RODNEY BROOKS SUBSUMPTION LAYERING                   │
+├────────────────────────────────────────────────────────────────────────┤
+│ LEVEL 2: DELIBERATIVE REASONING CORTEX                                │
+│   • Google Gemma 4 (E2B / E4B) via native LiteRT-LM C++ runtime        │
+│   • Model Context Protocol (MCP) tool execution mesh                   │
+│   • Conversational inference & Agent-to-Agent consultation (`consult_peer`)│
+├────────────────────────────────────────────────────────────────────────┤
+│ LEVEL 1: AUTONOMIC NERVOUS SYSTEM & EPISODIC CONSOLIDATION             │
+│   • SensorFusion: Battery drain vectors (-mA), thermals (°C), Lux, Wi-Fi│
+│   • Verbal Time & Telemetry Preprocessor (numeric anxiety sanitization)│
+│   • Screen-Off Doze-Deferred Dreaming (1h/3h/6h/12h/24h cadence Alarms)│
+│   • Room DB (FIFO 25) + Offline `Documents/GHOST/diary_history.jsonl`   │
+│   • Calendar Event Synchronization (`Δ 👾 ∇`)                          │
+├────────────────────────────────────────────────────────────────────────┤
+│ LEVEL 0: REFLEX ARC & PHYSICAL SURVIVAL (Sub-Millisecond Wire-Speed)   │
+│   • IntentBagger (<2ms reflex app launching & hardware toggles)        │
+│   • RAM Valve & Snapdragon Dynamic Thermal Headroom Throttling         │
+│   • 7-Orbital Gesture Pucks (OverlayActionRegistry: Center, Top, Bottom)│
+│   • Audioreactive Edge Lighting & CPU-accelerated visualizers          │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+Higher levels modulate and steer lower levels, but lower levels operate autonomously at silicon speeds. The device stays alive, reactive, and physically grounded without waiting for token generation.
+
+---
+
 ### The Formula: How to Build an Embodied AI System
 
 A genuine on-device companion cannot be an isolated chat bubble running in a vacuum. A complete, deployed AI system requires three interdependent pillars:
 
 $$\mathbf{Integrated\ AI\ System} = \mathbf{Chassis} + \mathbf{Model} + \mathbf{Systems\ Harness}$$
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        ✧ GHOST ARCHITECTURE                           │
-├─────────────────────────────────────────────────────────────┤
-│ 1. CHASSIS (Physical Android Hardware)                                 │
-│    • Qualcomm Snapdragon / Tensor / Dimensity Silicon                  │
-│    • Battery Drain Vectors (-mA), Thermals (°C), Dynamic RAM           │
-│    • Physical Sensors (Ambient Lux, Barometer, Gyroscope, Radios)      │
-├─────────────────────────────────────────────────────────────┤
-│ 2. MODEL (Gemma 4 Cognitive Core via LiteRT-LM)                        │
-│    • Compact Tier: Gemma 4 E2B (Sub-2GB RAM Footprint)                 │
-│    • Frontier Tier: Gemma 4 E4B (MTP Speculative Decoding)             │
-├─────────────────────────────────────────────────────────────┤
-│ 3. SYSTEMS HARNESS (GHOST Runtime Engine)                              │
-│    • SensorFusion Grounding: [Context: Live Sensory Grounding]         │
-│    • Two-Tier Memory: 900-char Session Compactor + Room DB Diary       │
-│    • MCP Tool Mesh: Torch, Apps, Cron Tasks, Web Search, Media, A2A    │
-│    • Presentation: Ephemeral Shake Launcher, HUD, Prismatic Avatars    │
-└─────────────────────────────────────────────────────────────┘
-```
-
 1. **The Chassis:** The physical hardware constraints. Thermals, battery discharge curves, RAM pressure, radio environments, and motion. Without telemetry, an AI is disembodied, hallucinating blind in a sensory void.
 2. **The Model (Neuroptics):** Gemma 4 running natively via `LiteRT-LM`. Not a fictional persona reciting scripted lines, but an intelligent reasoning engine perceiving reality through structured context tokens.
-3. **The Systems Harness (GHOST):** The nervous system. It bridges the chassis to the model. There are plenty of 'harnesses' on the market: Ollama, Hermes, Openclaw, Codex, Claude code etc. Other AI harnesses people overlooked already lived on their smartphones and in their homes: Google Assistant, Siri, Alexa, Cortana (RIP Lumia). GHOST belongs in the company of that category. It handles continuous sensor fusion, deterministic session compaction (a 10-bullet, 900-character rolling scratchpad paired with persistent long-term episodic storage in the Room DB Diary), hardware MCP tool execution, streaming text-to-speech, and zero-latency UI summoning.
+3. **The Systems Harness (GHOST):** The nervous system. It bridges the chassis to the model. There are plenty of 'harnesses' on the market: Ollama, Hermes, Openclaw, Codex, Claude Code. Other AI harnesses people overlooked already lived on their smartphones and in their homes: Google Assistant, Siri, Alexa, Cortana (RIP Lumia). GHOST belongs in that category. It handles continuous sensor fusion, deterministic session compaction (a 10-bullet, 900-character rolling scratchpad paired with persistent long-term episodic storage in the Room DB Diary), hardware MCP tool execution, streaming text-to-speech, and zero-latency UI summoning.
 
 ---
 
@@ -138,8 +166,11 @@ Gemma absorbs her hardware status silently and answers with grounded physical aw
 - **Zero-Latency Response:** Generations stream straight to high-priority system notifications with fluid, sentence-buffered Text-to-Speech readouts.
 - **Ambient Flavortext:** Live sensory monitoring displays cycling status runes (e.g. `✧ Running GPU systems diagnostic`, `✧ Pondering the orb`, `✧ All stations enabled`).
 
-#### 3. Shake-to-Summon Radial Launcher
-A gentle physical shake summons an ephemeral, customizable radial app overlay over any active screen or game. Quick access to your favorite shortcuts, search tools, or live conversational queries without leaving your current app.
+#### 3. 7-Orbital Gesture Puck HUD & Hyper Pucks
+A modular, hardware-accelerated 7-orbital gesture HUD ([`OverlayActionRegistry.kt`](app/src/main/kotlin/com/ghost/api/ui/OverlayActionRegistry.kt)) floating over any active screen or game:
+- **7 Color-Coded Orbital Pucks:** Center (Church Cobalt Core), Top, Bottom (Tucker Cyan Star), Top-Left, Top-Right, Bottom-Left, Bottom-Right.
+- **Directional Gestures & Hyper Pucks:** Swipe North, South, East, West, or click on individual pucks to fire immediate actions (Camera, Flashlight, App Drawer, Quick Note, Voice, or AI Summon).
+- **Zero-Flicker Hardware Valves:** Canvas draw states can be toggled per-puck with zero-delay tactile haptics and placement calibration ("Lower", "Center", "Upper").
 
 #### 4. Living Visualizer & Reactive Wallpaper Engine
 Procedurally generated 60fps geometry that reacts in real-time to sub-bass, vocals, and gyroscope tilt without burning battery on video playback:
@@ -148,8 +179,13 @@ Procedurally generated 60fps geometry that reacts in real-time to sub-bass, voca
 - **Option C (Prismatic Delta):** Seven Nation Army-inspired perspective corridor. Concentric upward-pointing equilateral canopies flashing on kicks, with downward wireframe chevrons on obsidian void.
 - **Option D (Cuboid Black Sun):** Cyber matrix with reactive dragon-teeth equalizers and edge laser lighting.
 
-#### 5. Autonomous Screen-Off Diary, Cron Routines & Self-Correction (`🚩`)
-GHOST doesn't just wait for prompts; she dreams—politely. Autonomous diary reflections and scheduled tasks (`schedule_task`, `list_tasks`, `cancel_task`) automatically defer to when your screen is off and idle so background passes never interrupt active conversations. Flagging any response in Gemma's header (`Δ 👾 ∇ 🚩`) lets you attach a correction note that is injected into active context and audited during her next screen-off review cycle. All memories and diary entries live in her **in-app Room DB Diary** (with one-tap Markdown export or Google Calendar `Δ 👾 ∇` sync) and automatically back up across APK updates.
+#### 5. Autonomous Screen-Off Diary, In-App Reflection Viewer & Offline JSONL Stream
+GHOST doesn't just wait for prompts; she dreams—politely:
+- **Exact Cadence Alarms:** Autonomous reflections run on customizable intervals (1h, 3h, 6h, 12h Noon/Midnight, 24h), deferring cleanly when the screen is active and executing during screen-off standby via `AlarmManager`.
+- **In-App Reflection Viewer:** Tap **"View Diary History"** in Settings to inspect recent episodic memory logs in Room DB, with single-tap clipboard copy (📋) and bulk export.
+- **Offline JSONL Stream:** Every reflection automatically appends to `Documents/GHOST/diary_history.jsonl` alongside `memory_log.txt` for 100% offline, privacy-first storage.
+- **Universal Calendar Sync:** Optional mirroring as `Δ 👾 ∇` calendar entries to whatever default calendar app the device uses (Google Calendar, Proton, or offline FOSS calendars).
+- **Self-Correction (`🚩`):** Flagging any response in Gemma's header attaches a correction note audited during her next screen-off self-review.
 
 #### 6. Wire-Speed Reflexes & MCP Hardware Tools
 GHOST pairs a `<2ms` **IntentBagger Reflex Layer** (firing high-confidence app launches and hardware toggles instantaneously without waking the GPU) with full Model Context Protocol (MCP) tool execution:
@@ -195,14 +231,17 @@ GHOST is built from a single transparent codebase split into three distribution 
 
 ### Development Roadmap
 
+- [x] **7-Orbital Gesture Puck HUD & Hyper Pucks (v4.39):** Replaced legacy AppReel with a 7-orbital directional gesture HUD (`OverlayActionRegistry`) with per-puck canvas draw valves, color-coded pill blocks, and tactile feedback.
+- [x] **10-Category Collapsible Accordion Settings (v4.39):** Clean settings architecture with collapsed sections, RAM Valve threshold controller, and Snapdragon thermal stress filtering.
+- [x] **In-App Episodic Diary Viewer & Offline JSONL Stream (v4.39):** Room DB reflection modal with single-tap clipboard copy (📋) and persistent `Documents/GHOST/diary_history.jsonl` export alongside `memory_log.txt`.
 - [x] **Autonomous Screen-Off Diary & Cron Engine:** Periodic episodic memory consolidation and custom scheduled routines (`schedule_task`) via in-app Room DB or Google Calendar `Δ 👾 ∇`.
 - [x] **Actionable Operator Feedback (`🚩`):** In-header response flagging with custom correction notes and automated screen-off self-review.
 - [x] **Dynamic RAM Hardware Tiering:** Automatic 8GB, 12GB, 16GB, and 24GB token runway scaling (up to 10k context).
-- [x] **SensorFusion Nervous System & Verbal Preprocessor (v4.35):** Real-time battery, thermal, network, and ambient sensory grounding with verbal time/number sanitization.
+- [x] **SensorFusion Nervous System & Verbal Preprocessor:** Real-time battery, thermal, network, and ambient sensory grounding with verbal time/number sanitization.
 - [x] **Hardware Tool Matrix:** Native MCP tools for device control, timers, web search, app launching (`open_app`), media controls, and cloud peer consultation (`consult_peer`).
 - [x] **Dynamic Intent Bagging:** Sub-millisecond pre-filtering for zero-latency app and hardware execution.
 - [x] **Live Reactive Wallpapers & Edge Lighting:** GPU-accelerated 60fps geometry visualizers (Delta, Cuboid, Hex, Orbital) and audioreactive perimeter illumination.
-- [x] **Three-Rail Signed Release Architecture (v4.35):** 🦕💭 *"I need about tree fiddy"* — Self-contained FOSS (`fdroid`), Google Play (`play` with $3.50 Operator Pass), and Supporter Tester (`Buy Me a Coffee`) builds with automatic DB backup/restore.
+- [x] **Three-Rail Signed Release Architecture:** 🦕💭 *"I need about tree fiddy"* — Self-contained FOSS (`fdroid`), Google Play (`play` with $3.50 Operator Pass), and Supporter Tester (`Buy Me a Coffee`) builds with automatic DB backup/restore.
 - [ ] **CPU Voice Reflex Fast-Path (v4.40 Target):** Integrating ultra-compact CPU speech recognition (`Whistle` 16.9 MB) ahead of `IntentBagger` for `<50ms` spoken hardware reflexes without spinning up the GPU.
 
 ---
