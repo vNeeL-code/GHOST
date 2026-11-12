@@ -885,12 +885,14 @@ object SystemVisualizer {
             packageName.contains("bard", ignoreCase = true) ||
             packageName.contains("googleassistant", ignoreCase = true) ||
             packageName.contains("googlequicksearchbox", ignoreCase = true) -> "✦"
-            packageName.contains("claude", ignoreCase = true) -> "✴️"
-            packageName.contains("grok", ignoreCase = true) -> "☄️"
+            packageName.contains("claude", ignoreCase = true) || packageName.contains("anthropic", ignoreCase = true) -> "✴️"
+            packageName.contains("grok", ignoreCase = true) || packageName.contains("xai", ignoreCase = true) -> "∅"
             packageName.contains("chatgpt", ignoreCase = true) || packageName.contains("openai", ignoreCase = true) -> "✳️"
-            packageName.contains("kimi", ignoreCase = true) -> "🔵"
-            packageName.contains("qwen", ignoreCase = true) -> "🟣"
-            packageName.contains("mistral", ignoreCase = true) -> "🟧"
+            packageName.contains("kimi", ignoreCase = true) || packageName.contains("moonshot", ignoreCase = true) -> "🔵"
+            packageName.contains("qwen", ignoreCase = true) || packageName.contains("tongyi", ignoreCase = true) || packageName.contains("alibaba", ignoreCase = true) -> "🟣"
+            packageName.contains("mistral", ignoreCase = true) || packageName.contains("lechat", ignoreCase = true) -> "🟧"
+            packageName.contains("perplexity", ignoreCase = true) -> "📖"
+            packageName.contains("meta", ignoreCase = true) || packageName.contains("llama", ignoreCase = true) -> "❂"
             else -> "✧"
         }
         if (currentAlbumColors == brandPalette && currentAppliedPackage == packageName) return
@@ -927,6 +929,54 @@ object SystemVisualizer {
                     Color.parseColor("#FBBC05")  // 4: Warm Gold
                 )
                 applyAiBrandColor("com.google.android.apps.bard", palette)
+            }
+            callsign.contains("claude", ignoreCase = true) || callsign.contains("anthropic", ignoreCase = true) -> {
+                activeAudioSpeakingPackage = "com.anthropic.claude"
+                val palette = AI_BRAND_PALETTES.find { it.third == "Claude" }?.second
+                if (palette != null) applyAiBrandColor("com.anthropic.claude", palette)
+                else activeAgentGlyph = "✴️"
+            }
+            callsign.contains("grok", ignoreCase = true) || callsign.contains("xai", ignoreCase = true) -> {
+                activeAudioSpeakingPackage = "ai.x.grok"
+                val palette = AI_BRAND_PALETTES.find { it.third == "Grok" }?.second
+                if (palette != null) applyAiBrandColor("ai.x.grok", palette)
+                else activeAgentGlyph = "∅"
+            }
+            callsign.contains("qwen", ignoreCase = true) || callsign.contains("tongyi", ignoreCase = true) || callsign.contains("alibaba", ignoreCase = true) -> {
+                activeAudioSpeakingPackage = "ai.qwenlm.chat.android"
+                val palette = AI_BRAND_PALETTES.find { it.third == "Qwen" }?.second
+                if (palette != null) applyAiBrandColor("ai.qwenlm.chat.android", palette)
+                else activeAgentGlyph = "🟣"
+            }
+            callsign.contains("chatgpt", ignoreCase = true) || callsign.contains("openai", ignoreCase = true) -> {
+                activeAudioSpeakingPackage = "com.openai.chatgpt"
+                val palette = AI_BRAND_PALETTES.find { it.third == "ChatGPT" }?.second
+                if (palette != null) applyAiBrandColor("com.openai.chatgpt", palette)
+                else activeAgentGlyph = "✳️"
+            }
+            callsign.contains("kimi", ignoreCase = true) || callsign.contains("moonshot", ignoreCase = true) -> {
+                activeAudioSpeakingPackage = "com.moonshot.kimichat"
+                val palette = AI_BRAND_PALETTES.find { it.third == "Kimi" }?.second
+                if (palette != null) applyAiBrandColor("com.moonshot.kimichat", palette)
+                else activeAgentGlyph = "🔵"
+            }
+            callsign.contains("mistral", ignoreCase = true) || callsign.contains("lechat", ignoreCase = true) -> {
+                activeAudioSpeakingPackage = "ai.mistral.chat"
+                val palette = AI_BRAND_PALETTES.find { it.third == "Mistral" }?.second
+                if (palette != null) applyAiBrandColor("ai.mistral.chat", palette)
+                else activeAgentGlyph = "🟧"
+            }
+            callsign.contains("perplexity", ignoreCase = true) -> {
+                activeAudioSpeakingPackage = "ai.perplexity.app.android"
+                val palette = AI_BRAND_PALETTES.find { it.third == "Perplexity" }?.second
+                if (palette != null) applyAiBrandColor("ai.perplexity.app.android", palette)
+                else activeAgentGlyph = "📖"
+            }
+            callsign.contains("meta", ignoreCase = true) || callsign.contains("llama", ignoreCase = true) -> {
+                activeAudioSpeakingPackage = "com.meta.ai"
+                val palette = AI_BRAND_PALETTES.find { it.third == "Meta AI" }?.second
+                if (palette != null) applyAiBrandColor("com.meta.ai", palette)
+                else activeAgentGlyph = "❂"
             }
             else -> {
                 activeAgentGlyph = "✧"

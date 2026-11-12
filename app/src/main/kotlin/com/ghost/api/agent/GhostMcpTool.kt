@@ -407,7 +407,7 @@ class GhostMcpTool(
         if (trimmed.isEmpty() || trimmed == "{}" || trimmed == "null") return emptyMap()
 
         if (toolName.lowercase() in setOf("consult_peer", "consultpeer") && !trimmed.startsWith("{")) {
-            val peerMatch = Regex("""(?:peer\s*[:=]\s*)["']?(?:[✦🐋✴️☄️🔵🟣📖🟧🔶️✧✨\s]*)([a-zA-Z0-9_-]+)["']?""", RegexOption.IGNORE_CASE).find(trimmed)
+            val peerMatch = Regex("""(?:peer\s*[:=]\s*)["']?(?:[✦🐋✴️☄️∅❂✳️🔵🟣📖🟧🔶️✧✨\s]*)([a-zA-Z0-9_-]+)["']?""", RegexOption.IGNORE_CASE).find(trimmed)
             val promptMatch = Regex("""(?:prompt\s*[:=]\s*)(.+)$""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)).find(trimmed)
             if (peerMatch != null && promptMatch != null) {
                 return mapOf(
