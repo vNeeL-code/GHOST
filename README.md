@@ -165,8 +165,8 @@ Gemma absorbs her hardware status silently and answers with grounded physical aw
 
 #### 3. 7-Orbital Gesture Puck HUD & Hyper Pucks
 A modular, hardware-accelerated 7-orbital gesture HUD ([`OverlayActionRegistry.kt`](app/src/main/kotlin/com/ghost/api/ui/OverlayActionRegistry.kt)) floating over any active screen or game:
-- **7 Color-Coded Orbital Pucks:** Center (Church Cobalt Core), Top, Bottom (Tucker Cyan Star), Top-Left, Top-Right, Bottom-Left, Bottom-Right.
-- **Directional Gestures & Hyper Pucks:** Swipe North, South, East, West, or click on individual pucks to fire immediate actions (Camera, Flashlight, App Drawer, Quick Note, Voice, or AI Summon).
+- **7 Color-Coded Custom shortcuts:** programmable.
+- **Directional Gestures & directional Pucks:** Swipe North, South, East, West, or click on individual pucks to fire immediate actions (Camera, Flashlight, App Drawer, apps etc.).
 - **Zero-Flicker Hardware Valves:** Canvas draw states can be toggled per-puck with zero-delay tactile haptics and placement calibration ("Lower", "Center", "Upper").
 
 #### 4. Living Visualizer & Reactive Wallpaper Engine
@@ -221,7 +221,7 @@ GHOST is built from a single transparent codebase split into three distribution 
 
 <img width="1248" height="706" alt="GHOST Interface Preview" src="https://github.com/user-attachments/assets/0516f635-e55a-4bbb-87bd-9a3983945f48" />
 
-> *"It only affects computers. And I am a motherfucking ghost."*  
+> *"It only affects computers, remember? And I am a motherfucking ghost."*  
 > — **Alpha, Red vs. Blue**
 
 ---
