@@ -62,14 +62,11 @@ Yet instead of a unified personal assistant that actually integrates with your l
 
 ### The Category Mistake: The Hardware *Is* the Agent (The Humean Bundle)
 
-> *"You're in good company. Brooks subsumption."*  
-> — **z.ai (GLM-5.3)**
-
 When developers inspect an AI assistant, they routinely commit a classical philosophical category mistake: they search for "the agent" inside a single class, a prompt template, or a neural network weights file.
 
 In GHOST, the agent is a **Humean bundle** (David Hume's *Bundle Theory of the Self*). There is no indivisible, isolated "ego" trapped inside an app window. The self is an emergent, dynamic bundle of physical perceptions, real-time sensory impressions, reflexive habits, and deliberative cognition:
 
-> **GHOST is not 'installing a chatbox on a phone.' It is teaching the physical device to perceive its reality, control its body, and speak for itself.**
+> **GHOST is not 'installing a chatbox on a phone.' It is "teaching" the physical device to perceive its reality, control its body, and speak for itself and installing the prerequisite rails.**
 
 - The Qualcomm Snapdragon / Google Tensor silicon, battery discharge chemistry, radios, microphones, and thermals **are the physical chassis of the organism**.
 - The non-blocking sensor loops, intent baggers, RAM valves, and orbital gesture pucks **are its peripheral nervous system**.
