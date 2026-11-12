@@ -126,7 +126,7 @@ object AiPhonebook {
             authType = PeerAuthType.APP_HANDOFF
         ),
         PeerContact(
-            callsign = "🔶️ Copilot",
+            callsign = "🪟 Copilot",
             name = "Copilot",
             organization = "Microsoft",
             specialty = "Edge browser native, direct video transcript OCR, Microsoft ecosystem integration",
@@ -140,7 +140,7 @@ object AiPhonebook {
 
     fun resolvePeer(query: String): PeerContact? {
         val clean = query.trim().lowercase(Locale.ROOT)
-            .replace(Regex("""^[✦🐋✴️☄️∅❂✳️🔵🟣📖🟧🔶️✧✨\s]+"""), "")
+            .replace(Regex("""^[✦🐋✴️☄️∅❂✳️🪟🔵🟣📖🟧🔶️✧✨\s]+"""), "")
             .trim()
         if (clean.isBlank()) return CONTACTS.firstOrNull()
 
@@ -207,7 +207,7 @@ object AiPhonebook {
 
     fun ensureNametag(reply: String, callsign: String): String {
         val trimmed = reply.trim()
-        val plainName = callsign.replace(Regex("""^[✦🐋✴️☄️∅❂✳️🔵🟣📖🟧🔶️✧✨\s]+"""), "").trim()
+        val plainName = callsign.replace(Regex("""^[✦🐋✴️☄️∅❂✳️🪟🔵🟣📖🟧🔶️✧✨\s]+"""), "").trim()
         if (trimmed.startsWith("[$callsign]") || trimmed.startsWith(callsign) ||
             trimmed.startsWith("[$plainName]") || trimmed.startsWith(plainName)) {
             return trimmed

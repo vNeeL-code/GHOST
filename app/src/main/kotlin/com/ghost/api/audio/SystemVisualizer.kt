@@ -893,6 +893,7 @@ object SystemVisualizer {
             packageName.contains("mistral", ignoreCase = true) || packageName.contains("lechat", ignoreCase = true) -> "🟧"
             packageName.contains("perplexity", ignoreCase = true) -> "📖"
             packageName.contains("meta", ignoreCase = true) || packageName.contains("llama", ignoreCase = true) -> "❂"
+            packageName.contains("copilot", ignoreCase = true) -> "🪟"
             else -> "✧"
         }
         if (currentAlbumColors == brandPalette && currentAppliedPackage == packageName) return
@@ -977,6 +978,12 @@ object SystemVisualizer {
                 val palette = AI_BRAND_PALETTES.find { it.third == "Meta AI" }?.second
                 if (palette != null) applyAiBrandColor("com.meta.ai", palette)
                 else activeAgentGlyph = "❂"
+            }
+            callsign.contains("copilot", ignoreCase = true) -> {
+                activeAudioSpeakingPackage = "com.microsoft.copilot"
+                val palette = AI_BRAND_PALETTES.find { it.third == "Copilot" }?.second
+                if (palette != null) applyAiBrandColor("com.microsoft.copilot", palette)
+                else activeAgentGlyph = "🪟"
             }
             else -> {
                 activeAgentGlyph = "✧"

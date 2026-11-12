@@ -355,7 +355,7 @@ class TTSManager(private val context: Context) : TextToSpeech.OnInitListener {
             // Strip HTML tags
             .replace(Regex("<[^>]+>"), "")
             // Strip common decorative symbols / glyphs
-            .replace(Regex("[✦✧✴️🔵🟣📖🟧🐋☄️∅❂✳️👾🦑Δ∇]"), "")
+            .replace(Regex("[✦✧✴️🔵🟣📖🟧🐋☄️∅❂✳️🪟👾🦑Δ∇]"), "")
             // Collapse multiple newlines & spaces
             .replace(Regex("\\s+"), " ")
             .trim()
