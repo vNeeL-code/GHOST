@@ -130,24 +130,22 @@ class InputOverlay(
                     MotionEvent.ACTION_UP -> {
                         v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(100).start()
                         val dy = event.rawY - startY
-                        if (isMoving && abs(dy) >= threshold) {
-                            hapticPulse()
-                            val slot = if (dy < 0) OverlayActionRegistry.DirectionSlot.UP else OverlayActionRegistry.DirectionSlot.DOWN
-                            val action = OverlayActionRegistry.getSlotAction(prefs, OverlayActionRegistry.PuckId.CENTER, slot)
-                            if (action == OverlayActionRegistry.ACTION_APP_FOLDER) {
-                                toggleAppFolderPopup()
-                            } else {
-                                OverlayActionRegistry.executeAction(context, action)
-                                if (action == OverlayActionRegistry.ACTION_OPEN_CHAT) onDismiss()
-                            }
+                        val slot = if (isMoving && abs(dy) >= threshold) {
+                            if (dy < 0) OverlayActionRegistry.DirectionSlot.UP else OverlayActionRegistry.DirectionSlot.DOWN
                         } else {
+                            OverlayActionRegistry.DirectionSlot.TAP
+                        }
+                        val action = OverlayActionRegistry.getSlotAction(prefs, OverlayActionRegistry.PuckId.CENTER, slot)
+                        if (action != OverlayActionRegistry.ACTION_NONE) {
                             hapticPulse()
-                            val action = OverlayActionRegistry.getSlotAction(prefs, OverlayActionRegistry.PuckId.CENTER, OverlayActionRegistry.DirectionSlot.TAP)
-                            if (action == OverlayActionRegistry.ACTION_APP_FOLDER) {
-                                toggleAppFolderPopup()
-                            } else {
-                                OverlayActionRegistry.executeAction(context, action)
-                                if (action == OverlayActionRegistry.ACTION_OPEN_CHAT) onDismiss()
+                            val shouldDismiss = OverlayActionRegistry.executeAction(
+                                context = context,
+                                actionSpec = action,
+                                onSummonOverlay = { },
+                                onOpenAppFolder = { toggleAppFolderPopup() }
+                            )
+                            if (shouldDismiss) {
+                                onDismiss()
                             }
                         }
                         true
