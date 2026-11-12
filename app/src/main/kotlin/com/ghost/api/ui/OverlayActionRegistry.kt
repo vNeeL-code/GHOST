@@ -92,7 +92,7 @@ object OverlayActionRegistry {
         val enabledPrefKey: String,
         val colorHex: String
     ) {
-        CENTER("center", "Center Purple Sparkle", Constants.PREF_PUCK_CENTER_ENABLED, "#8B5CF6"),
+        CENTER("center", "Center Cobalt Sparkle", Constants.PREF_PUCK_CENTER_ENABLED, "#8BB4F6"),
         TOP("top", "Top Orange Star", Constants.PREF_PUCK_TOP_ENABLED, "#F97316"),
         BOTTOM("bottom", "Bottom Cyan Star", Constants.PREF_PUCK_BOTTOM_ENABLED, "#00F0FF"),
         TL("tl", "Top-Left Blue Puck", Constants.PREF_PUCK_TL_ENABLED, "#4285F4"),

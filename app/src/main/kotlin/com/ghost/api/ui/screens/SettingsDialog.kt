@@ -90,10 +90,10 @@ fun SettingsDialog(
     var geminiKey by remember { mutableStateOf(tokenManager.getGeminiKey() ?: "") }
     var showGeminiKey by remember { mutableStateOf(false) }
     var geminiSearchGrounding by remember { mutableStateOf(prefs.getBoolean("gemini_search_grounding", true)) }
-    val collapsedSections = remember { mutableStateMapOf<String, Boolean>() }
-    fun isSectionExpanded(title: String): Boolean = collapsedSections[title] != true
+    val expandedSections = remember { mutableStateMapOf<String, Boolean>() }
+    fun isSectionExpanded(title: String): Boolean = expandedSections[title] == true
     fun toggleSection(title: String) {
-        collapsedSections[title] = isSectionExpanded(title)
+        expandedSections[title] = !isSectionExpanded(title)
     }
 
     val accentColor = Color(0xFF8BB4F6)
@@ -376,9 +376,9 @@ fun SettingsDialog(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 480.dp)
+                        .heightIn(max = 580.dp)
                         .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
                         text = "Tap a puck to configure swipe directions",
@@ -509,7 +509,7 @@ fun SettingsDialog(
                                 .clickable {
                                     activePickerSlot = slotPrefKey to "${currentPuck.title} • ${slot.label}"
                                 }
-                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                                .padding(horizontal = 10.dp, vertical = 7.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {

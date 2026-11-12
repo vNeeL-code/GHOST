@@ -97,11 +97,11 @@ class InputOverlay(
             setPadding(dpToPx(8), dpToPx(4), dpToPx(12), dpToPx(4))
         }
 
-        // ✧ Sparkle button (Center Purple Turing Star) — Tap, Up swipe, Down swipe
+        // ✧ Sparkle button (Center Cobalt Turing Star) — Tap, Up swipe, Down swipe
         sparkleButton = TextView(context).apply {
             text = "✧"
             textSize = 28f
-            setTextColor(Color.parseColor("#8B5CF6")) // Purple Turing core
+            setTextColor(Color.parseColor(OverlayActionRegistry.PuckId.CENTER.colorHex)) // Cobalt Turing core
             gravity = Gravity.CENTER
             layoutParams = LinearLayout.LayoutParams(dpToPx(44), dpToPx(44))
             background = createCircleBackground(Color.TRANSPARENT)
