@@ -54,7 +54,7 @@ Pure geometric Unicode primitives are preferred wherever possible because they i
 | **`🟣`** | Emoji (Purple Circle) | **Qwen** | Alibaba Qwen cloud peer (purple iris palette + TTS). |
 | **`🟧`** | Emoji (Orange Square) | **Mistral** | Mistral / Le Chat cloud peer. |
 | **`📖`** | Emoji (Open Book) | **Perplexity** | Perplexity citation research engine. |
-| **`🪟`** | Emoji (Window) | **Copilot** | Microsoft Copilot cloud peer (returned to Windows after Mico). |
+| **`⊞`** | `U+229E` (Squared Plus) | **Copilot** | Microsoft Copilot cloud peer (crisp 4-pane grid). |
 
 ---
 
