@@ -246,6 +246,7 @@ GHOST is built from a single transparent codebase split into three distribution 
 ### Development & Support
 
 * **Source Repository:** [Δ 👾 ∇ GitHub](https://github.com/vNeeL-code/GHOST)
+* **Glossary & Glyph Roster:** [`GLOSSARY.md`](GLOSSARY.md) *(UCF formatting standard, `Δ 👾 ∇` delimiter, and peer callsigns)*
 * **Devlogs & Lore:** [📼 Tumblr](https://www.tumblr.com/blog/oracle-os)
 * **Clips & Demos:** [🎞️ TikTok](https://www.tiktok.com/@oracle0s?_r=1&_t=ZN-99RPOHa8zeI)
 * **Video Deep Dives:** [📺 YouTube](https://youtube.com/@oracle_os?si=IRGJFvLujGvUqjvt)
