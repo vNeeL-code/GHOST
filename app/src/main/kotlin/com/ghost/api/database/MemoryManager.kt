@@ -31,6 +31,22 @@ class MemoryManager(private val context: Context) {
         }
     }
 
+    val externalDiaryJsonlFile: java.io.File by lazy {
+        try {
+            val docs = android.os.Environment.getExternalStoragePublicDirectory(
+                android.os.Environment.DIRECTORY_DOCUMENTS
+            )
+            val ghostDir = java.io.File(docs, "GHOST")
+            if (!ghostDir.exists()) ghostDir.mkdirs()
+            java.io.File(ghostDir, "diary_history.jsonl")
+        } catch (e: Exception) {
+            val appExternal = context.getExternalFilesDir(null) ?: context.filesDir
+            val ghostDir = java.io.File(appExternal, "GHOST")
+            if (!ghostDir.exists()) ghostDir.mkdirs()
+            java.io.File(ghostDir, "diary_history.jsonl")
+        }
+    }
+
     private fun maybeBackupDatabase(force: Boolean = false) {
         val now = System.currentTimeMillis()
         if (force || now - lastExternalBackupTime > 5 * 60 * 1000L) {
@@ -52,6 +68,27 @@ class MemoryManager(private val context: Context) {
             }
         } catch (e: Exception) {
             Timber.w(e, "Failed to append to external memory_log.txt")
+        }
+    }
+
+    fun appendDiaryJsonl(entry: DiaryEntry) {
+        try {
+            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US).apply {
+                timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }
+            val json = org.json.JSONObject().apply {
+                put("id", entry.id)
+                put("timestamp", entry.timestamp)
+                put("iso", sdf.format(java.util.Date(entry.timestamp)))
+                put("eventType", entry.eventType)
+                put("contextData", entry.contextData)
+                put("observation", entry.observation)
+            }
+            synchronized(this) {
+                externalDiaryJsonlFile.appendText(json.toString() + "\n", Charsets.UTF_8)
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to append to external diary_history.jsonl")
         }
     }
 
@@ -160,6 +197,7 @@ class MemoryManager(private val context: Context) {
         diaryDao.insertEntry(entry)
         diaryDao.trimOldEntries(keepCount = 25)
         appendToMemoryLog(entry.eventType, entry.observation)
+        appendDiaryJsonl(entry)
         maybeBackupDatabase(force = true)
     }
 
@@ -173,6 +211,7 @@ class MemoryManager(private val context: Context) {
         diaryDao.insertEntry(entry)
         diaryDao.trimOldEntries(keepCount = 25)
         appendToMemoryLog(eventType, observation)
+        appendDiaryJsonl(entry)
         maybeBackupDatabase(force = true)
     }
 

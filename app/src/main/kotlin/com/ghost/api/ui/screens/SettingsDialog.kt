@@ -27,11 +27,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.ghost.api.BuildConfig
 import com.ghost.api.Constants
 import com.ghost.api.GemmaAccessibilityService
@@ -63,6 +66,7 @@ fun SettingsDialog(
     var barkNotifs by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_BARK_NOTIFS, true)) }
     var showPassiveCuesSubmenu by remember { mutableStateOf(false) }
     var showPuckConfigDialog by remember { mutableStateOf(false) }
+    var showDiaryHistoryDialog by remember { mutableStateOf(false) }
 
     var hyperPucksEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_HYPER_PUCKS_ENABLED, true)) }
     var diaryActive by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_AUTONOMOUS_DIARY, false)) }
@@ -353,6 +357,154 @@ fun SettingsDialog(
                     shape = RoundedCornerShape(8.dp)
                 ) {
                     Text("Done", color = Color.Black, fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = Color(0xFF141418),
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
+    if (showDiaryHistoryDialog) {
+        val memoryManager = remember {
+            gemmaService?.memoryManager ?: com.ghost.api.database.MemoryManager(context.applicationContext)
+        }
+        var diaryEntries by remember { mutableStateOf<List<com.ghost.api.database.DiaryEntry>?>(null) }
+
+        LaunchedEffect(Unit) {
+            diaryEntries = withContext(Dispatchers.IO) {
+                memoryManager.getRecentDiaryEntries(50)
+            }
+        }
+
+        AlertDialog(
+            onDismissRequest = { showDiaryHistoryDialog = false },
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "✧ Episodic Diary Reflections",
+                            fontWeight = FontWeight.Bold,
+                            color = accentColor,
+                            fontSize = 16.sp
+                        )
+                        Text(
+                            text = "Room DB (FIFO 25) • Documents/GHOST/diary_history.jsonl",
+                            fontSize = 10.sp,
+                            color = textDim
+                        )
+                    }
+                }
+            },
+            text = {
+                val entries = diaryEntries
+                if (entries == null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = accentColor)
+                    }
+                } else if (entries.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "No episodic reflections recorded yet.\n\nTap 'Trigger Diary Log Now' to generate one immediately, or allow background cadence.",
+                            fontSize = 13.sp,
+                            color = Color(0x99FFFFFF),
+                            textAlign = TextAlign.Center,
+                            lineHeight = 18.sp
+                        )
+                    }
+                } else {
+                    val sdf = remember { java.text.SimpleDateFormat("MMM dd, yyyy · HH:mm", java.util.Locale.US) }
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 480.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(entries.size) { index ->
+                            val entry = entries[index]
+                            val dateStr = sdf.format(java.util.Date(entry.timestamp))
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFF1B1B22)),
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, Color(0x228BB4F6))
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "$dateStr • ${entry.eventType}",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = accentColor
+                                        )
+                                        IconButton(
+                                            onClick = {
+                                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                                val clip = android.content.ClipData.newPlainText("Diary Entry", entry.observation)
+                                                clipboard.setPrimaryClip(clip)
+                                                Toast.makeText(context, "Copied reflection to clipboard", Toast.LENGTH_SHORT).show()
+                                            },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Text("📋", fontSize = 12.sp)
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = entry.observation,
+                                        fontSize = 12.sp,
+                                        color = Color(0xFFE5E7EB),
+                                        lineHeight = 17.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showDiaryHistoryDialog = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = accentColor),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Close", color = Color.Black, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                val entries = diaryEntries
+                if (!entries.isNullOrEmpty()) {
+                    TextButton(
+                        onClick = {
+                            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+                            val allText = entries.joinToString("\n\n" + "=".repeat(30) + "\n\n") { e ->
+                                "[${sdf.format(java.util.Date(e.timestamp))} • ${e.eventType} • ${e.contextData}]\n${e.observation}"
+                            }
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            val clip = android.content.ClipData.newPlainText("All Diary Entries", allText)
+                            clipboard.setPrimaryClip(clip)
+                            Toast.makeText(context, "Copied all reflections to clipboard", Toast.LENGTH_SHORT).show()
+                        }
+                    ) {
+                        Text("Copy All", color = accentColor, fontSize = 12.sp)
+                    }
                 }
             },
             containerColor = Color(0xFF141418),
@@ -1662,7 +1814,8 @@ fun SettingsDialog(
                                 title = "Trigger Diary Log Now",
                                 subtitle = "Generate an episodic reflection immediately",
                                 onClick = {
-                                    GemmaService.instance?.startDiaryCycle()
+                                    val svc = gemmaService ?: GemmaService.instance
+                                    svc?.startDiaryCycle()
                                     Toast.makeText(context, "Generating diary entry...", Toast.LENGTH_SHORT).show()
                                 }
                             )
@@ -1671,7 +1824,10 @@ fun SettingsDialog(
                             SettingsActionCard(
                                 title = "View Diary History",
                                 subtitle = "Inspect recent episodic memory logs",
-                                onClick = onShowDiaryHistory
+                                onClick = {
+                                    showDiaryHistoryDialog = true
+                                    onShowDiaryHistory()
+                                }
                             )
                         }
                         item {
