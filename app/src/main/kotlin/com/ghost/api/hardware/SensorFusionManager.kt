@@ -1127,9 +1127,13 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
 
         return EnvironmentState(
             ambientTemp = cachedAmbientTemp,
-            cpuTemp = cpuTemps?.firstOrNull() ?: readThermalZone("thermal_zone0"),
-            gpuTemp = gpuTemps?.firstOrNull() ?: readThermalZone("thermal_zone1"),
-            skinTemp = skinTemps?.firstOrNull() ?: readThermalZone("thermal_zone3"),
+            cpuTemp = cpuTemps?.firstOrNull()
+                ?: readThermalZoneByType("cpu", "soc", "tsens")
+                ?: com.ghost.api.Constants.readMaxSocThermalCelsius(),
+            gpuTemp = gpuTemps?.firstOrNull()
+                ?: readThermalZoneByType("gpu"),
+            skinTemp = skinTemps?.firstOrNull()
+                ?: readThermalZoneByType("skin", "quiet", "xo"),
             pressure = cachedPressure,
             humidity = cachedHumidity,
             light = cachedLight
@@ -1137,18 +1141,28 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
     }
 
     /**
-     * Read temperature from a thermal zone file.
-     * Returns temperature in Celsius, or null if unavailable.
-     * Values in these files are typically in millidegrees (e.g., 45000 = 45°C)
+     * Scans `/sys/class/thermal/thermal_zone*` for a zone whose `type` matches one of [keywords]
+     * and returns the peak valid temperature in Celsius, or null if unavailable.
      */
-    private fun readThermalZone(zoneName: String): Float? {
+    private fun readThermalZoneByType(vararg keywords: String): Float? {
         return try {
-            val file = File("/sys/class/thermal/$zoneName/temp")
-            if (file.exists() && file.canRead()) {
-                val raw = file.readText().trim().toIntOrNull() ?: return null
-                // Most zones report in millidegrees Celsius
-                if (raw > 1000) raw / 1000f else raw.toFloat()
-            } else null
+            val dir = File(com.ghost.api.Constants.THERMAL_SYSFS_DIR)
+            val zones = dir.listFiles { file -> file.isDirectory && file.name.startsWith("thermal_zone") }
+                ?: return null
+            var best: Float? = null
+            for (zone in zones) {
+                val typeFile = File(zone, "type")
+                val tempFile = File(zone, "temp")
+                if (!typeFile.exists() || !tempFile.exists() || !tempFile.canRead()) continue
+                val typeStr = try { typeFile.readText().trim().lowercase() } catch (_: Exception) { continue }
+                if (keywords.none { typeStr.contains(it) }) continue
+                val raw = try { tempFile.readText().trim().toIntOrNull() } catch (_: Exception) { null } ?: continue
+                val tempC = if (raw > 1000) raw / 1000f else raw.toFloat()
+                if (tempC in 10f..115f && (best == null || tempC > best)) {
+                    best = tempC
+                }
+            }
+            best
         } catch (e: Exception) {
             null
         }

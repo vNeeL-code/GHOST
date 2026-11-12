@@ -1234,14 +1234,20 @@ class GhostAgent(
         val count = _conversationHistory.size
         val historyChars = synchronized(_conversationHistory) { _conversationHistory.sumOf { it.content.length } }
         val visionTokens = synchronized(_conversationHistory) { _conversationHistory.count { it.hadImage } * 512 }
-        val estTokens = (historyChars / 3) + visionTokens
+        val nativeTokens = llmEngine.getActiveTokenCount()
+        val estTokens = maxOf(nativeTokens, (historyChars / 3) + visionTokens)
 
         val maxTokens = llmEngine.maxNumTokens
-        val tokenThreshold = if (maxTokens > 6000) 4200 else if (maxTokens > 3000) 2400 else 1200
+        val tokenThreshold = when {
+            maxTokens >= 12000 -> (maxTokens * 0.75f).toInt()
+            maxTokens > 6000 -> 4200
+            maxTokens > 3000 -> 2400
+            else -> 1200
+        }
         val turnThreshold = if (maxTokens > 6000) 24 else if (maxTokens > 3000) 16 else 8
 
         if (forceFromTool || count >= turnThreshold || turnsSinceKvFlush >= turnThreshold || estTokens > tokenThreshold) {
-            Timber.i("GhostAgent: Triggering compaction (forceFromTool=$forceFromTool, count=$count/$turnThreshold, turnsSinceFlush=$turnsSinceKvFlush/$turnThreshold, estTokens=$estTokens/$tokenThreshold)")
+            Timber.i("GhostAgent: Triggering compaction (forceFromTool=$forceFromTool, count=$count/$turnThreshold, turnsSinceFlush=$turnsSinceKvFlush/$turnThreshold, estTokens=$estTokens/$tokenThreshold [native=$nativeTokens])")
             compactMemory(force = true)
         }
     }

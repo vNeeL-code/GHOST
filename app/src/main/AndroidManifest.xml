@@ -255,9 +255,6 @@
             </intent-filter>
         </receiver>
 
-        <!-- Internal Alarm Receiver -->
-        <receiver android:name=".hardware.GhostAlarmReceiver" android:exported="false" />
-
         <!-- Autonomous Diary & Scheduled Routine Exact Alarm Receiver -->
         <receiver android:name=".hardware.DiaryAlarmReceiver" android:exported="false">
             <intent-filter>

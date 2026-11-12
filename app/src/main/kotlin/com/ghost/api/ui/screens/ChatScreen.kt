@@ -806,23 +806,34 @@ fun ChatMessageRow(
                     } else {
                         AndroidView(
                             factory = { ctx ->
+                                val assetLoader = com.ghost.api.logic.JsExecutionBridge.createAssetLoader(ctx)
+                                val safeTargetUrl = com.ghost.api.logic.JsExecutionBridge.toSafeAssetUrl(ctx, targetUrl)
                                 android.webkit.WebView(ctx).apply {
                                     settings.javaScriptEnabled = true
                                     settings.domStorageEnabled = true
-                                    settings.allowFileAccess = true
+                                    settings.allowFileAccess = false
+                                    settings.allowContentAccess = false
                                     @Suppress("DEPRECATION")
-                                    settings.allowFileAccessFromFileURLs = true
+                                    settings.allowFileAccessFromFileURLs = false
                                     @Suppress("DEPRECATION")
-                                    settings.allowUniversalAccessFromFileURLs = true
+                                    settings.allowUniversalAccessFromFileURLs = false
                                     setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                                    webViewClient = android.webkit.WebViewClient()
-                                    loadUrl(targetUrl)
+                                    webViewClient = object : android.webkit.WebViewClient() {
+                                        override fun shouldInterceptRequest(
+                                            view: android.webkit.WebView,
+                                            request: android.webkit.WebResourceRequest
+                                        ): android.webkit.WebResourceResponse? {
+                                            return assetLoader.shouldInterceptRequest(request.url)
+                                        }
+                                    }
+                                    loadUrl(safeTargetUrl)
                                 }
                             },
                             update = { webView ->
+                                val safeTargetUrl = com.ghost.api.logic.JsExecutionBridge.toSafeAssetUrl(webView.context, targetUrl)
                                 val currentUrl = webView.url
-                                if (currentUrl != null && currentUrl != targetUrl) {
-                                    webView.loadUrl(targetUrl)
+                                if (currentUrl != null && currentUrl != safeTargetUrl) {
+                                    webView.loadUrl(safeTargetUrl)
                                 }
                             },
                             modifier = Modifier.fillMaxSize()

@@ -27,7 +27,6 @@ data class PeerContact(
     val alternatePackageNames: List<String> = emptyList(),
     val aliases: List<String>,
     val loginUrl: String,
-    val cookieDomain: String = "",
     val authType: PeerAuthType = PeerAuthType.APP_HANDOFF,
     val openRouterModelId: String = ""
 )
@@ -50,7 +49,6 @@ object AiPhonebook {
             appPackageName = "com.google.android.apps.bard",
             aliases = listOf("gemini", "bard", "google", "mum"),
             loginUrl = "https://aistudio.google.com/apikey",
-            cookieDomain = "aistudio.google.com",
             authType = PeerAuthType.GEMINI_DIRECT
         ),
         PeerContact(
@@ -62,7 +60,6 @@ object AiPhonebook {
             alternatePackageNames = listOf("com.deepseek.chat"),
             aliases = listOf("deepseek", "r1", "v3", "whale"),
             loginUrl = "https://chat.deepseek.com",
-            cookieDomain = "deepseek.com",
             authType = PeerAuthType.APP_HANDOFF
         ),
         PeerContact(
@@ -73,7 +70,6 @@ object AiPhonebook {
             appPackageName = "com.anthropic.claude",
             aliases = listOf("claude", "anthropic", "sonnet", "opus"),
             loginUrl = "https://claude.ai",
-            cookieDomain = "claude.ai",
             authType = PeerAuthType.APP_HANDOFF
         ),
         PeerContact(
@@ -85,7 +81,6 @@ object AiPhonebook {
             alternatePackageNames = listOf("com.x.android"),
             aliases = listOf("grok", "xai", "aurora", "twitter"),
             loginUrl = "https://x.ai",
-            cookieDomain = "x.ai",
             authType = PeerAuthType.APP_HANDOFF
         ),
         PeerContact(
@@ -97,7 +92,6 @@ object AiPhonebook {
             alternatePackageNames = listOf("com.moonshot.kimi"),
             aliases = listOf("kimi", "moonshot"),
             loginUrl = "https://kimi.moonshot.cn",
-            cookieDomain = "moonshot.cn",
             authType = PeerAuthType.APP_HANDOFF
         ),
         PeerContact(
@@ -109,7 +103,6 @@ object AiPhonebook {
             alternatePackageNames = listOf("com.alibaba.qwen"),
             aliases = listOf("qwen", "alibaba"),
             loginUrl = "https://chat.qwen.ai",
-            cookieDomain = "qwen.ai",
             authType = PeerAuthType.APP_HANDOFF
         ),
         PeerContact(
@@ -120,7 +113,6 @@ object AiPhonebook {
             appPackageName = "ai.perplexity.app.android",
             aliases = listOf("perplexity", "sonar"),
             loginUrl = "https://www.perplexity.ai",
-            cookieDomain = "perplexity.ai",
             authType = PeerAuthType.APP_HANDOFF
         ),
         PeerContact(
@@ -131,7 +123,6 @@ object AiPhonebook {
             appPackageName = "ai.mistral.chat",
             aliases = listOf("mistral", "mixtral", "lechat"),
             loginUrl = "https://chat.mistral.ai",
-            cookieDomain = "mistral.ai",
             authType = PeerAuthType.APP_HANDOFF
         ),
         PeerContact(
@@ -143,7 +134,6 @@ object AiPhonebook {
             alternatePackageNames = listOf("com.microsoft.bing"),
             aliases = listOf("copilot", "bing", "microsoft"),
             loginUrl = "https://copilot.microsoft.com",
-            cookieDomain = "microsoft.com",
             authType = PeerAuthType.APP_HANDOFF
         )
     )

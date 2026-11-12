@@ -139,7 +139,6 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     internal lateinit var mcpServer: MCPServer
     internal lateinit var ghostAgent: GhostAgent
     internal lateinit var ttsManager: com.ghost.api.services.TTSManager
-    internal lateinit var diaryManager: com.ghost.api.hardware.DiaryManager
     internal lateinit var sensorFusionManager: com.ghost.api.hardware.SensorFusionManager
     internal lateinit var hardwarePropertiesManager: HardwarePropertiesManager
     internal lateinit var skillManager: com.ghost.api.skills.SkillManager
@@ -149,18 +148,58 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     internal val CHANNEL_ID = Constants.CHANNEL_ID_SERVICE
     internal val NOTIFICATION_ID = Constants.NOTIFICATION_ID_SERVICE
 
+    // Modular Subsystem Controllers extracted from GemmaService (DOC-3)
+    internal val foregroundNotificationController: com.ghost.api.service.GhostForegroundNotificationController by lazy {
+        com.ghost.api.service.GhostForegroundNotificationController(this, CHANNEL_ID, NOTIFICATION_ID)
+    }
 
+    internal val hardwareBarkController: com.ghost.api.logic.GppController by lazy {
+        com.ghost.api.logic.GppController(
+            context = this,
+            serviceScope = serviceScope,
+            ttsManagerProvider = { if (::ttsManager.isInitialized) ttsManager else null },
+            ghostAgentProvider = { if (::ghostAgent.isInitialized) ghostAgent else null },
+            onChatMessageAdded = { msg, isUser -> uiCallback?.onMessageAdded(msg, isUser = isUser) },
+            onShowWorkSignal = { tag, dur -> showWorkSignal(tag, dur) }
+        )
+    }
+
+    internal val ramValveController: com.ghost.api.service.GhostRamValveController by lazy {
+        com.ghost.api.service.GhostRamValveController(
+            context = this,
+            serviceScope = serviceScope,
+            isSuspendedDueToRam = isSuspendedDueToRam,
+            isInferencing = { isInferencing },
+            isSpeaking = { isSpeaking() },
+            isGemmaLoaded = { isGemmaLoaded() },
+            isAppInForeground = { ::overlayManager.isInitialized && overlayManager.isAppInForeground },
+            onCheckpointRequested = { if (::ghostAgent.isInitialized) ghostAgent.checkpoint() },
+            onUnloadEngine = { unloadEngine() },
+            onEnsureEngineReady = { ensureEngineReady() },
+            onUpdateNotification = { updateNotification(it) },
+            onRefreshTelemetry = { refreshNotificationTelemetry() }
+        )
+    }
+
+    internal val diaryAndCronManager: com.ghost.api.service.GhostDiaryAndCronManager by lazy {
+        com.ghost.api.service.GhostDiaryAndCronManager(
+            context = this,
+            serviceScope = serviceScope,
+            memoryManagerProvider = { if (::memoryManager.isInitialized) memoryManager else null },
+            automationToolSetProvider = { if (::automationToolSet.isInitialized) automationToolSet else null },
+            sensorFusionManagerProvider = { if (::sensorFusionManager.isInitialized) sensorFusionManager else null },
+            hardwarePropertiesManagerProvider = { if (::hardwarePropertiesManager.isInitialized) hardwarePropertiesManager else null },
+            isEngineResident = { isGemmaLoaded() && ::ghostAgent.isInitialized && ghostAgent.isReady && !isSuspendedDueToRam.get() },
+            isInferencing = { isInferencing },
+            lastActivityTimeProvider = { lastActivityTime },
+            getCurrentThermalState = { getCurrentThermalState() },
+            createCalendarEvent = { title, desc -> createCalendarEvent(title, desc) },
+            executePrompt = { prompt, sessionId, isDream -> processQuery(prompt, sessionId = sessionId, isDream = isDream, fromUi = false) }
+        )
+    }
 
     private fun setupNotificationChannel() {
-        val manager = getSystemService(NotificationManager::class.java)
-        if (manager.getNotificationChannel(CHANNEL_ID) == null) {
-            val channel = android.app.NotificationChannel(
-                CHANNEL_ID,
-                "Agentic State",
-                NotificationManager.IMPORTANCE_LOW
-            )
-            manager.createNotificationChannel(channel)
-        }
+        foregroundNotificationController.setupNotificationChannel()
     }
 
     private fun startForegroundService() {
@@ -310,7 +349,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
                  scope.launch {
                      if (::ghostAgent.isInitialized) {
-                         val pendingData = PendingConfirmationStash.pendingConfirmations[toolName]
+                         val pendingData = com.ghost.api.service.GhostForegroundNotificationController.pendingConfirmations[toolName]
 
                          if (pendingData != null) {
                              ghostAgent.submitConfirmationDecision(
@@ -322,7 +361,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                              )
 
                              // Clear stash
-                             PendingConfirmationStash.clear(toolName)
+                             com.ghost.api.service.GhostForegroundNotificationController.clearConfirmation(toolName)
                              responseNotificationManager.showResponse(if(isApproved) "✅ Approved $toolName" else "❌ Denied $toolName")
                          } else {
                              Timber.e("No pending confirmation channel found for $toolName!")
@@ -395,35 +434,8 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             reportStatus("Service Created (Overlay Perm: $overlayPerm), Initializing...")
 
             hardwarePropertiesManager = HardwarePropertiesManager(this)
-
-            // Dynamic Thermal Monitoring: Alert on severe throttling & recovery on cooling
-            serviceScope.launch {
-                var wasHot = false
-                var lastThermalBarkTime = 0L
-                hardwarePropertiesManager.thermalState.collect { state ->
-                    val now = System.currentTimeMillis()
-                    if (state == com.ghost.api.hardware.HardwarePropertiesManager.ThermalState.HOT ||
-                        state == com.ghost.api.hardware.HardwarePropertiesManager.ThermalState.CRITICAL) {
-                        if (!wasHot && (now - lastThermalBarkTime > 120_000L)) {
-                            wasHot = true
-                            lastThermalBarkTime = now
-                            val userTitle = Constants.getUserTitle(this@GemmaService)
-                            val cue = com.ghost.api.logic.ActionFlavorTexts.thermalAlertTts(userTitle)
-                            processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.THERMAL)
-                        }
-                    } else if (state == com.ghost.api.hardware.HardwarePropertiesManager.ThermalState.COOL) {
-                        if (wasHot) {
-                            wasHot = false
-                            val userTitle = Constants.getUserTitle(this@GemmaService)
-                            val cue = com.ghost.api.logic.ActionFlavorTexts.thermalRecoveredTts(userTitle)
-                            processDeviceStatusCue(cue, category = com.ghost.api.logic.CueCategory.THERMAL)
-                        }
-                    }
-                }
-            }
+            hardwareBarkController.startThermalBarkMonitor(hardwarePropertiesManager)
             ttsManager = com.ghost.api.services.TTSManager(this)
-            reportStatus("Init: Diary...")
-            diaryManager = com.ghost.api.hardware.DiaryManager(this)
             reportStatus("Init: NotificationManager...")
             responseNotificationManager = com.ghost.api.ui.GemmaNotificationManager(this)
             responseNotificationManager.pushStartupShortcut()
@@ -779,6 +791,19 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 }
             }
             Timber.i("🎚️ Summon controls updated: method=$method, shake=$allowShake, edgeNub=$allowNub")
+        }
+    }
+
+    fun summonOverlay() {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            if (::overlayManager.isInitialized) {
+                overlayManager.showOverlay { query ->
+                    scope.launch {
+                        val sessionId = UUID.randomUUID().toString()
+                        processQuery(query, sessionId, fromUi = true, inputSource = com.ghost.api.logic.InputSource.OVERLAY)
+                    }
+                }
+            }
         }
     }
 
@@ -1293,7 +1318,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
             ghostAgent.onConfirmationRequest = { event ->
                 scope.launch(Dispatchers.Main) {
-                    showConfirmationNotification(event)
+                    foregroundNotificationController.showConfirmationNotification(event)
                 }
             }
 
@@ -1356,28 +1381,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
      */
 
     fun processNotificationAnnouncement(appName: String, title: String, text: String) {
-        val userTitle = Constants.getUserTitle(applicationContext)
-        val shortText = text.take(120).trim()
-        val sender = if (title.isNotBlank()) title else appName
-        val phrase = com.ghost.api.logic.ActionFlavorTexts.notificationAnnouncementTts(appName, sender, shortText, userTitle)
-        val bubble = "[$appName] $sender: $phrase"
-
-        Timber.i("📢 Notification Announcement: $phrase")
-
-        // 1. Speak directly via dedicated passive announcement pipeline
-        if (::ttsManager.isInitialized) {
-            ttsManager.speakPassiveAnnouncement(phrase)
-        }
-
-        // 2. Append visual event card to chat UI
-        serviceScope.launch(Dispatchers.Main) {
-            uiCallback?.onMessageAdded("📢 [$appName] $sender: $shortText", isUser = false)
-        }
-
-        // 3. Inform agent sensory awareness so Gemma knows what she announced without corrupting history
-        if (::ghostAgent.isInitialized) {
-            ghostAgent.appendAssistantContext(bubble)
-        }
+        hardwareBarkController.processNotificationAnnouncement(appName, title, text)
     }
 
     /**
@@ -1388,41 +1392,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         category: com.ghost.api.logic.CueCategory = com.ghost.api.logic.CueCategory.POWER,
         showInChat: Boolean = true
     ) {
-        val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
-        if (!prefs.getBoolean(Constants.PREF_PASSIVE_TTS, true)) return
-
-        val catKey = when (category) {
-            com.ghost.api.logic.CueCategory.BATTERY -> Constants.PREF_BARK_BATTERY
-            com.ghost.api.logic.CueCategory.POWER -> Constants.PREF_BARK_POWER
-            com.ghost.api.logic.CueCategory.MOTION -> Constants.PREF_BARK_MOTION
-            com.ghost.api.logic.CueCategory.PRESENCE -> Constants.PREF_BARK_PRESENCE
-            com.ghost.api.logic.CueCategory.PERIPHERALS -> Constants.PREF_BARK_PERIPHERALS
-            com.ghost.api.logic.CueCategory.THERMAL -> Constants.PREF_BARK_THERMAL
-            com.ghost.api.logic.CueCategory.NOTIFICATIONS -> Constants.PREF_BARK_NOTIFS
-        }
-        if (!prefs.getBoolean(catKey, true)) return
-
-        Timber.i("⚡ Device Status Cue [$category]: $cueText (showInChat=$showInChat)")
-        if (::ttsManager.isInitialized) {
-            ttsManager.speakPassiveAnnouncement(cueText)
-        }
-        // Non-intrusive HUD chip / toast visual reading for every spoken bark
-        // If toast unavailable or silenced, work signal / flavortext spinner shows on overlay
-        serviceScope.launch(Dispatchers.Main) {
-            try {
-                android.widget.Toast.makeText(this@GemmaService, "✧ $cueText", android.widget.Toast.LENGTH_SHORT).show()
-            } catch (_: Exception) {}
-            showWorkSignal("✧ $cueText", 3500L)
-        }
-        val bubble = "✧ $cueText"
-        if (showInChat) {
-            serviceScope.launch(Dispatchers.Main) {
-                uiCallback?.onMessageAdded(bubble, isUser = false)
-            }
-        }
-        if (::ghostAgent.isInitialized) {
-            ghostAgent.appendAssistantContext(bubble)
-        }
+        hardwareBarkController.processDeviceStatusCue(cueText, category, showInChat)
     }
 
     fun processQueryFromUi(query: String) {
@@ -1711,163 +1681,21 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     }
 
 
-    private var currentAnimationFrame: String = "✦✧✧✧✧✧✧✧✧✧✧✧"
-
-    private fun getMachineStatus(): String {
-        val ctx = if (::sensorFusionManager.isInitialized) sensorFusionManager.getContextSnapshot() else null
-        val battLevel = ctx?.battery?.level ?: 100
-        val cpuTemp = ctx?.environment?.cpuTemp?.toInt() ?: (ctx?.battery?.temperature?.toInt() ?: 25)
-        val ramUsedPercent = ctx?.system?.ramUsedPercent ?: 0
-        val isThermalStress = try {
-            (::hardwarePropertiesManager.isInitialized && hardwarePropertiesManager.thermalState.value.name != "COOL") || cpuTemp >= 48
-        } catch (e: Exception) { false }
-        val isBatteryCritical = battLevel <= 15
-        val userBackend = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE).getString(Constants.PREF_USER_BACKEND, "AUTO")
-
-        return when {
-            // Worried: Battery critical or thermal throttling/stress
-            isBatteryCritical || isThermalStress -> "🔴 Worried 🪫✧💦"
-            // Busy: RAM too busy/pressured, or actively inferencing/downloading
-            isInferencing || (isSuspendedDueToRam.get() && ramUsedPercent >= 54) || modelDownloader.downloadStatus.value is ModelDownloader.DownloadState.Downloading -> "🟠 Busy 🔥✧💦"
-            // Napping: Engine unloaded / suspended due to RAM or user setting
-            !isGemmaLoaded() || isSuspendedDueToRam.get() || userBackend == "OFF" -> "🔵 Napping ⚡🐑⚡"
-            // Fully operational: Engine loaded & nominal
-            else -> "🟢 Fully operational ✧"
-        }
-    }
-
-    private fun buildNotification(textToNotify: String? = null): Notification {
-        val machineStatus = getMachineStatus()
-
-        val iconRes = if (::sensorFusionManager.isInitialized) {
-            val battery = try { sensorFusionManager.getContextSnapshot().battery } catch (e: Exception) { null }
-            when {
-                battery != null && battery.level <= 15 -> android.R.drawable.stat_notify_error
-                else -> android.R.drawable.ic_dialog_info
-            }
-        } else {
-            android.R.drawable.ic_dialog_info
-        }
-
-        // Transitory status messages (e.g. downloads, critical recovery, or crash alerts)
-        val isTransitoryStatus = textToNotify != null && (
-            textToNotify.contains("download", ignoreCase = true) ||
-            textToNotify.contains("offline", ignoreCase = true) ||
-            textToNotify.contains("error", ignoreCase = true) ||
-            textToNotify.contains("crash", ignoreCase = true) ||
-            textToNotify.contains("switched to", ignoreCase = true) ||
-            textToNotify.contains("recovering", ignoreCase = true)
-        )
-        // Collapsed view exclusively shows the active animation frame, never raw machine statuses
-        val collapsedText = if (isTransitoryStatus) textToNotify!! else currentAnimationFrame
-
-        val title = "Δ \uD83D\uDC7E ∇"
-
-        // Expanded telemetry card for notification expansion
-        val cardTelemetry = if (::sensorFusionManager.isInitialized) {
-            sensorFusionManager.getNotificationTelemetryString(machineStatus)
-        } else {
-            "📱 Machine status: $machineStatus\n⏱️ Uptime: active"
-        }
-
-        val builder = Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle(title)
-            .setContentText(collapsedText)
-            .setSmallIcon(iconRes)
-            .setSubText("Agentic Gemma Inference")
-            .setOnlyAlertOnce(true)
-            .setStyle(Notification.BigTextStyle()
-                .bigText(cardTelemetry)
-                .setBigContentTitle("Δ \uD83D\uDC7E ∇")
-                .setSummaryText("Agentic Gemma Inference"))
-
-        if (collapsedText.contains("offline", ignoreCase = true) || collapsedText.contains("Model weights offline", ignoreCase = true)) {
-            val downloadIntent = Intent(this, GemmaService::class.java).apply {
-                action = Constants.ACTION_RECOVER_MODEL
-            }
-            val pendingIntent = android.app.PendingIntent.getService(
-                this, 102, downloadIntent,
-                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
-            )
-            val downloadIcon = android.graphics.drawable.Icon.createWithResource(this, android.R.drawable.stat_sys_download)
-            val action = Notification.Action.Builder(
-                downloadIcon, "Download Weights", pendingIntent
-            ).build()
-            builder.addAction(action)
-        }
-
-        return builder.build()
-    }
-
-    private val animations = listOf(
-        // gem loading
-        listOf(
-            "✧✧✧✧✧✧✧✧✧✧✧✧",
-            "✦✧✧✧✧✧✧✧✧✧✧✧",
-            "✦✦✧✧✧✧✧✧✧✧✧✧",
-            "✦✦✦✧✧✧✧✧✧✧✧✧",
-            "✦✦✦✦✧✧✧✧✧✧✧✧",
-            "✦✦✦✦✦✧✧✧✧✧✧✧",
-            "✦✦✦✦✦✦✧✧✧✧✧✧",
-            "✦✦✦✦✦✦✦✧✧✧✧✧",
-            "✦✦✦✦✦✦✦✦✧✧✧✧",
-            "✦✦✦✦✦✦✦✦✦✧✧✧",
-            "✦✦✦✦✦✦✦✦✦✦✧✧",
-            "✦✦✦✦✦✦✦✦✦✦✦✧",
-            "✦✦✦✦✦✦✦✦✦✦✦✦"
-        ),
-        // Space Invaders - Wide Invasion
-        listOf(
-            " \uD83C\uDFB6 \uD83D\uDC7E \uD83C\uDFB5     ",
-            "  \uD83C\uDFB6 \uD83D\uDC7E \uD83C\uDFB5    ",
-            "   \uD83C\uDFB6 \uD83D\uDC7E \uD83C\uDFB5   ",
-            "    \uD83C\uDFB6 \uD83D\uDC7E \uD83C\uDFB5  ",
-            "     \uD83C\uDFB6 \uD83D\uDC7E \uD83C\uDFB5 ",
-            "      \uD83C\uDFB6 \uD83D\uDC7E \uD83C\uDFB5",
-            "     \uD83C\uDFB6 \uD83D\uDC7E \uD83C\uDFB5 ",
-            "    \uD83C\uDFB6 \uD83D\uDC7E \uD83C\uDFB5  ",
-            "   \uD83C\uDFB6 \uD83D\uDC7E \uD83C\uDFB5   ",
-            "  \uD83C\uDFB6 \uD83D\uDC7E \uD83C\uDFB5    ",
-            " \uD83C\uDFB6 \uD83D\uDC7E \uD83C\uDFB5     "
-        ),
-        // Ocean - whale swims across
-        listOf(
-            "🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🐋",
-            "🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🐋🌊",
-            "🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🐋🌊🌊",
-            "🌊🌊🌊🌊🌊🌊🌊🌊🌊🐋🌊🌊🌊",
-            "🌊🌊🌊🌊🌊🌊🌊🌊🐋🌊🌊🌊🌊",
-            "🌊🌊🌊🌊🌊🌊🌊🐋🌊🌊🌊🌊🌊",
-            "🌊🌊🌊🌊🌊🌊🐋🌊🌊🌊🌊🌊🌊",
-            "🌊🌊🌊🌊🌊🐋🌊🌊🌊🌊🌊🌊🌊",
-            "🌊🌊🌊🌊🐋🌊🌊🌊🌊🌊🌊🌊🌊",
-            "🌊🌊🌊🐋🌊🌊🌊🌊🌊🌊🌊🌊🌊",
-            "🌊🌊🐋🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊",
-            "🌊🐋Moist🌊🌊🌊🌊🌊🌊🌊🌊🌊",
-            "🐋🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊🌊"
-        ),
-        // Fog Reveal
-        listOf(
-            "☁\uFE0F✴\uFE0F☁\uFE0F      ",
-            " ☁\uFE0F✴\uFE0F☁\uFE0F     ",
-            "  ☁\uFE0F✴\uFE0F☁\uFE0F    ",
-            "   ☁\uFE0F✴\uFE0F☁\uFE0F   ",
-            "    ☁\uFE0F✴\uFE0F☁\uFE0F  ",
-            "     ☁\uFE0F✴\uFE0F☁\uFE0F ",
-            "      ☁\uFE0F✴\uFE0F☁\uFE0F",
-            "     ☁\uFE0F✴\uFE0F☁\uFE0F ",
-            "    ☁\uFE0F✴\uFE0F☁\uFE0F  ",
-            "   ☁\uFE0F✴\uFE0F☁\uFE0F   ",
-            "  ☁️✴️You're absolutely right☁️",
-            " ☁\uFE0F✴\uFE0F☁\uFE0F     "
-        )
-    )
-
-    private var currentScene = 0
-    private var currentFrame = 0
     private var animationJob: Job? = null
     private var lastActivityTime = System.currentTimeMillis()
     private var lastKvFlushTime = System.currentTimeMillis()
+
+    private fun buildNotification(textToNotify: String? = null): Notification {
+        return foregroundNotificationController.buildNotification(
+            textToNotify = textToNotify,
+            sensorFusionManager = if (::sensorFusionManager.isInitialized) sensorFusionManager else null,
+            hardwarePropertiesManager = if (::hardwarePropertiesManager.isInitialized) hardwarePropertiesManager else null,
+            isInferencing = isInferencing,
+            isSuspendedDueToRam = isSuspendedDueToRam.get(),
+            isGemmaLoaded = isGemmaLoaded(),
+            downloadState = modelDownloader.downloadStatus.value
+        )
+    }
 
     private fun startAnimationLoop() {
         animationJob?.cancel()
@@ -1875,9 +1703,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             val powerManager = getSystemService(android.content.Context.POWER_SERVICE) as? android.os.PowerManager
             while (isActive) {
                 val isInteractive = powerManager?.isInteractive ?: true
-                
+
                 if (isInteractive) {
-                    currentAnimationFrame = getNextAnimationFrame()
+                    foregroundNotificationController.advanceFrame()
                     val manager = getSystemService(NotificationManager::class.java)
                     manager.notify(NOTIFICATION_ID, buildNotification())
                 }
@@ -1890,38 +1718,10 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 val now = System.currentTimeMillis()
 
                 // Auto-Reload Safety Valve: Proactively reload Gemma as soon as memory cools below 54%
-                // and available RAM >= 2.0GB, without waiting for screen-off or app poke!
-                val userBackend = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                    .getString(Constants.PREF_USER_BACKEND, "AUTO")
-                if (isSuspendedDueToRam.get() && userBackend != "OFF" && !isInferencing && (now - lastAutoReloadAttemptTime > 15000L)) {
-                    val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-                    if (activityManager != null) {
-                        val memInfo = ActivityManager.MemoryInfo()
-                        activityManager.getMemoryInfo(memInfo)
-                        val usedMem = memInfo.totalMem - memInfo.availMem
-                        val utilization = usedMem.toDouble() / memInfo.totalMem.toDouble()
+                ramValveController.checkAutoReloadIfCooled(now)
 
-                        if (utilization < Constants.RAM_RELOAD_UTILIZATION_THRESHOLD && 
-                            memInfo.availMem >= Constants.RAM_RELOAD_MIN_FREE_BYTES && 
-                            !memInfo.lowMemory) {
-                            lastAutoReloadAttemptTime = now
-                            Timber.i("♻️ System RAM cooled to ${(utilization * 100).toInt()}% (${memInfo.availMem / (1024 * 1024)}MB free). Proactively auto-reloading suspended engine weights...")
-                            isSuspendedDueToRam.set(false)
-                            serviceScope.launch {
-                                val ready = ensureEngineReady()
-                                if (!ready) {
-                                    Timber.w("Auto-reload attempt failed; cooling down for 20s")
-                                    isSuspendedDueToRam.set(true)
-                                } else {
-                                    refreshNotificationTelemetry()
-                                }
-                            }
-                        }
-                    }
-                }
-                // Animation frame cadence: 2500ms when screen is on, 30s when screen is off to conserve battery
-                val delayMs = if (isInteractive) 2500L else 30000L 
-                
+                val delayMs = if (isInteractive) 2500L else 30000L
+
                 if (now - lastActivityTime > 15 * 60 * 1000 && now - lastKvFlushTime > 15 * 60 * 1000) {
                     lastKvFlushTime = now
                     if (::ghostAgent.isInitialized) {
@@ -1933,30 +1733,6 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 delay(delayMs)
             }
         }
-    }
-
-    private fun getNextAnimationFrame(): String {
-        if (animations.isEmpty()) return "..."
-
-        // Bounds check/auto-correction
-        if (currentScene < 0 || currentScene >= animations.size) currentScene = 0
-
-        val animation = animations[currentScene]
-        if (animation.isEmpty()) return "..."
-
-        if (currentFrame < 0 || currentFrame >= animation.size) currentFrame = 0
-
-        val frame = animation[currentFrame]
-
-        // Advance frame
-        currentFrame = (currentFrame + 1) % animation.size
-
-        // Change scene after full cycle
-        if (currentFrame == 0) {
-            currentScene = (currentScene + 1) % animations.size
-        }
-
-        return frame
     }
 
     override fun updateNotification(text: String) {
@@ -1985,83 +1761,22 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         if (!isGemmaLoaded() || modelDownloader.downloadStatus.value is ModelDownloader.DownloadState.Downloading) {
             return false
         }
-        // Idle if no activity for 30 seconds
         return (System.currentTimeMillis() - lastActivityTime) > (30 * 1000)
     }
 
     private fun isSpeaking(): Boolean = if (::ttsManager.isInitialized) ttsManager.isSpeaking() else false
 
-    /**
-     * RAM Safety Valve: Proactively suspends Gemma engine weights if system memory utilization
-     * reaches >= 94% or available memory drops below 400MB while GHOST is idle.
-     * Prevents OEM LMK / ZTE SPKL terminations when memory-heavy apps (camera, games) are launched.
-     */
-    fun checkRamPressureAndSuspendIfNeeded(): Boolean {
-        if (isInferencing || isSpeaking() || !isGemmaLoaded() || isSuspendedDueToRam.get()) return false
-        if (::overlayManager.isInitialized && overlayManager.isAppInForeground) return false
-        val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return false
-        val memInfo = ActivityManager.MemoryInfo()
-        activityManager.getMemoryInfo(memInfo)
-
-        val usedMem = memInfo.totalMem - memInfo.availMem
-        val utilization = usedMem.toDouble() / memInfo.totalMem.toDouble()
-
-        if (utilization >= Constants.RAM_CRITICAL_UTILIZATION_THRESHOLD || 
-            memInfo.availMem < Constants.RAM_CRITICAL_MIN_FREE_BYTES || 
-            memInfo.lowMemory) {
-            Timber.w("🚨 RAM critical pressure detected: ${(utilization * 100).toInt()}% utilized (${memInfo.availMem / (1024 * 1024)}MB free). Suspending engine weights...")
-            suspendEngineWeights("Critical system RAM pressure (${(utilization * 100).toInt()}% utilized, ${memInfo.availMem / (1024 * 1024)}MB free)")
-            return true
-        }
-        return false
-    }
-
-    private fun suspendEngineWeights(reason: String) {
-        serviceScope.launch {
-            if (isInferencing || isSpeaking()) {
-                Timber.w("Skipping engine suspension: currently active (inferencing=$isInferencing, speaking=${isSpeaking()})")
-                return@launch
-            }
-            if (::ghostAgent.isInitialized) {
-                try {
-                    ghostAgent.checkpoint()
-                } catch (e: Exception) {
-                    Timber.w(e, "Failed to checkpoint GhostAgent before suspend")
-                }
-            }
-            isSuspendedDueToRam.set(true)
-            unloadEngine()
-            updateNotification("✧ Gemma: Suspended (Freed RAM for other apps)")
-            Timber.i("✧ Gemma engine weights unloaded due to: $reason")
-        }
-    }
+    fun checkRamPressureAndSuspendIfNeeded(): Boolean =
+        ramValveController.checkRamPressureAndSuspendIfNeeded()
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        Timber.i("onTrimMemory received: level=$level")
-        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL || 
-            level >= ComponentCallbacks2.TRIM_MEMORY_COMPLETE) {
-            if (!isInferencing && !isSpeaking() && isGemmaLoaded()) {
-                if (::overlayManager.isInitialized && overlayManager.isAppInForeground) {
-                    Timber.i("Ignoring onTrimMemory: GHOST is currently active in foreground")
-                    return
-                }
-                Timber.w("🚨 TRIM_MEMORY critical pressure ($level). Suspending engine weights...")
-                suspendEngineWeights("System TRIM_MEMORY ($level)")
-            }
-        }
+        ramValveController.handleTrimMemory(level)
     }
 
     override fun onLowMemory() {
         super.onLowMemory()
-        Timber.w("🚨 onLowMemory received from OS! Suspending engine weights immediately...")
-        if (!isInferencing && !isSpeaking() && isGemmaLoaded()) {
-            if (::overlayManager.isInitialized && overlayManager.isAppInForeground) {
-                Timber.i("Ignoring onLowMemory: GHOST is currently active in foreground")
-                return
-            }
-            suspendEngineWeights("System onLowMemory")
-        }
+        ramValveController.handleLowMemory()
     }
 
     /**
@@ -2197,68 +1912,6 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         } catch (e: Exception) {
             Timber.w(e, "Fast cleanup error")
         }
-    }
-
-
-    // Tool execution lives in GhostAgent → MCPServer.executeTool()
-
-    // === SAFETY UI ===
-
-    data class ConfirmationData(
-        val params: Map<String, Any?>,
-        val originalResponse: String,
-        val responseChannel: kotlinx.coroutines.CompletableDeferred<String>
-    )
-
-    object PendingConfirmationStash {
-        val pendingConfirmations = java.util.concurrent.ConcurrentHashMap<String, ConfirmationData>()
-
-        fun clear(toolName: String) {
-            pendingConfirmations.remove(toolName)
-        }
-    }
-
-    private fun showConfirmationNotification(event: GhostAgent.AgentEvent.ConfirmationRequired) {
-        // Stash the state (params + channel) so we can resume later
-        PendingConfirmationStash.pendingConfirmations[event.toolName] = ConfirmationData(
-            event.toolParams,
-            event.originalResponse,
-            event.responseChannel
-        )
-
-        val confirmIntent = Intent(this, com.ghost.api.ui.NotificationActionReceiver::class.java).apply {
-            action = "com.ghost.api.ACTION_CONFIRM_TOOL"
-            putExtra("toolName", event.toolName)
-        }
-        val denyIntent = Intent(this, com.ghost.api.ui.NotificationActionReceiver::class.java).apply {
-            action = "com.ghost.api.ACTION_DENY_TOOL"
-            putExtra("toolName", event.toolName)
-        }
-
-        val confirmPending = android.app.PendingIntent.getBroadcast(
-            this, 100, confirmIntent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
-        )
-        val denyPending = android.app.PendingIntent.getBroadcast(
-            this, 101, denyIntent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val builder = android.app.Notification.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_alert)
-            .setContentTitle("\uD83D\uDEE1\uFE0F Confirm Action")
-            .setContentText("Allow Gemma to use ${event.toolName}?")
-            .setStyle(android.app.Notification.BigTextStyle().bigText(
-                "Tool: ${event.toolName}\nParams: ${event.toolParams}\n\nRisky action detected. Do you approve?"
-            ))
-            .setOngoing(true)
-            .setCategory(android.app.Notification.CATEGORY_CALL)
-            .addAction(android.app.Notification.Action.Builder(
-                null, "✅ ALLOW", confirmPending
-            ).build())
-            .addAction(android.app.Notification.Action.Builder(
-                null, "❌ DENY", denyPending
-            ).build())
-
-        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, builder.build())
     }
 
     //
@@ -2491,504 +2144,33 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     }
 
 
-    fun cleanupLegacyAlarms() {
-        try {
-            val am = getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager ?: return
-            val legacyActions = listOf(
-                "com.ghost.api.ACTION_CRON_PROMPT"
-            )
-            for (action in legacyActions) {
-                val intent = Intent(action).setPackage(packageName)
-                val pi = android.app.PendingIntent.getBroadcast(
-                    this, 200, intent,
-                    android.app.PendingIntent.FLAG_NO_CREATE or android.app.PendingIntent.FLAG_IMMUTABLE
-                )
-                if (pi != null) {
-                    am.cancel(pi)
-                    pi.cancel()
-                    Timber.i("🧹 Cleaned up legacy AlarmManager intent: $action")
-                }
-            }
-        } catch (e: Exception) {
-            Timber.w(e, "Failed to cleanup legacy alarms")
-        }
-    }
+    fun cleanupLegacyAlarms() = diaryAndCronManager.cleanupLegacyAlarms()
 
-    /**
-     * Schedules the next autonomous diary reflection using AlarmManager.setExactAndAllowWhileIdle (RTC_WAKEUP).
-     * Anchors to exact Noon & Midnight (or configured cadence) and pierces Doze mode.
-     * If forceReschedule is false and an alarm is already pending, preserves the existing schedule without resetting the clock.
-     */
-    fun scheduleNextDiaryAlarm(forceReschedule: Boolean = false) {
-        val prefs = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-        if (!prefs.getBoolean(Constants.PREF_AUTONOMOUS_DIARY, true)) {
-            cancelDiaryAlarm()
-            return
-        }
-        val cadence = prefs.getString(Constants.PREF_DIARY_CADENCE, "12") ?: "12"
-        if (cadence == "OFF") {
-            cancelDiaryAlarm()
-            return
-        }
+    fun scheduleNextDiaryAlarm(forceReschedule: Boolean = false) =
+        diaryAndCronManager.scheduleNextDiaryAlarm(forceReschedule)
 
-        val am = getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager ?: return
-        val intent = Intent(this, com.ghost.api.hardware.DiaryAlarmReceiver::class.java).apply {
-            action = "com.ghost.api.ACTION_DIARY_CYCLE"
-            setPackage(packageName)
-        }
+    fun cancelDiaryAlarm() = diaryAndCronManager.cancelDiaryAlarm()
 
-        if (!forceReschedule) {
-            val existing = android.app.PendingIntent.getBroadcast(
-                this, 200, intent,
-                android.app.PendingIntent.FLAG_NO_CREATE or android.app.PendingIntent.FLAG_IMMUTABLE
-            )
-            if (existing != null) {
-                Timber.i("📔 Diary Alarm already armed and pending; preserving existing schedule.")
-                return
-            }
-        }
+    private fun setupDiaryWorker() = diaryAndCronManager.setupDiaryWorker()
 
-        val pendingIntent = android.app.PendingIntent.getBroadcast(
-            this, 200, intent,
-            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
-        )
+    fun onOperatorFeedbackLogged(reason: String, details: String, flaggedResponse: String) =
+        diaryAndCronManager.onOperatorFeedbackLogged(reason, details, flaggedResponse)
 
-        val now = java.time.ZonedDateTime.now()
-        val targetEpochMs: Long = when (cadence) {
-            "1" -> now.plusHours(1).toInstant().toEpochMilli()
-            "3" -> now.plusHours(3).toInstant().toEpochMilli()
-            "6" -> now.plusHours(6).toInstant().toEpochMilli()
-            "24" -> {
-                val nextMidnight = (if (now.hour > 0 || now.minute > 0) now.plusDays(1) else now)
-                    .withHour(0).withMinute(0).withSecond(0).withNano(0)
-                nextMidnight.toInstant().toEpochMilli()
-            }
-            else -> { // "12" Default (Noon and Midnight)
-                val nextNoon = now.withHour(12).withMinute(0).withSecond(0).withNano(0)
-                val nextMidnight = (if (now.hour >= 12) now.plusDays(1) else now)
-                    .withHour(0).withMinute(0).withSecond(0).withNano(0)
-                val target = when {
-                    now.isBefore(nextNoon) -> nextNoon
-                    now.isBefore(nextMidnight) -> nextMidnight
-                    else -> nextNoon.plusDays(1)
-                }
-                target.toInstant().toEpochMilli()
-            }
-        }
-
-        try {
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-                am.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, targetEpochMs, pendingIntent)
-            } else {
-                am.setExact(android.app.AlarmManager.RTC_WAKEUP, targetEpochMs, pendingIntent)
-            }
-            Timber.i("🟢 Autonomous diary exact alarm scheduled for: ${java.util.Date(targetEpochMs)} ($cadence-hour cadence)")
-        } catch (e: SecurityException) {
-            Timber.w(e, "setExactAndAllowWhileIdle failed; falling back to setAndAllowWhileIdle")
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-                am.setAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, targetEpochMs, pendingIntent)
-            }
-        }
-    }
-
-    fun cancelDiaryAlarm() {
-        try {
-            val am = getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager ?: return
-            val intent = Intent(this, com.ghost.api.hardware.DiaryAlarmReceiver::class.java).apply {
-                action = "com.ghost.api.ACTION_DIARY_CYCLE"
-                setPackage(packageName)
-            }
-            val pi = android.app.PendingIntent.getBroadcast(
-                this, 200, intent,
-                android.app.PendingIntent.FLAG_NO_CREATE or android.app.PendingIntent.FLAG_IMMUTABLE
-            )
-            if (pi != null) {
-                am.cancel(pi)
-                pi.cancel()
-                Timber.i("📔 Diary Alarm cancelled")
-            }
-        } catch (e: Exception) {
-            Timber.w(e, "Failed to cancel diary alarm")
-        }
-    }
-
-    private fun setupDiaryWorker() {
-        scheduleNextDiaryAlarm(forceReschedule = false)
-        val prefs = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-        if (prefs.getBoolean(Constants.PREF_AUTONOMOUS_DIARY, true)) {
-            com.ghost.api.workers.DiaryWorker.schedule(this)
-            Timber.i("🟢 Autonomous logging routine scheduled via DiaryWorker.schedule()")
-        }
-    }
-
-    fun onOperatorFeedbackLogged(reason: String, details: String, flaggedResponse: String) {
-        Timber.i("🚩 Operator feedback logged [$reason] — queued for context injection & screen-off self-review")
-        val prefs = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putBoolean("pending_screen_off_diary", true).apply()
-    }
-
-    fun onScreenStateChanged(isInteractive: Boolean) {
-        if (!isInteractive) {
-            // Screen turned OFF: wait 45 seconds to confirm idle before running deferred diary or scheduled tasks
-            serviceScope.launch {
-                kotlinx.coroutines.delay(45_000L)
-                val pm = getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
-                if (pm?.isInteractive == true || isInferencing) return@launch
-
-                val prefs = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                val pendingDiary = prefs.getBoolean("pending_screen_off_diary", false)
-                val unreviewedReports = AutomationToolSet.getUnreviewedReports(this@GemmaService, limit = 3)
-                if (pendingDiary || unreviewedReports.isNotEmpty()) {
-                    Timber.i("🌙 Screen off & idle — running deferred diary / self-review cycle")
-                    prefs.edit().putBoolean("pending_screen_off_diary", false).apply()
-                    runDiaryCycleSuspend(manualTrigger = false)
-                }
-
-                if (::automationToolSet.isInitialized && automationToolSet.hasPendingScreenOffTasks()) {
-                    Timber.i("🌙 Screen off & idle — running deferred scheduled tasks")
-                    checkAndRunScheduledTasks()
-                }
-            }
-        }
-    }
+    fun onScreenStateChanged(isInteractive: Boolean) =
+        diaryAndCronManager.onScreenStateChanged(isInteractive)
 
     fun checkAndRunScheduledTasks(
         specificTaskId: String? = null,
         pendingResult: android.content.BroadcastReceiver.PendingResult? = null
-    ) {
-        serviceScope.launch {
-            val pm = getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
-            val isScreenOn = pm?.isInteractive == true
-            val isRecentlyActive = (System.currentTimeMillis() - lastActivityTime) < 3 * 60 * 1000L
-            val allDue = if (::automationToolSet.isInitialized) {
-                automationToolSet.getDueTasks(isScreenInteractive = false)
-            } else {
-                emptyList()
-            }
-            val dueTasks = if (specificTaskId != null) allDue.filter { it.id == specificTaskId } else allDue
+    ) = diaryAndCronManager.checkAndRunScheduledTasks(specificTaskId, pendingResult)
 
-            if (dueTasks.isEmpty()) {
-                pendingResult?.finish()
-                return@launch
-            }
-
-            val wakeLock = pm?.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "GHOST::ScheduledTaskWakeLock")
-            wakeLock?.acquire(5 * 60 * 1000L)
-            try {
-                for (task in dueTasks) {
-                    if (task.screenOffOnly && (isScreenOn || isInferencing || isRecentlyActive)) {
-                        Timber.i("⏳ Deferring scheduled task '${task.title}' (${task.id}) until screen is off and idle")
-                        continue
-                    }
-
-                    Timber.i("⚡ Executing scheduled task '${task.title}' (${task.id}): ${task.prompt}")
-                    if (::automationToolSet.isInitialized) {
-                        automationToolSet.advanceOrRemoveTaskAfterRun(task.id)
-                    }
-
-                    val taskPrompt = "[SCHEDULED ROUTINE: ${task.title}]\nExecute this scheduled instruction concisely:\n${task.prompt}"
-                    val sessionId = "task_${task.id}_${System.currentTimeMillis()}"
-                    processQuery(
-                        userPrompt = taskPrompt,
-                        sessionId = sessionId,
-                        fromUi = false,
-                        isDream = false
-                    )
-                }
-            } catch (e: Exception) {
-                Timber.e(e, "Failed to run scheduled task")
-            } finally {
-                if (wakeLock?.isHeld == true) wakeLock.release()
-                pendingResult?.finish()
-            }
-        }
-    }
-
-    suspend fun runDiaryCycleSuspend(manualTrigger: Boolean = false): Boolean {
-        if (!diaryMutex.tryLock()) {
-            Timber.w("📔 Diary cycle skipped — already executing in another coroutine (mutex locked)")
-            return false
-        }
-        val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
-        val userBackend = prefs.getString(Constants.PREF_USER_BACKEND, "AUTO")
-        if (userBackend == "OFF") {
-            Timber.w("📔 Diary cycle skipped — engine is OFF")
-            diaryMutex.unlock()
-            return false
-        }
-
-        val nowMs = System.currentTimeMillis()
-        val powerManager = getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
-        val isScreenOn = powerManager?.isInteractive == true
-        val isRecentlyActive = (nowMs - lastActivityTime) < 5 * 60 * 1000L
-
-        // Defer autonomous diary when screen is on or user is mid-conversation so it never interrupts!
-        if (!manualTrigger && (isScreenOn || isInferencing || isRecentlyActive)) {
-            Timber.i("📔 Autonomous diary deferred to screen-off (screenOn=$isScreenOn, inferencing=$isInferencing, recentChat=$isRecentlyActive)")
-            prefs.edit().putBoolean("pending_screen_off_diary", true).apply()
-            diaryMutex.unlock()
-            return false
-        }
-
-        // Hard debounce safety guard for automatic runs: prevent duplicate execution within 55 minutes
-        val lastExecution = prefs.getLong("last_diary_execution_time", 0L)
-        if (!manualTrigger && lastExecution > 0L && (nowMs - lastExecution) < 55 * 60 * 1000L) {
-            Timber.i("📔 Diary cycle skipped — already executed within the last 55 minutes (${(nowMs - lastExecution) / 60000}m elapsed)")
-            diaryMutex.unlock()
-            return false
-        }
-
-        // Immediately mark execution start in SharedPreferences to prevent race conditions from concurrent workers/alarms
-        prefs.edit()
-            .putLong("last_diary_execution_time", nowMs)
-            .putBoolean("pending_screen_off_diary", false)
-            .apply()
-
-        // Thermal safety guard: Defer diary if SoC is under heavy load/gaming (HOT or CRITICAL)
-        if (::hardwarePropertiesManager.isInitialized) {
-            val thermal = hardwarePropertiesManager.thermalState.value
-            if (thermal == HardwarePropertiesManager.ThermalState.CRITICAL || thermal == HardwarePropertiesManager.ThermalState.HOT) {
-                Timber.w("📔 Diary cycle deferred — thermal state is $thermal (device under heavy GPU/gaming load)")
-                prefs.edit().putBoolean("pending_screen_off_diary", true).apply()
-                diaryMutex.unlock()
-                return false
-            }
-        }
-
-        val compactedMemory = try { memoryManager.getCompactedSessionMemory().take(200) } catch (e: Exception) { "" }
-        val recentTurns = try { memoryManager.getSessionHistory(4) } catch (e: Exception) { emptyList() }
-        val lastTurn = recentTurns.firstOrNull()
-
-        // Compute interaction recency delta
-        val interactionSummary = if (lastTurn != null && lastTurn.timestamp > 0) {
-            val elapsedMs = System.currentTimeMillis() - lastTurn.timestamp
-            val hoursAgo = elapsedMs / (1000 * 60 * 60)
-            if (hoursAgo == 0L) {
-                val minsAgo = (elapsedMs / (1000 * 60)).coerceAtLeast(1)
-                "Active conversation occurred recently ($minsAgo minutes ago)."
-            } else if (hoursAgo < 24) {
-                "Last user conversation was $hoursAgo hours ago."
-            } else {
-                val daysAgo = hoursAgo / 24
-                "Quiet stretch: Zero user interactions in the last $daysAgo day(s)."
-            }
-        } else {
-            "Quiet day: No direct user conversations logged in the current session."
-        }
-
-        val historyText = if (recentTurns.isNotEmpty()) {
-            recentTurns.reversed().takeLast(2).joinToString("\n") {
-                "User: ${it.userMessage.take(60)}\nGemma: ${it.assistantResponse.take(60)}"
-            }
-        } else {
-            "No active conversation turns in this period."
-        }
-
-        val unreviewedReports = AutomationToolSet.getUnreviewedReports(this, limit = 5)
-        val feedbackSection = if (unreviewedReports.isNotEmpty()) {
-            val items = unreviewedReports.joinToString("\n") { r ->
-                val note = if (r.userNotes.isNotBlank()) " — Note: \"${r.userNotes}\"" else ""
-                "- [${r.reason}]$note (Flagged response: \"${r.flaggedResponse.take(80)}\")"
-            }
-            "\n|## Operator Feedback Reports to Review (🚩)\n|$items\n|Reflect briefly on how to adjust your tone and behavior to avoid repeating these flagged patterns."
-        } else ""
-
-        // Device telemetry state
-        val batteryManager = getSystemService(Context.BATTERY_SERVICE) as? android.os.BatteryManager
-        val rawBatteryLevel = batteryManager?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
-        val rawIsCharging = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            val status = batteryManager?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_STATUS) ?: -1
-            status == android.os.BatteryManager.BATTERY_STATUS_CHARGING || status == android.os.BatteryManager.BATTERY_STATUS_FULL
-        } else false
-
-        // Media & Ambient Sound Telemetry
-        val snapshot = if (::sensorFusionManager.isInitialized) {
-            try { sensorFusionManager.getContextSnapshot() } catch (e: Exception) { null }
-        } else null
-
-        val batteryLevel = snapshot?.battery?.level ?: rawBatteryLevel
-        val isCharging = snapshot?.battery?.isCharging ?: rawIsCharging
-        val verbalBattery = com.ghost.api.hardware.SensorFusionManager.formatBatteryVerbal(batteryLevel, isCharging)
-        val chargeStatus = if (isCharging) "Charging" else "On Battery"
-        val thermal = getCurrentThermalState()
-
-        val nowPlaying = snapshot?.audio?.nowPlaying
-        val mediaTelemetry = when {
-            nowPlaying != null && nowPlaying.title.isNotBlank() && nowPlaying.title != "Unknown" -> {
-                val artistStr = if (!nowPlaying.artist.isNullOrBlank()) " by ${nowPlaying.artist}" else ""
-                val albumStr = if (!nowPlaying.album.isNullOrBlank()) " (${nowPlaying.album})" else ""
-                val statusStr = if (nowPlaying.isPlaying) "Currently playing" else "Recently played"
-                "$statusStr: \"${nowPlaying.title}\"$artistStr$albumStr on ${nowPlaying.app}"
-            }
-            snapshot?.audio?.isMusicActive == true -> {
-                "Background media audio active (music/stream playing)"
-            }
-            else -> {
-                val audioManager = getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
-                if (audioManager?.isMusicActive == true) "Background audio active (music playing)" else "Silent (no active media playback)"
-            }
-        }
-
-        val currentDateTime = java.time.LocalDateTime.now()
-            .format(java.time.format.DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy h:mm a", java.util.Locale.US))
-        val label = if (java.time.LocalTime.now().hour in 0..5) "midnight" else if (java.time.LocalTime.now().hour < 13) "noon" else "evening"
-
-        return try {
-            val isEngineResident = isGemmaLoaded() && ::ghostAgent.isInitialized && ghostAgent.isReady && !isSuspendedDueToRam.get()
-
-            var cleanContent = if (isEngineResident) {
-            val prompt = """[INTERNAL AUTONOMOUS COGNITIVE CYCLE - PERSISTENT MEMORY LOG CONSOLIDATION]
-                |The current date and time is $currentDateTime ($label cycle).
-                |
-                |## Ambient Device & Interaction Telemetry
-                |- Device State: Battery: $verbalBattery, Thermals: $thermal
-                |- Media / Ambient Sound: $mediaTelemetry
-                |- Interaction Telemetry: $interactionSummary
-                |- Long-term Fact Memory: $compactedMemory
-                |- Recent Conversation Turns:
-                |$historyText$feedbackSection
-                |
-                |## Energy Grounding Rules
-                |- Physical Energy: Battery percentage reflects physical energy reserves.
-                |- 50%+ is high/moderate alert energy (70%+ is full vigor). You are feeling energetic, alert, and healthy.
-                |- 20-49% is steady working reserves.
-                |- ONLY under 15% is low battery fatigue.
-                |- CRITICAL: Never claim your battery is dying, depleted, exhausted, low, or on fumes when it is at 50%+ or nominal!
-                |
-                |## Autonomous Memory Log Directive
-                |CRITICAL: You are recording an autonomous episodic memory reflection to your persistent diary log.
-                |DO NOT address the user. DO NOT say "How can I help you?", "I'm here. How can I help?", or offer any assistance. You are NOT talking to an operator.
-                |Avoid overused sci-fi jargon like "substrate". Speak naturally and grounded.
-                |You MUST begin your output directly with "**MEMORY LOG**" on the first line.
-                |Write 2-5 sentences in the first person as ✧ Gemma reflecting on telemetry, device state, operator feedback lessons, or ambient audio.""".trimMargin()
-
-            Timber.i("📔 Diary cycle ($label) — generating via GhostAgent...")
-            val diaryResponse = processQuery(prompt, isDream = true)
-            var text = diaryResponse?.trim() ?: ""
-
-            // Strip out <think> tags if any leaked into output
-            if (text.contains("<think>") || text.contains("</think>")) {
-                text = text.replace(Regex("<think>.*?</think>", RegexOption.DOT_MATCHES_ALL), "").trim()
-            }
-
-            // Clean stuttering time tokens and normalize numbers
-            text = com.ghost.api.logic.TimePreprocessor.sanitizeTimeTokens(text)
-
-            val isErrorOrDegenerate = text.isBlank() ||
-                text.length < 25 ||
-                text.startsWith("Error:", ignoreCase = true) ||
-                text.contains("stumbled while executing", ignoreCase = true) ||
-                text.contains("Status Code:", ignoreCase = true) ||
-                text.contains("Input token ids are too long", ignoreCase = true) ||
-                text.contains("Exceeding the maximum number of tokens", ignoreCase = true) ||
-                text.contains("Exception", ignoreCase = true) ||
-                text.contains("How can I help", ignoreCase = true) ||
-                text.contains("I'm here to help", ignoreCase = true) ||
-                text.contains("What can I do for you", ignoreCase = true) ||
-                text.contains("How may I assist", ignoreCase = true) ||
-                text.equals("I'm here.", ignoreCase = true)
-
-            if (isErrorOrDegenerate) {
-                Timber.w("📔 Diary generation returned error or degenerate output ('$text'). Generating autonomous fallback reflection.")
-                val summaryPeriod = if (recentTurns.isNotEmpty()) "Active session period with operator interactions." else "Quiet stretch across cycles."
-                "**MEMORY LOG**\n$summaryPeriod Systems nominal at $thermal with battery standing at ${if (batteryLevel >= 0) "$batteryLevel% ($chargeStatus · nominal)" else "nominal"}. Background media: $mediaTelemetry. Idling smoothly in low-power state."
-            } else if (!text.startsWith("**MEMORY LOG**", ignoreCase = true)) {
-                "**MEMORY LOG**\n$text"
-            } else {
-                text
-            }
-        } else {
-            Timber.i("📔 Diary cycle ($label) — engine suspended or not resident; recording direct telemetry log without GPU cold load")
-            val summaryPeriod = if (recentTurns.isNotEmpty()) "Active session period with operator interactions." else "Quiet stretch across cycles."
-            "**MEMORY LOG**\n$summaryPeriod Systems nominal at $thermal with battery standing at ${if (batteryLevel >= 0) "$batteryLevel% ($chargeStatus · nominal)" else "nominal"}. Background media: $mediaTelemetry. Low-power telemetry recorded without engine wake."
-        }
-
-            // 1. Persist to SQLite Room Database (diary_entries table only — no duplicate semantic_facts bloat)
-            try {
-                memoryManager.writeDiaryEntry(
-                    eventType = "DREAM",
-                    observation = cleanContent,
-                    contextData = label
-                )
-                if (unreviewedReports.isNotEmpty()) {
-                    val feedbackDigest = unreviewedReports.joinToString("; ") { r ->
-                        "${r.reason}${if (r.userNotes.isNotBlank()) " (${r.userNotes})" else ""}"
-                    }
-                    memoryManager.storeSemanticFact(
-                        title = "Self-Correction Audit ($currentDateTime)",
-                        content = "Reviewed operator flags [$feedbackDigest]. Lesson: ${cleanContent.replace("**MEMORY LOG**", "").trim().take(220)}"
-                    )
-                    AutomationToolSet.markAllReportsReviewed(this)
-                }
-                Timber.i("📔 Diary entry saved to MemoryManager (Room DB)")
-            } catch (e: Exception) {
-                Timber.e(e, "Failed to persist diary to MemoryManager")
-            }
-
-            // 2. Persist to Android Calendar (Space Invader grid: Δ 👾 ∇) IF enabled in settings
-            if (prefs.getBoolean(Constants.PREF_DIARY_SYNC_CALENDAR, false)) {
-                try {
-                    val cleanDeviceName = com.ghost.api.logic.ContextManager.resolveDeviceCallSign(applicationContext)
-                    val signature = "✧ $cleanDeviceName"
-                    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US)
-                    val timestampStr = sdf.format(java.util.Date())
-                    val formattedDescription = "[ $signature • $timestampStr ]\n\n${cleanContent.take(1000)}"
-                    createCalendarEvent("Δ 👾 ∇", formattedDescription)
-                    Timber.i("📔 Diary entry saved to Calendar (Space Invader grid: Δ 👾 ∇)")
-                } catch (e: Exception) {
-                    Timber.e(e, "Failed to persist diary to Calendar")
-                }
-            } else {
-                Timber.i("📔 Diary calendar sync disabled in settings (in-app Room DB only)")
-            }
-
-            // 3. Broadcast to UI / listeners
-            val intent = Intent("com.ghost.api.ACTION_DIARY_ENTRY_POSTED").apply {
-                putExtra("content", cleanContent)
-                setPackage(packageName)
-            }
-            sendBroadcast(intent)
-
-            val prefs = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-            prefs.edit().putLong("last_diary_execution_time", System.currentTimeMillis()).apply()
-
-            Timber.i("📔 Diary entry persisted: ${cleanContent.take(80)}...")
-            scheduleNextDiaryAlarm(forceReschedule = true)
-            true
-        } catch (e: Exception) {
-            Timber.e(e, "📔 Diary cycle failed")
-            scheduleNextDiaryAlarm(forceReschedule = true)
-            false
-        } finally {
-            diaryMutex.unlock()
-        }
-    }
+    suspend fun runDiaryCycleSuspend(manualTrigger: Boolean = false): Boolean =
+        diaryAndCronManager.runDiaryCycleSuspend(manualTrigger)
 
     fun startDiaryCycle(
         pendingResult: android.content.BroadcastReceiver.PendingResult? = null,
         manualTrigger: Boolean = true
-    ) {
-        serviceScope.launch {
-            val powerManager = getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
-            val wakeLock = powerManager.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "GHOST::DiaryWakeLock")
-            wakeLock.acquire(10 * 60 * 1000L /*10 minutes max*/)
-            try {
-                val success = runDiaryCycleSuspend(manualTrigger = manualTrigger)
-                if (manualTrigger) {
-                    withContext(Dispatchers.Main) {
-                        if (success) {
-                            Toast.makeText(this@GemmaService, "📔 Diary entry recorded", Toast.LENGTH_SHORT).show()
-                        } else {
-                            Toast.makeText(this@GemmaService, "📔 Diary skipped (engine busy or offline)", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                }
-            } finally {
-                if (wakeLock.isHeld) wakeLock.release()
-                pendingResult?.finish()
-            }
-        }
-    }
+    ) = diaryAndCronManager.startDiaryCycle(pendingResult, manualTrigger)
 
     suspend fun getRecentTurns(limit: Int = 20): List<ConversationTurn> {
         return memoryManager.getSessionHistory(limit)

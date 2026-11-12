@@ -20,15 +20,56 @@ object Constants {
     const val EXTRA_QUERY = "query"
     const val EXTRA_STATUS_MSG = "msg"
 
-    // Thermal
-    const val THERMAL_PATH = "/sys/class/thermal/thermal_zone3/temp"
+    // Thermal (PowerManager ThermalStatus + dynamic sysfs zone fallback)
+    const val THERMAL_SYSFS_DIR = "/sys/class/thermal"
     const val THERMAL_LIMIT_CELSIUS = 65
 
-    // Token budgets tuned per model architecture & memory footprint
-    const val MAX_TOKENS_E2B = 5120       // 8GB RAM profile (1.72GB peak, immune to 2GB SPKL, 4.7k free dialogue runway)
-    const val MAX_TOKENS_E4B_12GB = 6144  // 12GB RAM profile (Game Space pinned, MTP speculative decoding, ample prompt+tools headroom)
-    const val MAX_TOKENS_E4B_16GB = 8192  // 16GB RAM profile (8k native context runway, holds deep conversation history)
-    const val MAX_TOKENS_E4B_24GB = 10240 // 24GB RAM profile (10k deep reasoning runway, massive tool execution history)
+    /**
+     * Dynamically probes `/sys/class/thermal/thermal_zone*` for CPU/GPU/SoC/skin zones
+     * and returns the peak valid temperature in °C, avoiding reliance on a single hardcoded zone index.
+     */
+    fun readMaxSocThermalCelsius(): Float? {
+        return try {
+            val dir = java.io.File(THERMAL_SYSFS_DIR)
+            val zones = dir.listFiles { file -> file.isDirectory && file.name.startsWith("thermal_zone") }
+                ?: return null
+            var maxTemp: Float? = null
+            for (zone in zones) {
+                val typeFile = java.io.File(zone, "type")
+                val tempFile = java.io.File(zone, "temp")
+                if (!tempFile.exists() || !tempFile.canRead()) continue
+                val typeStr = if (typeFile.exists() && typeFile.canRead()) {
+                    try { typeFile.readText().trim().lowercase() } catch (_: Exception) { "" }
+                } else ""
+                val isRelevant = typeStr.isEmpty() ||
+                    typeStr.contains("cpu") ||
+                    typeStr.contains("gpu") ||
+                    typeStr.contains("soc") ||
+                    typeStr.contains("tsens") ||
+                    typeStr.contains("skin") ||
+                    typeStr.contains("quiet") ||
+                    typeStr.contains("xo")
+                if (!isRelevant) continue
+                val raw = try { tempFile.readText().trim().toIntOrNull() } catch (_: Exception) { null } ?: continue
+                val tempC = if (raw > 1000) raw / 1000f else raw.toFloat()
+                if (tempC in 10f..115f) {
+                    if (maxTemp == null || tempC > maxTemp) {
+                        maxTemp = tempC
+                    }
+                }
+            }
+            maxTemp
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    // Token budgets tuned per model architecture & memory footprint (up to 32K opt-in context on LiteRT-LM 0.18.1)
+    const val MAX_TOKENS_E2B = 5120           // 8GB RAM profile (1.72GB peak, immune to 2GB SPKL, 4.7k free dialogue runway)
+    const val MAX_TOKENS_E4B_12GB = 6144      // 12GB RAM profile (Game Space pinned, MTP speculative decoding, ample prompt+tools headroom)
+    const val MAX_TOKENS_E4B_16GB = 8192      // 16GB RAM profile (8k default runway; configurable up to 32k via PREF_MAX_CONTEXT_TOKENS)
+    const val MAX_TOKENS_E4B_24GB = 10240     // 24GB RAM profile (10k default runway; configurable up to 32k via PREF_MAX_CONTEXT_TOKENS)
+    const val MAX_TOKENS_MAX_CONTEXT = 32000  // Maximum native context window supported by Gemma-4-E2B-it / E4B-it
     const val MAX_TOKENS_E4B = MAX_TOKENS_E4B_12GB
     const val MAX_TOKENS = MAX_TOKENS_E4B // Legacy fallback
 
@@ -56,18 +97,26 @@ object Constants {
 
     /**
      * Resolves the maximum token context window for a given model, dynamically scaling
-     * with physical device RAM on 12GB, 16GB, and 24GB tiers.
+     * with physical device RAM on 12GB (6K), 16GB (8K), and 24GB (10K) tiers by default, or honoring
+     * an explicit operator override in SharedPreferences (`pref_max_context_tokens`, up to 32,000).
      */
     fun getMaxTokensForModel(modelNameOrKey: String, context: Context? = null): Int {
+        if (context != null) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val userOverride = prefs.getInt(PREF_MAX_CONTEXT_TOKENS, 0)
+            if (userOverride in 2048..MAX_TOKENS_MAX_CONTEXT) {
+                return userOverride
+            }
+        }
         if (modelNameOrKey.contains("E2B", ignoreCase = true)) {
             return MAX_TOKENS_E2B
         }
         if (context == null) return MAX_TOKENS_E4B_12GB
         val ramGb = getDeviceRamGb(context)
         return when {
-            ramGb >= 20.0 -> MAX_TOKENS_E4B_24GB // 24GB Extreme tier: 10,240 tokens (10k)
-            ramGb >= 14.5 -> MAX_TOKENS_E4B_16GB // 16GB Ultra tier: 8,192 tokens (8k)
-            else -> MAX_TOKENS_E4B_12GB          // 12GB Frontier tier: 4,096 tokens
+            ramGb >= 20.0 -> MAX_TOKENS_E4B_24GB // 24GB Extreme tier: 10,240 tokens default (up to 32k via pref)
+            ramGb >= 14.5 -> MAX_TOKENS_E4B_16GB // 16GB Ultra tier: 8,192 tokens default (up to 32k via pref)
+            else -> MAX_TOKENS_E4B_12GB          // 12GB Frontier tier: 6,144 tokens default
         }
     }
 
@@ -81,7 +130,7 @@ object Constants {
         return if (totalRamGb >= 10.5) "E4B" else "E2B"
     }
 
-    // Model download URLs and repos
+    // Model Download (Gemma 4 E2B & E4B LiteRT-LM)
     const val MODEL_URL_E2B = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm"
     const val MODEL_URL_E4B = "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm"
     const val MODEL_REPO_E2B = "litert-community/gemma-4-E2B-it-litert-lm"
@@ -188,14 +237,27 @@ object Constants {
     // Model Persistence & Storage Protection
     const val PREF_LAST_KNOWN_MODEL_PATH = "last_known_model_path"
     const val PREF_FAST_PATH_ENABLED = "fast_path_enabled"
+    const val PREF_MAX_CONTEXT_TOKENS = "pref_max_context_tokens"
 
-    // Summon Controls
+    // Summon Controls (Shake & Edge Nub Handle)
     const val PREF_SUMMON_METHOD = "summon_method" // "SHAKE", "EDGE_NUB", "BOTH", "OFF"
     const val SUMMON_METHOD_SHAKE = "SHAKE"
     const val SUMMON_METHOD_EDGE_NUB = "EDGE_NUB"
     const val SUMMON_METHOD_BOTH = "BOTH"
     const val SUMMON_METHOD_OFF = "OFF"
     const val PREF_EDGE_NUB_Y = "edge_nub_y_pos"
+
+    // Hyper Pucks & Orbital Controls
+    const val PREF_HYPER_PUCKS_ENABLED = "pref_hyper_pucks_enabled"
+    const val PREF_PUCK_CENTER_ENABLED = "pref_puck_center_enabled"
+    const val PREF_PUCK_TOP_ENABLED = "pref_puck_top_enabled"
+    const val PREF_PUCK_BOTTOM_ENABLED = "pref_puck_bottom_enabled"
+    const val PREF_PUCK_TL_ENABLED = "pref_puck_tl_enabled"
+    const val PREF_PUCK_TR_ENABLED = "pref_puck_tr_enabled"
+    const val PREF_PUCK_BL_ENABLED = "pref_puck_bl_enabled"
+    const val PREF_PUCK_BR_ENABLED = "pref_puck_br_enabled"
+    const val PREF_PUCK_SPREAD_SCALE = "pref_puck_spread_scale"
+    const val PREF_PUCK_VERTICAL_OFFSET_DP = "pref_puck_vertical_offset_dp"
 
     // Token estimation (multimodal tuned for Gemma 4 / LiteRT-LM)
     const val CHARS_PER_TOKEN = 4

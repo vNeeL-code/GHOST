@@ -254,10 +254,9 @@ class GhostMcpTool(
 
             val scriptPath = if (scriptName.isNotBlank() && scriptName != "null") scriptName else "index.html"
             val baseUrl = if (skill.path.startsWith("file://")) skill.path else "file://${skill.path}"
-            val url = "$baseUrl/scripts/$scriptPath"
-            val secret = ""
+            val url = JsExecutionBridge.toSafeAssetUrl(context, "$baseUrl/scripts/$scriptPath")
 
-            val resultJsonString = JsExecutionBridge.executeJs(context, url, data, secret)
+            val resultJsonString = JsExecutionBridge.executeJs(context, url, data)
             com.ghost.api.GemmaService.instance?.recordToolOutput(resultJsonString.length.coerceAtMost(1500))
 
             try {
@@ -268,12 +267,13 @@ class GhostMcpTool(
                 if (json.has("webview") && !json.isNull("webview")) {
                     val webviewObj = json.getJSONObject("webview")
                     val webviewUrl = webviewObj.optString("url", "")
-                    val absoluteWebviewUrl = when {
+                    val rawWebviewUrl = when {
                         webviewUrl.startsWith("http") || webviewUrl.startsWith("file://") -> webviewUrl
                         webviewUrl.startsWith("../assets/") -> "$baseUrl/assets/${webviewUrl.removePrefix("../assets/")}"
                         webviewUrl.startsWith("assets/") -> "$baseUrl/$webviewUrl"
                         else -> "$baseUrl/assets/$webviewUrl"
                     }
+                    val absoluteWebviewUrl = JsExecutionBridge.toSafeAssetUrl(context, rawWebviewUrl)
                     Timber.i("GhostMcpTool: Sending Webview request to UI: $absoluteWebviewUrl")
                     lastWebviewUrl = absoluteWebviewUrl
                     lastWebviewAspectRatio = webviewObj.optDouble("aspectRatio", 1.333).toFloat()
@@ -295,7 +295,7 @@ class GhostMcpTool(
                             </head><body><img src="$imgSrc"/></body></html>
                             """.trimIndent()
                         )
-                        lastWebviewUrl = "file://${htmlFile.absolutePath}"
+                        lastWebviewUrl = JsExecutionBridge.toSafeAssetUrl(context, "file://${htmlFile.absolutePath}")
                         lastWebviewAspectRatio = 1.0f
                     }
                 }
@@ -322,7 +322,7 @@ class GhostMcpTool(
         val ghostMcpTools = setOf(
             "timer", "alarm", "flashlight", "app", "open_app", "media", "calendar",
             "read_calendar", "search", "recall", "remember", "click", "scroll",
-            "navigate", "take_screenshot", "bash"
+            "navigate", "take_screenshot", "bash", "type"
         )
         if (normalized in ghostMcpTools) {
             return executeMcpAction(normalized, parameters)

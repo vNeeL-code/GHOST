@@ -22,9 +22,43 @@ class SystemToolSet(private val context: Context) : ToolSet {
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val packageManager: PackageManager = context.packageManager
     private val memoryManager by lazy { com.ghost.api.database.MemoryManager(context) }
-    private val diaryManager by lazy { DiaryManager(context) }
     private var appListCache: List<AppInfo>? = null
     private var appListCacheTime: Long = 0L
+
+    private fun searchCalendarMemories(query: String): List<String> {
+        val memories = mutableListOf<String>()
+        try {
+            val isDreamQuery = query.equals("DREAM", ignoreCase = true)
+            val selection = if (isDreamQuery) {
+                "${CalendarContract.Events.TITLE} LIKE ? OR ${CalendarContract.Events.TITLE} LIKE ? OR ${CalendarContract.Events.TITLE} LIKE ? OR ${CalendarContract.Events.DESCRIPTION} LIKE ?"
+            } else {
+                "${CalendarContract.Events.TITLE} LIKE ? OR ${CalendarContract.Events.DESCRIPTION} LIKE ?"
+            }
+            val selectionArgs = if (isDreamQuery) {
+                arrayOf("%DREAM%", "%Δ 👾 ∇%", "%👾%", "%MEMORY LOG%")
+            } else {
+                arrayOf("%$query%", "%$query%")
+            }
+            context.contentResolver.query(
+                CalendarContract.Events.CONTENT_URI,
+                arrayOf(CalendarContract.Events.TITLE, CalendarContract.Events.DESCRIPTION, CalendarContract.Events.DTSTART),
+                selection,
+                selectionArgs,
+                "${CalendarContract.Events.DTSTART} DESC"
+            )?.use {
+                while (it.moveToNext()) {
+                    val title = it.getString(0)
+                    val description = it.getString(1)
+                    val timestamp = it.getLong(2)
+                    val date = java.util.Date(timestamp).toString()
+                    memories.add("[$date] $title: $description")
+                }
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to search calendar memories")
+        }
+        return memories
+    }
 
     data class AppInfo(val label: String, val packageName: String)
 
@@ -291,7 +325,7 @@ class SystemToolSet(private val context: Context) : ToolSet {
         return try {
             val now = System.currentTimeMillis()
             val past = now - (days * 24 * 60 * 60 * 1000L)
-            val memories = diaryManager.searchMemories("DREAM")
+            val memories = searchCalendarMemories("DREAM")
             val dbEntries = kotlinx.coroutines.runBlocking {
                 memoryManager.getRecentDiaryEntries(20)
             }.filter { it.eventType == "DREAM" && it.timestamp >= past }
@@ -342,7 +376,7 @@ class SystemToolSet(private val context: Context) : ToolSet {
     ): Map<String, String> {
         com.ghost.api.GemmaService.instance?.showWorkSignal("MEMORIES")
         return try {
-            val episodicMemories = diaryManager.searchMemories(query)
+            val episodicMemories = searchCalendarMemories(query)
             val semanticMemories = kotlinx.coroutines.runBlocking {
                 memoryManager.searchSemanticFacts(query)
             }

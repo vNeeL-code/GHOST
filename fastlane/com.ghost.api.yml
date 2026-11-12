@@ -8,8 +8,8 @@ IssueTracker: https://github.com/vNeeL-code/GHOST/issues
 
 AutoUpdateMode: Version v%v
 UpdateCheckMode: Tags
-CurrentVersion: 4.35
-CurrentVersionCode: 13
+CurrentVersion: 4.39
+CurrentVersionCode: 14
 
 RepoType: git
 Repo: https://github.com/vNeeL-code/GHOST.git
@@ -18,6 +18,13 @@ Builds:
   - versionName: '4.35'
     versionCode: 13
     commit: v4.35
+    subdir: app
+    gradle:
+      - fdroid
+
+  - versionName: '4.39'
+    versionCode: 14
+    commit: v4.39
     subdir: app
     gradle:
       - fdroid

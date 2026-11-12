@@ -1,0 +1,4 @@
+GHOST Release v4.39 (build 14):
+- One Hand Operation+ (OHO+) architecture: Dual left/right edge handles with 4-gesture routing and zero-overhead modular pucks.
+- GPP Engine Consolidation: Unified flavor texts & hardware personality barks into GenuinePeoplePersonality.
+- Massively reduced UI memory footprint and purged orphaned/dead background workers.

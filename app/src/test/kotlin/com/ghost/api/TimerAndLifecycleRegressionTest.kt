@@ -77,4 +77,59 @@ class TimerAndLifecycleRegressionTest {
         assertNotNull(torchRes.spokenTts)
         assertTrue(torchRes.spokenTts!!.isNotBlank())
     }
+
+    @Test
+    fun `toolPolicy gates destructive delete_file while allowing built-in operator tools without blocking`() {
+        assertTrue(com.ghost.api.agent.ToolPolicy.isRisky("delete_file", emptyMap()))
+
+        org.junit.Assert.assertFalse(com.ghost.api.agent.ToolPolicy.isRisky("move_file", emptyMap()))
+        org.junit.Assert.assertFalse(com.ghost.api.agent.ToolPolicy.isRisky("save_skill", emptyMap()))
+        org.junit.Assert.assertFalse(com.ghost.api.agent.ToolPolicy.isRisky("bash", emptyMap()))
+        org.junit.Assert.assertFalse(com.ghost.api.agent.ToolPolicy.isRisky("type", mapOf("text" to "hello")))
+        org.junit.Assert.assertFalse(com.ghost.api.agent.ToolPolicy.isRisky("flashlight", emptyMap()))
+        org.junit.Assert.assertFalse(com.ghost.api.agent.ToolPolicy.isRisky("status", emptyMap()))
+        org.junit.Assert.assertFalse(com.ghost.api.agent.ToolPolicy.isRisky("search", emptyMap()))
+        org.junit.Assert.assertFalse(com.ghost.api.agent.ToolPolicy.isRisky("read_diary", emptyMap()))
+    }
+
+    @Test
+    fun `aiPhonebook preserves loginUrl for all peer contacts after cookie removal`() {
+        assertTrue(com.ghost.api.logic.AiPhonebook.CONTACTS.isNotEmpty())
+        for (contact in com.ghost.api.logic.AiPhonebook.CONTACTS) {
+            assertTrue("loginUrl must be non-blank for ${contact.name}", contact.loginUrl.startsWith("https://"))
+        }
+    }
+
+    @Test
+    fun `constants resolve safe default token budgets and 32k max ceiling`() {
+        assertEquals(5120, Constants.getMaxTokensForModel("gemma-4-E2B-it.litertlm"))
+        assertEquals(6144, Constants.getMaxTokensForModel("gemma-4-E4B-it.litertlm"))
+        assertEquals(32000, Constants.MAX_TOKENS_MAX_CONTEXT)
+    }
+
+    @Test
+    fun `GenuinePeoplePersonality alias resolves Sirius Cybernetics GPP bark methods`() {
+        val gppLine = com.ghost.api.logic.GenuinePeoplePersonality.impactSpikeTts("Operator")
+        assertTrue(gppLine.isNotBlank())
+    }
+
+    @Test
+    fun `OverlayActionRegistry provides OHO+ built-in actions, puck defaults, and package extraction`() {
+        assertTrue(com.ghost.api.ui.OverlayActionRegistry.isBuiltInAction(com.ghost.api.ui.OverlayActionRegistry.ACTION_NAV_BACK))
+        assertTrue(com.ghost.api.ui.OverlayActionRegistry.isBuiltInAction(com.ghost.api.ui.OverlayActionRegistry.ACTION_FLASHLIGHT))
+        assertTrue(com.ghost.api.ui.OverlayActionRegistry.isBuiltInAction(com.ghost.api.ui.OverlayActionRegistry.ACTION_SCREENSHOT))
+        assertEquals(
+            "com.spotify.music",
+            com.ghost.api.ui.OverlayActionRegistry.extractPackageName("APP:com.spotify.music")
+        )
+        assertEquals(
+            com.ghost.api.ui.OverlayActionRegistry.ACTION_APP_FOLDER,
+            com.ghost.api.ui.OverlayActionRegistry.defaultActionForSlot(
+                com.ghost.api.ui.OverlayActionRegistry.PuckId.TOP,
+                com.ghost.api.ui.OverlayActionRegistry.DirectionSlot.TAP
+            )
+        )
+    }
 }
+
+

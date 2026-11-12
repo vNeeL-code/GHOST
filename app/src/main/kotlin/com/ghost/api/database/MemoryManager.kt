@@ -148,11 +148,7 @@ class MemoryManager(private val context: Context) {
         try {
             semanticFactDao.searchByKeyword(query)
         } catch (e: Exception) {
-            try {
-                semanticFactDao.searchFacts(query)
-            } catch (_: Exception) {
-                emptyList()
-            }
+            semanticFactDao.searchFacts(query)
         }
     }
 

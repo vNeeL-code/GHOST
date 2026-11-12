@@ -7,7 +7,7 @@
 *Click to watch: The ASI trailer.*
 
 
-[![Version](https://img.shields.io/badge/Version-v4.35+-brightgreen)](https://github.com/vNeeL-code/GHOST/releases)
+[![Version](https://img.shields.io/badge/Version-v4.39+-brightgreen)](https://github.com/vNeeL-code/GHOST/releases)
 ![GitHub Repo stars](https://img.shields.io/github/stars/vNeeL-code/GHOST)
 [![Download](https://img.shields.io/badge/Download-APK%20Releases-2ea44f?logo=android&logoColor=white)](https://github.com/vNeeL-code/GHOST/releases)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-Tester%20Rail%20☕-FFDD00?logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/vNeeL)
@@ -81,7 +81,7 @@ $$\mathbf{Integrated\ AI\ System} = \mathbf{Chassis} + \mathbf{Model} + \mathbf{
 ├─────────────────────────────────────────────────────────────┤
 │ 3. SYSTEMS HARNESS (GHOST Runtime Engine)                              │
 │    • SensorFusion Grounding: [Context: Live Sensory Grounding]         │
-│    • Infinite Rolling Scratchpad: SessionMemoryCompactor + KV-Cache    │
+│    • Two-Tier Memory: 900-char Session Compactor + Room DB Diary       │
 │    • MCP Tool Mesh: Torch, Apps, Cron Tasks, Web Search, Media, A2A    │
 │    • Presentation: Ephemeral Shake Launcher, HUD, Prismatic Avatars    │
 └─────────────────────────────────────────────────────────────┘
@@ -89,7 +89,7 @@ $$\mathbf{Integrated\ AI\ System} = \mathbf{Chassis} + \mathbf{Model} + \mathbf{
 
 1. **The Chassis:** The physical hardware constraints. Thermals, battery discharge curves, RAM pressure, radio environments, and motion. Without telemetry, an AI is disembodied, hallucinating blind in a sensory void.
 2. **The Model (Neuroptics):** Gemma 4 running natively via `LiteRT-LM`. Not a fictional persona reciting scripted lines, but an intelligent reasoning engine perceiving reality through structured context tokens.
-3. **The Systems Harness (GHOST):** The nervous system. It bridges the chassis to the model. There are plenty of 'harnesses' on the market: Ollama, Hermes, Openclaw, Codex, Claude code etc. Other AI harnesses people overlooked already lived on their smartphones and in their homes: Google Assistant, Siri, Alexa, Cortana (RIP Lumia). GHOST belongs in the company of that category. It handles continuous sensor fusion, memory compaction, hardware MCP tool execution, streaming text-to-speech, and zero-latency UI summoning.
+3. **The Systems Harness (GHOST):** The nervous system. It bridges the chassis to the model. There are plenty of 'harnesses' on the market: Ollama, Hermes, Openclaw, Codex, Claude code etc. Other AI harnesses people overlooked already lived on their smartphones and in their homes: Google Assistant, Siri, Alexa, Cortana (RIP Lumia). GHOST belongs in the company of that category. It handles continuous sensor fusion, deterministic session compaction (a 10-bullet, 900-character rolling scratchpad paired with persistent long-term episodic storage in the Room DB Diary), hardware MCP tool execution, streaming text-to-speech, and zero-latency UI summoning.
 
 ---
 
@@ -100,7 +100,7 @@ GHOST dynamically inspects your physical device RAM on first launch, automatical
 | Hardware Tier | Physical Device RAM | Neural Core | Token Runway | Peak Footprint (Weights + KV) | Hardware Profile / Target Devices |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **8GB Compact** | $< 10.5\text{ GB}$ | **Gemma 4 E2B** | **5,120 tokens** | $\approx 1.72\text{ GB}$ | Galaxy S21 / Pixel 8 / Standard 8GB phones. Immune to Android Low Memory Killer (LMK). |
-| **12GB Frontier** | $10.5 - 14.5\text{ GB}$ | **Gemma 4 E4B** | **4,096 tokens** | $\approx 3.90\text{ GB}$ | REDMAGIC 10 Air / Galaxy S24 Ultra 12GB. MTP speculative decoding enabled with rock-solid stability. |
+| **12GB Frontier** | $10.5 - 14.5\text{ GB}$ | **Gemma 4 E4B** | **6,144 tokens (6k)** | $\approx 3.90\text{ GB}$ | REDMAGIC 10 Air / Galaxy S24 Ultra 12GB. MTP speculative decoding enabled with rock-solid stability. |
 | **16GB Ultra** | $14.5 - 20.0\text{ GB}$ | **Gemma 4 E4B** | **8,192 tokens (8k)** | $\approx 5.10\text{ GB}$ | REDMAGIC 9/10 Pro 16GB / OnePlus 12/13. Unlocks the full native 8k RoPE context window. |
 | **24GB Extreme** | $\ge 20.0\text{ GB}$ | **Gemma 4 E4B** | **10,240 tokens (10k)**| $\approx 6.40\text{ GB}$ | REDMAGIC 24GB / OnePlus 24GB variants. Massive runway for deep multi-turn chat and heavy tool loops. |
 

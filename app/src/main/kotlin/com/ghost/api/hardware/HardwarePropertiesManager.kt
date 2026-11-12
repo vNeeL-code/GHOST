@@ -27,7 +27,6 @@ class HardwarePropertiesManager(private val context: Context) {
     val thermalState: StateFlow<ThermalState> = _thermalState.asStateFlow()
 
     private val THERMAL_CACHE_TTL_MS = 5000L
-    private val thermalPath = "/sys/class/thermal/thermal_zone0/temp"
 
     private var nativeThermalAvailable = false
     private var lastInferenceEndTime: Long = 0L
@@ -56,8 +55,9 @@ class HardwarePropertiesManager(private val context: Context) {
                 Timber.w("HardwarePropertiesManager: Native thermal unavailable")
             }
         }
-        // initializeThermalMonitoring()
-        // startPolling()
+        if (!nativeThermalAvailable) {
+            startPolling()
+        }
     }
 
     private fun startPolling() {
@@ -71,13 +71,26 @@ class HardwarePropertiesManager(private val context: Context) {
 
     private fun pollSysfsThermal() {
         try {
-            val file = File(thermalPath)
-            if (file.exists()) {
-                val tempC = (file.readText().trim().toIntOrNull() ?: 0) / 1000
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                val pm = context.getSystemService(PowerManager::class.java)
+                val headroom = pm?.getThermalHeadroom(0) ?: Float.NaN
+                if (!headroom.isNaN() && headroom > 0f) {
+                    val newState = when {
+                        headroom >= 1.0f -> ThermalState.CRITICAL
+                        headroom >= 0.85f -> ThermalState.HOT
+                        headroom >= 0.70f -> ThermalState.WARM
+                        else -> ThermalState.COOL
+                    }
+                    if (_thermalState.value != newState) _thermalState.value = newState
+                    return
+                }
+            }
+            val tempC = Constants.readMaxSocThermalCelsius()
+            if (tempC != null) {
                 val newState = when {
-                    tempC > 60 -> ThermalState.CRITICAL
-                    tempC > 50 -> ThermalState.HOT
-                    tempC > 42 -> ThermalState.WARM
+                    tempC >= Constants.THERMAL_LIMIT_CELSIUS -> ThermalState.CRITICAL
+                    tempC > 52f -> ThermalState.HOT
+                    tempC > 43f -> ThermalState.WARM
                     else -> ThermalState.COOL
                 }
                 if (_thermalState.value != newState) _thermalState.value = newState

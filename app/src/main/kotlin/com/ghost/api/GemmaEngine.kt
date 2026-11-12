@@ -9,7 +9,7 @@ import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
-import com.google.ai.edge.litertlm.Capabilities
+import com.google.ai.edge.litertlm.ModelInfo
 import com.google.ai.edge.litertlm.ExperimentalApi
 import com.google.ai.edge.litertlm.ExperimentalFlags
 import com.google.ai.edge.litertlm.LogSeverity
@@ -75,6 +75,14 @@ class GemmaEngine(private val context: Context) : LlmBackend {
     override var maxNumTokens: Int = Constants.MAX_TOKENS_E4B
         private set
 
+    override fun getActiveTokenCount(): Int {
+        return try {
+            conversation?.getTokenCount() ?: 0
+        } catch (_: Throwable) {
+            0
+        }
+    }
+
     private var lastModelPath: String = ""
     private var lastSystemPrompt: String = ""
     private var lastVisionEnabled: Boolean = true
@@ -127,7 +135,24 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                 else -> listOf("GPU" to sharedGpuBackend, "CPU" to Backend.CPU())
             }
             
-            val modelMaxTokens = Constants.getMaxTokensForModel(modelPath, context)
+            var modelMaxTokens = Constants.getMaxTokensForModel(modelPath, context)
+            var supportsSpeculativeDecoding = false
+            try {
+                ModelInfo.from(modelPath).use { modelInfo ->
+                    val nativeMaxContext = modelInfo.maxContextTokens()
+                    if (nativeMaxContext > 0 && modelMaxTokens > nativeMaxContext) {
+                        Timber.i("Clamping modelMaxTokens ($modelMaxTokens) to native bundle limit ($nativeMaxContext)")
+                        modelMaxTokens = nativeMaxContext
+                    }
+                    if (modelInfo is ModelInfo.Llm) {
+                        supportsSpeculativeDecoding = modelInfo.hasSpeculativeDecodingSupport()
+                    }
+                }
+                Timber.i("ModelInfo for $modelPath: maxTokens=$modelMaxTokens, speculativeDecoding=$supportsSpeculativeDecoding")
+            } catch (e: Exception) {
+                Timber.d("ModelInfo capability check skipped/unsupported: ${e.message}")
+            }
+
             maxNumTokens = modelMaxTokens
             Timber.i("Configuring GemmaEngine with maxNumTokens=$modelMaxTokens for model: $modelPath")
 
@@ -147,16 +172,6 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                     maxNumImages = if (enableVision) 2 else 0,
                     cacheDir = context.codeCacheDir.absolutePath  // Private internal storage (safe from Samsung Knox SELinux sandbox blocks)
                 )
-
-                var supportsSpeculativeDecoding = false
-                try {
-                    Capabilities(modelPath).use {
-                        supportsSpeculativeDecoding = it.hasSpeculativeDecodingSupport()
-                    }
-                    Timber.i("Speculative decoding support for $modelPath: $supportsSpeculativeDecoding")
-                } catch (e: Exception) {
-                    Timber.d("Speculative decoding capability check skipped/unsupported: ${e.message}")
-                }
 
                 var candidateEngine: Engine? = null
                 var candidateConversation: Conversation? = null
@@ -182,7 +197,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                     conversation = newConversation
 
                     activeBackend = "LiteRT-LM ($backendName${if (supportsSpeculativeDecoding && isGpu) " + MTP" else ""})"
-                    Timber.i("GemmaEngine initialized successfully on $backendName (MTP=$supportsSpeculativeDecoding)")
+                    Timber.i("GemmaEngine initialized successfully on $backendName (MTP=$supportsSpeculativeDecoding, maxNumTokens=$modelMaxTokens)")
                     return null // Success!
                 } catch (e: Throwable) {
                     Timber.w(e, "Native Engine Initialization Failed for $backendName: ${e.message}")
@@ -490,6 +505,7 @@ class GemmaEngine(private val context: Context) : LlmBackend {
 
 
 
+    @OptIn(ExperimentalApi::class)
     override suspend fun softReset(systemPrompt: String, newToolSets: List<ToolSet>?, initialMessages: List<com.google.ai.edge.litertlm.Message>?) {
         lastSystemPrompt = systemPrompt
         if (newToolSets != null) {
@@ -515,8 +531,6 @@ class GemmaEngine(private val context: Context) : LlmBackend {
                 conversation?.close()
                 conversation = null
 
-                // Always create a clean conversation config with systemInstruction and tools.
-                // Avoid experimental initialMessages which causes C++ turn-state corruption when combined with tools.
                 val config = ConversationConfig(
                     samplerConfig = samplerConfig,
                     systemInstruction = if (systemPrompt.isNotBlank()) Contents.of(systemPrompt) else null,

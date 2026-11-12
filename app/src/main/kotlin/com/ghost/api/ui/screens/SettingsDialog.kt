@@ -39,13 +39,12 @@ import com.ghost.api.GemmaNotificationListener
 import com.ghost.api.GemmaService
 import com.ghost.api.hardware.HardwareToggleReceiver
 import com.ghost.api.ui.EdgeLightsManager
-import com.ghost.api.workers.DiaryWorker
+import com.ghost.api.ui.OverlayActionRegistry
 
 @Composable
 fun SettingsDialog(
     onDismiss: () -> Unit,
-    onShowTutorial: () -> Unit,
-    onShowDiaryHistory: () -> Unit,
+    onShowDiaryHistory: () -> Unit = {},
     gemmaService: GemmaService?
 ) {
     val context = LocalContext.current
@@ -53,6 +52,7 @@ fun SettingsDialog(
 
     var edgeLightsEnabled by remember { mutableStateOf(EdgeLightsManager.isShowing) }
     var edgeLightsStyle by remember { mutableStateOf(prefs.getString(Constants.PREF_EDGE_LIGHT_STYLE, Constants.EDGE_STYLE_BARS) ?: Constants.EDGE_STYLE_BARS) }
+
     var passiveTtsEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_PASSIVE_TTS, true)) }
     var barkBattery by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_BARK_BATTERY, true)) }
     var barkPower by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_BARK_POWER, true)) }
@@ -62,9 +62,19 @@ fun SettingsDialog(
     var barkThermal by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_BARK_THERMAL, true)) }
     var barkNotifs by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_BARK_NOTIFS, true)) }
     var showPassiveCuesSubmenu by remember { mutableStateOf(false) }
-    var diaryActive by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_AUTONOMOUS_DIARY, true)) }
-    var diaryCadence by remember { mutableStateOf(prefs.getString(Constants.PREF_DIARY_CADENCE, "12") ?: "12") }
+    var showPuckConfigDialog by remember { mutableStateOf(false) }
+
+    var hyperPucksEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_HYPER_PUCKS_ENABLED, true)) }
+    var diaryActive by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_AUTONOMOUS_DIARY, false)) }
     var diarySyncCalendar by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_DIARY_SYNC_CALENDAR, false)) }
+    var diaryCadence by remember { mutableStateOf(prefs.getString(Constants.PREF_DIARY_CADENCE, "3") ?: "3") }
+
+    var puckSpreadScale by remember { mutableStateOf(prefs.getFloat(Constants.PREF_PUCK_SPREAD_SCALE, 1.0f)) }
+    var puckVerticalOffsetDp by remember { mutableStateOf(prefs.getInt(Constants.PREF_PUCK_VERTICAL_OFFSET_DP, 0)) }
+    var selectedConfigPuck by remember { mutableStateOf(OverlayActionRegistry.PuckId.CENTER) }
+    var activePickerSlot by remember { mutableStateOf<Pair<String, String>?>(null) } // prefKey to title
+    var bindingRefreshTick by remember { mutableStateOf(0) }
+
     var fastPathEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_FAST_PATH_ENABLED, true)) }
     var isOperatorTier by remember { mutableStateOf(Constants.isOperatorTier(prefs)) }
     var ttsEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_TTS_ENABLED, true)) }
@@ -77,10 +87,14 @@ fun SettingsDialog(
     var summonMethod by remember { mutableStateOf(prefs.getString(Constants.PREF_SUMMON_METHOD, Constants.SUMMON_METHOD_BOTH) ?: Constants.SUMMON_METHOD_BOTH) }
 
     val tokenManager = remember { com.ghost.api.logic.HFTokenManager(context) }
-    val webSessionManager = remember { com.ghost.api.logic.WebSessionManager.getInstance(context) }
     var geminiKey by remember { mutableStateOf(tokenManager.getGeminiKey() ?: "") }
     var showGeminiKey by remember { mutableStateOf(false) }
-    var geminiSearchGrounding by remember { mutableStateOf(webSessionManager.isGeminiSearchGroundingEnabled()) }
+    var geminiSearchGrounding by remember { mutableStateOf(prefs.getBoolean("gemini_search_grounding", true)) }
+    val collapsedSections = remember { mutableStateMapOf<String, Boolean>() }
+    fun isSectionExpanded(title: String): Boolean = collapsedSections[title] != true
+    fun toggleSection(title: String) {
+        collapsedSections[title] = isSectionExpanded(title)
+    }
 
     val accentColor = Color(0xFF8BB4F6)
     val cardBg = Color(0xFF141418)
@@ -346,6 +360,367 @@ fun SettingsDialog(
         )
     }
 
+    if (showPuckConfigDialog) {
+        val _tick = bindingRefreshTick
+        AlertDialog(
+            onDismissRequest = { showPuckConfigDialog = false },
+            title = {
+                Text(
+                    text = "✧ Pucks & Gestures",
+                    fontWeight = FontWeight.Bold,
+                    color = accentColor,
+                    fontSize = 16.sp
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 480.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "Tap a puck to configure swipe directions",
+                        fontSize = 11.sp,
+                        color = textDim
+                    )
+
+                    // 1. Row of Colored Puck Pills
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        val configPucks = listOf(
+                            OverlayActionRegistry.PuckId.TL,
+                            OverlayActionRegistry.PuckId.TOP,
+                            OverlayActionRegistry.PuckId.TR,
+                            OverlayActionRegistry.PuckId.CENTER,
+                            OverlayActionRegistry.PuckId.BL,
+                            OverlayActionRegistry.PuckId.BOTTOM,
+                            OverlayActionRegistry.PuckId.BR
+                        )
+                        for (puck in configPucks) {
+                            val isSelected = selectedConfigPuck == puck
+                            val puckColor = Color(android.graphics.Color.parseColor(puck.colorHex))
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSelected) puckColor else puckColor.copy(alpha = 0.28f))
+                                    .border(
+                                        width = if (isSelected) 2.dp else 1.dp,
+                                        color = if (isSelected) Color.White else puckColor.copy(alpha = 0.55f),
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                    .clickable { selectedConfigPuck = puck }
+                                    .padding(vertical = 10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "✧",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = if (isSelected) Color.Black else puckColor
+                                )
+                            }
+                        }
+                    }
+
+                    // 2. Selected Puck Header & Enable Toggle
+                    val currentPuck = selectedConfigPuck
+                    val puckColor = Color(android.graphics.Color.parseColor(currentPuck.colorHex))
+                    val isCenter = currentPuck == OverlayActionRegistry.PuckId.CENTER
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF181820))
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(14.dp)
+                                    .clip(CircleShape)
+                                    .background(puckColor)
+                            )
+                            Text(
+                                text = currentPuck.title,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+
+                        if (!isCenter) {
+                            var isEnabled by remember(_tick, currentPuck) {
+                                mutableStateOf(OverlayActionRegistry.isPuckEnabled(prefs, currentPuck))
+                            }
+                            Switch(
+                                checked = isEnabled,
+                                onCheckedChange = { checked ->
+                                    isEnabled = checked
+                                    prefs.edit().putBoolean(currentPuck.enabledPrefKey, checked).apply()
+                                    bindingRefreshTick++
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = puckColor,
+                                    checkedTrackColor = Color(0xFF334B77)
+                                )
+                            )
+                        } else {
+                            Text(
+                                text = "Core ✧",
+                                fontSize = 11.sp,
+                                color = textDim,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+
+                    // 3. Direction Slots for selected puck
+                    val activeSlots = if (isCenter) {
+                        listOf(
+                            OverlayActionRegistry.DirectionSlot.TAP,
+                            OverlayActionRegistry.DirectionSlot.UP,
+                            OverlayActionRegistry.DirectionSlot.DOWN
+                        )
+                    } else {
+                        OverlayActionRegistry.DirectionSlot.entries
+                    }
+
+                    for (slot in activeSlots) {
+                        val slotPrefKey = OverlayActionRegistry.prefKeyForSlot(currentPuck, slot)
+                        val actionSpec = remember(_tick, currentPuck, slot) {
+                            OverlayActionRegistry.getSlotAction(prefs, currentPuck, slot)
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF181820))
+                                .clickable {
+                                    activePickerSlot = slotPrefKey to "${currentPuck.title} • ${slot.label}"
+                                }
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "${slot.arrowGlyph} ${slot.label}",
+                                fontSize = 12.sp,
+                                color = Color.White,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = OverlayActionRegistry.getDisplayLabel(context, actionSpec),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = accentColor
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = dividerColor, thickness = 1.dp)
+
+                    // 4. Spread & Offset Calibration
+                    Text(
+                        text = "Placement Calibration",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = accentColor
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        val spreads = listOf(0.8f to "Compact", 1.0f to "Standard", 1.2f to "Wide")
+                        for ((scaleVal, sLabel) in spreads) {
+                            val isSel = kotlin.math.abs(puckSpreadScale - scaleVal) < 0.05f
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSel) accentColor else Color(0xFF181820))
+                                    .clickable {
+                                        puckSpreadScale = scaleVal
+                                        prefs.edit().putFloat(Constants.PREF_PUCK_SPREAD_SCALE, scaleVal).apply()
+                                    }
+                                    .padding(vertical = 7.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = sLabel,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSel) Color.Black else Color.White
+                                )
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        val offsets = listOf(65 to "Lower", 0 to "Center", -45 to "Upper")
+                        for ((offDp, oLabel) in offsets) {
+                            val isSel = puckVerticalOffsetDp == offDp
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSel) accentColor else Color(0xFF181820))
+                                    .clickable {
+                                        puckVerticalOffsetDp = offDp
+                                        prefs.edit().putInt(Constants.PREF_PUCK_VERTICAL_OFFSET_DP, offDp).apply()
+                                    }
+                                    .padding(vertical = 7.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = oLabel,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSel) Color.Black else Color.White
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showPuckConfigDialog = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = accentColor),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Done", color = Color.Black, fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = Color(0xFF141418),
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
+    activePickerSlot?.let { (targetPrefKey, slotTitle) ->
+        val installedApps = remember {
+            val pm = context.packageManager
+            val mainIntent = Intent(Intent.ACTION_MAIN, null).apply {
+                addCategory(Intent.CATEGORY_LAUNCHER)
+            }
+            pm.queryIntentActivities(mainIntent, 0)
+                .mapNotNull { info ->
+                    val pkg = info.activityInfo?.packageName ?: return@mapNotNull null
+                    val label = try { info.loadLabel(pm).toString() } catch (_: Exception) { pkg }
+                    label to pkg
+                }
+                .distinctBy { it.second }
+                .sortedBy { it.first.lowercase() }
+        }
+        AlertDialog(
+            onDismissRequest = { activePickerSlot = null },
+            title = {
+                Text(
+                    text = "Bind Action: $slotTitle",
+                    fontWeight = FontWeight.Bold,
+                    color = accentColor,
+                    fontSize = 15.sp
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "ACTIONS",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = accentColor
+                    )
+                    for (act in OverlayActionRegistry.BUILT_IN_ACTIONS) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF1C1C22))
+                                .clickable {
+                                    prefs.edit().putString(targetPrefKey, act.id).apply()
+                                    bindingRefreshTick++
+                                    activePickerSlot = null
+                                }
+                                .padding(horizontal = 12.dp, vertical = 9.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "${act.shortGlyph}  ${act.label}",
+                                fontSize = 12.sp,
+                                color = Color.White,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = act.category,
+                                fontSize = 10.sp,
+                                color = textDim
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "INSTALLED APPS",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = accentColor
+                    )
+                    for ((appLabel, pkg) in installedApps) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF1C1C22))
+                                .clickable {
+                                    prefs.edit().putString(targetPrefKey, "${OverlayActionRegistry.APP_PREFIX}$pkg").apply()
+                                    bindingRefreshTick++
+                                    activePickerSlot = null
+                                }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = appLabel,
+                                fontSize = 12.sp,
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { activePickerSlot = null }) {
+                    Text("Cancel", color = textDim)
+                }
+            },
+            containerColor = Color(0xFF141418),
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -405,52 +780,38 @@ fun SettingsDialog(
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                         contentPadding = PaddingValues(vertical = 12.dp)
                     ) {
-                        // 1. === System & Memory === (Category 1: Quick tools)
+                        // 1. === Fast-Path Automation ===
                         item {
-                            SettingsSectionHeader(title = "System & Memory")
-                        }
-                        item {
-                            SettingsActionCard(
-                                title = "Trigger Diary Log Now",
-                                subtitle = if (isEngineActive) "Generate an episodic reflection immediately" else "Generate an episodic reflection immediately (Engine is currently OFF)",
-                                enabled = isEngineActive,
-                                onClick = {
-                                    GemmaService.instance?.startDiaryCycle()
-                                    Toast.makeText(context, "Generating diary entry...", Toast.LENGTH_SHORT).show()
-                                }
+                            SettingsSectionHeader(
+                                title = "Fast-Path Automation",
+                                isExpanded = isSectionExpanded("Fast-Path Automation"),
+                                onToggle = { toggleSection("Fast-Path Automation") }
                             )
                         }
-                        item {
-                            SettingsActionCard(
-                                title = "View Log History",
-                                subtitle = "Inspect recent episodic memory logs",
-                                onClick = onShowDiaryHistory
-                            )
-                        }
-                        item {
-                            SettingsActionCard(
-                                title = "Tutorial Programme",
-                                subtitle = "Review setup orientation and gesture controls",
-                                onClick = onShowTutorial
-                            )
-                        }
-                        item {
-                            SettingsToggleRow(
-                                title = "Fast-Path Router",
-                                subtitle = "Zero-token instant bypass for URLs, volume & system actions",
-                                checked = fastPathEnabled,
-                                onCheckedChange = { checked ->
-                                    fastPathEnabled = checked
-                                    prefs.edit().putBoolean(Constants.PREF_FAST_PATH_ENABLED, checked).apply()
-                                    Toast.makeText(context, if (checked) "Fast-path router active ⚡" else "Fast-path router disabled (all queries go to LLM)", Toast.LENGTH_SHORT).show()
-                                }
-                            )
+                        if (isSectionExpanded("Fast-Path Automation")) {
+                            item {
+                                SettingsToggleRow(
+                                    title = "Fast-Path Router",
+                                    subtitle = "Zero-token instant bypass for URLs, volume & system actions",
+                                    checked = fastPathEnabled,
+                                    onCheckedChange = { checked ->
+                                        fastPathEnabled = checked
+                                        prefs.edit().putBoolean(Constants.PREF_FAST_PATH_ENABLED, checked).apply()
+                                        Toast.makeText(context, if (checked) "Fast-path router active ⚡" else "Fast-path router disabled (all queries go to LLM)", Toast.LENGTH_SHORT).show()
+                                    }
+                                )
+                            }
                         }
 
-                        // 2. === Live Wallpapers & Visualisers === (Category 2: 4 options + wallpaper actions + edge lights + pip)
+                        // 2. === Live Wallpapers & Visualisers ===
                         item {
-                            SettingsSectionHeader(title = "Live Wallpapers & Visualisers")
+                            SettingsSectionHeader(
+                                title = "Live Wallpapers & Visualisers",
+                                isExpanded = isSectionExpanded("Live Wallpapers & Visualisers"),
+                                onToggle = { toggleSection("Live Wallpapers & Visualisers") }
+                            )
                         }
+                        if (isSectionExpanded("Live Wallpapers & Visualisers")) {
                         item {
                             Column {
                                 Text(
@@ -643,35 +1004,41 @@ fun SettingsDialog(
                                 }
                             }
                         }
+                        }
 
                         // === Summon & Gesture Controls ===
                         item {
-                            SettingsSectionHeader(title = "Summon & Gesture Controls")
+                            SettingsSectionHeader(
+                                title = "Summon & Gesture Controls",
+                                isExpanded = isSectionExpanded("Summon & Gesture Controls"),
+                                onToggle = { toggleSection("Summon & Gesture Controls") }
+                            )
                         }
-                        item {
+                        if (isSectionExpanded("Summon & Gesture Controls")) {
+                            item {
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 4.dp, vertical = 4.dp)
                                     .background(cardBg, RoundedCornerShape(12.dp))
                                     .border(1.dp, Color(0x1AFFFFFF), RoundedCornerShape(12.dp))
-                                    .padding(12.dp)
+                                    .padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 Text(
-                                    text = "Summon Trigger",
+                                    text = "Summon Method",
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
                                 )
                                 Text(
-                                    text = "Choose how to invoke GHOST overlay from anywhere",
+                                    text = "Choose how GHOST is summoned onto the screen",
                                     fontSize = 11.sp,
-                                    color = textDim,
-                                    modifier = Modifier.padding(bottom = 10.dp)
+                                    color = textDim
                                 )
                                 val summonOptions = listOf(
                                     Constants.SUMMON_METHOD_SHAKE to "Shake",
-                                    Constants.SUMMON_METHOD_EDGE_NUB to "Edge",
+                                    Constants.SUMMON_METHOD_EDGE_NUB to "Edge Nub",
                                     Constants.SUMMON_METHOD_BOTH to "Both",
                                     Constants.SUMMON_METHOD_OFF to "Off"
                                 )
@@ -693,8 +1060,8 @@ fun SettingsDialog(
                                                     svc?.updateSummonControls()
                                                     val desc = when (key) {
                                                         Constants.SUMMON_METHOD_SHAKE -> "Phone shake active 📳"
-                                                        Constants.SUMMON_METHOD_EDGE_NUB -> "Right bezel handle active 🎚️"
-                                                        Constants.SUMMON_METHOD_BOTH -> "Shake & Edge handle active ✨"
+                                                        Constants.SUMMON_METHOD_EDGE_NUB -> "Edge summon nub active 🎚️"
+                                                        Constants.SUMMON_METHOD_BOTH -> "Shake & Edge summon nub active ✨"
                                                         else -> "Overlay summoning disabled 🚫"
                                                     }
                                                     Toast.makeText(context, desc, Toast.LENGTH_SHORT).show()
@@ -711,14 +1078,83 @@ fun SettingsDialog(
                                         }
                                     }
                                 }
+
+                                // Master Hyper Pucks Toggle
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(0xFF1C1C22))
+                                        .clickable {
+                                            val next = !hyperPucksEnabled
+                                            hyperPucksEnabled = next
+                                            prefs.edit().putBoolean(Constants.PREF_HYPER_PUCKS_ENABLED, next).apply()
+                                            Toast.makeText(context, if (next) "Hyper Pucks enabled" else "Hyper Pucks disabled", Toast.LENGTH_SHORT).show()
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                        Text(
+                                            text = "Hyper Pucks",
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = Color.White
+                                        )
+                                        Text(
+                                            text = "6 orbital quick-action gesture pucks surrounding input bar",
+                                            fontSize = 10.sp,
+                                            color = textDim
+                                        )
+                                    }
+                                    Switch(
+                                        checked = hyperPucksEnabled,
+                                        onCheckedChange = { checked ->
+                                            hyperPucksEnabled = checked
+                                            prefs.edit().putBoolean(Constants.PREF_HYPER_PUCKS_ENABLED, checked).apply()
+                                            Toast.makeText(context, if (checked) "Hyper Pucks enabled" else "Hyper Pucks disabled", Toast.LENGTH_SHORT).show()
+                                        },
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = accentColor,
+                                            checkedTrackColor = Color(0xFF334B77)
+                                        )
+                                    )
+                                }
+
+                                // Puck & Action Configurator Button
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(0xFF1C1C22))
+                                        .clickable { showPuckConfigDialog = true }
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Customize Pucks, Gestures & Positions",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = accentColor
+                                    )
+                                    Text(text = "✧", fontSize = 14.sp, color = accentColor)
+                                }
                             }
                         }
-
-                        // 3. === Voice & Speech === (Category 3: TTS + Passive Notification TTS)
-                        item {
-                            SettingsSectionHeader(title = "Voice & Speech")
                         }
+
+                        // 3. === Voice & Speech ===
                         item {
+                            SettingsSectionHeader(
+                                title = "Voice & Speech",
+                                isExpanded = isSectionExpanded("Voice & Speech"),
+                                onToggle = { toggleSection("Voice & Speech") }
+                            )
+                        }
+                        if (isSectionExpanded("Voice & Speech")) {
+                            item {
                             SettingsToggleRow(
                                 title = "Direct Voice Output",
                                 subtitle = "Speaks aloud responses to your direct messages and commands",
@@ -748,7 +1184,7 @@ fun SettingsDialog(
                                 ) {
                                     Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                                         Text(
-                                            text = "Passive Presence & Cues",
+                                            text = "GPP Cues",
                                             fontSize = 14.sp,
                                             fontWeight = FontWeight.Medium,
                                             color = Color.White
@@ -765,7 +1201,7 @@ fun SettingsDialog(
                                         onCheckedChange = { checked ->
                                             passiveTtsEnabled = checked
                                             prefs.edit().putBoolean(Constants.PREF_PASSIVE_TTS, checked).apply()
-                                            Toast.makeText(context, if (checked) "Passive cues enabled" else "Passive cues disabled", Toast.LENGTH_SHORT).show()
+                                            Toast.makeText(context, if (checked) "GPP cues enabled" else "GPP cues disabled", Toast.LENGTH_SHORT).show()
                                         },
                                         colors = SwitchDefaults.colors(
                                             checkedThumbColor = Color(0xFF8BB4F6),
@@ -789,7 +1225,7 @@ fun SettingsDialog(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = "Customize",
+                                        text = "Customize GPP Reflexes",
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Medium,
                                         color = Color(0xFF8BB4F6)
@@ -801,109 +1237,19 @@ fun SettingsDialog(
                                 }
                             }
                         }
-
-                        // 4. === Autonomous Diary === (Category 4: Second to last)
-                        item {
-                            SettingsSectionHeader(title = "Autonomous Diary")
                         }
+
+                        // 4. === Cloud Reasoning & Search Grounding ===
                         item {
-                            SettingsToggleRow(
-                                title = "Autonomous Reflections",
-                                subtitle = if (isEngineActive) {
-                                    "Log episodic memory entries via background alarms"
-                                } else {
-                                    "Log episodic memory entries via background alarms (Engine is currently OFF)"
-                                },
-                                checked = diaryActive,
-                                enabled = isEngineActive,
-                                onCheckedChange = { checked ->
-                                    diaryActive = checked
-                                    prefs.edit().putBoolean(Constants.PREF_AUTONOMOUS_DIARY, checked).apply()
-                                    if (checked) {
-                                        com.ghost.api.GemmaService.instance?.scheduleNextDiaryAlarm(forceReschedule = true)
-                                        DiaryWorker.schedule(context)
-                                        Toast.makeText(context, "Autonomous diary enabled", Toast.LENGTH_SHORT).show()
-                                    } else {
-                                        com.ghost.api.GemmaService.instance?.cancelDiaryAlarm()
-                                        DiaryWorker.cancel(context)
-                                        Toast.makeText(context, "Autonomous diary paused", Toast.LENGTH_SHORT).show()
-                                    }
-                                }
+                            SettingsSectionHeader(
+                                title = "Cloud Reasoning & Search Grounding",
+                                isExpanded = isSectionExpanded("Cloud Reasoning & Search Grounding"),
+                                onToggle = { toggleSection("Cloud Reasoning & Search Grounding") }
                             )
                         }
-                        item {
-                            SettingsToggleRow(
-                                title = "Device Calendar Integration",
-                                subtitle = if (!isEngineActive) {
-                                    "Calendar sync paused (Engine is currently OFF)"
-                                } else if (diarySyncCalendar) {
-                                    "Calendar sync ACTIVE: Reflections mirror as Δ 👾 ∇ calendar blocks."
-                                } else {
-                                    "In-app PRIVATE: Reflections stay strictly in local database with FIFO eviction (last 25 entries)."
-                                },
-                                checked = diarySyncCalendar,
-                                enabled = isEngineActive,
-                                onCheckedChange = { checked ->
-                                    diarySyncCalendar = checked
-                                    prefs.edit().putBoolean(Constants.PREF_DIARY_SYNC_CALENDAR, checked).apply()
-                                    val msg = if (checked) "Calendar sync enabled (Δ 👾 ∇)" else "In-app private mode (FIFO 25)"
-                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                                }
-                            )
-                        }
-                        item {
-                            AnimatedVisibility(visible = diaryActive && isEngineActive) {
-                                Column(modifier = Modifier.padding(top = 4.dp)) {
-                                    Text(
-                                        text = "Reflection Cadence",
-                                        fontSize = 12.sp,
-                                        color = textDim,
-                                        modifier = Modifier.padding(bottom = 8.dp)
-                                    )
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        val cadences = listOf("1H" to "1", "3H" to "3", "6H" to "6", "12H" to "12", "24H" to "24")
-                                        for ((label, value) in cadences) {
-                                            val isSelected = diaryCadence == value
-                                            Box(
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .background(if (isSelected) accentColor else cardBg)
-                                                    .clickable {
-                                                        diaryCadence = value
-                                                        prefs.edit().putString(Constants.PREF_DIARY_CADENCE, value).apply()
-                                                        if (diaryActive) {
-                                                            com.ghost.api.GemmaService.instance?.scheduleNextDiaryAlarm(forceReschedule = true)
-                                                            DiaryWorker.schedule(context)
-                                                        }
-                                                        Toast.makeText(context, "Cadence set to $label", Toast.LENGTH_SHORT).show()
-                                                    }
-                                                    .padding(vertical = 8.dp),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(
-                                                    text = label,
-                                                    fontSize = 12.sp,
-                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                    color = if (isSelected) Color.Black else Color.White
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // 5. === Cloud Reasoning & Search Grounding ===
-                        item {
-                            SettingsSectionHeader(title = "Cloud Reasoning & Search Grounding")
-                        }
-
-                        // 5A. Direct Pipe: ✦ Gemini ("Mum")
-                        item {
+                        if (isSectionExpanded("Cloud Reasoning & Search Grounding")) {
+                            // 5A. Direct Pipe: ✦ Gemini ("Mum")
+                            item {
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1036,7 +1382,7 @@ fun SettingsDialog(
                                         checked = geminiSearchGrounding,
                                         onCheckedChange = { checked ->
                                             geminiSearchGrounding = checked
-                                            webSessionManager.setGeminiSearchGroundingEnabled(checked)
+                                            prefs.edit().putBoolean("gemini_search_grounding", checked).apply()
                                         },
                                         colors = SwitchDefaults.colors(
                                             checkedThumbColor = Color.Black,
@@ -1046,12 +1392,18 @@ fun SettingsDialog(
                                 }
                             }
                         }
-
-                        // 6. === Inference Engine === (Category 6: Last setting, fire and forget)
-                        item {
-                            SettingsSectionHeader(title = "Inference Engine")
                         }
+
+                        // 6. === Inference Engine ===
                         item {
+                            SettingsSectionHeader(
+                                title = "Inference Engine",
+                                isExpanded = isSectionExpanded("Inference Engine"),
+                                onToggle = { toggleSection("Inference Engine") }
+                            )
+                        }
+                        if (isSectionExpanded("Inference Engine")) {
+                            item {
                             Column(modifier = Modifier.padding(bottom = 14.dp)) {
                                 val ramGb = Constants.getDeviceRamGb(context)
                                 val coreTitle = when {
@@ -1099,9 +1451,6 @@ fun SettingsDialog(
                                     }
                                 }
                             }
-                        }
-                        item {
-                            SettingsSectionHeader(title = "Local Inference Engine")
                         }
                         item {
                             Column {
@@ -1199,64 +1548,214 @@ fun SettingsDialog(
                                 }
                             }
                         }
+                        }
 
-                        // === Permissions & Access ===
-                        if (!isNotifGranted || !isOverlayGranted || !isAccessibilityGranted) {
-                            item {
-                                SettingsSectionHeader(title = "Required System Access")
-                            }
+                        // === Autonomous Diary ===
+                        item {
+                            SettingsSectionHeader(
+                                title = "Autonomous Diary",
+                                isExpanded = isSectionExpanded("Autonomous Diary"),
+                                onToggle = { toggleSection("Autonomous Diary") }
+                            )
                         }
-                        if (!isAccessibilityGranted) {
+                        if (isSectionExpanded("Autonomous Diary")) {
                             item {
-                                SettingsActionCard(
-                                    title = "Grant Accessibility Service",
-                                    subtitle = "Required for active agent app awareness & dynamic avatar reactivity",
-                                    isWarning = true,
-                                    onClick = {
-                                        showAccessibilityDisclosureDialog = true
+                            SettingsToggleRow(
+                                title = "Autonomous Reflections",
+                                subtitle = if (isEngineActive) {
+                                    "Log episodic memory entries via background alarms"
+                                } else {
+                                    "Log episodic memory entries via background alarms (Engine is currently OFF)"
+                                },
+                                checked = diaryActive,
+                                enabled = isEngineActive,
+                                onCheckedChange = { checked ->
+                                    diaryActive = checked
+                                    prefs.edit().putBoolean(Constants.PREF_AUTONOMOUS_DIARY, checked).apply()
+                                    if (checked) {
+                                        com.ghost.api.GemmaService.instance?.scheduleNextDiaryAlarm(forceReschedule = true)
+                                        Toast.makeText(context, "Autonomous diary enabled", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        com.ghost.api.GemmaService.instance?.cancelDiaryAlarm()
+                                        Toast.makeText(context, "Autonomous diary paused", Toast.LENGTH_SHORT).show()
                                     }
-                                )
-                            }
+                                }
+                            )
                         }
-                        if (!isNotifGranted) {
-                            item {
-                                SettingsActionCard(
-                                    title = "Grant Notification Listener Access",
-                                    subtitle = "Required for reading notifications, auto-replies & context awareness",
-                                    isWarning = true,
-                                    onClick = {
-                                        val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
-                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        item {
+                            SettingsToggleRow(
+                                title = "Device Calendar Integration",
+                                subtitle = if (!isEngineActive) {
+                                    "Calendar sync paused (Engine is currently OFF)"
+                                } else if (diarySyncCalendar) {
+                                    "Google Calendar sync ACTIVE: Reflections mirror as Δ 👾 ∇ calendar blocks."
+                                } else {
+                                    "In-app PRIVATE: Reflections stay strictly in local database with FIFO eviction (last 25 entries)."
+                                },
+                                checked = diarySyncCalendar,
+                                enabled = isEngineActive,
+                                onCheckedChange = { checked ->
+                                    diarySyncCalendar = checked
+                                    prefs.edit().putBoolean(Constants.PREF_DIARY_SYNC_CALENDAR, checked).apply()
+                                    val msg = if (checked) "Calendar sync enabled (Δ 👾 ∇)" else "In-app private mode (FIFO 25)"
+                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                }
+                            )
+                        }
+                        item {
+                            AnimatedVisibility(visible = diaryActive && isEngineActive) {
+                                Column(modifier = Modifier.padding(top = 4.dp)) {
+                                    Text(
+                                        text = "Reflection Cadence",
+                                        fontSize = 12.sp,
+                                        color = textDim,
+                                        modifier = Modifier.padding(bottom = 8.dp)
+                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        val cadences = listOf("1H" to "1", "3H" to "3", "6H" to "6", "12H" to "12", "24H" to "24")
+                                        for ((label, value) in cadences) {
+                                            val isSelected = diaryCadence == value
+                                            Box(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(if (isSelected) accentColor else cardBg)
+                                                    .clickable {
+                                                        diaryCadence = value
+                                                        prefs.edit().putString(Constants.PREF_DIARY_CADENCE, value).apply()
+                                                        if (diaryActive) {
+                                                            com.ghost.api.GemmaService.instance?.scheduleNextDiaryAlarm(forceReschedule = true)
+                                                        }
+                                                        Toast.makeText(context, "Cadence set to $label", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                    .padding(vertical = 8.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = label,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                    color = if (isSelected) Color.Black else Color.White
+                                                )
+                                            }
                                         }
-                                        context.startActivity(intent)
                                     }
-                                )
+                                }
                             }
                         }
-                        if (!isOverlayGranted) {
+                        }
+
+                        // === System & Memory ===
+                        item {
+                            SettingsSectionHeader(
+                                title = "System & Memory",
+                                isExpanded = isSectionExpanded("System & Memory"),
+                                onToggle = { toggleSection("System & Memory") }
+                            )
+                        }
+                        if (isSectionExpanded("System & Memory")) {
                             item {
-                                SettingsActionCard(
-                                    title = "Grant System Overlay Access",
-                                    subtitle = "Required for edge lights & ambient HUD",
-                                    isWarning = true,
-                                    onClick = {
-                                        context.startActivity(
-                                            Intent(
-                                                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                                Uri.parse("package:${context.packageName}")
+                            SettingsActionCard(
+                                title = "Trigger Diary Log Now",
+                                subtitle = "Generate an episodic reflection immediately",
+                                onClick = {
+                                    GemmaService.instance?.startDiaryCycle()
+                                    Toast.makeText(context, "Generating diary entry...", Toast.LENGTH_SHORT).show()
+                                }
+                            )
+                        }
+                        item {
+                            SettingsActionCard(
+                                title = "View Diary History",
+                                subtitle = "Inspect recent episodic memory logs",
+                                onClick = onShowDiaryHistory
+                            )
+                        }
+                        item {
+                            SettingsActionCard(
+                                title = "Compress Session / Flush Memory",
+                                subtitle = "Force long-term semantic memory synthesis",
+                                onClick = {
+                                    val svc = gemmaService ?: GemmaService.instance
+                                    svc?.flushSessionMemory()
+                                    Toast.makeText(context, "Flushing memory and compressing session...", Toast.LENGTH_SHORT).show()
+                                }
+                            )
+                        }
+                    }
+
+                    // === Permissions & Access ===
+                    if (!isNotifGranted || !isOverlayGranted || !isAccessibilityGranted) {
+                        item {
+                            SettingsSectionHeader(
+                                title = "Required System Access",
+                                isExpanded = isSectionExpanded("Required System Access"),
+                                onToggle = { toggleSection("Required System Access") }
+                            )
+                        }
+                        if (isSectionExpanded("Required System Access")) {
+                            if (!isAccessibilityGranted) {
+                                item {
+                                    SettingsActionCard(
+                                        title = "Grant Accessibility Service",
+                                        subtitle = "Required for active agent app awareness & dynamic avatar reactivity",
+                                        isWarning = true,
+                                        onClick = {
+                                            showAccessibilityDisclosureDialog = true
+                                        }
+                                    )
+                                }
+                            }
+                            if (!isNotifGranted) {
+                                item {
+                                    SettingsActionCard(
+                                        title = "Grant Notification Listener Access",
+                                        subtitle = "Required for reading notifications, auto-replies & context awareness",
+                                        isWarning = true,
+                                        onClick = {
+                                            val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
+                                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            }
+                                            context.startActivity(intent)
+                                        }
+                                    )
+                                }
+                            }
+                            if (!isOverlayGranted) {
+                                item {
+                                    SettingsActionCard(
+                                        title = "Grant System Overlay Access",
+                                        subtitle = "Required for edge lights & ambient HUD",
+                                        isWarning = true,
+                                        onClick = {
+                                            context.startActivity(
+                                                Intent(
+                                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                                    Uri.parse("package:${context.packageName}")
+                                                )
                                             )
-                                        )
-                                    }
-                                )
+                                        }
+                                    )
+                                }
                             }
                         }
+                    }
 
                         // === Flavor-specific Bottom Card ===
-                        if (BuildConfig.SHOW_OPERATOR_PASS_PAYWALL) {
-                            // Play Store Flavor: Operator Pass (Tree Fiddy 🦕💭💸 Hunter vs Δ 👾 ∇ Operator)
-                            item {
-                                SettingsSectionHeader(title = "Operator Pass")
-                            }
+                        val passTitle = if (BuildConfig.DISTRIBUTION_FLAVOR == "fdroid") "Guardian" else "Operator Pass"
+                        item {
+                            SettingsSectionHeader(
+                                title = passTitle,
+                                isExpanded = isSectionExpanded(passTitle),
+                                onToggle = { toggleSection(passTitle) }
+                            )
+                        }
+                        if (isSectionExpanded(passTitle)) {
+                            if (BuildConfig.SHOW_OPERATOR_PASS_PAYWALL) {
+                                // Play Store Flavor: Operator Pass (Tree Fiddy 🦕💭💸 Hunter vs Δ 👾 ∇ Operator)
                             item {
                                 Surface(
                                     modifier = Modifier
@@ -1410,9 +1909,6 @@ fun SettingsDialog(
                         } else if (BuildConfig.DISTRIBUTION_FLAVOR == "fdroid") {
                             // F-Droid Flavor: FOSS Guardian (zero upsells, zero locks)
                             item {
-                                SettingsSectionHeader(title = "Guardian")
-                            }
-                            item {
                                 Surface(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -1505,9 +2001,6 @@ fun SettingsDialog(
                         } else {
                             // Patreon / Supporter Flavor: Fully Unlocked Operator
                             item {
-                                SettingsSectionHeader(title = "Operator Pass")
-                            }
-                            item {
                                 Surface(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -1598,6 +2091,7 @@ fun SettingsDialog(
                             }
                         }
                     }
+                    }
                 }
             }
         }
@@ -1605,15 +2099,43 @@ fun SettingsDialog(
 }
 
 @Composable
-private fun SettingsSectionHeader(title: String) {
-    Text(
-        text = title.uppercase(),
-        fontSize = 11.sp,
-        fontWeight = FontWeight.Bold,
-        color = Color(0xFF8BB4F6),
-        letterSpacing = 1.sp,
-        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
-    )
+private fun SettingsSectionHeader(
+    title: String,
+    isExpanded: Boolean = true,
+    onToggle: (() -> Unit)? = null
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (onToggle != null) {
+                    Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onToggle)
+                        .padding(vertical = 6.dp, horizontal = 4.dp)
+                } else {
+                    Modifier.padding(top = 8.dp, bottom = 4.dp)
+                }
+            ),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = title.uppercase(),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF8BB4F6),
+            letterSpacing = 1.sp
+        )
+        if (onToggle != null) {
+            Text(
+                text = if (isExpanded) "▾" else "▸",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF8BB4F6)
+            )
+        }
+    }
 }
 
 @Composable
@@ -1758,3 +2280,4 @@ private fun SettingsSubmenuToggle(
         )
     }
 }
+

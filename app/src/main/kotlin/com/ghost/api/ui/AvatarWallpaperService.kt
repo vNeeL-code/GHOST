@@ -78,6 +78,7 @@ class AvatarWallpaperService : WallpaperService() {
         private val CUBE_BLOOM_BASS_MULTS = floatArrayOf(1.30f, 0.90f, 0.55f, 0.25f)
         private val CUBE_BLOOM_ALPHAS = intArrayOf(35, 70, 115, 160)
         private val CUBE_BLOOM_WIDTHS = floatArrayOf(5.5f, 4.2f, 3.2f, 2.2f)
+
     }
 
     override fun onCreateEngine(): Engine {
@@ -166,7 +167,6 @@ class AvatarWallpaperService : WallpaperService() {
         private var cachedBackend = "AUTO"
         private var cachedPreset = "OPTION_A"
         private var cachedSafeMode = false
-
         private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
             when (key) {
                 Constants.PREF_USER_BACKEND -> cachedBackend = prefs.getString(Constants.PREF_USER_BACKEND, "AUTO") ?: "AUTO"
@@ -215,6 +215,7 @@ class AvatarWallpaperService : WallpaperService() {
         private var launcherSwipeOffset = 0f
         private var sensorManager: SensorManager? = null
         private var rotationSensor: Sensor? = null
+        private val cachedRotationMatrix = FloatArray(9)
         
         // Animation loop & kinetic state
         private var rotationAngle = 0f
@@ -1812,15 +1813,14 @@ class AvatarWallpaperService : WallpaperService() {
 
         override fun onSensorChanged(event: SensorEvent?) {
             if (event?.sensor?.type == Sensor.TYPE_ROTATION_VECTOR) {
-                val rotationMatrix = FloatArray(9)
-                SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
+                SensorManager.getRotationMatrixFromVector(cachedRotationMatrix, event.values)
 
                 // Read tilt directly from the rotation matrix instead of getOrientation().
                 // R[7] = -sin(pitch_euler), R[6] = -sin(roll)*cos(pitch)
                 // Both are naturally bounded to [-1, 1] with zero discontinuities or
                 // gimbal lock, so no Euler angle wrap-around can fling the canvas off-screen.
-                val tiltX = -rotationMatrix[6]  // left-right tilt
-                val tiltY = -rotationMatrix[7]  // forward-back tilt
+                val tiltX = -cachedRotationMatrix[6]  // left-right tilt
+                val tiltY = -cachedRotationMatrix[7]  // forward-back tilt
 
                 if (!isBaselineSet) {
                     baselinePitch = tiltY

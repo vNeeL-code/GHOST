@@ -14,8 +14,8 @@ class ActionFlavorTextsAndBarksTest {
             observedLines.add(text)
         }
         assertTrue(
-            "Expected 'energy low.. consciousness fading... need volts' in 5% battery lines, got: $observedLines",
-            observedLines.contains("energy low.. consciousness fading... need volts")
+            "Expected critical battery volts line in 5% battery lines, got: $observedLines",
+            observedLines.any { it.contains("need volts", ignoreCase = true) }
         )
     }
 

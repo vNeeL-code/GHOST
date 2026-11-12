@@ -87,6 +87,7 @@ class MCPServer(
         )),
         // Screen / Accessibility
         "click"           to ToolDefinition("click", "Click a UI element by visible text", mapOf("target" to ParameterSpec("string", "Text of element to click"))),
+        "type"            to ToolDefinition("type", "Type text into the focused editable UI element (requires confirmation)", mapOf("text" to ParameterSpec("string", "Text to type"))),
         "scroll"          to ToolDefinition("scroll", "Scroll the screen", mapOf("direction" to ParameterSpec("string", "UP, DOWN, LEFT, or RIGHT"))),
         "navigate"        to ToolDefinition("navigate", "Android system navigation", mapOf("action" to ParameterSpec("string", "BACK, HOME, RECENTS, or NOTIFICATIONS"))),
 
@@ -231,6 +232,11 @@ class MCPServer(
                     val target = params["target"]?.toString() ?: ""
                     val res = uiMacroTools.click(target)
                     ToolResult(res["result"] == "success", "Clicked: $target")
+                }
+                "type", "inject_text", "input_text" -> {
+                    val text = params["text"]?.toString() ?: params["input"]?.toString() ?: ""
+                    val res = uiMacroTools.type(text)
+                    ToolResult(res["result"] == "success", "Typed text into active element")
                 }
                 "scroll" -> {
                     val direction = params["direction"]?.toString() ?: "DOWN"

@@ -79,11 +79,11 @@ class ModelDownloader(
 
         val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
 
-        // 0. Check cached model path from SharedPreferences first
+        // 0. Check cached model path from SharedPreferences first (only if it matches requested fileName)
         val cachedPath = prefs.getString(Constants.PREF_LAST_KNOWN_MODEL_PATH, null)
         if (!cachedPath.isNullOrBlank()) {
             val cachedFile = File(cachedPath)
-            if (cachedFile.exists() && cachedFile.length() > 200 * 1024 * 1024L) {
+            if (cachedFile.exists() && cachedFile.length() > 200 * 1024 * 1024L && cachedFile.name.equals(fileName, ignoreCase = true)) {
                 Timber.i("Model already exists at cached path: ${cachedFile.absolutePath} (${cachedFile.length()} bytes)")
                 _downloadStatus.value = DownloadState.Success(cachedFile)
                 return

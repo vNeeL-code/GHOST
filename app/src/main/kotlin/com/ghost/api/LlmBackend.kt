@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 interface LlmBackend {
     val activeBackend: String?
     val maxNumTokens: Int
+    fun getActiveTokenCount(): Int = 0
     suspend fun softReset(systemPrompt: String, newToolSets: List<com.google.ai.edge.litertlm.ToolSet>? = null, initialMessages: List<com.google.ai.edge.litertlm.Message>? = null)
     suspend fun hardReset()
     suspend fun cleanup()

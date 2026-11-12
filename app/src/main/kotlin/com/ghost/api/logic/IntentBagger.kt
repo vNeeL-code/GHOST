@@ -3,7 +3,6 @@ package com.ghost.api.logic
 import android.content.Context
 import android.content.Intent
 import com.ghost.api.hardware.SystemToolSet
-import com.ghost.api.ui.AppReelOverlay
 import timber.log.Timber
 import java.util.Locale
 
@@ -291,12 +290,7 @@ object IntentBagger {
         val words = trimmedClean.split(Regex("""[\s,;.!?'"]+""")).filter { it.isNotBlank() }
         val isConversational = words.any { it.lowercase() in CONVERSATIONAL_MARKERS } || words.size > 4
 
-        // Check installed apps cache
-        val apps = if (AppReelOverlay.AppListCache.isLoaded && AppReelOverlay.AppListCache.cachedApps.isNotEmpty()) {
-            AppReelOverlay.AppListCache.cachedApps.map { it.label }
-        } else {
-            emptyList()
-        }
+        val apps = emptyList<String>()
 
         // 2. High-Confidence Fast-Track:
         // Must be RIGID & FRAGILE. Only triggers if:

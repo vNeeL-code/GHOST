@@ -1,14 +1,21 @@
 package com.ghost.api.logic
 
+import android.content.Context
+import android.widget.Toast
+import com.ghost.api.Constants
+import com.ghost.api.agent.GhostAgent
+import com.ghost.api.hardware.HardwarePropertiesManager
+import com.ghost.api.services.TTSManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import timber.log.Timber
+
 /**
- * Action Flavor Texts for GHOST.
+ * GPP — Genuine People Personalities (Sirius Cybernetics Corporation / 🐋 DeepSeek audit reference).
  *
- * Provides rotating, personality-infused canned HUD chips and snappy TTS phrases for wire-speed actions.
- * Solves the "dead silence" UX trap when leaving the screen or executing void hardware toggles,
- * avoiding a 500-800ms model forward-pass latency penalty while preserving GHOST's sharp cyberpunk persona.
- *
- * Implements a non-repeating ShuffleBag selection algorithm to guarantee high perceived variety
- * without back-to-back repetitions.
+ * "Gemma has GPP" — deterministic somatic reflexes, hardware status barks, and non-repeating
+ * ShuffleBag flavor lines that give the Android chassis a voice at wire speed (0 tokens, 0ms LLM wait).
  *
  * Supports tier & flavor-sensitive user titles:
  * - "Guardian" (Destiny Ghost / F-Droid FOSS)
@@ -696,3 +703,106 @@ object ActionFlavorTexts {
         return primers.random()
     }
 }
+
+typealias GenuinePeoplePersonality = ActionFlavorTexts
+
+/**
+ * GPP Somatic Bark Dispatcher (`GppController`):
+ * Dispatches deterministic hardware status barks (battery, power, thermal throttling/recovery,
+ * motion, presence, peripherals) and passive notification announcements across TTS, HUD work signals,
+ * chat bubbles, and GhostAgent sensory context.
+ */
+class GppController(
+    private val context: Context,
+    private val serviceScope: CoroutineScope,
+    private val ttsManagerProvider: () -> TTSManager?,
+    private val ghostAgentProvider: () -> GhostAgent?,
+    private val onChatMessageAdded: (String, Boolean) -> Unit,
+    private val onShowWorkSignal: (String, Long) -> Unit
+) {
+
+    fun startThermalBarkMonitor(hardwarePropertiesManager: HardwarePropertiesManager) {
+        serviceScope.launch {
+            var wasHot = false
+            var lastThermalBarkTime = 0L
+            hardwarePropertiesManager.thermalState.collect { state ->
+                val now = System.currentTimeMillis()
+                if (state == HardwarePropertiesManager.ThermalState.HOT ||
+                    state == HardwarePropertiesManager.ThermalState.CRITICAL
+                ) {
+                    if (!wasHot && (now - lastThermalBarkTime > 120_000L)) {
+                        wasHot = true
+                        lastThermalBarkTime = now
+                        val userTitle = Constants.getUserTitle(context)
+                        val cue = ActionFlavorTexts.thermalAlertTts(userTitle)
+                        processDeviceStatusCue(cue, category = CueCategory.THERMAL)
+                    }
+                } else if (state == HardwarePropertiesManager.ThermalState.COOL) {
+                    if (wasHot) {
+                        wasHot = false
+                        val userTitle = Constants.getUserTitle(context)
+                        val cue = ActionFlavorTexts.thermalRecoveredTts(userTitle)
+                        processDeviceStatusCue(cue, category = CueCategory.THERMAL)
+                    }
+                }
+            }
+        }
+    }
+
+    fun processNotificationAnnouncement(appName: String, title: String, text: String) {
+        val userTitle = Constants.getUserTitle(context.applicationContext)
+        val shortText = text.take(120).trim()
+        val sender = if (title.isNotBlank()) title else appName
+        val phrase = ActionFlavorTexts.notificationAnnouncementTts(appName, sender, shortText, userTitle)
+        val bubble = "[$appName] $sender: $phrase"
+
+        Timber.i("📢GPP Notification Announcement: $phrase")
+
+        ttsManagerProvider()?.speakPassiveAnnouncement(phrase)
+
+        serviceScope.launch(Dispatchers.Main) {
+            onChatMessageAdded("📢 [$appName] $sender: $shortText", false)
+        }
+
+        ghostAgentProvider()?.appendAssistantContext(bubble)
+    }
+
+    fun processDeviceStatusCue(
+        cueText: String,
+        category: CueCategory = CueCategory.POWER,
+        showInChat: Boolean = true
+    ) {
+        val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+        if (!prefs.getBoolean(Constants.PREF_PASSIVE_TTS, true)) return
+
+        val catKey = when (category) {
+            CueCategory.BATTERY -> Constants.PREF_BARK_BATTERY
+            CueCategory.POWER -> Constants.PREF_BARK_POWER
+            CueCategory.MOTION -> Constants.PREF_BARK_MOTION
+            CueCategory.PRESENCE -> Constants.PREF_BARK_PRESENCE
+            CueCategory.PERIPHERALS -> Constants.PREF_BARK_PERIPHERALS
+            CueCategory.THERMAL -> Constants.PREF_BARK_THERMAL
+            CueCategory.NOTIFICATIONS -> Constants.PREF_BARK_NOTIFS
+        }
+        if (!prefs.getBoolean(catKey, true)) return
+
+        Timber.i("⚡ GPP Status Cue [$category]: $cueText (showInChat=$showInChat)")
+        ttsManagerProvider()?.speakPassiveAnnouncement(cueText)
+
+        serviceScope.launch(Dispatchers.Main) {
+            try {
+                Toast.makeText(context, "✧ $cueText", Toast.LENGTH_SHORT).show()
+            } catch (_: Exception) {}
+            onShowWorkSignal("✧ $cueText", 3500L)
+        }
+
+        val bubble = "✧ $cueText"
+        if (showInChat) {
+            serviceScope.launch(Dispatchers.Main) {
+                onChatMessageAdded(bubble, false)
+            }
+        }
+        ghostAgentProvider()?.appendAssistantContext(bubble)
+    }
+}
+

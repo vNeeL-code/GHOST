@@ -113,7 +113,12 @@ class NetworkToolSet(private val context: Context) : ToolSet {
             val html = connection.inputStream.bufferedReader().use { it.readText() }
 
             val results = parseDuckDuckGoLiteResults(html, maxResults)
-            if (results.isEmpty()) return null
+            if (results.isEmpty()) {
+                Timber.w("DDG Lite: 0 results parsed from ${html.length}-byte HTML response for '$query' (possible markup drift or empty query)")
+                val fallback = fetchDuckDuckGoInstantAnswer(query)
+                if (!fallback.isNullOrBlank()) return fallback
+                return "SEARCH STATUS: 0 results parsed from DuckDuckGo Lite for '$query' (HTML payload: ${html.length} bytes)."
+            }
 
             val sb = StringBuilder("SEARCH RESULTS for '$query':\n\n")
             results.forEachIndexed { index, result ->
@@ -126,9 +131,38 @@ class NetworkToolSet(private val context: Context) : ToolSet {
             return sanitizeToolString(sb.toString(), 1400)
         } catch (e: Exception) {
             Timber.w("DuckDuckGo search connection timed out or failed: ${e.message}")
-            return null
+            return fetchDuckDuckGoInstantAnswer(query)
         } finally {
             connection.disconnect()
+        }
+    }
+
+    private fun fetchDuckDuckGoInstantAnswer(query: String): String? {
+        var conn: HttpURLConnection? = null
+        return try {
+            val encoded = URLEncoder.encode(query, "UTF-8")
+            val url = URL("https://api.duckduckgo.com/?q=$encoded&format=json&no_html=1&skip_disambig=1")
+            conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) GHOST/4.40")
+                connectTimeout = 3000
+                readTimeout = 3000
+            }
+            if (conn.responseCode != 200) return null
+            val body = conn.inputStream.bufferedReader().use { it.readText() }
+            val json = org.json.JSONObject(body)
+            val abstractText = json.optString("AbstractText", "").trim()
+            val answerText = json.optString("Answer", "").trim()
+            val abstractUrl = json.optString("AbstractURL", "").trim()
+            when {
+                abstractText.isNotEmpty() -> sanitizeToolString("SEARCH RESULTS for '$query':\n\n1. $abstractText\n   URL: $abstractUrl", 1400)
+                answerText.isNotEmpty() -> sanitizeToolString("SEARCH RESULTS for '$query':\n\n1. $answerText", 1400)
+                else -> null
+            }
+        } catch (_: Exception) {
+            null
+        } finally {
+            conn?.disconnect()
         }
     }
 

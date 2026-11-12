@@ -19,8 +19,8 @@ android {
         applicationId = "com.ghost.api"
         minSdk = 31
         targetSdk = 36
-        versionCode = 13
-        versionName = "4.35"
+        versionCode = 14
+        versionName = "4.39"
 
         ndk {
             abiFilters.addAll(listOf("arm64-v8a"))
@@ -76,6 +76,7 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+        freeCompilerArgs += listOf("-Xskip-metadata-version-check")
     }
 
     flavorDimensions += listOf("distribution")
@@ -113,6 +114,9 @@ android {
     }
 
     packaging {
+        jniLibs {
+            pickFirsts += "**/liblitertlm_jni.so"
+        }
         resources {
             excludes += "/META-INF/{INDEX.LIST,*.SF,*.DSA,*.RSA,DEPENDENCIES,LICENSE,LICENSE.txt,license.txt,NOTICE,NOTICE.txt,notice.txt,ASL2.0,AL2.0,LGPL2.1}"
         }
@@ -137,7 +141,7 @@ ksp {
 }
 
 dependencies {
-    implementation("com.google.ai.edge.litertlm:litertlm-android:0.12.0")
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.18.1")
     "playImplementation"("com.android.billingclient:billing-ktx:7.1.1")
 
 
@@ -148,6 +152,7 @@ dependencies {
     implementation("androidx.recyclerview:recyclerview:1.4.0")
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.palette:palette-ktx:1.0.0")
+    implementation("androidx.webkit:webkit:1.12.1")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.1")
@@ -164,6 +169,7 @@ dependencies {
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
     ksp("androidx.room:room-compiler:$roomVersion")
+    ksp("org.jetbrains.kotlin:kotlin-metadata-jvm:2.4.0")
     
     implementation("androidx.work:work-runtime-ktx:2.9.0")
     
@@ -177,4 +183,8 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     
     testImplementation("junit:junit:4.13.2")
+}
+
+configurations.all {
+    resolutionStrategy.force("org.jetbrains.kotlin:kotlin-metadata-jvm:2.4.0")
 }

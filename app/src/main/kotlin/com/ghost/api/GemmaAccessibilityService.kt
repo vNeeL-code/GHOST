@@ -47,8 +47,13 @@ class GemmaAccessibilityService : AccessibilityService() {
     // Previously used recursive DFS which caused stack overflow on deep trees. Fixed.
     fun getSemanticScreenDump(): String {
         val root = rootInActiveWindow ?: return "[[NO ACTIVE WINDOW]]"
-        if (root.packageName?.toString() == packageName || root.packageName?.toString() == "com.ghost.api") {
+        val activePkg = root.packageName?.toString() ?: ""
+        if (activePkg == packageName || activePkg == "com.ghost.api") {
             return "" // Skip scraping our own UI to prevent reading own chat/telemetry twice
+        }
+        if (isSensitivePackage(activePkg)) {
+            Timber.i("GemmaAccessibilityService: Redacted semantic screen dump for sensitive package $activePkg")
+            return "[[SCREEN REDACTED: sensitive package ($activePkg) is excluded by security policy]]"
         }
 
         val sb = StringBuilder()
@@ -118,6 +123,13 @@ class GemmaAccessibilityService : AccessibilityService() {
         val service = instance
         if (service == null) {
             Timber.w("AccessibilityService not bound - vision disabled")
+            callback(null)
+            return
+        }
+
+        val activePkg = rootInActiveWindow?.packageName?.toString() ?: ""
+        if (isSensitivePackage(activePkg)) {
+            Timber.w("GemmaAccessibilityService: Blocked screenshot capture on sensitive package $activePkg")
             callback(null)
             return
         }
@@ -316,11 +328,70 @@ class GemmaAccessibilityService : AccessibilityService() {
         }
     }
 
+    fun isSensitivePackage(pkg: String): Boolean {
+        val clean = pkg.trim().lowercase()
+        if (clean.isEmpty()) return false
+        if (clean in DEFAULT_SENSITIVE_PACKAGES) return true
+        if (SENSITIVE_PACKAGE_KEYWORDS.any { clean.contains(it) }) return true
+        return try {
+            val prefs = getSharedPreferences(Constants.PREFS_NAME, MODE_PRIVATE)
+            val userBlocked = prefs.getStringSet(PREF_BLOCKED_ACCESSIBILITY_PACKAGES, emptySet()) ?: emptySet()
+            userBlocked.any { it.equals(clean, ignoreCase = true) }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     val sensoryStream = SensoryStream()
 
     companion object {
         var instance: GemmaAccessibilityService? = null
-        
+
+        const val PREF_BLOCKED_ACCESSIBILITY_PACKAGES = "pref_blocked_accessibility_packages"
+
+        val DEFAULT_SENSITIVE_PACKAGES = setOf(
+            // Authenticators & 2FA
+            "com.google.android.apps.authenticator2",
+            "com.azure.authenticator",
+            "com.duosecurity.duomobile",
+            "com.authy.authy",
+            "org.fedorahosted.freeotp",
+            "com.beemdevelopment.aegis",
+            // Password Managers
+            "com.x8bit.bitwarden",
+            "com.agilebits.onepassword",
+            "com.lastpass.lpandroid",
+            "com.dashlane",
+            "proton.android.pass",
+            "keepass2android.keepass2android",
+            // Wallets & Banking / Payments
+            "com.google.android.apps.walletnfcrel",
+            "com.paypal.android.p2pmobile",
+            "com.revolut.revolut",
+            "com.wise.android",
+            "com.venmo",
+            "com.squareup.cash",
+            "de.number26.android",
+            "com.monzo.android",
+            "com.chase.sig.android",
+            "com.infonow.bofa",
+            "com.wf.wellsfargomobile",
+            "com.citi.citimobile"
+        )
+
+        private val SENSITIVE_PACKAGE_KEYWORDS = listOf(
+            ".bank",
+            "banking",
+            "authenticator",
+            "bitwarden",
+            "1password",
+            "keepass",
+            "keychain",
+            "cryptowallet",
+            "metamask",
+            "trustwallet"
+        )
+
         fun getSemantics(): String? = instance?.sensoryStream?.getUnifiedPerception() // Helper
 
         fun safePerformGlobal(action: String): Boolean {
