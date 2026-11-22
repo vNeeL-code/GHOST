@@ -24,7 +24,7 @@ class GemmaVoiceInteractionSession(context: Context) : VoiceInteractionSession(c
         super.onShow(args, showFlags)
 
         val view = com.ghost.api.ui.OverlayInputView(context) { query ->
-            Toast.makeText(context, "Processing...", Toast.LENGTH_SHORT).show()
+            com.ghost.api.ui.GhostHudDispatcher.show(context, "Processing...")
 
             val intent = Intent(context, GemmaService::class.java).apply {
                 action = Constants.ACTION_QUERY

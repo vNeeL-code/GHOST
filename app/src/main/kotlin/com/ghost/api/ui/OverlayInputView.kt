@@ -113,14 +113,24 @@ class OverlayInputView(
     }
 
     private fun initSpeechRecognizer() {
-        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+        val supportsOnDevice = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S &&
+            SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
+        if (!supportsOnDevice && !SpeechRecognizer.isRecognitionAvailable(context)) {
             Timber.w("Speech recognition not available")
             micButton.isEnabled = false
             micButton.alpha = 0.5f
             return
         }
 
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
+        val recognizer = if (supportsOnDevice && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            Timber.i("STT: Using strictly on-device SpeechRecognizer (air-gapped)")
+            SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+        } else {
+            Timber.i("STT: On-device recognizer unavailable, falling back to system SpeechRecognizer with EXTRA_PREFER_OFFLINE")
+            SpeechRecognizer.createSpeechRecognizer(context)
+        }
+
+        speechRecognizer = recognizer.apply {
             setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) {
                     Timber.d("STT ready")
@@ -152,7 +162,7 @@ class OverlayInputView(
                     Timber.w("STT error: $errorMsg")
                     resetMicButton()
                     if (error != SpeechRecognizer.ERROR_NO_MATCH) {
-                        Toast.makeText(context, errorMsg, Toast.LENGTH_SHORT).show()
+                        com.ghost.api.ui.GhostHudDispatcher.show(context, errorMsg)
                     }
                 }
 
@@ -205,6 +215,7 @@ class OverlayInputView(
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
         }
 
         try {

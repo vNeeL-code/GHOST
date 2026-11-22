@@ -109,20 +109,26 @@ class GemmaNotificationManager(private val context: Context) {
 
     /**
      * Posts the actual AI response.
-     * This triggers the heavy Conversation/Bubble logic.
+     * Supports inline generated cards / QR codes via NotificationCompat.BigPictureStyle
+     * (with 2:1 white quiet-zone padding so Android System UI never crops square QR finder patterns).
      */
-    fun showResponse(response: String, enableBubble: Boolean = false) {
+    fun showResponse(
+        response: String,
+        enableBubble: Boolean = false,
+        cardBitmap: android.graphics.Bitmap? = null,
+        webviewUrl: String? = null
+    ) {
         val cleanResponse = response.replace(Regex("<\\|channel>thought.*?<channel\\|>", RegexOption.DOT_MATCHES_ALL), "").trim()
         val shortResponse = cleanResponse.take(200)
 
         val cleanDeviceName = com.ghost.api.logic.ContextManager.resolveDeviceCallSign(context)
         val notifTitle = "✧ $cleanDeviceName:"
 
-        val notification = NotificationCompat.Builder(context, CONVO_CHANNEL_ID)
+        val rawBitmap = cardBitmap ?: decodeInlineDataImage(webviewUrl)
+        val builder = NotificationCompat.Builder(context, CONVO_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_notify_chat)
             .setContentTitle(notifTitle)
             .setContentText(shortResponse)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(cleanResponse))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .setContentIntent(PendingIntent.getActivity(
@@ -130,9 +136,61 @@ class GemmaNotificationManager(private val context: Context) {
                 Intent(context, com.ghost.api.MainActivity::class.java),
                 PendingIntent.FLAG_IMMUTABLE
             ))
-            .build()
 
-        notificationManager.notify(RESPONSE_NOTIF_ID, notification)
+        if (rawBitmap != null) {
+            val paddedBanner = padSquareCardToBanner(rawBitmap)
+            builder
+                .setLargeIcon(rawBitmap)
+                .setStyle(
+                    NotificationCompat.BigPictureStyle()
+                        .bigPicture(paddedBanner)
+                        .bigLargeIcon(null as android.graphics.Bitmap?)
+                        .setSummaryText(shortResponse)
+                )
+        } else {
+            builder.setStyle(NotificationCompat.BigTextStyle().bigText(cleanResponse))
+        }
+
+        notificationManager.notify(RESPONSE_NOTIF_ID, builder.build())
+    }
+
+    private fun decodeInlineDataImage(webviewUrl: String?): android.graphics.Bitmap? {
+        if (webviewUrl.isNullOrBlank() || !webviewUrl.startsWith("data:image/")) return null
+        return try {
+            val base64Data = webviewUrl.substringAfter(",")
+            val bytes = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT)
+            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        } catch (e: Exception) {
+            Timber.w(e, "GemmaNotificationManager: Failed to decode inline data:image card")
+            null
+        }
+    }
+
+    /**
+     * Android System UI crops BigPictureStyle to ~2:1 landscape.
+     * For square/tall generated cards (especially QR codes), pad onto a 2:1 white canvas with
+     * quiet-zone margins so scanner finder squares are never clipped in the notification shade.
+     */
+    private fun padSquareCardToBanner(src: android.graphics.Bitmap): android.graphics.Bitmap {
+        val ratio = src.width.toFloat() / src.height.coerceAtLeast(1)
+        if (ratio >= 1.75f) return src
+        val targetHeight = (src.height * 1.16f).toInt().coerceIn(360, 520)
+        val targetWidth = targetHeight * 2
+        val padded = android.graphics.Bitmap.createBitmap(targetWidth, targetHeight, android.graphics.Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(padded)
+        canvas.drawColor(android.graphics.Color.WHITE)
+        val innerMax = (targetHeight * 0.86f).toInt()
+        val scale = minOf(innerMax.toFloat() / src.width.coerceAtLeast(1), innerMax.toFloat() / src.height.coerceAtLeast(1))
+        val drawW = (src.width * scale).toInt()
+        val drawH = (src.height * scale).toInt()
+        val left = (targetWidth - drawW) / 2
+        val top = (targetHeight - drawH) / 2
+        val paint = android.graphics.Paint().apply {
+            isFilterBitmap = false
+            isAntiAlias = false
+        }
+        canvas.drawBitmap(src, null, android.graphics.Rect(left, top, left + drawW, top + drawH), paint)
+        return padded
     }
 
     /**

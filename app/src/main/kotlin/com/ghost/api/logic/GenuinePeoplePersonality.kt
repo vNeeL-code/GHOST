@@ -791,7 +791,7 @@ class GppController(
 
         serviceScope.launch(Dispatchers.Main) {
             try {
-                Toast.makeText(context, "✧ $cueText", Toast.LENGTH_SHORT).show()
+                com.ghost.api.ui.GhostHudDispatcher.show(context, "✧ $cueText")
             } catch (_: Exception) {}
             onShowWorkSignal("✧ $cueText", 3500L)
         }

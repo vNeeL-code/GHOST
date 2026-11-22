@@ -21,11 +21,11 @@ class HardwareToggleReceiver : BroadcastReceiver() {
                 Timber.i("Hardware Toggle: Edge Lights requested")
                 com.ghost.api.ui.EdgeLightsManager.toggle(context)
                 val status = if (com.ghost.api.ui.EdgeLightsManager.isShowing) "ON" else "OFF"
-                Toast.makeText(context, "Edge Lights $status", Toast.LENGTH_SHORT).show()
+                com.ghost.api.ui.GhostHudDispatcher.show(context, "Edge Lights $status")
             }
             "com.ghost.api.ACTION_SET_AVATAR_WALLPAPER" -> {
                 Timber.i("Hardware Toggle: Avatar Wallpaper requested")
-                Toast.makeText(context, "Launching Wallpaper Chooser...", Toast.LENGTH_SHORT).show()
+                com.ghost.api.ui.GhostHudDispatcher.show(context, "Launching Wallpaper Chooser...")
                 val wpIntent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).apply {
                     putExtra(WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT, 
                         ComponentName(context, com.ghost.api.ui.AvatarWallpaperService::class.java))
@@ -35,7 +35,7 @@ class HardwareToggleReceiver : BroadcastReceiver() {
                     context.startActivity(wpIntent)
                 } catch (e: Exception) {
                     Timber.e(e, "Failed to launch wallpaper chooser")
-                    Toast.makeText(context, "Error launching wallpaper chooser", Toast.LENGTH_SHORT).show()
+                    com.ghost.api.ui.GhostHudDispatcher.show(context, "Error launching wallpaper chooser")
                 }
             }
             "com.ghost.api.ACTION_TEST_WORK_SIGNAL" -> {

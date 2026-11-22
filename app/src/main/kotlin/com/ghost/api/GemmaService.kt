@@ -276,12 +276,12 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                             }
                         } catch (e: Exception) {
                             Timber.e(e, "Failed to toggle overlay")
-                            android.widget.Toast.makeText(this, "Overlay Error: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                            com.ghost.api.ui.GhostHudDispatcher.show(this, "Overlay Error: ${e.message}")
                         }
                     }
                 } else {
                     Timber.e("OverlayManager still not initialized after force init")
-                    android.widget.Toast.makeText(this, "System still initializing... try again.", android.widget.Toast.LENGTH_SHORT).show()
+                    com.ghost.api.ui.GhostHudDispatcher.show(this, "System still initializing... try again.")
                 }
             }
             "com.ghost.api.ACTION_SHARE_MEDIA" -> {
@@ -667,7 +667,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 updateNotification("GHOST Online (Engine OFF)")
                 reportStatus("Standby: Engine OFF")
                 withContext(Dispatchers.Main) {
-                    android.widget.Toast.makeText(this@GemmaService, "Inference Engine OFF (RAM freed) 🍃", android.widget.Toast.LENGTH_SHORT).show()
+                    com.ghost.api.ui.GhostHudDispatcher.show(this@GemmaService, "Inference Engine OFF (RAM freed) 🍃")
                 }
             } else {
                 updateNotification("Switching to $backend...")
@@ -676,7 +676,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 _isSystemReady.value = ready
                 withContext(Dispatchers.Main) {
                     val msg = if (ready) "Engine online on $backend 🚀" else "Engine failed to initialize on $backend ⚠️"
-                    android.widget.Toast.makeText(this@GemmaService, msg, android.widget.Toast.LENGTH_SHORT).show()
+                    com.ghost.api.ui.GhostHudDispatcher.show(this@GemmaService, msg)
                 }
             }
         }
@@ -712,7 +712,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             _isSystemReady.value = ready
             withContext(Dispatchers.Main) {
                 val msg = if (ready) "Active model core: $targetCore 🧠" else if (modelDownloader.downloadStatus.value is ModelDownloader.DownloadState.Downloading) "Downloading $targetCore weights... 📥" else "Model $targetCore weights offline ⚠️"
-                android.widget.Toast.makeText(this@GemmaService, msg, android.widget.Toast.LENGTH_SHORT).show()
+                com.ghost.api.ui.GhostHudDispatcher.show(this@GemmaService, msg)
             }
         }
     }
@@ -749,7 +749,7 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             if (::ghostAgent.isInitialized) {
                 ghostAgent.flushAndCompactSession()
                 withContext(Dispatchers.Main) {
-                    android.widget.Toast.makeText(this@GemmaService, "Session compacted & KV cache cleared ✨", android.widget.Toast.LENGTH_SHORT).show()
+                    com.ghost.api.ui.GhostHudDispatcher.show(this@GemmaService, "Session compacted & KV cache cleared ✨")
                 }
             }
         }
@@ -1554,11 +1554,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         var effectivePrompt = userPrompt
         var promptHint: String? = null
         if (!isDream) {
-            val isFastPathEnabled = prefs.getBoolean(Constants.PREF_FAST_PATH_ENABLED, true)
             val routingResult = com.ghost.api.logic.FastPathRouter.route(
                 input = userPrompt,
-                source = inputSource,
-                isFastPathEnabled = isFastPathEnabled
+                source = inputSource
             )
 
             when (routingResult) {
@@ -1943,23 +1941,19 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             webviewAspectRatio = webviewAspectRatio
         )
         // Show Gemma response in notification tray alongside sensor card
-        // Ensures user sees response without opening the app, especially when TTS is disabled
-        if (!isUser && isComplete && message.isNotBlank()) {
+        // Ensures user sees response (and generated QR/cards) without opening the app
+        if (!isUser && isComplete && (message.isNotBlank() || !webviewUrl.isNullOrBlank())) {
             if (::responseNotificationManager.isInitialized) {
-                responseNotificationManager.showResponse(message)
+                responseNotificationManager.showResponse(message, webviewUrl = webviewUrl)
             }
         }
     }
 
     override fun onEmotionSignal(emoji: String) {
-        // Emoji extracted from leading response character — used for toast/edge lighting signals
+        // Emoji extracted from response — used for corner HUD bark & edge lighting signals
         Timber.d("Emotion signal: $emoji")
         com.ghost.api.audio.SystemVisualizer.pushEmotionColor(emoji)
-        
-        // Actually flash the emoji on screen via Toast
-        android.os.Handler(android.os.Looper.getMainLooper()).post {
-            android.widget.Toast.makeText(this, emoji, android.widget.Toast.LENGTH_SHORT).show()
-        }
+        com.ghost.api.ui.GhostHudDispatcher.bark(this, emoji, durationMs = 1800L)
     }
 
     override fun onThoughtUpdated(thought: String) {
@@ -1994,7 +1988,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         sessionId: String,
         imageUri: String?,
         userTimestamp: Long,
-        durationMs: Long?
+        durationMs: Long?,
+        webviewUrl: String?,
+        webviewAspectRatio: Float?
     ) {
         val completionEpoch = System.currentTimeMillis()
         val tokenHashVal = if (durationMs != null) "$completionEpoch|$durationMs" else "$completionEpoch"
@@ -2006,7 +2002,9 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 tokensUsed = 0,
                 sessionId = sessionId,
                 tokenHash = tokenHashVal,
-                imageUri = imageUri
+                imageUri = imageUri,
+                webviewUrl = webviewUrl,
+                webviewAspectRatio = webviewAspectRatio
             ))
         }
     }
@@ -2134,6 +2132,14 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     fun showWorkSignal(tag: String = "WORKING", durationMs: Long = 0) {
         if (::overlayManager.isInitialized) {
             overlayManager.showWorkSignal(tag, durationMs)
+        }
+    }
+
+    fun showHudMessage(message: String, durationMs: Long = 2200L, announceForA11y: Boolean = true): Boolean {
+        return if (::overlayManager.isInitialized) {
+            overlayManager.showHudMessage(message, durationMs, announceForA11y)
+        } else {
+            false
         }
     }
 

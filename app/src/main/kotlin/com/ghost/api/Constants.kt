@@ -236,8 +236,11 @@ object Constants {
 
     // Model Persistence & Storage Protection
     const val PREF_LAST_KNOWN_MODEL_PATH = "last_known_model_path"
-    const val PREF_FAST_PATH_ENABLED = "fast_path_enabled"
     const val PREF_MAX_CONTEXT_TOKENS = "pref_max_context_tokens"
+
+    // Proprioception Thresholds (with hysteresis to prevent boundary flapping)
+    const val BATTERY_WORRIED_ENTER_PERCENT = 20
+    const val BATTERY_WORRIED_EXIT_PERCENT = 25
 
     // Summon Controls (Shake & Edge Nub Handle)
     const val PREF_SUMMON_METHOD = "summon_method" // "SHAKE", "EDGE_NUB", "BOTH", "OFF"

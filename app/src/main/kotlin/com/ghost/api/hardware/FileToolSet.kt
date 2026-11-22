@@ -196,6 +196,45 @@ class FileToolSet(private val context: Context) : ToolSet {
         }
     }
 
+    /**
+     * Resolves and validates a user-accessible file path, blocking path traversal ('..'),
+     * app-private storage (shared_prefs, databases, filesDir, cacheDir), and sensitive system paths.
+     */
+    private fun resolveSandboxedFile(rawPath: String): File? {
+        return try {
+            val canonical = File(rawPath.trim()).canonicalFile
+            val path = canonical.path
+            val lower = path.lowercase(Locale.ROOT)
+            val appDataDir = context.dataDir?.canonicalPath?.lowercase(Locale.ROOT)
+            if (appDataDir != null && (lower == appDataDir || lower.startsWith("$appDataDir/"))) {
+                Timber.w("FileToolSet: Blocked access to app-private directory: $path")
+                return null
+            }
+            if (lower.startsWith("/data/data/") ||
+                lower.startsWith("/data/user/") ||
+                lower.contains("/shared_prefs/") ||
+                lower.contains("/databases/") ||
+                lower.startsWith("/proc/") ||
+                lower.startsWith("/sys/") ||
+                lower.startsWith("/etc/")
+            ) {
+                Timber.w("FileToolSet: Blocked access to restricted path: $path")
+                return null
+            }
+            val extRoot = Environment.getExternalStorageDirectory().canonicalPath
+            val isExternal = path == extRoot || path.startsWith("$extRoot/") ||
+                path.startsWith("/sdcard/") || path.startsWith("/storage/")
+            if (!isExternal) {
+                Timber.w("FileToolSet: Blocked access outside user storage: $path")
+                return null
+            }
+            canonical
+        } catch (e: Exception) {
+            Timber.w(e, "FileToolSet: Path canonicalization failed for '$rawPath'")
+            null
+        }
+    }
+
     @Tool(description = "Moves or renames a file from sourcePath to destinationPath")
     fun move_file(
         @ToolParam(description = "Absolute path of existing source file") sourcePath: String,
@@ -203,7 +242,8 @@ class FileToolSet(private val context: Context) : ToolSet {
     ): Map<String, String> {
         com.ghost.api.GemmaService.instance?.showWorkSignal("FILES", 1500)
         return try {
-            val src = File(sourcePath.trim())
+            val src = resolveSandboxedFile(sourcePath)
+                ?: return mapOf("result" to "error", "message" to "Permission denied: Path is outside allowed user storage.")
             if (!src.exists() || !src.isFile) {
                 return mapOf("result" to "error", "message" to "Source file does not exist: $sourcePath")
             }
@@ -212,9 +252,13 @@ class FileToolSet(private val context: Context) : ToolSet {
                 return mapOf("result" to "error", "message" to "Permission denied: Cannot move protected AI model weights.")
             }
 
-            var dest = File(destinationPath.trim())
+            var dest = resolveSandboxedFile(destinationPath)
+                ?: return mapOf("result" to "error", "message" to "Permission denied: Destination is outside allowed user storage.")
             if (dest.isDirectory) {
                 dest = File(dest, src.name)
+            }
+            if (isProtectedModelFile(dest)) {
+                return mapOf("result" to "error", "message" to "Permission denied: Cannot overwrite protected AI model weights.")
             }
 
             dest.parentFile?.mkdirs()
@@ -239,14 +283,22 @@ class FileToolSet(private val context: Context) : ToolSet {
     ): Map<String, String> {
         com.ghost.api.GemmaService.instance?.showWorkSignal("FILES", 1500)
         return try {
-            val src = File(sourcePath.trim())
+            val src = resolveSandboxedFile(sourcePath)
+                ?: return mapOf("result" to "error", "message" to "Permission denied: Source path is outside allowed user storage.")
             if (!src.exists() || !src.isFile) {
                 return mapOf("result" to "error", "message" to "Source file does not exist: $sourcePath")
             }
+            if (isProtectedModelFile(src)) {
+                return mapOf("result" to "error", "message" to "Permission denied: Cannot copy protected AI model weights.")
+            }
 
-            var dest = File(destinationPath.trim())
+            var dest = resolveSandboxedFile(destinationPath)
+                ?: return mapOf("result" to "error", "message" to "Permission denied: Destination is outside allowed user storage.")
             if (dest.isDirectory) {
                 dest = File(dest, src.name)
+            }
+            if (isProtectedModelFile(dest)) {
+                return mapOf("result" to "error", "message" to "Permission denied: Cannot overwrite protected AI model weights.")
             }
 
             dest.parentFile?.mkdirs()
@@ -264,7 +316,8 @@ class FileToolSet(private val context: Context) : ToolSet {
     ): Map<String, String> {
         com.ghost.api.GemmaService.instance?.showWorkSignal("FILES", 1500)
         return try {
-            val file = File(filePath.trim())
+            val file = resolveSandboxedFile(filePath)
+                ?: return mapOf("result" to "error", "message" to "Permission denied: Path is outside allowed user storage.")
             if (!file.exists()) {
                 return mapOf("result" to "error", "message" to "File does not exist: $filePath")
             }
@@ -303,7 +356,8 @@ class FileToolSet(private val context: Context) : ToolSet {
         @ToolParam(description = "Absolute path of file") filePath: String
     ): Map<String, String> {
         return try {
-            val file = File(filePath.trim())
+            val file = resolveSandboxedFile(filePath)
+                ?: return mapOf("result" to "error", "message" to "Permission denied: Path is outside allowed user storage.")
             if (!file.exists()) {
                 return mapOf("result" to "error", "message" to "File does not exist: $filePath")
             }
@@ -332,9 +386,13 @@ class FileToolSet(private val context: Context) : ToolSet {
     ): Map<String, String> {
         com.ghost.api.GemmaService.instance?.showWorkSignal("APP", 1500)
         return try {
-            val file = File(filePath.trim())
+            val file = resolveSandboxedFile(filePath)
+                ?: return mapOf("result" to "error", "message" to "Permission denied: Path is outside allowed user storage.")
             if (!file.exists()) {
                 return mapOf("result" to "error", "message" to "File does not exist: $filePath")
+            }
+            if (isProtectedModelFile(file)) {
+                return mapOf("result" to "error", "message" to "Permission denied: Cannot open protected AI model weights.")
             }
 
             val ext = file.extension.lowercase(Locale.ROOT)
@@ -368,9 +426,13 @@ class FileToolSet(private val context: Context) : ToolSet {
     ): Map<String, String> {
         com.ghost.api.GemmaService.instance?.showWorkSignal("FILES", 1500)
         return try {
-            val file = File(filePath.trim())
+            val file = resolveSandboxedFile(filePath)
+                ?: return mapOf("result" to "error", "message" to "Permission denied: Path is outside allowed user storage.")
             if (!file.exists() || !file.isFile) {
                 return mapOf("result" to "error", "message" to "File does not exist: $filePath")
+            }
+            if (isProtectedModelFile(file)) {
+                return mapOf("result" to "error", "message" to "Permission denied: Cannot read protected AI model weights.")
             }
 
             val lines = file.bufferedReader().useLines { linesSeq ->

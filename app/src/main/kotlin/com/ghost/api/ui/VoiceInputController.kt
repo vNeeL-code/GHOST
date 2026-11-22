@@ -94,7 +94,7 @@ class VoiceInputController(
 
     private fun startRecording() {
         if (!audioRecorder.hasPermission()) {
-            Toast.makeText(context, "Microphone permission required", Toast.LENGTH_SHORT).show()
+            com.ghost.api.ui.GhostHudDispatcher.show(context, "Microphone permission required")
             return
         }
         // Shut up TTS immediately when user initiates microphone input

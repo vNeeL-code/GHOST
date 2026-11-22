@@ -41,10 +41,10 @@ object IntentBagger {
     private val URL_REGEX = Regex("""(?i)\b(?:https?://|www\.)[^\s]+|\b[a-zA-Z0-9-]+\.(?:com|org|net|io|dev|app|ai|me|co|uk|de|ca)(?:/[^\s]*)?""")
 
 
-    private val MEDIA_VERBS_PAUSE = listOf("pause", "pause music", "stop music", "halt music", "mute music", "stop playing")
-    private val MEDIA_VERBS_PLAY = listOf("play", "resume", "unpause", "play music", "start music", "play song", "continue playing")
-    private val MEDIA_VERBS_NEXT = listOf("next", "skip", "next song", "next track", "skip track", "skip song")
-    private val MEDIA_VERBS_PREV = listOf("prev", "previous", "previous song", "previous track", "last track", "last song")
+    private val MEDIA_PHRASES_PAUSE = listOf("pause music", "pause the music", "pause playback", "stop music", "stop the music", "halt music", "mute music", "stop playing")
+    private val MEDIA_PHRASES_PLAY = listOf("play music", "play the music", "resume music", "resume playback", "start music", "play song", "continue playing", "unpause music")
+    private val MEDIA_PHRASES_NEXT = listOf("next song", "next track", "skip song", "skip track", "skip this song", "skip this track", "skip forward")
+    private val MEDIA_PHRASES_PREV = listOf("previous song", "previous track", "last track", "last song", "prev track", "prev song")
 
     private val APP_LAUNCH_PREFIXES = listOf(
         "open the app", "open app", "launch app", "open", "launch", "start",
@@ -68,7 +68,7 @@ object IntentBagger {
         "photos" to listOf("Photos", "Gallery"),
         "calculator" to listOf("Calculator"),
         "notes" to listOf("Notes", "Keep", "Google Keep"),
-        "keep" to listOf("Google Keep", "Keep"),
+        "google keep" to listOf("Google Keep", "Keep"),
         "files" to listOf("Files", "My Files", "File Manager"),
         "maps" to listOf("Maps", "Google Maps"),
         "mail" to listOf("Gmail", "Mail", "Email"),
@@ -393,11 +393,23 @@ object IntentBagger {
     }
 
     private fun matchMedia(clean: String): String? {
+        // Standalone short commands (e.g. "pause", "next", "skip", "play")
+        when (clean) {
+            "pause", "stop" -> return "PAUSE"
+            "play", "resume", "unpause" -> return "PLAY"
+            "next", "skip" -> return "NEXT"
+            "prev", "previous" -> return "PREV"
+        }
+        // Inside longer sentences, require explicit media-qualified phrases to avoid
+        // false positives like "on next day off" or "hoping to keep..."
+        fun hasPhrase(phrases: List<String>): Boolean =
+            phrases.any { phrase -> Regex("""\b${Regex.escape(phrase)}\b""").containsMatchIn(clean) }
+
         return when {
-            MEDIA_VERBS_PAUSE.any { clean.contains(it) } -> "PAUSE"
-            MEDIA_VERBS_PLAY.any { clean.contains(it) } -> "PLAY"
-            MEDIA_VERBS_NEXT.any { clean.contains(it) } -> "NEXT"
-            MEDIA_VERBS_PREV.any { clean.contains(it) } -> "PREV"
+            hasPhrase(MEDIA_PHRASES_PAUSE) -> "PAUSE"
+            hasPhrase(MEDIA_PHRASES_PLAY) -> "PLAY"
+            hasPhrase(MEDIA_PHRASES_NEXT) -> "NEXT"
+            hasPhrase(MEDIA_PHRASES_PREV) -> "PREV"
             else -> null
         }
     }

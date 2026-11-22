@@ -281,7 +281,7 @@ object OverlayActionRegistry {
                 if (a11y != null) {
                     a11y.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
                 } else {
-                    Toast.makeText(context, "Enable GHOST Accessibility for Back gesture", Toast.LENGTH_SHORT).show()
+                    com.ghost.api.ui.GhostHudDispatcher.show(context, "Enable GHOST Accessibility for Back gesture")
                 }
                 return true
             }
@@ -310,7 +310,7 @@ object OverlayActionRegistry {
                 if (a11y != null) {
                     a11y.performGlobalAction(AccessibilityService.GLOBAL_ACTION_RECENTS)
                 } else {
-                    Toast.makeText(context, "Enable GHOST Accessibility for Recents", Toast.LENGTH_SHORT).show()
+                    com.ghost.api.ui.GhostHudDispatcher.show(context, "Enable GHOST Accessibility for Recents")
                 }
                 return true
             }
@@ -323,7 +323,7 @@ object OverlayActionRegistry {
                         GemmaAccessibilityService.instance?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_RECENTS)
                     }, 180L)
                 } else {
-                    Toast.makeText(context, "Enable GHOST Accessibility for Last App switch", Toast.LENGTH_SHORT).show()
+                    com.ghost.api.ui.GhostHudDispatcher.show(context, "Enable GHOST Accessibility for Last App switch")
                 }
                 return true
             }
@@ -333,7 +333,7 @@ object OverlayActionRegistry {
                 if (a11y != null) {
                     a11y.performGlobalAction(AccessibilityService.GLOBAL_ACTION_QUICK_SETTINGS)
                 } else {
-                    Toast.makeText(context, "Enable GHOST Accessibility for Quick Settings", Toast.LENGTH_SHORT).show()
+                    com.ghost.api.ui.GhostHudDispatcher.show(context, "Enable GHOST Accessibility for Quick Settings")
                 }
                 return true
             }
@@ -343,7 +343,7 @@ object OverlayActionRegistry {
                 if (a11y != null) {
                     a11y.performGlobalAction(AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS)
                 } else {
-                    Toast.makeText(context, "Enable GHOST Accessibility for Notifications", Toast.LENGTH_SHORT).show()
+                    com.ghost.api.ui.GhostHudDispatcher.show(context, "Enable GHOST Accessibility for Notifications")
                 }
                 return true
             }
@@ -358,7 +358,7 @@ object OverlayActionRegistry {
                 if (a11y != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                     a11y.performGlobalAction(AccessibilityService.GLOBAL_ACTION_TAKE_SCREENSHOT)
                 } else {
-                    Toast.makeText(context, "Enable GHOST Accessibility for Screenshot", Toast.LENGTH_SHORT).show()
+                    com.ghost.api.ui.GhostHudDispatcher.show(context, "Enable GHOST Accessibility for Screenshot")
                 }
                 return true
             }
@@ -408,7 +408,7 @@ object OverlayActionRegistry {
                 context.startActivity(launchIntent)
                 true
             } else {
-                Toast.makeText(context, "App not found: $pkg", Toast.LENGTH_SHORT).show()
+                com.ghost.api.ui.GhostHudDispatcher.show(context, "App not found: $pkg")
                 false
             }
         } catch (e: Exception) {
@@ -426,7 +426,7 @@ object OverlayActionRegistry {
             torchEnabled = nextState
         } catch (e: Exception) {
             Timber.w(e, "Failed to toggle flashlight")
-            Toast.makeText(context, "Flashlight unavailable", Toast.LENGTH_SHORT).show()
+            com.ghost.api.ui.GhostHudDispatcher.show(context, "Flashlight unavailable")
         }
     }
 

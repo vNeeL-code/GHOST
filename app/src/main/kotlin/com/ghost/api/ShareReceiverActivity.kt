@@ -40,7 +40,7 @@ class ShareReceiverActivity : Activity() {
             mimeType.startsWith("audio/") -> handleAudio()
             mimeType == "application/pdf" -> handlePdf()
             else -> {
-                Toast.makeText(this, "Unsupported type: $mimeType", Toast.LENGTH_SHORT).show()
+                com.ghost.api.ui.GhostHudDispatcher.show(this, "Unsupported type: $mimeType")
                 finish()
             }
         }
@@ -54,7 +54,7 @@ class ShareReceiverActivity : Activity() {
             intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
         }
         if (uri == null) {
-            Toast.makeText(this, "No image received", Toast.LENGTH_SHORT).show()
+            com.ghost.api.ui.GhostHudDispatcher.show(this, "No image received")
             finish()
             return
         }
@@ -67,7 +67,7 @@ class ShareReceiverActivity : Activity() {
 
                 if (inputStream == null) {
                     runOnUiThread { 
-                        Toast.makeText(this, "Unreadable content", Toast.LENGTH_SHORT).show()
+                        com.ghost.api.ui.GhostHudDispatcher.show(this, "Unreadable content")
                         finish()
                     }
                     return@thread
@@ -109,13 +109,13 @@ class ShareReceiverActivity : Activity() {
                 }
 
                 runOnUiThread {
-                    Toast.makeText(this, if (!sharedText.isNullOrEmpty()) "Analyzing shared image..." else "Image shared with Gemma ✨", Toast.LENGTH_SHORT).show()
+                    com.ghost.api.ui.GhostHudDispatcher.show(this, if (!sharedText.isNullOrEmpty()) "Analyzing shared image..." else "Image shared with Gemma ✨")
                     finish()
                 }
             } catch (e: Exception) {
                 Timber.e(e, "Share failed")
                 runOnUiThread {
-                    Toast.makeText(this, "Share Failed: ${e.message}", Toast.LENGTH_LONG).show()
+                    com.ghost.api.ui.GhostHudDispatcher.show(this, "Share Failed: ${e.message}", isLong = true)
                     finish()
                 }
             }
@@ -127,7 +127,7 @@ class ShareReceiverActivity : Activity() {
     private fun handleText() {
         val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
         if (sharedText.isNullOrEmpty()) {
-            Toast.makeText(this, "No text received", Toast.LENGTH_SHORT).show()
+            com.ghost.api.ui.GhostHudDispatcher.show(this, "No text received")
             finish()
             return
         }
@@ -141,22 +141,22 @@ class ShareReceiverActivity : Activity() {
         }
         startService(serviceIntent)
 
-        Toast.makeText(this, "Text shared with Gemma", Toast.LENGTH_SHORT).show()
+        com.ghost.api.ui.GhostHudDispatcher.show(this, "Text shared with Gemma")
         finish()
     }
 
     private fun handleVideo() {
-        Toast.makeText(this, "Video sharing not yet supported", Toast.LENGTH_SHORT).show()
+        com.ghost.api.ui.GhostHudDispatcher.show(this, "Video sharing not yet supported")
         finish()
     }
 
     private fun handleAudio() {
-        Toast.makeText(this, "Audio sharing not yet supported", Toast.LENGTH_SHORT).show()
+        com.ghost.api.ui.GhostHudDispatcher.show(this, "Audio sharing not yet supported")
         finish()
     }
 
     private fun handlePdf() {
-        Toast.makeText(this, "PDF sharing not yet supported", Toast.LENGTH_SHORT).show()
+        com.ghost.api.ui.GhostHudDispatcher.show(this, "PDF sharing not yet supported")
         finish()
     }
 

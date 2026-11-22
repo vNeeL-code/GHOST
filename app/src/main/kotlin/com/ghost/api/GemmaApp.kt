@@ -10,7 +10,9 @@ class GemmaApp : Application() {
         // Global Crash Handler (logs to filesDir/logs/crashes)
         CrashHandler.install(this)
 
-        Timber.plant(Timber.DebugTree())
+        if (BuildConfig.DEBUG) {
+            Timber.plant(Timber.DebugTree())
+        }
         Timber.i("Gemma API initialized")
     }
 }

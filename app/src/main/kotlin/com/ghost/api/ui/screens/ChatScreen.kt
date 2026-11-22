@@ -426,9 +426,10 @@ fun ChatMessageRow(
 
     // Strip redundant leading callsign prefix from AI messages so it never renders twice
     val cleanContent = if (!isUser) {
+        val escapedName = Regex.escape(cleanDeviceName)
         displayContent
-            .replace(Regex("""^✧\s*.*?:?\s*"""), "")
-            .replace(Regex("""^$cleanDeviceName:\s*"""), "")
+            .replace(Regex("""^✧\s*$escapedName:?\s*"""), "")
+            .replace(Regex("""^$escapedName:\s*"""), "")
             .trim()
     } else {
         displayContent
@@ -499,7 +500,7 @@ fun ChatMessageRow(
                 operatorAvatar = newEmoji
                 prefs.edit().putString(Constants.PREF_OPERATOR_AVATAR, newEmoji).apply()
                 showAvatarDialog = false
-                Toast.makeText(context, "Operator callsign updated: Δ $newEmoji ∇", Toast.LENGTH_SHORT).show()
+                com.ghost.api.ui.GhostHudDispatcher.show(context, "Operator callsign updated: Δ $newEmoji ∇")
             }
         )
     }
@@ -510,7 +511,7 @@ fun ChatMessageRow(
             onDismiss = { showReportDialog = false },
             onSubmitReport = { reason, details ->
                 saveAiReport(context, displayContent, reason, details)
-                Toast.makeText(context, "Report received. Thank you for helping improve GHOST.", Toast.LENGTH_SHORT).show()
+                com.ghost.api.ui.GhostHudDispatcher.show(context, "Report received. Thank you for helping improve GHOST.")
             }
         )
     }
@@ -575,7 +576,7 @@ fun ChatMessageRow(
                                 if (isOperatorTier) {
                                     showAvatarDialog = true
                                 } else {
-                                    Toast.makeText(context, "Operator Pass required (🦕💭💸) to customize avatar", Toast.LENGTH_SHORT).show()
+                                    com.ghost.api.ui.GhostHudDispatcher.show(context, "Operator Pass required (🦕💭💸) to customize avatar")
                                 }
                             } else if (displayContent.isNotEmpty()) {
                                 showReportDialog = true
@@ -630,7 +631,7 @@ fun ChatMessageRow(
                             .clip(RoundedCornerShape(4.dp))
                             .clickable {
                                 clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(ucfFormattedContent))
-                                Toast.makeText(context, "Copied UCF to clipboard", Toast.LENGTH_SHORT).show()
+                                com.ghost.api.ui.GhostHudDispatcher.show(context, "Copied UCF to clipboard")
                             }
                             .padding(horizontal = 6.dp, vertical = 4.dp)
                     ) {
@@ -902,7 +903,7 @@ fun VoiceMessageBubble(
         }
 
         if (audioData == null || audioData.isEmpty()) {
-            Toast.makeText(context, "Voice memo audio stream expired", Toast.LENGTH_SHORT).show()
+            com.ghost.api.ui.GhostHudDispatcher.show(context, "Voice memo audio stream expired")
             return
         }
 
@@ -968,7 +969,7 @@ fun VoiceMessageBubble(
             }
         } catch (e: Exception) {
             Timber.e(e, "Failed to play voice memo")
-            Toast.makeText(context, "Playback error: ${e.message}", Toast.LENGTH_SHORT).show()
+            com.ghost.api.ui.GhostHudDispatcher.show(context, "Playback error: ${e.message}")
             isPlaying = false
         }
     }
@@ -1539,7 +1540,7 @@ fun CompactToolCard(tool: ToolInvocation) {
                     modifier = Modifier
                         .clickable {
                             clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(tool.params))
-                            Toast.makeText(context, "Copied payload", Toast.LENGTH_SHORT).show()
+                            com.ghost.api.ui.GhostHudDispatcher.show(context, "Copied payload")
                         }
                         .padding(4.dp)
                 )
@@ -1882,7 +1883,7 @@ fun InputBar(
                         when (voiceState) {
                             VoiceState.IDLE -> {
                                 if (!audioRecorder.hasPermission()) {
-                                    Toast.makeText(context, "Microphone permission required", Toast.LENGTH_SHORT).show()
+                                    com.ghost.api.ui.GhostHudDispatcher.show(context, "Microphone permission required")
                                 } else {
                                     // Shut up TTS immediately when user initiates microphone input
                                     com.ghost.api.services.TTSManager.stopAll()

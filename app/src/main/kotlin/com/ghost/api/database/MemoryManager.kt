@@ -68,6 +68,13 @@ class MemoryManager(private val context: Context) {
             }
         } catch (e: Exception) {
             Timber.w(e, "Failed to append to external memory_log.txt")
+            com.ghost.api.ui.GhostHudDispatcher.bark(
+                context = context,
+                glyph = "⚠️ Memory log write failed",
+                debounceKey = "memory_log_write_fail",
+                debounceMs = 60_000L,
+                durationMs = 3000L
+            )
         }
     }
 

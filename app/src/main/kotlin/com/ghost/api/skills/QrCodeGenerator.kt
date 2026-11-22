@@ -33,10 +33,10 @@ object QrCodeGenerator {
         VersionSpec(4, 100, 20, 1, 80, alignmentCenters = intArrayOf(6, 26)),
         VersionSpec(5, 134, 26, 1, 108, alignmentCenters = intArrayOf(6, 30)),
         VersionSpec(6, 172, 18, 2, 68, alignmentCenters = intArrayOf(6, 34)),
-        VersionSpec(7, 196, 20, 4, 39, alignmentCenters = intArrayOf(6, 22, 38)),
+        VersionSpec(7, 196, 20, 2, 78, alignmentCenters = intArrayOf(6, 22, 38)),
         VersionSpec(8, 242, 24, 2, 97, alignmentCenters = intArrayOf(6, 24, 42)),
-        VersionSpec(9, 292, 30, 3, 76, 2, 77, alignmentCenters = intArrayOf(6, 26, 46)),
-        VersionSpec(10, 346, 18, 4, 68, 1, 69, alignmentCenters = intArrayOf(6, 28, 50))
+        VersionSpec(9, 292, 30, 2, 116, alignmentCenters = intArrayOf(6, 26, 46)),
+        VersionSpec(10, 346, 18, 2, 68, 2, 69, alignmentCenters = intArrayOf(6, 28, 50))
     )
 
     fun generatePngBase64(text: String, pixelSize: Int = 512): String {

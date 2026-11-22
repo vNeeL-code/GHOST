@@ -143,7 +143,7 @@ class SystemToolSet(private val context: Context) : ToolSet {
         return mapOf("result" to "error", "message" to "App not found matching '$name'")
     }
 
-    @Tool(description = "Controls media playback")
+    @Tool(description = "Controls media playback (PLAY, PAUSE, NEXT, PREV). ONLY call when the user explicitly asks to control music/audio playback—NEVER invoke for conversational words like 'next day', 'next week', or 'play along'.")
     fun media(
         @ToolParam(description = "PLAY, PAUSE, NEXT, PREV") action: String
     ): Map<String, String> {

@@ -81,8 +81,10 @@ class TimerAndLifecycleRegressionTest {
     @Test
     fun `toolPolicy gates destructive delete_file while allowing built-in operator tools without blocking`() {
         assertTrue(com.ghost.api.agent.ToolPolicy.isRisky("delete_file", emptyMap()))
+        assertTrue(com.ghost.api.agent.ToolPolicy.isRisky("move_file", emptyMap()))
+        assertTrue(com.ghost.api.agent.ToolPolicy.isRisky("run_intent", emptyMap()))
+        assertTrue(com.ghost.api.agent.ToolPolicy.isRisky("reply_notification", emptyMap()))
 
-        org.junit.Assert.assertFalse(com.ghost.api.agent.ToolPolicy.isRisky("move_file", emptyMap()))
         org.junit.Assert.assertFalse(com.ghost.api.agent.ToolPolicy.isRisky("save_skill", emptyMap()))
         org.junit.Assert.assertFalse(com.ghost.api.agent.ToolPolicy.isRisky("bash", emptyMap()))
         org.junit.Assert.assertFalse(com.ghost.api.agent.ToolPolicy.isRisky("type", mapOf("text" to "hello")))

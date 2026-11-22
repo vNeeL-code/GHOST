@@ -13,35 +13,74 @@ import org.json.JSONObject
 object IntentHandler {
     private const val TAG = "IntentHandler"
 
+    private val ALLOWED_GENERIC_ACTIONS = setOf(
+        Intent.ACTION_VIEW,
+        Intent.ACTION_SEND,
+        Intent.ACTION_SENDTO,
+        Intent.ACTION_DIAL,
+        Intent.ACTION_WEB_SEARCH,
+        Intent.ACTION_SEARCH,
+        Intent.ACTION_MAIN,
+        Intent.ACTION_INSERT,
+        Intent.ACTION_EDIT,
+        "android.intent.action.SET_ALARM",
+        "android.intent.action.SET_TIMER",
+        "android.intent.action.SHOW_ALARMS",
+        "android.intent.action.SHOW_TIMERS",
+        "android.media.action.MEDIA_PLAY_FROM_SEARCH",
+        "com.google.android.gms.actions.CREATE_NOTE"
+    )
+
+    private val ALLOWED_DATA_SCHEMES = setOf(
+        "http", "https", "mailto", "tel", "sms", "smsto", "geo", "market", "spotify", "vnd.youtube"
+    )
+
     fun handleAction(context: Context, action: String, parameters: String): Boolean {
         return try {
             val json = JSONObject(parameters)
             
-            // 1. Generic Android Intents
+            // 1. Generic Android Intents (Strict Allowlist — prevents prompt-injection privilege escalation)
             if (action.startsWith("android.intent.action.") || action.startsWith("com.")) {
+                if (action !in ALLOWED_GENERIC_ACTIONS) {
+                    Log.w(TAG, "Blocked non-allowlisted intent action: $action")
+                    return false
+                }
+
+                // Never allow arbitrary background service starts or broadcasts from LLM tool calls
+                val mode = json.optString("start_mode", "activity").lowercase()
+                if (mode != "activity") {
+                    Log.w(TAG, "Blocked non-activity intent launch mode '$mode' for $action")
+                    return false
+                }
+
                 val intent = Intent(action)
                 
-                // Parse optional data/type
+                // Parse optional data/type (validate URI scheme to block file:// / content:// internal leaks)
                 val dataStr = json.optString("data", "")
                 val typeStr = json.optString("type", "")
-                if (dataStr.isNotEmpty() && typeStr.isNotEmpty()) {
-                    intent.setDataAndType(Uri.parse(dataStr), typeStr)
-                } else if (dataStr.isNotEmpty()) {
-                    intent.data = Uri.parse(dataStr)
+                if (dataStr.isNotEmpty()) {
+                    val uri = Uri.parse(dataStr)
+                    val scheme = uri.scheme?.lowercase() ?: ""
+                    if (scheme.isNotEmpty() && scheme !in ALLOWED_DATA_SCHEMES) {
+                        Log.w(TAG, "Blocked unsafe URI scheme '$scheme' in intent $action")
+                        return false
+                    }
+                    if (typeStr.isNotEmpty()) {
+                        intent.setDataAndType(uri, typeStr)
+                    } else {
+                        intent.data = uri
+                    }
                 } else if (typeStr.isNotEmpty()) {
                     intent.type = typeStr
                 }
                 
-                // Parse Component Name
+                // Optional package hint only (block explicit internal class targeting & self-package spoofing)
                 val compPkg = json.optString("component_package", "")
-                val compCls = json.optString("component_class", "")
-                if (compPkg.isNotEmpty() && compCls.isNotEmpty()) {
-                    intent.setClassName(compPkg, compCls)
-                } else if (compPkg.isNotEmpty()) {
+                if (compPkg.isNotEmpty() && compPkg != context.packageName && !compPkg.startsWith("com.android.systemui")) {
                     intent.setPackage(compPkg)
                 }
                 
-                // Parse Extras
+                // Parse safe scalar extras
                 val extrasObj = json.optJSONObject("extras")
                 if (extrasObj != null) {
                     val keys = extrasObj.keys()
@@ -56,16 +95,8 @@ object IntentHandler {
                     }
                 }
                 
-                // Launch mode
-                val mode = json.optString("start_mode", "activity")
-                when (mode) {
-                    "service" -> context.startService(intent)
-                    "broadcast" -> context.sendBroadcast(intent)
-                    else -> {
-                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        context.startActivity(intent)
-                    }
-                }
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(intent)
                 return true
             }
             

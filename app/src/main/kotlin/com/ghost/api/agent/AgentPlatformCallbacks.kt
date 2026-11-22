@@ -21,7 +21,9 @@ interface AgentPlatformCallbacks {
         sessionId: String,
         imageUri: String? = null,
         userTimestamp: Long = System.currentTimeMillis(),
-        durationMs: Long? = null
+        durationMs: Long? = null,
+        webviewUrl: String? = null,
+        webviewAspectRatio: Float? = null
     )
     fun writeDiaryEntry(eventType: String, content: String, thermalState: String)
     suspend fun unloadEngine()

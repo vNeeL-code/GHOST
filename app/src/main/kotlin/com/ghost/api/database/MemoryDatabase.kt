@@ -17,7 +17,7 @@ import timber.log.Timber
         AgentState::class,
         DiaryEntry::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false  // Disable schema export to fix build warning
 )
 abstract class MemoryDatabase : RoomDatabase() {
@@ -88,6 +88,26 @@ abstract class MemoryDatabase : RoomDatabase() {
         }
 
         /**
+         * Migration 6→7: Added webviewUrl and webviewAspectRatio columns to conversations
+         * for QR code & interactive skill card persistence across app lifecycle transitions.
+         */
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                Timber.i("MemoryDatabase: Migrating 6→7 (webviewUrl, webviewAspectRatio)")
+                try {
+                    db.execSQL("ALTER TABLE conversations ADD COLUMN webviewUrl TEXT DEFAULT NULL")
+                } catch (e: Exception) {
+                    Timber.d("Migration 6→7: webviewUrl column may already exist")
+                }
+                try {
+                    db.execSQL("ALTER TABLE conversations ADD COLUMN webviewAspectRatio REAL DEFAULT NULL")
+                } catch (e: Exception) {
+                    Timber.d("Migration 6→7: webviewAspectRatio column may already exist")
+                }
+            }
+        }
+
+        /**
          * Migration 1→2: Added diary_entries table
          */
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -134,12 +154,12 @@ abstract class MemoryDatabase : RoomDatabase() {
                 )
                 .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
                 // Apply migrations in order
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                 // Active development: wipe rather than crash on schema conflict
                 .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance
-                Timber.i("MemoryDatabase: Initialized (version 6, file=$dbName)")
+                Timber.i("MemoryDatabase: Initialized (version 7, file=$dbName)")
                 instance
             }
         }

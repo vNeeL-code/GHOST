@@ -127,6 +127,14 @@ class GemmaAccessibilityService : AccessibilityService() {
             return
         }
 
+        com.ghost.api.ui.GhostHudDispatcher.bark(
+            context = this,
+            glyph = "👁️",
+            debounceKey = "sensor_watch",
+            debounceMs = 4_000L,
+            durationMs = 1800L
+        )
+
         val activePkg = rootInActiveWindow?.packageName?.toString() ?: ""
         if (isSensitivePackage(activePkg)) {
             Timber.w("GemmaAccessibilityService: Blocked screenshot capture on sensitive package $activePkg")

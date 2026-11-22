@@ -13,7 +13,7 @@ object ClipboardUtils {
             val clip = ClipData.newPlainText(label, text)
             clipboard.setPrimaryClip(clip)
             if (showToast) {
-                Toast.makeText(context, "✧ Copied", Toast.LENGTH_SHORT).show()
+                com.ghost.api.ui.GhostHudDispatcher.show(context, "✧ Copied")
             }
             Timber.d("Text copied to clipboard: ${label}")
         } catch (e: Exception) {

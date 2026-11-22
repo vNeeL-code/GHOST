@@ -367,6 +367,15 @@ class SensorFusionManager(val context: Context) : AutoCloseable {
                 }
                 Intent.ACTION_USER_PRESENT -> {
                     com.ghost.api.GemmaService.instance?.onScreenStateChanged(isInteractive = true)
+                    context?.let { ctx ->
+                        com.ghost.api.ui.GhostHudDispatcher.bark(
+                            context = ctx,
+                            glyph = "👋",
+                            debounceKey = "unlock_wave",
+                            debounceMs = 15_000L,
+                            durationMs = 2000L
+                        )
+                    }
                     handleOperatorPresent(context)
                 }
                 Intent.ACTION_SCREEN_OFF -> {

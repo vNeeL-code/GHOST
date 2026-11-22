@@ -191,7 +191,7 @@ class OverlayManager(private val context: Context) {
 
     fun showError(error: String) {
         if (inputOverlay != null) {
-            Toast.makeText(context, "Inference: $error", Toast.LENGTH_LONG).show()
+            com.ghost.api.ui.GhostHudDispatcher.show(context, "Inference: $error", isLong = true)
             hideOverlay()
         }
     }
@@ -226,6 +226,22 @@ class OverlayManager(private val context: Context) {
             }
             ghostWorkIndicator?.show(tag, durationMs)
         }
+    }
+
+    /**
+     * Displays a unified corner HUD notice or ambient bark (works in both foreground and background).
+     * Returns true if overlay permission is granted and the notice was scheduled.
+     */
+    fun showHudMessage(message: String, durationMs: Long = 2200L, announceForA11y: Boolean = true): Boolean {
+        if (!canDrawOverlay()) return false
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            val wm = windowManager ?: return@post
+            if (ghostWorkIndicator == null) {
+                ghostWorkIndicator = GhostWorkIndicatorOverlay(context, wm)
+            }
+            ghostWorkIndicator?.showMessage(message, durationMs, announceForA11y)
+        }
+        return true
     }
 
     /**

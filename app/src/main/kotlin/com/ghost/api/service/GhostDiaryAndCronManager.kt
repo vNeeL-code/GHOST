@@ -497,9 +497,9 @@ class GhostDiaryAndCronManager(
                 if (manualTrigger) {
                     withContext(Dispatchers.Main) {
                         if (success) {
-                            Toast.makeText(context, "📔 Diary entry recorded", Toast.LENGTH_SHORT).show()
+                            com.ghost.api.ui.GhostHudDispatcher.show(context, "📔 Diary entry recorded")
                         } else {
-                            Toast.makeText(context, "📔 Diary skipped (engine busy or offline)", Toast.LENGTH_SHORT).show()
+                            com.ghost.api.ui.GhostHudDispatcher.show(context, "📔 Diary skipped (engine busy or offline)")
                         }
                     }
                 }

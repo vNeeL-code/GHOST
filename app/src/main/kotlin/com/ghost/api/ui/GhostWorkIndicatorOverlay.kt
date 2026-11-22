@@ -379,6 +379,74 @@ class GhostWorkIndicatorOverlay(
         }
     }
 
+    /**
+     * Displays a literal status ping, confirmation, or non-verbal ambient bark (e.g. 👋, 👁️)
+     * in the corner HUD without cycling flavor text.
+     */
+    fun showMessage(message: String, durationMs: Long = 2200L, announceForA11y: Boolean = true) {
+        val compact = message.replace('\n', ' ').trim().let {
+            if (it.length > 54) it.take(51).trimEnd() + "…" else it
+        }
+        if (compact.isEmpty()) return
+
+        showTimestamp = System.currentTimeMillis()
+        currentTag = "NOTICE"
+        currentFlavorText = if (compact.length <= 4) compact else "> $compact"
+        requestLayout()
+
+        windowManager?.let { wm ->
+            if (!isAttachedToWindow) {
+                try {
+                    wm.addView(this, windowParams)
+                    isAttachedToWindow = true
+                } catch (e: Exception) {
+                    Timber.w(e, "GhostWorkIndicatorOverlay failed to attach for message")
+                    return
+                }
+            } else {
+                try {
+                    wm.updateViewLayout(this, windowParams)
+                } catch (e: Exception) {
+                    Timber.w(e, "GhostWorkIndicatorOverlay layout update failed for message")
+                }
+            }
+        }
+
+        visibility = View.VISIBLE
+        if (announceForA11y) {
+            @Suppress("DEPRECATION")
+            announceForAccessibility(compact)
+        }
+
+        alphaAnimator?.cancel()
+        alphaAnimator = ValueAnimator.ofFloat(currentAlpha, 1f).apply {
+            duration = 160
+            interpolator = DecelerateInterpolator()
+            addUpdateListener {
+                currentAlpha = it.animatedValue as Float
+                invalidate()
+            }
+            start()
+        }
+
+        openAnimator?.cancel()
+        openAnimator = ValueAnimator.ofFloat(openProgress, 1f).apply {
+            duration = 260
+            interpolator = OvershootInterpolator(1.2f)
+            addUpdateListener {
+                openProgress = it.animatedValue as Float
+                invalidate()
+            }
+            start()
+        }
+
+        startAnimationLoop()
+        removeCallbacks(cycleFlavorRunnable)
+        removeCallbacks(autoHideRunnable)
+        val safeDuration = durationMs.coerceAtLeast(minDisplayDurationMs)
+        postDelayed(autoHideRunnable, safeDuration)
+    }
+
     private val autoHideRunnable = Runnable {
         hide()
     }

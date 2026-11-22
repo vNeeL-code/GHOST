@@ -121,6 +121,7 @@ class GhostAgent(
     @Volatile private var toolSpokeFlavorTts = false
     @Volatile private var lastToolFlavorPhrase: String? = null
     @Volatile private var pendingToolCompaction = false
+    @Volatile private var activeTurnStepFlush: (() -> Unit)? = null
 
     private fun extractTimerDurationLabel(params: String): String {
         val secFromKey = Regex("""(?i)\b(?:seconds?|secs?|duration)\s*[:=]\s*["']?(\d+)["']?""").find(params)?.groupValues?.get(1)?.toIntOrNull()
@@ -131,6 +132,8 @@ class GhostAgent(
     init {
         // Wire tool lifecycle hooks
         mcpTool.onToolExecuting = { toolName, params ->
+            // Finalize any pre-tool ReAct commentary as its own async-chat bubble before the next step
+            activeTurnStepFlush?.invoke()
             val userTitle = Constants.getUserTitle(context)
             val hudText = when (toolName.lowercase()) {
                 "app", "open_app" -> {
@@ -561,9 +564,30 @@ class GhostAgent(
         val responseBuffer = StringBuilder()
         val thoughtBuffer = StringBuilder()
         val ttsSentenceBuffer = StringBuilder()
+        val reactStepMessages = mutableListOf<String>()
         var spokenAnyStreamingTts = false
         var inThinkBlock = false
         var streamError: String? = null
+
+        activeTurnStepFlush = {
+            if (!isDream) {
+                val rawStep = synchronized(responseBuffer) {
+                    val s = responseBuffer.toString()
+                    responseBuffer.clear()
+                    s
+                }
+                val stepClean = sanitizeAgentOutput(rawStep)
+                if (stepClean.isNotBlank() && !isToolInvocation(stepClean) && (stepClean.length >= 4 || containsEmoji(stepClean)) && stepClean != "I'") {
+                    synchronized(reactStepMessages) {
+                        if (reactStepMessages.lastOrNull() != stepClean) {
+                            reactStepMessages.add(stepClean)
+                        }
+                    }
+                    _conversationHistory.add(AgentMessage(role = "assistant", content = stepClean))
+                    callbacks?.onMessageAdded(stepClean, isUser = false, isComplete = true)
+                }
+            }
+        }
 
         try {
             llmEngine.streamResponse(
@@ -603,20 +627,23 @@ class GhostAgent(
 
                     if (cleanToken.isEmpty()) return@streamResponse
 
-                    // Extract emoji for emotion visualizer
-                    val emojiMatch = Regex("([\\x{1F300}-\\x{1F9FF}|\\x{2600}-\\x{26FF}|\\x{2700}-\\x{27BF}])").find(cleanToken)
-                    if (emojiMatch != null) {
-                        callbacks?.onEmotionSignal(emojiMatch.groupValues[1])
+                    // Extract emoji for emotion visualizer (preserving full Unicode emoji, ZWJ, and VS16)
+                    val detectedEmoji = extractFirstEmoji(cleanToken)
+                    if (detectedEmoji != null) {
+                        callbacks?.onEmotionSignal(detectedEmoji)
                     }
 
-                    if (responseBuffer.isEmpty()) {
-                        callbacks?.cancelThinking()
+                    val snapshot = synchronized(responseBuffer) {
+                        if (responseBuffer.isEmpty()) {
+                            callbacks?.cancelThinking()
+                        }
+                        responseBuffer.append(cleanToken)
+                        responseBuffer.toString()
                     }
-                    responseBuffer.append(cleanToken)
 
                     if (!isDream) {
                         callbacks?.onMessageAdded(
-                            wrapResponse(responseBuffer.toString()),
+                            wrapResponse(snapshot),
                             isUser = false,
                             isComplete = false
                         )
@@ -920,6 +947,23 @@ class GhostAgent(
             )
             if (toolExecutedInCurrentTurn && (isKnowledgeRetrievalTool || cleanResponse.length < 25 || cleanResponse == "I'")) {
                 Timber.i("GhostAgent: Tool was executed ($lastExecutedToolName, knowledge=$isKnowledgeRetrievalTool). Running continuation decode pass...")
+                // Finalize any non-stub commentary from the prior ReAct step as its own bubble
+                // so the continuation streams as a separate async-chat message right below it.
+                if (!isDream && cleanResponse.isNotBlank() && !isToolInvocation(cleanResponse) &&
+                    (cleanResponse.length >= 4 || containsEmoji(cleanResponse)) && cleanResponse != "I'") {
+                    val alreadyFlushed = synchronized(reactStepMessages) {
+                        if (reactStepMessages.lastOrNull() == cleanResponse) {
+                            true
+                        } else {
+                            reactStepMessages.add(cleanResponse)
+                            false
+                        }
+                    }
+                    if (!alreadyFlushed) {
+                        _conversationHistory.add(AgentMessage(role = "assistant", content = cleanResponse))
+                        callbacks?.onMessageAdded(cleanResponse, isUser = false, isComplete = true)
+                    }
+                }
                 val continuationBuffer = StringBuilder()
                 val toolData = lastExecutedToolResult?.takeIf { it.isNotBlank() }
                 val continuationPrompt = if (toolData != null && isKnowledgeRetrievalTool) {
@@ -940,6 +984,10 @@ class GhostAgent(
                                 .replace(Regex("<\\|[a-z_]+\\|?>"), "")
                                 .replace(Regex("<[a-z_]+\\|>"), "")
                             if (cleanCont.isNotEmpty()) {
+                                val detectedEmoji = extractFirstEmoji(cleanCont)
+                                if (detectedEmoji != null) {
+                                    callbacks?.onEmotionSignal(detectedEmoji)
+                                }
                                 continuationBuffer.append(cleanCont)
                                 callbacks?.onMessageAdded(
                                     wrapResponse(continuationBuffer.toString()),
@@ -960,7 +1008,7 @@ class GhostAgent(
                 }
 
                 val contResult = continuationBuffer.toString().trim()
-                if (contResult.isNotBlank() && contResult.length >= 10) {
+                if (contResult.isNotBlank() && (contResult.length >= 10 || containsEmoji(contResult))) {
                     rawResponse = contResult
                     spokenAnyStreamingTts = false
                 } else if (!lastExecutedToolResult.isNullOrBlank()) {
@@ -1011,7 +1059,8 @@ class GhostAgent(
                 }
             }
 
-            val isStub = cleanResponse.length < 5 || cleanResponse == "I'" || cleanResponse.endsWith("]:")
+            // Expressive emoji-only or emoji-bearing short replies are NEVER stubs
+            val isStub = (!containsEmoji(cleanResponse) && cleanResponse.length < 5) || cleanResponse == "I'" || cleanResponse.endsWith("]:")
             if (streamError != null || (isStub && !toolExecutedInCurrentTurn)) {
                 Timber.w("GhostAgent: Stream error or stub detected (error=$streamError, stub=$isStub, response='$cleanResponse'). Attempting single-shot auto-recovery retry...")
 
@@ -1036,6 +1085,10 @@ class GhostAgent(
                                 .replace(Regex("<\\|[a-z_]+\\|?>"), "")
                                 .replace(Regex("<[a-z_]+\\|>"), "")
                             if (cleanCont.isNotEmpty()) {
+                                val detectedEmoji = extractFirstEmoji(cleanCont)
+                                if (detectedEmoji != null) {
+                                    callbacks?.onEmotionSignal(detectedEmoji)
+                                }
                                 retryBuffer.append(cleanCont)
                                 callbacks?.onMessageAdded(
                                     wrapResponse(retryBuffer.toString()),
@@ -1058,7 +1111,7 @@ class GhostAgent(
                 }
 
                 val retryClean = sanitizeAgentOutput(retryBuffer.toString())
-                val retryStub = retryClean.length < 5 || retryClean == "I'" || retryClean.endsWith("]:")
+                val retryStub = (!containsEmoji(retryClean) && retryClean.length < 5) || retryClean == "I'" || retryClean.endsWith("]:")
 
                 if (retryError == null && !retryStub) {
                     Timber.i("✅ GhostAgent: Auto-recovery retry SUCCEEDED! User prompt preserved.")
@@ -1115,14 +1168,44 @@ class GhostAgent(
                     callbacks?.speak(cleanForTTS(finalOutput))
                 }
                 val durationMs = System.currentTimeMillis() - turnStartTime
-                callbacks?.storeConversationTurn(
-                    userMessage = message,
-                    response = finalOutput,
-                    sessionId = sessionId,
-                    imageUri = turnImageUri,
-                    userTimestamp = turnStartTime,
-                    durationMs = durationMs
-                )
+                val flushedSteps = synchronized(reactStepMessages) { reactStepMessages.toList() }
+                if (flushedSteps.isEmpty()) {
+                    callbacks?.storeConversationTurn(
+                        userMessage = message,
+                        response = finalOutput,
+                        sessionId = sessionId,
+                        imageUri = turnImageUri,
+                        userTimestamp = turnStartTime,
+                        durationMs = durationMs,
+                        webviewUrl = webviewUrl,
+                        webviewAspectRatio = webviewRatio
+                    )
+                } else {
+                    // Persist multi-step ReAct turns as consecutive assistant messages so minimize/resume
+                    // restores the exact async-chat bubble sequence + final card/QR attachment.
+                    flushedSteps.forEachIndexed { idx, stepText ->
+                        callbacks?.storeConversationTurn(
+                            userMessage = if (idx == 0) message else "",
+                            response = stepText,
+                            sessionId = sessionId,
+                            imageUri = if (idx == 0) turnImageUri else null,
+                            userTimestamp = turnStartTime + idx,
+                            durationMs = null,
+                            webviewUrl = null,
+                            webviewAspectRatio = null
+                        )
+                    }
+                    callbacks?.storeConversationTurn(
+                        userMessage = "",
+                        response = finalOutput,
+                        sessionId = sessionId,
+                        imageUri = null,
+                        userTimestamp = turnStartTime + flushedSteps.size,
+                        durationMs = durationMs,
+                        webviewUrl = webviewUrl,
+                        webviewAspectRatio = webviewRatio
+                    )
+                }
                 consumeSpokenBarks()
             }
 
@@ -1150,6 +1233,7 @@ class GhostAgent(
             }
             return errorMsg
         } finally {
+            activeTurnStepFlush = null
             callbacks?.cancelThinking()
         }
     }
@@ -1646,12 +1730,14 @@ class GhostAgent(
         text = text.replace(Regex("""\[/?(?:Context|Live Sensory Grounding|Sensory Grounding|Telemetry|Perception|Intent Hints|Internal hardware perception|Internal perception)(?::[^\]]*)?\]\s*""", RegexOption.IGNORE_CASE), "")
 
         // 5. Clean callsign prefix and echoed prompt header if model emitted it
+        // Only strip explicit callsign/timestamp headers; never strip expressive Unicode emojis or body text.
         val assistantCallSign = getAssistantCallSign()
+        val escapedCallSign = Regex.escape(assistantCallSign)
         text = text
-            .replace(Regex("""^(?:\[.*?\]|[\w\s:·-]*?\]:?)\s*"""), "") // Strips echoed timestamp/prefix e.g. "pm]:", "[9:31 pm]:", "]:"
-            .replace(Regex("""^Δ\s*.*?\s*∇\s*"""), "")
-            .replace(Regex("""^✧\s*.*?:?\s*"""), "")
-            .replace(Regex("""^${Regex.escape(assistantCallSign)}:\s*"""), "")
+            .replace(Regex("""^(?:\[\d{1,2}:\d{2}(?:\s*[ap]m)?\]|[\w\s:·-]{0,16}\]:?)\s*""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""^Δ\s*[^\n]{0,24}?\s*∇:?\s*"""), "")
+            .replace(Regex("""^✧\s*$escapedCallSign:?\s*"""), "")
+            .replace(Regex("""^$escapedCallSign:\s*"""), "")
 
         // 6. Clean stuttering time tokens (e.g. "8:0000 PM" -> "8:00 PM", "2:000" -> "2:00")
         text = com.ghost.api.logic.TimePreprocessor.sanitizeTimeTokens(text)
@@ -1668,6 +1754,53 @@ class GhostAgent(
 
         return text.trim()
     }
+
+    /**
+     * Unicode-aware check for whether a code point is an emoji base character
+     * (handles BMP symbols/dingbats and supplementary planes including U+1F000..U+1FAFF).
+     */
+    private fun isEmojiCodePoint(cp: Int): Boolean {
+        return (cp in 0x1F300..0x1FAFF) ||
+            (cp in 0x2600..0x27BF) ||
+            (cp in 0x1F1E6..0x1F1FF) ||
+            (cp == 0x231A || cp == 0x231B || cp in 0x23E9..0x23F3 || cp in 0x23F8..0x23FA) ||
+            (cp == 0x2B50 || cp == 0x2B55 || cp == 0x3030 || cp == 0x303D || cp == 0x3297 || cp == 0x3299)
+    }
+
+    /**
+     * Extracts the first full emoji grapheme cluster (preserving variation selectors, skin-tone modifiers,
+     * regional indicator flag pairs, and ZWJ sequences). Never matches ASCII/pipe characters.
+     */
+    internal fun extractFirstEmoji(text: String): String? {
+        var i = 0
+        while (i < text.length) {
+            val cp = Character.codePointAt(text, i)
+            val charCount = Character.charCount(cp)
+            if (isEmojiCodePoint(cp)) {
+                var end = i + charCount
+                // Consume trailing VS16 (U+FE0F), skin-tone modifiers (U+1F3FB..U+1F3FF),
+                // regional indicator pair, or ZWJ (U+200D) + next emoji code point.
+                while (end < text.length) {
+                    val nextCp = Character.codePointAt(text, end)
+                    val nextCount = Character.charCount(nextCp)
+                    if (nextCp == 0xFE0F || nextCp in 0x1F3FB..0x1F3FF ||
+                        (cp in 0x1F1E6..0x1F1FF && nextCp in 0x1F1E6..0x1F1FF)) {
+                        end += nextCount
+                    } else if (nextCp == 0x200D && end + nextCount < text.length) {
+                        val afterZwj = Character.codePointAt(text, end + nextCount)
+                        end += nextCount + Character.charCount(afterZwj)
+                    } else {
+                        break
+                    }
+                }
+                return text.substring(i, end)
+            }
+            i += charCount
+        }
+        return null
+    }
+
+    internal fun containsEmoji(text: String): Boolean = extractFirstEmoji(text) != null
 
     private fun wrapResponse(raw: String): String {
         val trimmed = raw.trimStart()
@@ -1709,7 +1842,8 @@ class GhostAgent(
             val timeStamp = java.text.SimpleDateFormat("h:mm:ss a", Locale.US).format(java.util.Date())
             val entry = "[$timeStamp] \"$clean\""
             synchronized(recentReflexBarks) {
-                if (recentReflexBarks.lastOrNull() != entry) {
+                val recentTexts = recentReflexBarks.takeLast(2).map { it.substringAfter("] ", it) }
+                if ("\"$clean\"" !in recentTexts) {
                     if (recentReflexBarks.size >= 6) {
                         recentReflexBarks.removeFirst()
                     }

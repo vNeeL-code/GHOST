@@ -276,7 +276,7 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
                             images = bitmaps
                         ))
                     }
-                    if (turn.assistantResponse.isNotEmpty()) {
+                    if (turn.assistantResponse.isNotEmpty() || !turn.webviewUrl.isNullOrBlank()) {
                         val parts = turn.tokenHash.split("|")
                         val assistantTimestamp = parts.getOrNull(0)?.toLongOrNull() ?: (turn.timestamp + 5000L)
                         val durationMs = parts.getOrNull(1)?.toLongOrNull()
@@ -284,7 +284,9 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
                             content = turn.assistantResponse,
                             isFromUser = false,
                             timestamp = assistantTimestamp,
-                            durationMs = durationMs
+                            durationMs = durationMs,
+                            webviewUrl = turn.webviewUrl,
+                            webviewAspectRatio = turn.webviewAspectRatio
                         ))
                     }
                     list
@@ -406,12 +408,12 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
                 gemmaService?.processMultimodalFromUi(promptText, bitmaps, imageUris = imagePaths)
                 withContext(Dispatchers.Main) {
                     val toastMsg = if (bitmaps.size > 1) "Sent with 2 images" else "Sent with image"
-                    Toast.makeText(this@MainActivity, toastMsg, Toast.LENGTH_SHORT).show()
+                    com.ghost.api.ui.GhostHudDispatcher.show(this@MainActivity, toastMsg)
                 }
             }
         } else {
             gemmaService?.processQueryFromUi(promptText)
-            Toast.makeText(this@MainActivity, "Transmission sent", Toast.LENGTH_SHORT).show()
+            com.ghost.api.ui.GhostHudDispatcher.show(this@MainActivity, "Transmission sent")
         }
     }
 
@@ -419,7 +421,7 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
         scope.launch {
             gemmaService?.processMultimodalFromUi("[operator has sent a voice message - please listen and respond to contents of audio]", audio = audio)
             withContext(Dispatchers.Main) {
-                Toast.makeText(this@MainActivity, "Voice audio transmitted", Toast.LENGTH_SHORT).show()
+                com.ghost.api.ui.GhostHudDispatcher.show(this@MainActivity, "Voice audio transmitted")
             }
         }
     }
@@ -470,7 +472,7 @@ class MainActivity : ComponentActivity(), GemmaService.UiCallback {
                     withContext(Dispatchers.Main) {
                         chatViewModel.setAttachedImages(results.map { it.first }, results.mapNotNull { it.second })
                         val msg = if (results.size > 1) "2 images staged. Type a prompt and send." else "Image staged. Type a prompt and send."
-                        Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
+                        com.ghost.api.ui.GhostHudDispatcher.show(this@MainActivity, msg)
                     }
                 }
             } catch (e: Exception) { Timber.e(e) }

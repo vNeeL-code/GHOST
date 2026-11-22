@@ -149,7 +149,7 @@ MEDIA: "Seven Nation Army" - The White Stripes (Playing)
 
 Δ Operator ∇ [quarter to four in the afternoon]: Are we getting hot while downloading this file?
 ```
-Gemma absorbs her hardware status silently and answers with grounded physical awareness: she won't dump raw telemetry numbers unless asked or unless a thermal limit ($65^\circ\text{C}$) or battery threshold ($<30\%$) is genuinely crossed.
+Gemma absorbs her hardware status silently and answers with grounded physical awareness: she won't dump raw telemetry numbers unless asked or unless a thermal limit ($65^\circ\text{C}$) or battery threshold ($\le 20\%$ with $25\%$ hysteresis) is genuinely crossed.
 
 #### 2. Notification HUD & Streaming TTS
 ```

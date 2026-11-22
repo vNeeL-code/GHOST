@@ -141,6 +141,8 @@ class GhostForegroundNotificationController(
         return frame
     }
 
+    @Volatile private var isBatteryWorriedLatched: Boolean = false
+
     fun computeMachineStatus(
         sensorFusionManager: SensorFusionManager?,
         hardwarePropertiesManager: HardwarePropertiesManager?,
@@ -162,12 +164,18 @@ class GhostForegroundNotificationController(
         } catch (e: Exception) {
             false
         }
-        val isBatteryCritical = battLevel <= 10 && !isCharging
+        // Hysteresis latch: enter Worried at <= 20% when discharging, exit once charging or >= 25%
+        isBatteryWorriedLatched = when {
+            isCharging -> false
+            battLevel <= Constants.BATTERY_WORRIED_ENTER_PERCENT -> true
+            battLevel >= Constants.BATTERY_WORRIED_EXIT_PERCENT -> false
+            else -> isBatteryWorriedLatched
+        }
         val userBackend = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
             .getString(Constants.PREF_USER_BACKEND, "AUTO")
 
         return when {
-            isBatteryCritical || isThermalStress -> "🔴 Worried 🪫✧💦"
+            isBatteryWorriedLatched || isThermalStress -> "🔴 Worried 🪫✧💦"
             isInferencing || (isSuspendedDueToRam && ramUsedPercent >= 54) || downloadState is ModelDownloader.DownloadState.Downloading -> "🟠 Busy 🔥✧💦"
             !isGemmaLoaded || isSuspendedDueToRam || userBackend == "OFF" -> "🔵 Napping ⚡🐑⚡"
             else -> "🟢 Fully operational ✧"

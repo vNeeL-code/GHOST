@@ -54,11 +54,23 @@ object FastPathRouter {
         RegexOption.IGNORE_CASE
     )
 
+    private val NON_URL_FILE_EXTENSIONS = setOf(
+        "md", "txt", "kt", "java", "py", "json", "xml", "yaml", "yml", "csv",
+        "pdf", "png", "jpg", "jpeg", "webp", "gif", "mp3", "mp4", "wav",
+        "apk", "zip", "tar", "gz", "log", "sh", "bat", "gradle", "kts", "toml", "ini"
+    )
+
     fun isBareUrl(trimmed: String): Boolean {
         if (trimmed.isEmpty() || trimmed.any { it.isWhitespace() }) return false
         val lower = trimmed.lowercase()
         if (lower.startsWith("http://") || lower.startsWith("https://") || lower.startsWith("www.")) {
             return true
+        }
+        // Prevent filenames like "notes.md" or "config.json" from being treated as bare web domains
+        val lastSegment = lower.substringBefore('/').substringBefore('?').substringBefore('#')
+        val ext = lastSegment.substringAfterLast('.', "")
+        if (ext in NON_URL_FILE_EXTENSIONS) {
+            return false
         }
         if (BARE_URL_REGEX.matches(trimmed)) {
             return true
@@ -87,16 +99,10 @@ object FastPathRouter {
 
     fun route(
         input: String,
-        source: InputSource,
-        isFastPathEnabled: Boolean = true
+        source: InputSource
     ): RoutingResult {
         val trimmed = input.trim()
         if (trimmed.isEmpty()) {
-            return RoutingResult.FallThroughToLlm(augmentedUserMessage = input)
-        }
-
-        // 1. Settings Kill-Switch Check
-        if (!isFastPathEnabled) {
             return RoutingResult.FallThroughToLlm(augmentedUserMessage = input)
         }
 

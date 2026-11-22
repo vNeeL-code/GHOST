@@ -79,7 +79,6 @@ fun SettingsDialog(
     var activePickerSlot by remember { mutableStateOf<Pair<String, String>?>(null) } // prefKey to title
     var bindingRefreshTick by remember { mutableStateOf(0) }
 
-    var fastPathEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_FAST_PATH_ENABLED, true)) }
     var isOperatorTier by remember { mutableStateOf(Constants.isOperatorTier(prefs)) }
     var ttsEnabled by remember { mutableStateOf(prefs.getBoolean(Constants.PREF_TTS_ENABLED, true)) }
     var backend by remember { mutableStateOf(prefs.getString(Constants.PREF_USER_BACKEND, "AUTO") ?: "AUTO") }
@@ -167,7 +166,7 @@ fun SettingsDialog(
                             showOperatorUnlockDialog = false
                             billingManager.launchPurchaseFlow(activity)
                         } else {
-                            Toast.makeText(context, "Activity unavailable for store checkout", Toast.LENGTH_SHORT).show()
+                            com.ghost.api.ui.GhostHudDispatcher.show(context, "Activity unavailable for store checkout")
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E))
@@ -459,7 +458,7 @@ fun SettingsDialog(
                                                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                                                 val clip = android.content.ClipData.newPlainText("Diary Entry", entry.observation)
                                                 clipboard.setPrimaryClip(clip)
-                                                Toast.makeText(context, "Copied reflection to clipboard", Toast.LENGTH_SHORT).show()
+                                                com.ghost.api.ui.GhostHudDispatcher.show(context, "Copied reflection to clipboard")
                                             },
                                             modifier = Modifier.size(24.dp)
                                         ) {
@@ -500,7 +499,7 @@ fun SettingsDialog(
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                             val clip = android.content.ClipData.newPlainText("All Diary Entries", allText)
                             clipboard.setPrimaryClip(clip)
-                            Toast.makeText(context, "Copied all reflections to clipboard", Toast.LENGTH_SHORT).show()
+                            com.ghost.api.ui.GhostHudDispatcher.show(context, "Copied all reflections to clipboard")
                         }
                     ) {
                         Text("Copy All", color = accentColor, fontSize = 12.sp)
@@ -932,33 +931,166 @@ fun SettingsDialog(
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                         contentPadding = PaddingValues(vertical = 12.dp)
                     ) {
-                        // 1. === Fast-Path Automation ===
+                        // 1. === Α·Ω · Inference Engine (Alpha: Model Core, Omega: Backend) ===
                         item {
                             SettingsSectionHeader(
-                                title = "Fast-Path Automation",
-                                isExpanded = isSectionExpanded("Fast-Path Automation"),
-                                onToggle = { toggleSection("Fast-Path Automation") }
+                                title = "Α·Ω · Inference Engine",
+                                isExpanded = isSectionExpanded("Inference Engine"),
+                                onToggle = { toggleSection("Inference Engine") }
                             )
                         }
-                        if (isSectionExpanded("Fast-Path Automation")) {
+                        if (isSectionExpanded("Inference Engine")) {
                             item {
-                                SettingsToggleRow(
-                                    title = "Fast-Path Router",
-                                    subtitle = "Zero-token instant bypass for URLs, volume & system actions",
-                                    checked = fastPathEnabled,
-                                    onCheckedChange = { checked ->
-                                        fastPathEnabled = checked
-                                        prefs.edit().putBoolean(Constants.PREF_FAST_PATH_ENABLED, checked).apply()
-                                        Toast.makeText(context, if (checked) "Fast-path router active ⚡" else "Fast-path router disabled (all queries go to LLM)", Toast.LENGTH_SHORT).show()
+                            Column(modifier = Modifier.padding(bottom = 14.dp)) {
+                                val ramGb = Constants.getDeviceRamGb(context)
+                                val coreTitle = when {
+                                    is8GbDevice -> "Gemma 4 E2B • 8GB Compact"
+                                    ramGb >= 20.0 -> "Gemma 4 E4B • 24GB Extreme"
+                                    ramGb >= 14.5 -> "Gemma 4 E4B • 16GB Ultra"
+                                    else -> "Gemma 4 E4B • 12GB Frontier"
+                                }
+                                val coreSubtitle = when {
+                                    is8GbDevice -> "5,120 token dialogue runway (Hardware Locked)"
+                                    ramGb >= 20.0 -> "10,240 token massive runway (MTP Speculative Decoding)"
+                                    ramGb >= 14.5 -> "8,192 token extended runway (MTP Speculative Decoding)"
+                                    else -> "6,144 token dialogue runway (MTP Speculative Decoding)"
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(cardBg)
+                                        .border(1.dp, Color(0x22FFFFFF), RoundedCornerShape(10.dp))
+                                        .padding(horizontal = 14.dp, vertical = 12.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        Text(
+                                            text = if (is8GbDevice) "⚡" else "🧠",
+                                            fontSize = 22.sp
+                                        )
+                                        Column {
+                                            Text(
+                                                text = coreTitle,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = Color.White
+                                            )
+                                            Text(
+                                                text = coreSubtitle,
+                                                fontSize = 11.sp,
+                                                color = textDim
+                                            )
+                                        }
                                     }
-                                )
+                                }
                             }
                         }
+                        item {
+                            Column {
+                                Text(
+                                    text = "Α · Model Architecture & Weights",
+                                    fontSize = 12.sp,
+                                    color = textDim,
+                                    modifier = Modifier.padding(bottom = 8.dp)
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    val models = listOf(
+                                        "E4B" to "E4B Frontier (3.4GB)",
+                                        "E2B" to "E2B Compact (1.7GB)"
+                                    )
+                                    for ((mCore, label) in models) {
+                                        val isSelected = selectedModel.equals(mCore, ignoreCase = true)
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(if (isSelected) accentColor else cardBg)
+                                                .clickable {
+                                                    if (mCore == "E4B" && is8GbDevice) {
+                                                        com.ghost.api.ui.GhostHudDispatcher.show(context, "E4B requires >=12GB RAM (Hardware locked to E2B)")
+                                                        return@clickable
+                                                    }
+                                                    selectedModel = mCore
+                                                    prefs.edit().putString(Constants.PREF_SELECTED_MODEL, mCore).apply()
+                                                    val svc = gemmaService ?: GemmaService.instance
+                                                    if (svc != null) {
+                                                        svc.reloadWithModel(mCore)
+                                                    } else {
+                                                        com.ghost.api.ui.GhostHudDispatcher.show(context, "Active model core: $mCore")
+                                                    }
+                                                }
+                                                .padding(vertical = 10.dp, horizontal = 4.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = label,
+                                                fontSize = 11.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                color = if (isSelected) Color.Black else Color.White,
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        item {
+                            Column {
+                                Text(
+                                    text = "Ω · Active Hardware Acceleration",
+                                    fontSize = 12.sp,
+                                    color = textDim,
+                                    modifier = Modifier.padding(bottom = 8.dp)
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    val backends = listOf("AUTO", "CPU", "GPU", "OFF")
+                                    for (b in backends) {
+                                        val isSelected = backend == b
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(if (isSelected) accentColor else cardBg)
+                                                .clickable {
+                                                    backend = b
+                                                    prefs.edit().putString(Constants.PREF_USER_BACKEND, b).apply()
+                                                    val svc = gemmaService ?: GemmaService.instance
+                                                    if (svc != null) {
+                                                        svc.reloadWithBackend(b)
+                                                    } else {
+                                                        com.ghost.api.ui.GhostHudDispatcher.show(context, "Backend set to $b")
+                                                    }
+                                                }
+                                                .padding(vertical = 8.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = b,
+                                                fontSize = 12.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                color = if (isSelected) Color.Black else Color.White
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        }
 
-                        // 2. === Live Wallpapers & Visualisers ===
+                        // 2. === Ξ·Ι · Live Wallpapers & Visualisers (The Twins: Wallpaper & Edge Lights) ===
                         item {
                             SettingsSectionHeader(
-                                title = "Live Wallpapers & Visualisers",
+                                title = "Ξ·Ι · Live Wallpapers & Visualisers",
                                 isExpanded = isSectionExpanded("Live Wallpapers & Visualisers"),
                                 onToggle = { toggleSection("Live Wallpapers & Visualisers") }
                             )
@@ -1018,11 +1150,11 @@ fun SettingsDialog(
                                                         )
                                                         .clickable {
                                                             if (isLocked) {
-                                                                Toast.makeText(context, "Operator Pass ($billingPrice 🦕💭💸) required to unlock $label geometry", Toast.LENGTH_SHORT).show()
+                                                                com.ghost.api.ui.GhostHudDispatcher.show(context, "Operator Pass ($billingPrice 🦕💭💸) required to unlock $label geometry")
                                                             } else {
                                                                 visualizerPreset = key
                                                                 prefs.edit().putString(Constants.PREF_VISUALIZER_PRESET, key).apply()
-                                                                Toast.makeText(context, "Visualizer geometry set to $label", Toast.LENGTH_SHORT).show()
+                                                                com.ghost.api.ui.GhostHudDispatcher.show(context, "Visualizer geometry set to $label")
                                                             }
                                                         }
                                                         .padding(vertical = 10.dp),
@@ -1071,7 +1203,7 @@ fun SettingsDialog(
                                         EdgeLightsManager.hide(context)
                                     }
                                     val status = if (EdgeLightsManager.isShowing) "ON" else "OFF"
-                                    Toast.makeText(context, "Edge Lights $status", Toast.LENGTH_SHORT).show()
+                                    com.ghost.api.ui.GhostHudDispatcher.show(context, "Edge Lights $status")
                                 }
                             )
                         }
@@ -1130,7 +1262,7 @@ fun SettingsDialog(
                                                     )
                                                     .clickable {
                                                         if (isLocked) {
-                                                            Toast.makeText(context, "Operator Pass ($billingPrice 🦕💭💸) required for Edge Style $label", Toast.LENGTH_SHORT).show()
+                                                            com.ghost.api.ui.GhostHudDispatcher.show(context, "Operator Pass ($billingPrice 🦕💭💸) required for Edge Style $label")
                                                         } else {
                                                             edgeLightsStyle = key
                                                             prefs.edit().putString(Constants.PREF_EDGE_LIGHT_STYLE, key).apply()
@@ -1161,7 +1293,7 @@ fun SettingsDialog(
                         // === Summon & Gesture Controls ===
                         item {
                             SettingsSectionHeader(
-                                title = "Summon & Gesture Controls",
+                                title = "Δ · Summon & Gesture Controls",
                                 isExpanded = isSectionExpanded("Summon & Gesture Controls"),
                                 onToggle = { toggleSection("Summon & Gesture Controls") }
                             )
@@ -1216,7 +1348,7 @@ fun SettingsDialog(
                                                         Constants.SUMMON_METHOD_BOTH -> "Shake & Edge summon nub active ✨"
                                                         else -> "Overlay summoning disabled 🚫"
                                                     }
-                                                    Toast.makeText(context, desc, Toast.LENGTH_SHORT).show()
+                                                    com.ghost.api.ui.GhostHudDispatcher.show(context, desc)
                                                 }
                                                 .padding(vertical = 10.dp),
                                             contentAlignment = Alignment.Center
@@ -1241,7 +1373,7 @@ fun SettingsDialog(
                                             val next = !hyperPucksEnabled
                                             hyperPucksEnabled = next
                                             prefs.edit().putBoolean(Constants.PREF_HYPER_PUCKS_ENABLED, next).apply()
-                                            Toast.makeText(context, if (next) "Hyper Pucks enabled" else "Hyper Pucks disabled", Toast.LENGTH_SHORT).show()
+                                            com.ghost.api.ui.GhostHudDispatcher.show(context, if (next) "Hyper Pucks enabled" else "Hyper Pucks disabled")
                                         }
                                         .padding(horizontal = 12.dp, vertical = 9.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1265,7 +1397,7 @@ fun SettingsDialog(
                                         onCheckedChange = { checked ->
                                             hyperPucksEnabled = checked
                                             prefs.edit().putBoolean(Constants.PREF_HYPER_PUCKS_ENABLED, checked).apply()
-                                            Toast.makeText(context, if (checked) "Hyper Pucks enabled" else "Hyper Pucks disabled", Toast.LENGTH_SHORT).show()
+                                            com.ghost.api.ui.GhostHudDispatcher.show(context, if (checked) "Hyper Pucks enabled" else "Hyper Pucks disabled")
                                         },
                                         colors = SwitchDefaults.colors(
                                             checkedThumbColor = accentColor,
@@ -1300,7 +1432,7 @@ fun SettingsDialog(
                         // 3. === Voice & Speech ===
                         item {
                             SettingsSectionHeader(
-                                title = "Voice & Speech",
+                                title = "Θ · Voice & Speech",
                                 isExpanded = isSectionExpanded("Voice & Speech"),
                                 onToggle = { toggleSection("Voice & Speech") }
                             )
@@ -1317,7 +1449,7 @@ fun SettingsDialog(
                                     val svc = gemmaService ?: GemmaService.instance
                                     svc?.ttsManager?.isTtsEnabled = checked
                                     if (!checked) svc?.ttsManager?.stop()
-                                    Toast.makeText(context, if (checked) "Direct voice enabled" else "Direct voice muted", Toast.LENGTH_SHORT).show()
+                                    com.ghost.api.ui.GhostHudDispatcher.show(context, if (checked) "Direct voice enabled" else "Direct voice muted")
                                 }
                             )
                         }
@@ -1353,7 +1485,7 @@ fun SettingsDialog(
                                         onCheckedChange = { checked ->
                                             passiveTtsEnabled = checked
                                             prefs.edit().putBoolean(Constants.PREF_PASSIVE_TTS, checked).apply()
-                                            Toast.makeText(context, if (checked) "GPP cues enabled" else "GPP cues disabled", Toast.LENGTH_SHORT).show()
+                                            com.ghost.api.ui.GhostHudDispatcher.show(context, if (checked) "GPP cues enabled" else "GPP cues disabled")
                                         },
                                         colors = SwitchDefaults.colors(
                                             checkedThumbColor = Color(0xFF8BB4F6),
@@ -1394,7 +1526,7 @@ fun SettingsDialog(
                         // 4. === Cloud Reasoning & Search Grounding ===
                         item {
                             SettingsSectionHeader(
-                                title = "Cloud Reasoning & Search Grounding",
+                                title = "Γ · Cloud Reasoning & Search Grounding",
                                 isExpanded = isSectionExpanded("Cloud Reasoning & Search Grounding"),
                                 onToggle = { toggleSection("Cloud Reasoning & Search Grounding") }
                             )
@@ -1495,7 +1627,7 @@ fun SettingsDialog(
                                     Button(
                                         onClick = {
                                             tokenManager.setGeminiKey(geminiKey)
-                                            Toast.makeText(context, if (geminiKey.isNotBlank()) "Gemini API Key Saved!" else "Key Cleared", Toast.LENGTH_SHORT).show()
+                                            com.ghost.api.ui.GhostHudDispatcher.show(context, if (geminiKey.isNotBlank()) "Gemini API Key Saved!" else "Key Cleared")
                                         },
                                         colors = ButtonDefaults.buttonColors(containerColor = accentColor),
                                         shape = RoundedCornerShape(8.dp),
@@ -1546,166 +1678,10 @@ fun SettingsDialog(
                         }
                         }
 
-                        // 6. === Inference Engine ===
+                        // 6. === Ε · Autonomous Diary & Memory (Epsilon) ===
                         item {
                             SettingsSectionHeader(
-                                title = "Inference Engine",
-                                isExpanded = isSectionExpanded("Inference Engine"),
-                                onToggle = { toggleSection("Inference Engine") }
-                            )
-                        }
-                        if (isSectionExpanded("Inference Engine")) {
-                            item {
-                            Column(modifier = Modifier.padding(bottom = 14.dp)) {
-                                val ramGb = Constants.getDeviceRamGb(context)
-                                val coreTitle = when {
-                                    is8GbDevice -> "Gemma 4 E2B • 8GB Compact"
-                                    ramGb >= 20.0 -> "Gemma 4 E4B • 24GB Extreme"
-                                    ramGb >= 14.5 -> "Gemma 4 E4B • 16GB Ultra"
-                                    else -> "Gemma 4 E4B • 12GB Frontier"
-                                }
-                                val coreSubtitle = when {
-                                    is8GbDevice -> "5,120 token dialogue runway (Hardware Locked)"
-                                    ramGb >= 20.0 -> "10,240 token massive runway (MTP Speculative Decoding)"
-                                    ramGb >= 14.5 -> "8,192 token extended runway (MTP Speculative Decoding)"
-                                    else -> "6,144 token dialogue runway (MTP Speculative Decoding)"
-                                }
-
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(cardBg)
-                                        .border(1.dp, Color(0x22FFFFFF), RoundedCornerShape(10.dp))
-                                        .padding(horizontal = 14.dp, vertical = 12.dp)
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        Text(
-                                            text = if (is8GbDevice) "⚡" else "🧠",
-                                            fontSize = 22.sp
-                                        )
-                                        Column {
-                                            Text(
-                                                text = coreTitle,
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = Color.White
-                                            )
-                                            Text(
-                                                text = coreSubtitle,
-                                                fontSize = 11.sp,
-                                                color = textDim
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        item {
-                            Column {
-                                Text(
-                                    text = "Model Architecture & Weights",
-                                    fontSize = 12.sp,
-                                    color = textDim,
-                                    modifier = Modifier.padding(bottom = 8.dp)
-                                )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    val models = listOf(
-                                        "E4B" to "E4B Frontier (3.4GB)",
-                                        "E2B" to "E2B Compact (1.7GB)"
-                                    )
-                                    for ((mCore, label) in models) {
-                                        val isSelected = selectedModel.equals(mCore, ignoreCase = true)
-                                        Box(
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(if (isSelected) accentColor else cardBg)
-                                                .clickable {
-                                                    if (mCore == "E4B" && is8GbDevice) {
-                                                        Toast.makeText(context, "E4B requires >=12GB RAM (Hardware locked to E2B)", Toast.LENGTH_SHORT).show()
-                                                        return@clickable
-                                                    }
-                                                    selectedModel = mCore
-                                                    prefs.edit().putString(Constants.PREF_SELECTED_MODEL, mCore).apply()
-                                                    val svc = gemmaService ?: GemmaService.instance
-                                                    if (svc != null) {
-                                                        svc.reloadWithModel(mCore)
-                                                    } else {
-                                                        Toast.makeText(context, "Active model core: $mCore", Toast.LENGTH_SHORT).show()
-                                                    }
-                                                }
-                                                .padding(vertical = 10.dp, horizontal = 4.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                text = label,
-                                                fontSize = 11.sp,
-                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                color = if (isSelected) Color.Black else Color.White,
-                                                maxLines = 1
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        item {
-                            Column {
-                                Text(
-                                    text = "Active Hardware Acceleration",
-                                    fontSize = 12.sp,
-                                    color = textDim,
-                                    modifier = Modifier.padding(bottom = 8.dp)
-                                )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    val backends = listOf("AUTO", "CPU", "GPU", "OFF")
-                                    for (b in backends) {
-                                        val isSelected = backend == b
-                                        Box(
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(if (isSelected) accentColor else cardBg)
-                                                .clickable {
-                                                    backend = b
-                                                    prefs.edit().putString(Constants.PREF_USER_BACKEND, b).apply()
-                                                    val svc = gemmaService ?: GemmaService.instance
-                                                    if (svc != null) {
-                                                        svc.reloadWithBackend(b)
-                                                    } else {
-                                                        Toast.makeText(context, "Backend set to $b", Toast.LENGTH_SHORT).show()
-                                                    }
-                                                }
-                                                .padding(vertical = 8.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                text = b,
-                                                fontSize = 12.sp,
-                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                color = if (isSelected) Color.Black else Color.White
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        }
-
-                        // === Autonomous Diary ===
-                        item {
-                            SettingsSectionHeader(
-                                title = "Autonomous Diary",
+                                title = "Ε · Autonomous Diary & Memory",
                                 isExpanded = isSectionExpanded("Autonomous Diary"),
                                 onToggle = { toggleSection("Autonomous Diary") }
                             )
@@ -1726,10 +1702,10 @@ fun SettingsDialog(
                                     prefs.edit().putBoolean(Constants.PREF_AUTONOMOUS_DIARY, checked).apply()
                                     if (checked) {
                                         com.ghost.api.GemmaService.instance?.scheduleNextDiaryAlarm(forceReschedule = true)
-                                        Toast.makeText(context, "Autonomous diary enabled", Toast.LENGTH_SHORT).show()
+                                        com.ghost.api.ui.GhostHudDispatcher.show(context, "Autonomous diary enabled")
                                     } else {
                                         com.ghost.api.GemmaService.instance?.cancelDiaryAlarm()
-                                        Toast.makeText(context, "Autonomous diary paused", Toast.LENGTH_SHORT).show()
+                                        com.ghost.api.ui.GhostHudDispatcher.show(context, "Autonomous diary paused")
                                     }
                                 }
                             )
@@ -1750,7 +1726,7 @@ fun SettingsDialog(
                                     diarySyncCalendar = checked
                                     prefs.edit().putBoolean(Constants.PREF_DIARY_SYNC_CALENDAR, checked).apply()
                                     val msg = if (checked) "Calendar sync enabled (Δ 👾 ∇)" else "In-app private mode (FIFO 25)"
-                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                    com.ghost.api.ui.GhostHudDispatcher.show(context, msg)
                                 }
                             )
                         }
@@ -1781,7 +1757,7 @@ fun SettingsDialog(
                                                         if (diaryActive) {
                                                             com.ghost.api.GemmaService.instance?.scheduleNextDiaryAlarm(forceReschedule = true)
                                                         }
-                                                        Toast.makeText(context, "Cadence set to $label", Toast.LENGTH_SHORT).show()
+                                                        com.ghost.api.ui.GhostHudDispatcher.show(context, "Cadence set to $label")
                                                     }
                                                     .padding(vertical = 8.dp),
                                                 contentAlignment = Alignment.Center
@@ -1798,50 +1774,17 @@ fun SettingsDialog(
                                 }
                             }
                         }
-                        }
-
-                        // === System & Memory ===
-                        item {
-                            SettingsSectionHeader(
-                                title = "System & Memory",
-                                isExpanded = isSectionExpanded("System & Memory"),
-                                onToggle = { toggleSection("System & Memory") }
-                            )
-                        }
-                        if (isSectionExpanded("System & Memory")) {
                             item {
-                            SettingsActionCard(
-                                title = "Trigger Diary Log Now",
-                                subtitle = "Generate an episodic reflection immediately",
-                                onClick = {
-                                    val svc = gemmaService ?: GemmaService.instance
-                                    svc?.startDiaryCycle()
-                                    Toast.makeText(context, "Generating diary entry...", Toast.LENGTH_SHORT).show()
-                                }
-                            )
+                                SettingsActionCard(
+                                    title = "View Diary History",
+                                    subtitle = "Inspect recent episodic memory logs",
+                                    onClick = {
+                                        showDiaryHistoryDialog = true
+                                        onShowDiaryHistory()
+                                    }
+                                )
+                            }
                         }
-                        item {
-                            SettingsActionCard(
-                                title = "View Diary History",
-                                subtitle = "Inspect recent episodic memory logs",
-                                onClick = {
-                                    showDiaryHistoryDialog = true
-                                    onShowDiaryHistory()
-                                }
-                            )
-                        }
-                        item {
-                            SettingsActionCard(
-                                title = "Compress Session / Flush Memory",
-                                subtitle = "Force long-term semantic memory synthesis",
-                                onClick = {
-                                    val svc = gemmaService ?: GemmaService.instance
-                                    svc?.flushSessionMemory()
-                                    Toast.makeText(context, "Flushing memory and compressing session...", Toast.LENGTH_SHORT).show()
-                                }
-                            )
-                        }
-                    }
 
                     // === Permissions & Access ===
                     if (!isNotifGranted || !isOverlayGranted || !isAccessibilityGranted) {
@@ -1900,11 +1843,11 @@ fun SettingsDialog(
                         }
                     }
 
-                        // === Flavor-specific Bottom Card ===
+                        // === Σ · Operator Pass / Guardian (Sigma) ===
                         val passTitle = if (BuildConfig.DISTRIBUTION_FLAVOR == "fdroid") "Guardian" else "Operator Pass"
                         item {
                             SettingsSectionHeader(
-                                title = passTitle,
+                                title = "Σ · $passTitle",
                                 isExpanded = isSectionExpanded(passTitle),
                                 onToggle = { toggleSection(passTitle) }
                             )
@@ -2001,7 +1944,7 @@ fun SettingsDialog(
                                                                 prefs.edit().putString(Constants.PREF_EDGE_LIGHT_STYLE, Constants.EDGE_STYLE_BARS).apply()
                                                                 EdgeLightsManager.invalidate()
                                                             }
-                                                            Toast.makeText(context, "Hunter Tier active 🦕💭💸", Toast.LENGTH_SHORT).show()
+                                                            com.ghost.api.ui.GhostHudDispatcher.show(context, "Hunter Tier active 🦕💭💸")
                                                         }
                                                     }
                                                     .padding(vertical = 10.dp),
@@ -2036,7 +1979,7 @@ fun SettingsDialog(
                                                         if (!isOperatorTier) {
                                                             showOperatorUnlockDialog = true
                                                         } else {
-                                                            Toast.makeText(context, "Operator Pass active Δ 👾 ∇", Toast.LENGTH_SHORT).show()
+                                                            com.ghost.api.ui.GhostHudDispatcher.show(context, "Operator Pass active Δ 👾 ∇")
                                                         }
                                                     }
                                                     .padding(vertical = 10.dp),

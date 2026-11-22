@@ -106,13 +106,20 @@ object TimePreprocessor {
             return buildParsed(h, 0, amPmMatch.value)
         }
 
-        // 5. Standalone 24-hour military numbers (e.g. 2000, 0800, 1830)
-        val militaryRegex = Regex("""\b([01]\d|2[0-3])([0-5]\d)\b""")
+        // 5. Standalone 24-hour military numbers (e.g. 0800, 1830, "at 2000", or "2000 hours")
+        // Exclude bare calendar years (1900..2099) unless explicitly preceded by at/for or suffixed with hours/hrs so "in 2025" != 8:25 PM.
+        val militaryRegex = Regex("""(?i)(?:\b(at|for)\s+)?\b([01]\d|2[0-3])([0-5]\d)(?:\s*(hours?|hrs?))?\b""")
         val militaryMatch = militaryRegex.find(sanitized)
         if (militaryMatch != null) {
-            val h = militaryMatch.groupValues[1].toInt()
-            val m = militaryMatch.groupValues[2].toInt()
-            return buildParsed(h, m, militaryMatch.value)
+            val hasAtForPrefix = militaryMatch.groupValues[1].isNotBlank()
+            val h = militaryMatch.groupValues[2].toInt()
+            val m = militaryMatch.groupValues[3].toInt()
+            val hasHoursSuffix = militaryMatch.groupValues[4].isNotBlank()
+            val rawNum = h * 100 + m
+            val isLikelyYear = rawNum in 1900..2099 && !hasHoursSuffix && !hasAtForPrefix
+            if (!isLikelyYear) {
+                return buildParsed(h, m, militaryMatch.value)
+            }
         }
 
         // 6. Number preceded by "at" or "for": "alarm at 8", "wake me at 7"

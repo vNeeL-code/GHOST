@@ -99,7 +99,7 @@ class ScratchpadOverlay(
                     if (textToCopy.isNotBlank()) {
                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         clipboard.setPrimaryClip(ClipData.newPlainText("GHOSt Scratchpad", textToCopy))
-                        Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                        com.ghost.api.ui.GhostHudDispatcher.show(context, "Copied to clipboard")
                     }
                 }
             })
@@ -113,7 +113,7 @@ class ScratchpadOverlay(
                 setOnClickListener {
                     editContent.setText("")
                     prefs.edit().remove(PREF_KEY_TEXT).apply()
-                    Toast.makeText(context, "Scratchpad cleared", Toast.LENGTH_SHORT).show()
+                    com.ghost.api.ui.GhostHudDispatcher.show(context, "Scratchpad cleared")
                 }
             })
 

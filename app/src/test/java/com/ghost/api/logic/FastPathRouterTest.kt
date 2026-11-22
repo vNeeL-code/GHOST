@@ -96,11 +96,11 @@ class FastPathRouterTest {
     }
 
     @Test
-    fun testSettingsKillSwitch() {
-        val url = "https://github.com/vNeeL-code/GHOST"
-        val result = FastPathRouter.route(url, InputSource.USER_TYPED, isFastPathEnabled = false)
-        assertTrue("Kill-switch must disable fast path", result is RoutingResult.FallThroughToLlm)
-        assertEquals(url, (result as RoutingResult.FallThroughToLlm).augmentedUserMessage)
+    fun testFragileByDesignEscapeHatch() {
+        val input = "hey check out https://github.com/vNeeL-code/GHOST 👾"
+        val result = FastPathRouter.route(input, InputSource.USER_TYPED)
+        assertTrue("Conversational input with URL must fall through to LLM", result is RoutingResult.FallThroughToLlm)
+        assertTrue((result as RoutingResult.FallThroughToLlm).augmentedUserMessage.contains("https://github.com/vNeeL-code/GHOST"))
     }
 
     @Test
