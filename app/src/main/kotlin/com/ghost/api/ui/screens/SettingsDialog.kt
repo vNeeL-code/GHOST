@@ -943,13 +943,17 @@ fun SettingsDialog(
                             item {
                             Column(modifier = Modifier.padding(bottom = 14.dp)) {
                                 val ramGb = Constants.getDeviceRamGb(context)
+                                val isEchoDevice = Constants.isEchoOnlyDevice(context)
                                 val coreTitle = when {
+                                    selectedModel.equals("ECHO", ignoreCase = true) || isEchoDevice -> "Echo Spine • Zero-LLM Mode"
                                     is8GbDevice -> "Gemma 4 E2B • 8GB Compact"
                                     ramGb >= 20.0 -> "Gemma 4 E4B • 24GB Extreme"
                                     ramGb >= 14.5 -> "Gemma 4 E4B • 16GB Ultra"
                                     else -> "Gemma 4 E4B • 12GB Frontier"
                                 }
                                 val coreSubtitle = when {
+                                    isEchoDevice -> "Spinal cord reflexes & sensors (<=4GB Hardware Locked)"
+                                    selectedModel.equals("ECHO", ignoreCase = true) -> "Spinal cord reflexes, clock, sensors & offline QR (0 MB LLM)"
                                     is8GbDevice -> "5,120 token dialogue runway (Hardware Locked)"
                                     ramGb >= 20.0 -> "10,240 token massive runway (MTP Speculative Decoding)"
                                     ramGb >= 14.5 -> "8,192 token extended runway (MTP Speculative Decoding)"
@@ -969,7 +973,7 @@ fun SettingsDialog(
                                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                                     ) {
                                         Text(
-                                            text = if (is8GbDevice) "⚡" else "🧠",
+                                            text = if (selectedModel.equals("ECHO", ignoreCase = true) || isEchoDevice || is8GbDevice) "⚡" else "🧠",
                                             fontSize = 22.sp
                                         )
                                         Column {
@@ -1001,9 +1005,11 @@ fun SettingsDialog(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
+                                    val isEchoDevice = Constants.isEchoOnlyDevice(context)
                                     val models = listOf(
-                                        "E4B" to "E4B Frontier (3.4GB)",
-                                        "E2B" to "E2B Compact (1.7GB)"
+                                        "E4B" to "E4B (3.4GB)",
+                                        "E2B" to "E2B (1.7GB)",
+                                        "ECHO" to "ECHO (Spine)"
                                     )
                                     for ((mCore, label) in models) {
                                         val isSelected = selectedModel.equals(mCore, ignoreCase = true)
@@ -1013,6 +1019,10 @@ fun SettingsDialog(
                                                 .clip(RoundedCornerShape(8.dp))
                                                 .background(if (isSelected) accentColor else cardBg)
                                                 .clickable {
+                                                    if (isEchoDevice && mCore != "ECHO") {
+                                                        com.ghost.api.ui.GhostHudDispatcher.show(context, "Requires >=6GB RAM (Hardware locked to ECHO)")
+                                                        return@clickable
+                                                    }
                                                     if (mCore == "E4B" && is8GbDevice) {
                                                         com.ghost.api.ui.GhostHudDispatcher.show(context, "E4B requires >=12GB RAM (Hardware locked to E2B)")
                                                         return@clickable

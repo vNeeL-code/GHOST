@@ -20,7 +20,7 @@ class ContextManager(
         return withContext(Dispatchers.Default) {
             try {
                 val now = java.time.ZonedDateTime.now()
-                val timeFormatter = java.time.format.DateTimeFormatter.ofPattern("EEE MMM d · h:mm a", java.util.Locale.getDefault())
+                val timeFormatter = java.time.format.DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy · h:mm a", java.util.Locale.getDefault())
                 val timeStr = now.format(timeFormatter)
                 GemmaNotificationListener.ensureConnected(sensorManager.context)
                 val sensorData = sensorManager.getContextString()

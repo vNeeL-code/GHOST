@@ -75,3 +75,39 @@ data class DiaryEntry(
     val observation: String,  // Factual observation, no roleplay
     val contextData: String  // JSON metadata
 )
+
+/**
+ * Semantic vector sidecar storage (Matryoshka 256-dim float32 blobs).
+ * Scoped by [modelTag] so vectors from different embedding checkpoints are never compared.
+ * Supports FACT, DIARY, TURN, IMAGE (16-24GB multimodal), and WIKI entries.
+ */
+@Entity(
+    tableName = "memory_embeddings",
+    indices = [androidx.room.Index(value = ["sourceType", "modelTag"])]
+)
+data class MemoryEmbedding(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val sourceType: String,   // "FACT", "DIARY", "TURN", "IMAGE", "WIKI"
+    val sourceId: Long,
+    val textPreview: String,
+    val modelTag: String,     // e.g. "hash-256", "embeddinggemma-270m-256", "embeddinggemma-mm-256"
+    val dims: Int,
+    val vectorBlob: ByteArray,
+    val createdAt: Long = System.currentTimeMillis()
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is MemoryEmbedding) return false
+        return id == other.id && sourceType == other.sourceType && sourceId == other.sourceId &&
+            modelTag == other.modelTag && dims == other.dims && vectorBlob.contentEquals(other.vectorBlob)
+    }
+
+    override fun hashCode(): Int {
+        var result = id.hashCode()
+        result = 31 * result + sourceType.hashCode()
+        result = 31 * result + sourceId.hashCode()
+        result = 31 * result + modelTag.hashCode()
+        result = 31 * result + vectorBlob.contentHashCode()
+        return result
+    }
+}

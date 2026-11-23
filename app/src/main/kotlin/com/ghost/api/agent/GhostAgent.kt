@@ -427,8 +427,8 @@ class GhostAgent(
 
         // 4. Assemble turn input
         val operatorAvatar = getOperatorAvatar()
-        val timeFormatter = java.time.format.DateTimeFormatter.ofPattern("h:mm a", java.util.Locale.getDefault())
-        val timeStr = java.time.LocalTime.now().format(timeFormatter)
+        val timeFormatter = java.time.format.DateTimeFormatter.ofPattern("EEEE h:mm a", java.util.Locale.getDefault())
+        val timeStr = java.time.ZonedDateTime.now().format(timeFormatter)
 
         val isAutonomous = isDream || message.startsWith("Δ 👾 ∇")
         val imageTag = if (images.isNotEmpty()) {

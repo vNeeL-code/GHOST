@@ -122,12 +122,32 @@ object Constants {
 
     /**
      * Automatically resolves the appropriate model core based on physical device RAM.
-     * Devices with < 10.5GB RAM (e.g. 8GB Galaxy S21) are locked to E2B (Compact).
-     * Devices with >= 10.5GB RAM (e.g. 12GB/16GB/24GB REDMAGIC) are assigned E4B (Frontier).
+     * - < 5.5GB RAM (e.g. 4GB / Android Go devices): ECHO (Spinal Cord — zero-LLM reflex & sensory engine)
+     * - 5.5GB–10.4GB RAM (e.g. 8GB Galaxy S21): E2B (Compact)
+     * - >= 10.5GB RAM (e.g. 12GB/16GB/24GB REDMAGIC): E4B (Frontier)
      */
     fun resolveHardwareModelTier(context: Context): String {
         val totalRamGb = getDeviceRamGb(context)
-        return if (totalRamGb >= 10.5) "E4B" else "E2B"
+        return when {
+            totalRamGb >= 10.5 -> "E4B"
+            totalRamGb >= 5.5 -> "E2B"
+            else -> "ECHO"
+        }
+    }
+
+    /**
+     * Returns true on <= 4GB devices where a 1.7GB+ generative cortex cannot fit alongside Android.
+     */
+    fun isEchoOnlyDevice(context: Context): Boolean = getDeviceRamGb(context) < 5.5
+
+    /**
+     * Resolves the appropriate EmbeddingGemma sidecar tier based on available physical RAM:
+     * - >= 14.5GB (16GB–24GB Ultra/Extreme): EmbeddingGemma 2 Multimodal (~567MB — text + images + audio + local wiki)
+     * - < 14.5GB (4GB–12GB): EmbeddingGemma Text 270M (~191MB — semantic intent routing + memory recall)
+     */
+    fun resolveEmbeddingTier(context: Context): String {
+        val totalRamGb = getDeviceRamGb(context)
+        return if (totalRamGb >= 14.5) "MULTIMODAL_567M" else "TEXT_270M"
     }
 
     // Model Download (Gemma 4 E2B & E4B LiteRT-LM)

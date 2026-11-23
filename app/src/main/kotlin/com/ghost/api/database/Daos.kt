@@ -92,3 +92,21 @@ interface DiaryDao {
     @Query("DELETE FROM diary_entries")
     suspend fun deleteAll(): Int
 }
+
+@Dao
+interface MemoryEmbeddingDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertEmbedding(embedding: MemoryEmbedding): Long
+
+    @Query("SELECT * FROM memory_embeddings WHERE modelTag = :modelTag ORDER BY createdAt DESC LIMIT :limit")
+    suspend fun getRecentForModel(modelTag: String, limit: Int = 500): List<MemoryEmbedding>
+
+    @Query("SELECT * FROM memory_embeddings WHERE sourceType = :sourceType AND modelTag = :modelTag ORDER BY createdAt DESC LIMIT :limit")
+    suspend fun getByTypeForModel(sourceType: String, modelTag: String, limit: Int = 300): List<MemoryEmbedding>
+
+    @Query("DELETE FROM memory_embeddings WHERE id NOT IN (SELECT id FROM memory_embeddings ORDER BY createdAt DESC LIMIT :keepCount)")
+    suspend fun trimOldEmbeddings(keepCount: Int = 600): Int
+
+    @Query("DELETE FROM memory_embeddings")
+    suspend fun deleteAll(): Int
+}

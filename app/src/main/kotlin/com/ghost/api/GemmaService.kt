@@ -683,15 +683,21 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     }
 
     /**
-     * Hot-swaps the active model core (E4B or E2B) live.
+     * Hot-swaps the active model core (E4B, E2B, or ECHO spinal cord) live.
      */
     fun reloadWithModel(modelCore: String) {
         val hardwareTier = Constants.resolveHardwareModelTier(this)
-        val targetCore = if (hardwareTier == "E2B" && !modelCore.equals("E2B", ignoreCase = true)) {
-            Timber.w("🛡️ Hardware constraint: Denying switch to $modelCore on E2B tier.")
-            "E2B"
-        } else {
-            modelCore
+        val targetCore = when {
+            modelCore.equals("ECHO", ignoreCase = true) -> "ECHO"
+            hardwareTier == "ECHO" -> {
+                Timber.w("🛡️ Hardware constraint: Denying switch to $modelCore on 4GB ECHO tier.")
+                "ECHO"
+            }
+            hardwareTier == "E2B" && modelCore.equals("E4B", ignoreCase = true) -> {
+                Timber.w("🛡️ Hardware constraint: Denying switch to $modelCore on E2B tier.")
+                "E2B"
+            }
+            else -> modelCore
         }
         val prefs = getSharedPreferences(Constants.PREFS_NAME, android.content.Context.MODE_PRIVATE)
         prefs.edit()
@@ -706,6 +712,17 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             cancelThinking()
             isInferencing = false
             currentInFlightQuery = null
+            if (targetCore == "ECHO") {
+                unloadEngine()
+                _isSystemReady.value = true
+                isSuspendedDueToRam.set(false)
+                updateNotification("GHOST Online (Echo Mode)")
+                reportStatus("Echo Mode: Spinal Cord")
+                withContext(Dispatchers.Main) {
+                    com.ghost.api.ui.GhostHudDispatcher.show(this@GemmaService, "Echo Mode active (Spinal Cord) ⚡")
+                }
+                return@launch
+            }
             updateNotification("Loading Gemma $targetCore...")
             initialize(allowDownload = true)
             val ready = isGemmaLoaded() && ::ghostAgent.isInitialized && ghostAgent.isReady
@@ -951,13 +968,31 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         val crashCount = prefs.getInt("init_crash_count", 0)
         val hardwareTier = Constants.resolveHardwareModelTier(this)
         var selectedModel = prefs.getString(Constants.PREF_SELECTED_MODEL, hardwareTier) ?: hardwareTier
-        if (hardwareTier == "E2B" && !selectedModel.equals("E2B", ignoreCase = true)) {
+        if (hardwareTier == "ECHO" && !selectedModel.equals("ECHO", ignoreCase = true)) {
+            Timber.w("🛡️ Hardware constraint: Enforcing ECHO spinal-cord tier on <=4GB device")
+            selectedModel = "ECHO"
+            prefs.edit()
+                .putString(Constants.PREF_SELECTED_MODEL, "ECHO")
+                .remove(Constants.PREF_LAST_KNOWN_MODEL_PATH)
+                .apply()
+        } else if (hardwareTier == "E2B" && selectedModel.equals("E4B", ignoreCase = true)) {
             Timber.w("🛡️ Hardware constraint: Enforcing E2B model tier in initialize()")
             selectedModel = "E2B"
             prefs.edit()
                 .putString(Constants.PREF_SELECTED_MODEL, "E2B")
                 .remove(Constants.PREF_LAST_KNOWN_MODEL_PATH)
                 .apply()
+        }
+
+        if (selectedModel.equals("ECHO", ignoreCase = true)) {
+            Timber.i("⚡ Echo Mode active (Spinal Cord) — skipping generative cortex load.")
+            unloadEngine()
+            _isSystemReady.value = true
+            isSuspendedDueToRam.set(false)
+            prefs.edit().putBoolean("is_initializing", false).apply()
+            updateNotification("GHOST Online (Echo Mode)")
+            reportStatus("Echo Mode: Spinal Cord")
+            return
         }
 
         val protectedModelsDir = getExternalFilesDir("models") 
@@ -1595,18 +1630,64 @@ class GemmaService : Service(), AgentPlatformCallbacks {
         }
 
         val userBackend = prefs.getString(Constants.PREF_USER_BACKEND, "AUTO")
-        if (userBackend == "OFF") {
-            val msg = "Inference Engine is set to OFF in Settings. Select AUTO, CPU, or GPU to enable on-device chat."
-            if (!isDream) {
-                responseNotificationManager.showResponse("⚠️ $msg")
+        val hardwareTier = Constants.resolveHardwareModelTier(this)
+        val selectedModel = prefs.getString(Constants.PREF_SELECTED_MODEL, hardwareTier) ?: hardwareTier
+        val isDownloadingWeights = modelDownloader.downloadStatus.value is ModelDownloader.DownloadState.Downloading
+
+        suspend fun runEchoFallback(reason: com.ghost.api.logic.EchoSpineEngine.EchoReason): String {
+            if (isDream) return ""
+            val echoResp = com.ghost.api.logic.EchoSpineEngine.handle(
+                context = this@GemmaService,
+                rawInput = effectivePrompt,
+                reason = reason,
+                sensorFusionManager = if (::sensorFusionManager.isInitialized) sensorFusionManager else null,
+                systemToolSet = if (::systemToolSet.isInitialized) systemToolSet else null,
+                hardwareToolSet = if (::hardwareToolSet.isInitialized) hardwareToolSet else null
+            )
+            markActivity()
+            if (::ttsManager.isInitialized && echoResp.spokenTts.isNotBlank()) {
+                ttsManager.stop()
+                ttsManager.speak(echoResp.spokenTts)
             }
-            return msg
+            withContext(Dispatchers.Main) {
+                if (!fromUi) {
+                    uiCallback?.onMessageAdded(userPrompt, isUser = true)
+                }
+                uiCallback?.onMessageAdded(
+                    message = echoResp.text,
+                    isUser = false,
+                    isComplete = true,
+                    webviewUrl = echoResp.webviewUrl,
+                    webviewAspectRatio = echoResp.webviewAspectRatio
+                )
+            }
+            if (::responseNotificationManager.isInitialized) {
+                responseNotificationManager.showResponse(
+                    response = echoResp.text,
+                    webviewUrl = echoResp.webviewUrl
+                )
+            }
+            return echoResp.text
+        }
+
+        if (selectedModel.equals("ECHO", ignoreCase = true)) {
+            return runEchoFallback(com.ghost.api.logic.EchoSpineEngine.EchoReason.ECHO_TIER)
+        }
+        if (userBackend == "OFF") {
+            return runEchoFallback(com.ghost.api.logic.EchoSpineEngine.EchoReason.ENGINE_OFF)
+        }
+        if (isDownloadingWeights) {
+            return runEchoFallback(com.ghost.api.logic.EchoSpineEngine.EchoReason.DOWNLOADING_WEIGHTS)
         }
 
         // Seamless wakeup from suspension OUTSIDE of engineMutex to prevent recursive mutex deadlock
         if (!ensureEngineReady()) {
-            responseNotificationManager.showResponse("⚠️ System still starting up... try again in a moment")
-            return "System is still initializing. Please wait a moment and try again."
+            val reason = if (isSuspendedDueToRam.get()) {
+                com.ghost.api.logic.EchoSpineEngine.EchoReason.RAM_VALVE_SUSPENDED
+            } else {
+                com.ghost.api.logic.EchoSpineEngine.EchoReason.INITIALIZING
+            }
+            return runEchoFallback(reason)
         }
 
         return engineMutex.withLock {

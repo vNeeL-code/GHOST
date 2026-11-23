@@ -15,9 +15,10 @@ import timber.log.Timber
         SemanticFact::class,
         SemanticFactFts::class,
         AgentState::class,
-        DiaryEntry::class
+        DiaryEntry::class,
+        MemoryEmbedding::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false  // Disable schema export to fix build warning
 )
 abstract class MemoryDatabase : RoomDatabase() {
@@ -26,6 +27,7 @@ abstract class MemoryDatabase : RoomDatabase() {
     abstract fun semanticFactDao(): SemanticFactDao
     abstract fun agentStateDao(): AgentStateDao
     abstract fun diaryDao(): DiaryDao
+    abstract fun memoryEmbeddingDao(): MemoryEmbeddingDao
 
     companion object {
         @Volatile
@@ -108,6 +110,31 @@ abstract class MemoryDatabase : RoomDatabase() {
         }
 
         /**
+         * Migration 7→8: Added memory_embeddings table for 256-dim Matryoshka semantic vector recall
+         * (facts, diary, turns, multimodal images, and local wiki).
+         */
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                Timber.i("MemoryDatabase: Migrating 7→8 (memory_embeddings)")
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `memory_embeddings` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `sourceType` TEXT NOT NULL,
+                        `sourceId` INTEGER NOT NULL,
+                        `textPreview` TEXT NOT NULL,
+                        `modelTag` TEXT NOT NULL,
+                        `dims` INTEGER NOT NULL,
+                        `vectorBlob` BLOB NOT NULL,
+                        `createdAt` INTEGER NOT NULL
+                    )
+                """)
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_memory_embeddings_sourceType_modelTag` ON `memory_embeddings` (`sourceType`, `modelTag`)"
+                )
+            }
+        }
+
+        /**
          * Migration 1→2: Added diary_entries table
          */
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -154,12 +181,12 @@ abstract class MemoryDatabase : RoomDatabase() {
                 )
                 .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
                 // Apply migrations in order
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                 // Active development: wipe rather than crash on schema conflict
                 .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance
-                Timber.i("MemoryDatabase: Initialized (version 7, file=$dbName)")
+                Timber.i("MemoryDatabase: Initialized (version 8, file=$dbName)")
                 instance
             }
         }
