@@ -76,6 +76,13 @@ class MemoryManager(private val context: Context) {
         }
     }
 
+    val fallbackLogFile: java.io.File by lazy {
+        val appExternal = context.getExternalFilesDir(null) ?: context.filesDir
+        val ghostDir = java.io.File(appExternal, "GHOST")
+        if (!ghostDir.exists()) ghostDir.mkdirs()
+        java.io.File(ghostDir, "memory_log.txt")
+    }
+
     private fun maybeBackupDatabase(force: Boolean = false) {
         val now = System.currentTimeMillis()
         if (force || now - lastExternalBackupTime > 5 * 60 * 1000L) {
@@ -85,25 +92,35 @@ class MemoryManager(private val context: Context) {
     }
 
     fun appendToMemoryLog(type: String, content: String) {
+        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US).apply {
+            timeZone = java.util.TimeZone.getTimeZone("UTC")
+        }
+        val timestamp = sdf.format(java.util.Date())
+        val sanitized = content.trim().replace("\r\n", "\n").replace("\n", " ⏎ ")
+        val line = "[$timestamp] | $type | $sanitized\n"
         try {
-            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US).apply {
-                timeZone = java.util.TimeZone.getTimeZone("UTC")
-            }
-            val timestamp = sdf.format(java.util.Date())
-            val sanitized = content.trim().replace("\r\n", "\n").replace("\n", " ⏎ ")
-            val line = "[$timestamp] | $type | $sanitized\n"
             synchronized(this) {
                 externalLogFile.appendText(line, Charsets.UTF_8)
             }
-        } catch (e: Exception) {
-            Timber.w(e, "Failed to append to external memory_log.txt")
-            com.ghost.api.ui.GhostHudDispatcher.bark(
-                context = context,
-                glyph = "⚠️ Memory log write failed",
-                debounceKey = "memory_log_write_fail",
-                debounceMs = 60_000L,
-                durationMs = 3000L
-            )
+        } catch (primaryErr: Exception) {
+            // Android 11+ Scoped Storage blocks appending to pre-existing Documents/GHOST/memory_log.txt
+            // owned by an earlier install when MANAGE_EXTERNAL_STORAGE is not granted. Fall back cleanly
+            // to app-scoped external storage so logging never drops silently.
+            try {
+                synchronized(this) {
+                    fallbackLogFile.appendText(line, Charsets.UTF_8)
+                }
+                Timber.d(primaryErr, "Public memory_log.txt unavailable (Scoped Storage); appended to app-scoped fallback")
+            } catch (fallbackErr: Exception) {
+                Timber.w(fallbackErr, "Failed to append to both public and fallback memory_log.txt")
+                com.ghost.api.ui.GhostHudDispatcher.bark(
+                    context = context,
+                    glyph = "⚠️ Memory log write failed",
+                    debounceKey = "memory_log_write_fail",
+                    debounceMs = 60_000L,
+                    durationMs = 3000L
+                )
+            }
         }
     }
 
@@ -128,30 +145,44 @@ class MemoryManager(private val context: Context) {
         }
     }
 
+    private fun resolveReadableLogFile(): java.io.File? {
+        if (externalLogFile.exists() && externalLogFile.canRead()) return externalLogFile
+        if (fallbackLogFile.exists() && fallbackLogFile.canRead()) return fallbackLogFile
+        return null
+    }
+
     suspend fun tailMemoryLog(limitLines: Int = 30): List<String> = withContext(Dispatchers.IO) {
         try {
-            if (!externalLogFile.exists()) return@withContext emptyList()
-            val lines = externalLogFile.readLines(Charsets.UTF_8)
+            val target = resolveReadableLogFile() ?: return@withContext emptyList()
+            val lines = target.readLines(Charsets.UTF_8)
             lines.takeLast(limitLines)
         } catch (e: Exception) {
-            emptyList()
+            try {
+                if (fallbackLogFile.exists()) fallbackLogFile.readLines(Charsets.UTF_8).takeLast(limitLines) else emptyList()
+            } catch (_: Exception) {
+                emptyList()
+            }
         }
     }
 
     suspend fun grepMemoryLog(query: String, maxResults: Int = 20): List<String> = withContext(Dispatchers.IO) {
-        try {
-            if (!externalLogFile.exists() || query.isBlank()) return@withContext emptyList()
-            val matches = mutableListOf<String>()
-            externalLogFile.forEachLine(Charsets.UTF_8) { line ->
-                if (line.contains(query, ignoreCase = true)) {
-                    matches.add(line)
-                    if (matches.size >= maxResults) return@forEachLine
+        if (query.isBlank()) return@withContext emptyList()
+        val files = listOf(externalLogFile, fallbackLogFile).distinct()
+        val matches = mutableListOf<String>()
+        for (file in files) {
+            try {
+                if (!file.exists()) continue
+                file.forEachLine(Charsets.UTF_8) { line ->
+                    if (line.contains(query, ignoreCase = true) && matches.size < maxResults) {
+                        matches.add(line)
+                    }
                 }
+            } catch (_: Exception) {
+                // Skip unreadable Scoped Storage file and continue to fallback
             }
-            matches
-        } catch (e: Exception) {
-            emptyList()
+            if (matches.size >= maxResults) break
         }
+        matches
     }
 
     suspend fun getCompactedSessionMemory(): String = withContext(Dispatchers.IO) {
