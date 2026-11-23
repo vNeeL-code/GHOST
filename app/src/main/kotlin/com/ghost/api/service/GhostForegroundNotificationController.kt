@@ -158,7 +158,7 @@ class GhostForegroundNotificationController(
         val ramUsedPercent = ctx?.system?.ramUsedPercent ?: 0
         val isThermalStress = try {
             val state = hardwarePropertiesManager?.thermalState?.value
-            state == HardwarePropertiesManager.ThermalState.CRITICAL ||
+            (state == HardwarePropertiesManager.ThermalState.CRITICAL && cpuTemp >= 54) ||
             (state == HardwarePropertiesManager.ThermalState.HOT && cpuTemp >= 52) ||
             cpuTemp >= 58
         } catch (e: Exception) {

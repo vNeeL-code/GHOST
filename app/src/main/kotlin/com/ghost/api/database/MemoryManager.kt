@@ -12,9 +12,37 @@ class MemoryManager(private val context: Context) {
     private val diaryDao = db.diaryDao()
     private val semanticFactDao = db.semanticFactDao()
     private val memoryEmbeddingDao = db.memoryEmbeddingDao()
+    private val agentStateDao = db.agentStateDao()
 
     private val sessionMemoryFile = java.io.File(context.filesDir, "session_memory.txt")
     @Volatile private var lastExternalBackupTime = 0L
+
+    val identityFile: java.io.File by lazy {
+        try {
+            val docs = android.os.Environment.getExternalStoragePublicDirectory(
+                android.os.Environment.DIRECTORY_DOCUMENTS
+            )
+            val ghostDir = java.io.File(docs, "GHOST")
+            if (!ghostDir.exists()) ghostDir.mkdirs()
+            java.io.File(ghostDir, "identity.md")
+        } catch (e: Exception) {
+            val appExternal = context.getExternalFilesDir(null) ?: context.filesDir
+            val ghostDir = java.io.File(appExternal, "GHOST")
+            if (!ghostDir.exists()) ghostDir.mkdirs()
+            java.io.File(ghostDir, "identity.md")
+        }
+    }
+
+    val skillsDir: java.io.File by lazy {
+        try {
+            val docs = android.os.Environment.getExternalStoragePublicDirectory(
+                android.os.Environment.DIRECTORY_DOCUMENTS
+            )
+            java.io.File(java.io.File(docs, "GHOST"), "skills")
+        } catch (e: Exception) {
+            java.io.File(context.getExternalFilesDir(null) ?: context.filesDir, "GHOST/skills")
+        }
+    }
 
     val externalLogFile: java.io.File by lazy {
         try {
@@ -241,6 +269,7 @@ class MemoryManager(private val context: Context) {
         semanticFactDao.trimOldFacts(keepCount = 150)
         indexEmbedding("FACT", factId, "$title: $content")
         appendToMemoryLog("FACT", "$title: $content")
+        syncIdentityAndSeal()
         maybeBackupDatabase(force = true)
     }
 
@@ -283,6 +312,7 @@ class MemoryManager(private val context: Context) {
         indexEmbedding("DIARY", entryId, "${entry.eventType}: ${entry.observation}")
         appendToMemoryLog(entry.eventType, entry.observation)
         appendDiaryJsonl(entry)
+        syncIdentityAndSeal()
         maybeBackupDatabase(force = true)
     }
 
@@ -298,7 +328,44 @@ class MemoryManager(private val context: Context) {
         indexEmbedding("DIARY", entryId, "$eventType: $observation")
         appendToMemoryLog(eventType, observation)
         appendDiaryJsonl(entry)
+        syncIdentityAndSeal()
         maybeBackupDatabase(force = true)
+    }
+
+    /**
+     * Renders portable `Documents/GHOST/identity.md` (soul without chat transcripts)
+     * and updates the private Room DB SHA-256 hash-chained tamper seal + `.bak` rollback copy.
+     */
+    suspend fun syncIdentityAndSeal() = withContext(Dispatchers.IO) {
+        try {
+            val facts = semanticFactDao.getRecentFacts(100)
+            val diary = diaryDao.getRecentEntries(25)
+            val md = IdentityTamperSeal.renderIdentityMarkdown(
+                callSign = com.ghost.api.logic.ContextManager.resolveDeviceCallSign(context),
+                userTitle = com.ghost.api.Constants.getUserTitle(context),
+                hardwareTier = com.ghost.api.Constants.resolveHardwareModelTier(context),
+                facts = facts,
+                diaryEntries = diary
+            )
+            synchronized(this@MemoryManager) {
+                identityFile.writeText(md, Charsets.UTF_8)
+            }
+            IdentityTamperSeal.sealCurrentState(context, agentStateDao, identityFile, skillsDir)
+        } catch (e: Exception) {
+            Timber.w(e, "MemoryManager: Failed syncing identity.md / tamper seal")
+        }
+    }
+
+    suspend fun verifyTamperSeal(): IdentityTamperSeal.VerificationResult = withContext(Dispatchers.IO) {
+        IdentityTamperSeal.verifyStoredSeal(agentStateDao, identityFile, skillsDir)
+    }
+
+    suspend fun acceptTamperSeal() = withContext(Dispatchers.IO) {
+        IdentityTamperSeal.sealCurrentState(context, agentStateDao, identityFile, skillsDir)
+    }
+
+    suspend fun rollbackIdentityFromBackup(): Boolean = withContext(Dispatchers.IO) {
+        IdentityTamperSeal.rollbackIdentity(context, agentStateDao, identityFile, skillsDir)
     }
 
     /**

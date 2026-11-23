@@ -96,8 +96,60 @@ object EmbeddingSidecar {
         }
     }
 
+    /**
+     * Native LiteRT + SentencePiece backend powered by Google AI Edge localagents-rag
+     * (EmbeddingGemma-300M seq256 mixed-precision, ~179 MB, Matryoshka-truncated to 256-dim).
+     * Runs on CPU (XNNPACK) by default so the GPU delegate stays 100% dedicated to Gemma 4 E4B/E2B.
+     */
+    class GemmaLiteRtEmbeddingBackend(
+        modelPath: String,
+        tokenizerPath: String,
+        useGpu: Boolean = false
+    ) : EmbeddingBackend {
+        override val modelTag: String = "embeddinggemma-300m-seq256-d256"
+        override val dimensions: Int = DEFAULT_DIMS
+        override val supportsVision: Boolean = false
+
+        private val lock = Any()
+        private val nativeModel = com.google.ai.edge.localagents.rag.models.GemmaEmbeddingModel(
+            modelPath,
+            tokenizerPath,
+            useGpu
+        )
+
+        override fun embedText(text: String): FloatArray {
+            if (text.isBlank()) return FloatArray(dimensions)
+            return try {
+                val embedData = com.google.ai.edge.localagents.rag.models.EmbedData.builder<String>()
+                    .setData(text.take(1024))
+                    .setTask(com.google.ai.edge.localagents.rag.models.EmbedData.TaskType.RETRIEVAL_QUERY)
+                    .build()
+                val req = com.google.ai.edge.localagents.rag.models.EmbeddingRequest.create(listOf(embedData))
+                val fullList = synchronized(lock) {
+                    nativeModel.getEmbeddings(req).get()
+                }
+                if (fullList.isNullOrEmpty()) {
+                    LocalSemanticHashBackend.embedText(text)
+                } else {
+                    // Matryoshka truncation (768 -> 256 dims) + L2 renormalization
+                    val truncated = FloatArray(dimensions) { idx ->
+                        if (idx < fullList.size) fullList[idx] else 0f
+                    }
+                    l2Normalize(truncated)
+                }
+            } catch (e: Exception) {
+                Timber.w(e, "EmbeddingSidecar: GemmaLiteRtEmbeddingBackend inference failed, using hash fallback")
+                LocalSemanticHashBackend.embedText(text)
+            }
+        }
+    }
+
     @Volatile
     var activeBackend: EmbeddingBackend = LocalSemanticHashBackend
+
+    @Volatile
+    var isDownloadingSidecar: Boolean = false
+        private set
 
     @Volatile
     private var cachedPrototypesModelTag: String? = null
@@ -105,17 +157,26 @@ object EmbeddingSidecar {
     @Volatile
     private var cachedIntentPrototypes: Map<EchoSpineEngine.EchoIntent, List<FloatArray>> = emptyMap()
 
+    fun isNeuralSidecarActive(): Boolean = activeBackend !is LocalSemanticHashBackend
+
+    fun getEmbeddingModelsDir(context: Context): File {
+        val dir = context.getExternalFilesDir("models/embeddings")
+            ?: File(context.filesDir, "models/embeddings")
+        if (!dir.exists()) dir.mkdirs()
+        return dir
+    }
+
     /**
      * Checks whether a local EmbeddingGemma sidecar model file is staged on disk for the device's RAM tier.
      * Returns the discovered file (if any) without blocking startup.
      */
     fun discoverEmbeddingModelFile(context: Context): File? {
         val tier = Constants.resolveEmbeddingTier(context)
-        val dir = context.getExternalFilesDir("models/embeddings")
-            ?: File(context.filesDir, "models/embeddings")
+        val dir = getEmbeddingModelsDir(context)
         if (!dir.exists()) return null
         val candidates = dir.listFiles()?.filter {
-            it.isFile && (it.name.endsWith(".tflite") || it.name.endsWith(".litertlm"))
+            it.isFile && (it.name.endsWith(".tflite") || it.name.endsWith(".litertlm")) &&
+                it.length() >= Constants.EMBEDDING_MODEL_MIN_BYTES
         } ?: return null
         val preferred = if (tier == "MULTIMODAL_567M") {
             candidates.firstOrNull { it.name.contains("multimodal", ignoreCase = true) || it.name.contains("omni", ignoreCase = true) }
@@ -127,6 +188,148 @@ object EmbeddingSidecar {
             Timber.i("EmbeddingSidecar: Discovered sidecar weights (${found.name}) for tier $tier")
         }
         return found
+    }
+
+    /**
+     * Auto-mounts EmbeddingGemma-300M if both `.tflite` weights and `sentencepiece.model` exist on disk.
+     * Safe to call on a background IO thread during service startup.
+     */
+    fun initializeIfAvailable(context: Context): Boolean {
+        if (isNeuralSidecarActive()) return true
+        val dir = getEmbeddingModelsDir(context)
+        val modelFile = discoverEmbeddingModelFile(context) ?: return false
+        val tokenizerFile = File(dir, Constants.EMBEDDING_TOKENIZER_FILENAME)
+        if (!tokenizerFile.exists() || tokenizerFile.length() < Constants.EMBEDDING_TOKENIZER_MIN_BYTES) {
+            Timber.w("EmbeddingSidecar: Model found (${modelFile.name}) but sentencepiece.model missing")
+            return false
+        }
+        return try {
+            val backend = GemmaLiteRtEmbeddingBackend(
+                modelPath = modelFile.absolutePath,
+                tokenizerPath = tokenizerFile.absolutePath,
+                useGpu = false
+            )
+            activeBackend = backend
+            cachedPrototypesModelTag = null // Force Echo prototype re-embedding in new vector space
+            Timber.i("🧠 EmbeddingSidecar: Mounted native ${backend.modelTag} (${modelFile.name})")
+            true
+        } catch (e: Throwable) {
+            Timber.e(e, "EmbeddingSidecar: Failed to mount GemmaLiteRtEmbeddingBackend, keeping hash fallback")
+            false
+        }
+    }
+
+    /**
+     * Downloads EmbeddingGemma-300M (179.1 MB) + sentencepiece.model (4.7 MB) atomically
+     * and hot-swaps [activeBackend] live without restarting GHOST.
+     */
+    suspend fun downloadAndActivateSidecar(
+        context: Context,
+        onProgress: (String) -> Unit = {}
+    ): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        if (isDownloadingSidecar) return@withContext false
+        isDownloadingSidecar = true
+        try {
+            val dir = getEmbeddingModelsDir(context)
+            val hfToken = try { HFTokenManager(context).getToken() } catch (_: Exception) { null }
+
+            val tokFile = File(dir, Constants.EMBEDDING_TOKENIZER_FILENAME)
+            if (!tokFile.exists() || tokFile.length() < Constants.EMBEDDING_TOKENIZER_MIN_BYTES) {
+                onProgress("Downloading SentencePiece tokenizer (4.7 MB)...")
+                val okTok = downloadFileAtomic(
+                    urlStr = Constants.EMBEDDING_TOKENIZER_URL,
+                    destFile = tokFile,
+                    minBytes = Constants.EMBEDDING_TOKENIZER_MIN_BYTES,
+                    hfToken = hfToken,
+                    onPct = { pct -> onProgress("Tokenizer: $pct%") }
+                )
+                if (!okTok) return@withContext false
+            }
+
+            val modelFile = File(dir, Constants.EMBEDDING_MODEL_FILENAME_TEXT)
+            if (!modelFile.exists() || modelFile.length() < Constants.EMBEDDING_MODEL_MIN_BYTES) {
+                onProgress("Downloading EmbeddingGemma-300M (179 MB)...")
+                val okModel = downloadFileAtomic(
+                    urlStr = Constants.EMBEDDING_MODEL_URL_TEXT,
+                    destFile = modelFile,
+                    minBytes = Constants.EMBEDDING_MODEL_MIN_BYTES,
+                    hfToken = hfToken,
+                    onPct = { pct -> onProgress("EmbeddingGemma-300M: $pct%") }
+                )
+                if (!okModel) return@withContext false
+            }
+
+            onProgress("Mounting EmbeddingGemma-300M...")
+            val mounted = initializeIfAvailable(context)
+            onProgress(if (mounted) "EmbeddingGemma-300M active" else "Mount failed (using hash fallback)")
+            mounted
+        } catch (e: Exception) {
+            Timber.e(e, "EmbeddingSidecar: Sidecar download failed")
+            onProgress("Download failed: ${e.message}")
+            false
+        } finally {
+            isDownloadingSidecar = false
+        }
+    }
+
+    private fun downloadFileAtomic(
+        urlStr: String,
+        destFile: File,
+        minBytes: Long,
+        hfToken: String?,
+        onPct: (Int) -> Unit
+    ): Boolean {
+        val tmpFile = File(destFile.parentFile, "${destFile.name}.tmp")
+        var conn: java.net.HttpURLConnection? = null
+        return try {
+            conn = (java.net.URL(urlStr).openConnection() as java.net.HttpURLConnection).apply {
+                connectTimeout = 20_000
+                readTimeout = 45_000
+                instanceFollowRedirects = true
+                setRequestProperty("User-Agent", "GHOST-Android/4.40")
+                if (!hfToken.isNullOrBlank()) {
+                    setRequestProperty("Authorization", "Bearer $hfToken")
+                }
+            }
+            val code = conn.responseCode
+            if (code !in 200..299) {
+                Timber.w("EmbeddingSidecar: HTTP $code for $urlStr")
+                return false
+            }
+            val total = conn.contentLengthLong
+            var downloaded = 0L
+            var lastPct = -1
+            conn.inputStream.use { input ->
+                tmpFile.outputStream().use { output ->
+                    val buf = ByteArray(32 * 1024)
+                    while (true) {
+                        val read = input.read(buf)
+                        if (read <= 0) break
+                        output.write(buf, 0, read)
+                        downloaded += read
+                        if (total > 0) {
+                            val pct = ((downloaded * 100) / total).toInt().coerceIn(0, 100)
+                            if (pct != lastPct && pct % 5 == 0) {
+                                lastPct = pct
+                                onPct(pct)
+                            }
+                        }
+                    }
+                }
+            }
+            if (tmpFile.length() < minBytes) {
+                tmpFile.delete()
+                return false
+            }
+            if (destFile.exists()) destFile.delete()
+            tmpFile.renameTo(destFile)
+        } catch (e: Exception) {
+            Timber.e(e, "EmbeddingSidecar: Failed downloading $urlStr")
+            if (tmpFile.exists()) tmpFile.delete()
+            false
+        } finally {
+            conn?.disconnect()
+        }
     }
 
     fun embedText(text: String): FloatArray = activeBackend.embedText(text)

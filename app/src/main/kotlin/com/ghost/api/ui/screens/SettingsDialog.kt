@@ -2,6 +2,7 @@ package com.ghost.api.ui.screens
 
 import android.app.Activity
 import android.content.ComponentName
+import kotlinx.coroutines.launch
 import android.content.Context
 import android.content.Intent
 import com.ghost.api.billing.BillingManager
@@ -1094,6 +1095,42 @@ fun SettingsDialog(
                                     }
                                 }
                             }
+                        }
+                        item {
+                            val sidecarScope = rememberCoroutineScope()
+                            var sidecarActive by remember { mutableStateOf(com.ghost.api.logic.EmbeddingSidecar.isNeuralSidecarActive()) }
+                            var sidecarProgress by remember { mutableStateOf<String?>(null) }
+                            val sidecarSubtitle = when {
+                                sidecarProgress != null -> sidecarProgress!!
+                                sidecarActive -> "Active: EmbeddingGemma-300M (256-dim CPU XNNPACK)"
+                                else -> "Using 0 MB Hash-256 fallback • Tap to download 179 MB neural sidecar"
+                            }
+                            SettingsActionCard(
+                                title = "EmbeddingGemma-300M Sidecar",
+                                subtitle = sidecarSubtitle,
+                                onClick = {
+                                    if (sidecarActive) {
+                                        com.ghost.api.ui.GhostHudDispatcher.show(context, "EmbeddingGemma-300M already active")
+                                        return@SettingsActionCard
+                                    }
+                                    if (com.ghost.api.logic.EmbeddingSidecar.isDownloadingSidecar) {
+                                        com.ghost.api.ui.GhostHudDispatcher.show(context, sidecarProgress ?: "Download in progress...")
+                                        return@SettingsActionCard
+                                    }
+                                    sidecarScope.launch {
+                                        com.ghost.api.ui.GhostHudDispatcher.show(context, "Downloading EmbeddingGemma-300M (179 MB)...")
+                                        val ok = com.ghost.api.logic.EmbeddingSidecar.downloadAndActivateSidecar(context) { status ->
+                                            sidecarProgress = status
+                                        }
+                                        sidecarActive = ok || com.ghost.api.logic.EmbeddingSidecar.isNeuralSidecarActive()
+                                        sidecarProgress = null
+                                        com.ghost.api.ui.GhostHudDispatcher.show(
+                                            context,
+                                            if (sidecarActive) "EmbeddingGemma-300M mounted 🧠" else "Sidecar download failed (hash fallback active)"
+                                        )
+                                    }
+                                }
+                            )
                         }
                         }
 

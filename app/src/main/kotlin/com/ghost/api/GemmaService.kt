@@ -572,6 +572,32 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 checkPermissions()
                 startAnimationLoop()  // Start notification screensavers (power-aware)
                 com.ghost.api.ui.EdgeLightsManager.restoreState(this@GemmaService)
+                scope.launch(Dispatchers.IO) {
+                    com.ghost.api.logic.EmbeddingSidecar.initializeIfAvailable(this@GemmaService)
+                    when (val seal = memoryManager.verifyTamperSeal()) {
+                        is com.ghost.api.database.IdentityTamperSeal.VerificationResult.FirstSeal -> {
+                            memoryManager.syncIdentityAndSeal()
+                            Timber.i("🔐 Tamper Seal: Initialized portable identity.md & genesis seal")
+                        }
+                        is com.ghost.api.database.IdentityTamperSeal.VerificationResult.Intact -> {
+                            Timber.i("🔐 Tamper Seal: Intact (${seal.digest.take(12)}...)")
+                        }
+                        is com.ghost.api.database.IdentityTamperSeal.VerificationResult.Modified -> {
+                            val targets = seal.changedTargets.joinToString(", ")
+                            Timber.w("⚠️ Tamper Seal MISMATCH: $targets modified while offline")
+                            com.ghost.api.ui.GhostHudDispatcher.show(
+                                this@GemmaService,
+                                "⚠️ $targets edited while offline",
+                                isLong = true
+                            )
+                            if (::ghostAgent.isInitialized) {
+                                ghostAgent.appendAssistantContext(
+                                    "Integrity notice: $targets was modified externally while offline."
+                                )
+                            }
+                        }
+                    }
+                }
             }
         } catch (e: Exception) {
             reportStatus("CRASH: ${e.message}")

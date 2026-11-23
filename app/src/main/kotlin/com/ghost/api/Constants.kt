@@ -158,6 +158,16 @@ object Constants {
     const val MODEL_NAME_E2B = "gemma-4-E2B-it.litertlm"
     const val MODEL_NAME_E4B = "gemma-4-E4B-it.litertlm"
 
+    // EmbeddingGemma-300M Sidecar (Text 256-seq mixed-precision: 179.1 MB + 4.7 MB SentencePiece)
+    const val EMBEDDING_MODEL_URL_TEXT =
+        "https://huggingface.co/litert-community/embeddinggemma-300m/resolve/main/embeddinggemma-300M_seq256_mixed-precision.tflite"
+    const val EMBEDDING_TOKENIZER_URL =
+        "https://huggingface.co/litert-community/embeddinggemma-300m/resolve/main/sentencepiece.model"
+    const val EMBEDDING_MODEL_FILENAME_TEXT = "embeddinggemma-300M_seq256_mixed-precision.tflite"
+    const val EMBEDDING_TOKENIZER_FILENAME = "sentencepiece.model"
+    const val EMBEDDING_MODEL_MIN_BYTES = 150L * 1024L * 1024L
+    const val EMBEDDING_TOKENIZER_MIN_BYTES = 2L * 1024L * 1024L
+
     val DEFAULT_MODEL_NAMES = listOf(
         MODEL_NAME_E4B,
         MODEL_NAME_E2B

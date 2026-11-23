@@ -413,6 +413,9 @@ class GhostAgent(
         Timber.i("🧠 GhostAgent: Turn $currentTurn - Starting (turnsSinceKvFlush=$turnsSinceKvFlush, historySize=${_conversationHistory.size})...")
 
         val turnStartTime = System.currentTimeMillis()
+        val turnStartUah = readBatteryChargeUah()
+        val turnStartVolts = readBatteryVoltageV()
+        val turnStartCharging = isCharging()
 
         // 1. Proactive Memory Compaction
         maybeCompactHistory()
@@ -1207,6 +1210,16 @@ class GhostAgent(
                     )
                 }
                 consumeSpokenBarks()
+                val turnEndUah = readBatteryChargeUah()
+                recordTurnEnergy(
+                    turn = currentTurn,
+                    durationMs = durationMs,
+                    outputChars = finalOutput.length,
+                    startUah = turnStartUah,
+                    endUah = turnEndUah,
+                    volts = turnStartVolts,
+                    wasCharging = turnStartCharging || isCharging()
+                )
             }
 
             checkpoint()
@@ -1706,6 +1719,65 @@ class GhostAgent(
     private fun isCriticalBattery(): Boolean {
         val level = getBatteryLevel()
         return level in 1..15 && !isCharging()
+    }
+
+    private fun readBatteryChargeUah(): Long = try {
+        val bm = context.getSystemService(Context.BATTERY_SERVICE) as? android.os.BatteryManager
+        val raw = bm?.getLongProperty(android.os.BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER) ?: Long.MIN_VALUE
+        if (raw > 0L) raw else -1L
+    } catch (_: Exception) { -1L }
+
+    private fun readBatteryVoltageV(): Double = try {
+        val intent = context.registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
+        val mv = intent?.getIntExtra(android.os.BatteryManager.EXTRA_VOLTAGE, -1) ?: -1
+        if (mv > 1000) mv / 1000.0 else 3.85
+    } catch (_: Exception) { 3.85 }
+
+    /**
+     * "Publish the joules" (Volume II C-6 empirical energy instrument):
+     * Logs per-reply energy consumption (mWh, Wh, Joules) from BatteryManager charge counter deltas
+     * to Documents/GHOST/energy_log.jsonl whenever discharging cleanly.
+     */
+    private fun recordTurnEnergy(
+        turn: Int,
+        durationMs: Long,
+        outputChars: Int,
+        startUah: Long,
+        endUah: Long,
+        volts: Double,
+        wasCharging: Boolean
+    ) {
+        if (wasCharging || startUah <= 0L || endUah <= 0L) return
+        val deltaUah = startUah - endUah
+        if (deltaUah <= 0L) return
+        val mWh = (deltaUah * volts) / 1000.0
+        val wh = mWh / 1000.0
+        val joules = mWh * 3.6
+        val tempC = try { Constants.readMaxSocThermalCelsius() ?: -1f } catch (_: Exception) { -1f }
+        Timber.i("⚡ Energy [Turn $turn]: Δ${deltaUah}uAh @ ${String.format(Locale.US, "%.2f", volts)}V = ${String.format(Locale.US, "%.3f", mWh)} mWh (${String.format(Locale.US, "%.2f", joules)} J) in ${durationMs}ms")
+        agentScope.launch(Dispatchers.IO) {
+            try {
+                val docs = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOCUMENTS)
+                val ghostDir = java.io.File(docs, "GHOST").apply { if (!exists()) mkdirs() }
+                val file = java.io.File(ghostDir, "energy_log.jsonl")
+                val iso = java.time.Instant.now().toString()
+                val json = JSONObject().apply {
+                    put("iso", iso)
+                    put("turn", turn)
+                    put("durationMs", durationMs)
+                    put("outputChars", outputChars)
+                    put("deltaUah", deltaUah)
+                    put("voltageV", Math.round(volts * 1000.0) / 1000.0)
+                    put("mWh", Math.round(mWh * 10000.0) / 10000.0)
+                    put("wh", Math.round(wh * 1_000_000.0) / 1_000_000.0)
+                    put("joules", Math.round(joules * 1000.0) / 1000.0)
+                    put("tempC", tempC)
+                }
+                file.appendText(json.toString() + "\n", Charsets.UTF_8)
+            } catch (e: Exception) {
+                Timber.w(e, "GhostAgent: Failed to append energy_log.jsonl")
+            }
+        }
     }
 
     private fun getAssistantCallSign(): String = ContextManager.resolveDeviceCallSign(context)
