@@ -158,7 +158,17 @@ object Constants {
     const val MODEL_NAME_E2B = "gemma-4-E2B-it.litertlm"
     const val MODEL_NAME_E4B = "gemma-4-E4B-it.litertlm"
 
-    // EmbeddingGemma-300M Sidecar (Text 256-seq mixed-precision: 179.1 MB + 4.7 MB SentencePiece)
+    // Neural Embedding Sidecar — Default: Gecko-110M-en (Apache 2.0, ungated, 109 MB + 0.76 MB SentencePiece)
+    const val EMBEDDING_GECKO_MODEL_URL =
+        "https://huggingface.co/litert-community/Gecko-110m-en/resolve/main/Gecko_256_quant.tflite"
+    const val EMBEDDING_GECKO_TOKENIZER_URL =
+        "https://huggingface.co/litert-community/Gecko-110m-en/resolve/main/sentencepiece.model"
+    const val EMBEDDING_GECKO_MODEL_FILENAME = "Gecko_256_quant.tflite"
+    const val EMBEDDING_GECKO_TOKENIZER_FILENAME = "gecko_sentencepiece.model"
+    const val EMBEDDING_GECKO_MODEL_MIN_BYTES = 90L * 1024L * 1024L
+    const val EMBEDDING_GECKO_TOKENIZER_MIN_BYTES = 400L * 1024L
+
+    // Optional power-user sidecar: EmbeddingGemma-300M (gated HF repo, 179.1 MB + 4.7 MB SentencePiece)
     const val EMBEDDING_MODEL_URL_TEXT =
         "https://huggingface.co/litert-community/embeddinggemma-300m/resolve/main/embeddinggemma-300M_seq256_mixed-precision.tflite"
     const val EMBEDDING_TOKENIZER_URL =

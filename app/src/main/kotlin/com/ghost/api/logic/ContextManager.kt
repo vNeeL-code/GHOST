@@ -58,7 +58,8 @@ class ContextManager(
             } else {
                 "Gemma 4 E2B (Compact Core, $formattedTokens tokens)"
             }
-            "Device: ✧ $deviceName ($marketingName, $chipsetName, ${totalRamGb}GB RAM, ${totalStorageGb}GB storage, Android ${android.os.Build.VERSION.RELEASE})\nModel Core: $coreDescription\nRuntime: GHOST On-Device Agentic Harness\nSensors: Battery (Level, Drain, Thermals), System (RAM, Storage, Uptime), Environment (Light, Pressure, Ambient), Network & Radio (WiFi, Cell, Bluetooth), Notifications (Status Bar Alerts), Motion (Orientation, Movement), Audio/Media Session, Geolocation"
+            val sidecarLabel = EmbeddingSidecar.activeSidecarLabel()
+            "Device: ✧ $deviceName ($marketingName, $chipsetName, ${totalRamGb}GB RAM, ${totalStorageGb}GB storage, Android ${android.os.Build.VERSION.RELEASE})\nModel Core: $coreDescription\nMemory Sidecar: $sidecarLabel\nRuntime: GHOST On-Device Agentic Harness\nSensors: Battery (Level, Drain, Thermals), System (RAM, Storage, Uptime), Environment (Light, Pressure, Ambient), Network & Radio (WiFi, Cell, Bluetooth), Notifications (Status Bar Alerts), Motion (Orientation, Movement), Audio/Media Session, Geolocation"
         } catch (e: Exception) {
             "Device: Android Smartphone\nRuntime: GHOST On-Device Agentic Harness\nSensors: Battery, System, Environment, Network, Notifications, Motion, Media, Location"
         }

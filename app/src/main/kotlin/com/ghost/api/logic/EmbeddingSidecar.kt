@@ -144,11 +144,60 @@ object EmbeddingSidecar {
         }
     }
 
+    /**
+     * Native LiteRT + SentencePiece backend powered by Google AI Edge localagents-rag
+     * (Gecko-110M-en seq256 dynamic int8, ~109 MB, Apache 2.0 ungated, 768-dim).
+     * Runs on CPU (XNNPACK: ~11 ms init, ~126 MB RSS) so GPU stays 100% dedicated to Gemma 4.
+     */
+    class GeckoLiteRtEmbeddingBackend(
+        modelPath: String,
+        tokenizerPath: String,
+        useGpu: Boolean = false
+    ) : EmbeddingBackend {
+        override val modelTag: String = "gecko-110m-en-seq256-d768"
+        override val dimensions: Int = 768
+        override val supportsVision: Boolean = false
+
+        private val lock = Any()
+        private val nativeModel = com.google.ai.edge.localagents.rag.models.GeckoEmbeddingModel(
+            modelPath,
+            java.util.Optional.of(tokenizerPath),
+            useGpu
+        )
+
+        override fun embedText(text: String): FloatArray {
+            if (text.isBlank()) return FloatArray(dimensions)
+            return try {
+                val embedData = com.google.ai.edge.localagents.rag.models.EmbedData.builder<String>()
+                    .setData(text.take(1024))
+                    .setTask(com.google.ai.edge.localagents.rag.models.EmbedData.TaskType.RETRIEVAL_QUERY)
+                    .build()
+                val req = com.google.ai.edge.localagents.rag.models.EmbeddingRequest.create(listOf(embedData))
+                val fullList = synchronized(lock) {
+                    nativeModel.getEmbeddings(req).get()
+                }
+                if (fullList.isNullOrEmpty()) {
+                    FloatArray(dimensions)
+                } else {
+                    val vec = FloatArray(fullList.size) { idx -> fullList[idx] }
+                    l2Normalize(vec)
+                }
+            } catch (e: Exception) {
+                Timber.w(e, "EmbeddingSidecar: GeckoLiteRtEmbeddingBackend inference failed")
+                FloatArray(dimensions)
+            }
+        }
+    }
+
     @Volatile
     var activeBackend: EmbeddingBackend = LocalSemanticHashBackend
 
     @Volatile
     var isDownloadingSidecar: Boolean = false
+        private set
+
+    @Volatile
+    var lastErrorMessage: String? = null
         private set
 
     @Volatile
@@ -159,6 +208,12 @@ object EmbeddingSidecar {
 
     fun isNeuralSidecarActive(): Boolean = activeBackend !is LocalSemanticHashBackend
 
+    fun activeSidecarLabel(): String = when (activeBackend) {
+        is GeckoLiteRtEmbeddingBackend -> "Gecko-110M (768-dim CPU XNNPACK)"
+        is GemmaLiteRtEmbeddingBackend -> "EmbeddingGemma-300M (256-dim CPU XNNPACK)"
+        else -> "Hash-256 fallback (0 MB)"
+    }
+
     fun getEmbeddingModelsDir(context: Context): File {
         val dir = context.getExternalFilesDir("models/embeddings")
             ?: File(context.filesDir, "models/embeddings")
@@ -167,7 +222,7 @@ object EmbeddingSidecar {
     }
 
     /**
-     * Checks whether a local EmbeddingGemma sidecar model file is staged on disk for the device's RAM tier.
+     * Checks whether a local neural sidecar model file (Gecko-110M or EmbeddingGemma-300M) is staged on disk.
      * Returns the discovered file (if any) without blocking startup.
      */
     fun discoverEmbeddingModelFile(context: Context): File? {
@@ -176,12 +231,12 @@ object EmbeddingSidecar {
         if (!dir.exists()) return null
         val candidates = dir.listFiles()?.filter {
             it.isFile && (it.name.endsWith(".tflite") || it.name.endsWith(".litertlm")) &&
-                it.length() >= Constants.EMBEDDING_MODEL_MIN_BYTES
+                it.length() >= Constants.EMBEDDING_GECKO_MODEL_MIN_BYTES
         } ?: return null
         val preferred = if (tier == "MULTIMODAL_567M") {
             candidates.firstOrNull { it.name.contains("multimodal", ignoreCase = true) || it.name.contains("omni", ignoreCase = true) }
         } else {
-            candidates.firstOrNull { it.name.contains("embeddinggemma", ignoreCase = true) || it.name.contains("270m", ignoreCase = true) || it.name.contains("300m", ignoreCase = true) }
+            candidates.firstOrNull { it.name.contains("embeddinggemma", ignoreCase = true) || it.name.contains("gecko", ignoreCase = true) }
         }
         val found = preferred ?: candidates.firstOrNull()
         if (found != null) {
@@ -191,36 +246,64 @@ object EmbeddingSidecar {
     }
 
     /**
-     * Auto-mounts EmbeddingGemma-300M if both `.tflite` weights and `sentencepiece.model` exist on disk.
+     * Auto-mounts Gecko-110M or EmbeddingGemma-300M if both `.tflite` weights and matching tokenizer exist on disk.
      * Safe to call on a background IO thread during service startup.
      */
     fun initializeIfAvailable(context: Context): Boolean {
         if (isNeuralSidecarActive()) return true
         val dir = getEmbeddingModelsDir(context)
-        val modelFile = discoverEmbeddingModelFile(context) ?: return false
-        val tokenizerFile = File(dir, Constants.EMBEDDING_TOKENIZER_FILENAME)
-        if (!tokenizerFile.exists() || tokenizerFile.length() < Constants.EMBEDDING_TOKENIZER_MIN_BYTES) {
-            Timber.w("EmbeddingSidecar: Model found (${modelFile.name}) but sentencepiece.model missing")
-            return false
+
+        // 1. Prefer EmbeddingGemma-300M if manually staged with its 4.7 MB tokenizer
+        val gemmaModel = File(dir, Constants.EMBEDDING_MODEL_FILENAME_TEXT)
+        val gemmaTok = File(dir, Constants.EMBEDDING_TOKENIZER_FILENAME)
+        if (gemmaModel.exists() && gemmaModel.length() >= Constants.EMBEDDING_MODEL_MIN_BYTES &&
+            gemmaTok.exists() && gemmaTok.length() >= Constants.EMBEDDING_TOKENIZER_MIN_BYTES
+        ) {
+            return try {
+                val backend = GemmaLiteRtEmbeddingBackend(
+                    modelPath = gemmaModel.absolutePath,
+                    tokenizerPath = gemmaTok.absolutePath,
+                    useGpu = false
+                )
+                activeBackend = backend
+                cachedPrototypesModelTag = null
+                Timber.i("🧠 EmbeddingSidecar: Mounted native ${backend.modelTag} (${gemmaModel.name})")
+                true
+            } catch (e: Throwable) {
+                Timber.e(e, "EmbeddingSidecar: Failed to mount GemmaLiteRtEmbeddingBackend")
+                lastErrorMessage = "Mount error: ${e.message}"
+                false
+            }
         }
-        return try {
-            val backend = GemmaLiteRtEmbeddingBackend(
-                modelPath = modelFile.absolutePath,
-                tokenizerPath = tokenizerFile.absolutePath,
-                useGpu = false
-            )
-            activeBackend = backend
-            cachedPrototypesModelTag = null // Force Echo prototype re-embedding in new vector space
-            Timber.i("🧠 EmbeddingSidecar: Mounted native ${backend.modelTag} (${modelFile.name})")
-            true
-        } catch (e: Throwable) {
-            Timber.e(e, "EmbeddingSidecar: Failed to mount GemmaLiteRtEmbeddingBackend, keeping hash fallback")
-            false
+
+        // 2. Default ungated sidecar: Gecko-110M-en (Apache 2.0)
+        val geckoModel = File(dir, Constants.EMBEDDING_GECKO_MODEL_FILENAME)
+        val geckoTok = File(dir, Constants.EMBEDDING_GECKO_TOKENIZER_FILENAME)
+        if (geckoModel.exists() && geckoModel.length() >= Constants.EMBEDDING_GECKO_MODEL_MIN_BYTES &&
+            geckoTok.exists() && geckoTok.length() >= Constants.EMBEDDING_GECKO_TOKENIZER_MIN_BYTES
+        ) {
+            return try {
+                val backend = GeckoLiteRtEmbeddingBackend(
+                    modelPath = geckoModel.absolutePath,
+                    tokenizerPath = geckoTok.absolutePath,
+                    useGpu = false
+                )
+                activeBackend = backend
+                cachedPrototypesModelTag = null
+                Timber.i("🧠 EmbeddingSidecar: Mounted native ${backend.modelTag} (${geckoModel.name})")
+                true
+            } catch (e: Throwable) {
+                Timber.e(e, "EmbeddingSidecar: Failed to mount GeckoLiteRtEmbeddingBackend")
+                lastErrorMessage = "Mount error: ${e.message}"
+                false
+            }
         }
+
+        return false
     }
 
     /**
-     * Downloads EmbeddingGemma-300M (179.1 MB) + sentencepiece.model (4.7 MB) atomically
+     * Downloads ungated Gecko-110M-en (109 MB, Apache 2.0) + SentencePiece tokenizer (0.76 MB) atomically
      * and hot-swaps [activeBackend] live without restarting GHOST.
      */
     suspend fun downloadAndActivateSidecar(
@@ -229,72 +312,100 @@ object EmbeddingSidecar {
     ): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         if (isDownloadingSidecar) return@withContext false
         isDownloadingSidecar = true
+        lastErrorMessage = null
         try {
             val dir = getEmbeddingModelsDir(context)
             val hfToken = try { HFTokenManager(context).getToken() } catch (_: Exception) { null }
 
-            val tokFile = File(dir, Constants.EMBEDDING_TOKENIZER_FILENAME)
-            if (!tokFile.exists() || tokFile.length() < Constants.EMBEDDING_TOKENIZER_MIN_BYTES) {
-                onProgress("Downloading SentencePiece tokenizer (4.7 MB)...")
-                val okTok = downloadFileAtomic(
-                    urlStr = Constants.EMBEDDING_TOKENIZER_URL,
+            val tokFile = File(dir, Constants.EMBEDDING_GECKO_TOKENIZER_FILENAME)
+            if (!tokFile.exists() || tokFile.length() < Constants.EMBEDDING_GECKO_TOKENIZER_MIN_BYTES) {
+                onProgress("Downloading Gecko tokenizer (0.8 MB)...")
+                val tokErr = downloadFileAtomic(
+                    urlStr = Constants.EMBEDDING_GECKO_TOKENIZER_URL,
                     destFile = tokFile,
-                    minBytes = Constants.EMBEDDING_TOKENIZER_MIN_BYTES,
+                    minBytes = Constants.EMBEDDING_GECKO_TOKENIZER_MIN_BYTES,
                     hfToken = hfToken,
                     onPct = { pct -> onProgress("Tokenizer: $pct%") }
                 )
-                if (!okTok) return@withContext false
+                if (tokErr != null) {
+                    lastErrorMessage = tokErr
+                    onProgress("Tokenizer failed: $tokErr")
+                    return@withContext false
+                }
             }
 
-            val modelFile = File(dir, Constants.EMBEDDING_MODEL_FILENAME_TEXT)
-            if (!modelFile.exists() || modelFile.length() < Constants.EMBEDDING_MODEL_MIN_BYTES) {
-                onProgress("Downloading EmbeddingGemma-300M (179 MB)...")
-                val okModel = downloadFileAtomic(
-                    urlStr = Constants.EMBEDDING_MODEL_URL_TEXT,
+            val modelFile = File(dir, Constants.EMBEDDING_GECKO_MODEL_FILENAME)
+            if (!modelFile.exists() || modelFile.length() < Constants.EMBEDDING_GECKO_MODEL_MIN_BYTES) {
+                onProgress("Downloading Gecko-110M (109 MB)...")
+                val modelErr = downloadFileAtomic(
+                    urlStr = Constants.EMBEDDING_GECKO_MODEL_URL,
                     destFile = modelFile,
-                    minBytes = Constants.EMBEDDING_MODEL_MIN_BYTES,
+                    minBytes = Constants.EMBEDDING_GECKO_MODEL_MIN_BYTES,
                     hfToken = hfToken,
-                    onPct = { pct -> onProgress("EmbeddingGemma-300M: $pct%") }
+                    onPct = { pct -> onProgress("Gecko-110M: $pct%") }
                 )
-                if (!okModel) return@withContext false
+                if (modelErr != null) {
+                    lastErrorMessage = modelErr
+                    onProgress("Download failed: $modelErr")
+                    return@withContext false
+                }
             }
 
-            onProgress("Mounting EmbeddingGemma-300M...")
+            onProgress("Mounting Gecko-110M...")
             val mounted = initializeIfAvailable(context)
-            onProgress(if (mounted) "EmbeddingGemma-300M active" else "Mount failed (using hash fallback)")
+            onProgress(if (mounted) "Gecko-110M active" else (lastErrorMessage ?: "Mount failed"))
             mounted
         } catch (e: Exception) {
             Timber.e(e, "EmbeddingSidecar: Sidecar download failed")
-            onProgress("Download failed: ${e.message}")
+            lastErrorMessage = e.message ?: e.javaClass.simpleName
+            onProgress("Download failed: $lastErrorMessage")
             false
         } finally {
             isDownloadingSidecar = false
         }
     }
 
+    /**
+     * Atomically downloads [urlStr] to [destFile] with explicit cross-host redirect handling
+     * (strips Authorization header when redirected from huggingface.co to CDN LFS hosts).
+     * Returns `null` on success, or a concise error string on failure.
+     */
     private fun downloadFileAtomic(
         urlStr: String,
         destFile: File,
         minBytes: Long,
         hfToken: String?,
         onPct: (Int) -> Unit
-    ): Boolean {
+    ): String? {
         val tmpFile = File(destFile.parentFile, "${destFile.name}.tmp")
         var conn: java.net.HttpURLConnection? = null
         return try {
-            conn = (java.net.URL(urlStr).openConnection() as java.net.HttpURLConnection).apply {
-                connectTimeout = 20_000
-                readTimeout = 45_000
-                instanceFollowRedirects = true
-                setRequestProperty("User-Agent", "GHOST-Android/4.40")
-                if (!hfToken.isNullOrBlank()) {
-                    setRequestProperty("Authorization", "Bearer $hfToken")
+            var currentUrl = java.net.URL(urlStr)
+            var redirects = 0
+            var code: Int
+            while (true) {
+                conn?.disconnect()
+                conn = (currentUrl.openConnection() as java.net.HttpURLConnection).apply {
+                    connectTimeout = 20_000
+                    readTimeout = 45_000
+                    instanceFollowRedirects = false
+                    setRequestProperty("User-Agent", "GHOST-Android/4.40")
+                    if (!hfToken.isNullOrBlank() && currentUrl.host.endsWith("huggingface.co")) {
+                        setRequestProperty("Authorization", "Bearer $hfToken")
+                    }
                 }
+                code = conn.responseCode
+                if (code in setOf(301, 302, 303, 307, 308)) {
+                    val loc = conn.getHeaderField("Location") ?: return "HTTP $code (missing Location)"
+                    if (++redirects > 6) return "Too many redirects"
+                    currentUrl = java.net.URL(currentUrl, loc)
+                    continue
+                }
+                break
             }
-            val code = conn.responseCode
             if (code !in 200..299) {
                 Timber.w("EmbeddingSidecar: HTTP $code for $urlStr")
-                return false
+                return "HTTP $code"
             }
             val total = conn.contentLengthLong
             var downloaded = 0L
@@ -318,15 +429,16 @@ object EmbeddingSidecar {
                 }
             }
             if (tmpFile.length() < minBytes) {
+                val actualKb = tmpFile.length() / 1024
                 tmpFile.delete()
-                return false
+                return "Incomplete file (${actualKb} KB)"
             }
             if (destFile.exists()) destFile.delete()
-            tmpFile.renameTo(destFile)
+            if (tmpFile.renameTo(destFile)) null else "Rename failed"
         } catch (e: Exception) {
             Timber.e(e, "EmbeddingSidecar: Failed downloading $urlStr")
             if (tmpFile.exists()) tmpFile.delete()
-            false
+            e.message ?: e.javaClass.simpleName
         } finally {
             conn?.disconnect()
         }
