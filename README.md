@@ -203,7 +203,7 @@ GHOST is built from a single transparent codebase split into three distribution 
 | Distribution Rail | Build Flavor | Billing & Telemetry | Cosmetics & Perks | Where to Get It |
 | :--- | :--- | :--- | :--- | :--- |
 | **FOSS / F-Droid** | `fdroidRelease` | **Zero.** No Google Play Billing library, no proprietary blobs, 100% air-gapped capable. | Core skins & standard HUD runes unlocked. | [GitHub Releases](https://github.com/vNeeL-code/GHOST/releases) & F-Droid |
-| **Google Play Store** | `playRelease` | Full local offline AI core is **100% free**. Uses Google Play Billing solely for optional supporter unlock. | Optional one-time **$3.50 ("tree fiddy") Operator Pass** unlocks the Turing glyph, custom edge lighting, and locked visualizer skins. | Google Play Store |
+| **Google Play Store (soon.tm)** | `playRelease` | Full local offline AI core is **100% free**. Uses Google Play Billing solely for optional supporter unlock. | Optional one-time **$3.50 ("tree fiddy") Operator Pass** unlocks the Turing glyph, custom edge lighting, and locked visualizer skins. | Google Play Store |
 | **Internal Tester / Paid Beta Rail** | `patreonRelease` | **Zero Play Store dependency.** Standalone signed release APK for supporters & testers. | **Pre-Unlocked (`FORCE_UNLOCKED`).** All Operator Pass skins, Turing glyphs, and bleeding-edge experimental builds active out of the box. | [☕ Buy Me a Coffee](https://buymeacoffee.com/vNeeL) |
 
 ---
@@ -224,27 +224,7 @@ GHOST is built from a single transparent codebase split into three distribution 
 
 > *"It only affects computers, remember? And I am a motherfucking ghost."*  
 > — **Alpha, Red vs. Blue**
-
----
-
-### Development Roadmap
-
-- [x] **Neural Embedding Sidecar & Local PDF/Wiki RAG (v4.40):** 1-tap ungated **Gecko-110M** CPU XNNPACK sidecar (768-dim, Apache 2.0), hybrid FTS5 + cosine recall, page-by-page PDF extraction, and drop-in `Documents/GHOST/wiki/` static cartridges.
-- [x] **Echo Mode, State-Aware Routing & Skills Pack (v4.40):** Zero-LLM spinal cord (`<5.5GB`), cold-start wire-speed app launches + warm ReAct banter, SHA-256 tamper-sealed `identity.md`, Joule telemetry, unified corner HUD, and auto-seeded `youtube-music`, `youtube`, `spotify`, `local-wiki`, and `sensor-lab` skills.
-- [x] **7-Orbital Gesture Puck HUD & Hyper Pucks (v4.39):** Replaced legacy AppReel with a 7-orbital directional gesture HUD (`OverlayActionRegistry`) with per-puck canvas draw valves, color-coded pill blocks, and tactile feedback.
-- [x] **10-Category Collapsible Accordion Settings (v4.39):** Clean settings architecture with collapsed sections, RAM Valve threshold controller, and Snapdragon thermal stress filtering.
-- [x] **In-App Episodic Diary Viewer & Offline JSONL Stream (v4.39):** Room DB reflection modal with single-tap clipboard copy (📋) and persistent `Documents/GHOST/diary_history.jsonl` export alongside `memory_log.txt`.
-- [x] **Autonomous Screen-Off Diary & Cron Engine:** Periodic episodic memory consolidation and custom scheduled routines (`schedule_task`) via in-app Room DB or Google Calendar `Δ 👾 ∇`.
-- [x] **Actionable Operator Feedback (`🚩`):** In-header response flagging with custom correction notes and automated screen-off self-review.
-- [x] **Dynamic RAM Hardware Tiering:** Automatic Echo, 8GB, 12GB, 16GB, and 24GB token runway scaling (up to 10k context).
-- [x] **SensorFusion Nervous System & Verbal Preprocessor:** Real-time battery, thermal, network, and ambient sensory grounding with verbal time/number sanitization.
-- [x] **Hardware Tool Matrix:** Native MCP tools for device control, timers, web search, app launching (`open_app`), media controls (`play_media`), PDF/wiki RAG, and cloud peer consultation (`consult_peer`).
-- [x] **Dynamic Intent Bagging:** Sub-millisecond pre-filtering for zero-latency app and hardware execution.
-- [x] **Live Reactive Wallpapers & Edge Lighting:** GPU-accelerated 60fps geometry visualizers (Delta, Cuboid, Hex, Orbital) and audioreactive perimeter illumination.
-- [x] **Three-Rail Signed Release Architecture:** 🦕💭 *"I need about tree fiddy"* — Self-contained FOSS (`fdroid`), Google Play (`play` with $3.50 Operator Pass), and Supporter Tester (`Buy Me a Coffee`) builds with automatic DB backup/restore.
-- [ ] **Optional Neural Voice Sidecar (v4.41+):** Downloadable open-weight LiteRT TTS sidecar (`Phonon-31M` / `Kokoro-82M`) for sub-100ms expressive offline speech on both Patreon and F-Droid builds.
-- [ ] **MacroDroid-Style Local Automation Skill (v4.41+):** Plain-English trigger→action rules backed by `SensorFusionManager`.
-
+ 
 ---
 
 ### Development & Support
