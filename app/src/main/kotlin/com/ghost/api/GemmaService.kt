@@ -1706,6 +1706,32 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             return runEchoFallback(com.ghost.api.logic.EchoSpineEngine.EchoReason.DOWNLOADING_WEIGHTS)
         }
 
+        // State-Aware Routing: If Gemma is cold/unloaded, never block a bare "open <app>" behind GPU warmup!
+        // Execute wire-speed via EchoSpineEngine in <10ms and warm Gemma silently in the background.
+        val isEngineWarm = isGemmaLoaded() && ::ghostAgent.isInitialized && ghostAgent.isReady
+        if (!isDream && !isEngineWarm) {
+            val coldWireSpeed = try {
+                com.ghost.api.logic.IntentBagger.bagIntents(this, effectivePrompt)
+                    .firstOrNull { it.isWireSpeedDirect && !it.appLabel.isNullOrBlank() }
+            } catch (_: Exception) {
+                null
+            }
+            if (coldWireSpeed != null) {
+                Timber.i("⚡ GemmaService: Cold-engine wire-speed app launch '${coldWireSpeed.appLabel}' (bypassing GPU warmup)")
+                val echoResult = runEchoFallback(
+                    if (isSuspendedDueToRam.get()) {
+                        com.ghost.api.logic.EchoSpineEngine.EchoReason.RAM_VALVE_SUSPENDED
+                    } else {
+                        com.ghost.api.logic.EchoSpineEngine.EchoReason.INITIALIZING
+                    }
+                )
+                if (!isSuspendedDueToRam.get()) {
+                    serviceScope.launch(Dispatchers.IO) { ensureEngineReady() }
+                }
+                return echoResult
+            }
+        }
+
         // Seamless wakeup from suspension OUTSIDE of engineMutex to prevent recursive mutex deadlock
         if (!ensureEngineReady()) {
             val reason = if (isSuspendedDueToRam.get()) {

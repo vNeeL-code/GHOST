@@ -267,12 +267,12 @@ object IntentBagger {
             return null
         }
         val playRegex = Regex(
-            """\b(?:play|playing|put on|queue|stream|spin|listen to)\s+(.+?)\s+(?:on|in|via|using)\s+(yt music|youtube music|ytm|youtube|yt|spotify)\b"""
+            """\b(?:play|playing|put on|queue|stream|spin|listen to)[\s.,:;…-]+(.+?)\s+(?:on|in|via|using)\s+(yt music|youtube music|ytm|youtube|yt|spotify)\b"""
         )
         val match = playRegex.find(clean) ?: return null
         val rawSong = match.groupValues[1]
             .replace(Regex("""^(?:the\s+song|song|track|video|some|a|the)\s+"""), "")
-            .trim()
+            .trim('.', ',', ':', ';', ' ')
         if (rawSong.length < 2) return null
 
         val svcToken = match.groupValues[2].trim()
@@ -336,12 +336,12 @@ object IntentBagger {
         val words = trimmedClean.split(Regex("""[\s,;.!?'"]+""")).filter { it.isNotBlank() }
         val isConversational = words.any { it.lowercase() in CONVERSATIONAL_MARKERS } || words.size > 4
 
-        val apps = emptyList<String>()
+        val apps = getInstalledAppLabels(context)
 
         // 2. High-Confidence Fast-Track:
         // Must be RIGID & FRAGILE. Only triggers if:
         // - NOT conversational
-        // - Candidate is strictly an exact alias or exact installed app label
+        // - Candidate is strictly an exact alias or exact installed app label (typos drop to ReAct)
         // - And either had an explicit launch prefix (e.g. "open chrome") OR was a bare single-word app alias (e.g. "chrome")
         val isExplicitLaunch = matchedPrefix != null || words.size == 1
 
@@ -668,6 +668,67 @@ object IntentBagger {
         }
         sb.append("[/Intent Hints]")
         return sb.toString().trim()
+    }
+
+    @Volatile
+    private var cachedInstalledLabels: List<String> = emptyList()
+    @Volatile
+    private var cachedInstalledLabelsMs: Long = 0L
+
+    private fun getInstalledAppLabels(context: Context): List<String> {
+        val now = System.currentTimeMillis()
+        if (cachedInstalledLabels.isNotEmpty() && (now - cachedInstalledLabelsMs) < 60_000L) {
+            return cachedInstalledLabels
+        }
+        return try {
+            val pm = context.packageManager ?: return emptyList()
+            val launcherIntent = android.content.Intent(android.content.Intent.ACTION_MAIN).apply {
+                addCategory(android.content.Intent.CATEGORY_LAUNCHER)
+            }
+            val resolved = pm.queryIntentActivities(launcherIntent, 0)
+            val labels = resolved
+                .mapNotNull { it.loadLabel(pm)?.toString()?.trim() }
+                .filter { it.isNotBlank() }
+                .distinct()
+            cachedInstalledLabels = labels
+            cachedInstalledLabelsMs = now
+            labels
+        } catch (_: Throwable) {
+            emptyList()
+        }
+    }
+
+    internal fun findOneTypoMatch(query: String, candidates: Iterable<String>): String? {
+        val q = query.lowercase(Locale.ROOT)
+        if (q.length < 5) return null
+        for (cand in candidates) {
+            val c = cand.lowercase(Locale.ROOT)
+            if (kotlin.math.abs(q.length - c.length) > 1) continue
+            if (isWithinOneEdit(q, c)) return cand
+        }
+        return null
+    }
+
+    private fun isWithinOneEdit(a: String, b: String): Boolean {
+        val lenA = a.length
+        val lenB = b.length
+        if (kotlin.math.abs(lenA - lenB) > 1) return false
+        var i = 0
+        var j = 0
+        var edits = 0
+        while (i < lenA && j < lenB) {
+            if (a[i] == b[j]) {
+                i++
+                j++
+            } else {
+                if (++edits > 1) return false
+                if (lenA > lenB) i++
+                else if (lenB > lenA) j++
+                else { i++; j++ }
+            }
+        }
+        if (i < lenA || j < lenB) edits++
+        return edits <= 1
     }
 }
 
