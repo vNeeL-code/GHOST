@@ -1706,20 +1706,19 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             return runEchoFallback(com.ghost.api.logic.EchoSpineEngine.EchoReason.DOWNLOADING_WEIGHTS)
         }
 
-        // State-Aware Routing: If Gemma is cold/unloaded OR her KV cache cooled down after >10 min idle
-        // (15-min idle KV flush triggers a ~5s prefill warmup), never block a bare "open <app>" behind warmup!
-        // Execute wire-speed via EchoSpineEngine in <10ms and warm Gemma silently in the background.
-        val isKvWarm = (System.currentTimeMillis() - lastActivityTime) < 10 * 60 * 1000L
-        val isEngineWarm = isGemmaLoaded() && ::ghostAgent.isInitialized && ghostAgent.isReady && isKvWarm
-        if (!isDream && !isEngineWarm) {
-            val coldWireSpeed = try {
+        // Wire-Speed Fragile-By-Design App Launch Fast-Path (<10ms):
+        // Bare 2-word commands ("open reddit", "open yt", "open linkedin") ALWAYS fire instantaneously
+        // whether Gemma is cold, warm, or KV-flushed. Any typos, extra words, or conversational framing
+        // miss isWireSpeedDirect and route to Gemma 4's ReAct loop.
+        if (!isDream) {
+            val wireSpeedApp = try {
                 com.ghost.api.logic.IntentBagger.bagIntents(this, effectivePrompt)
                     .firstOrNull { it.isWireSpeedDirect && !it.appLabel.isNullOrBlank() }
             } catch (_: Exception) {
                 null
             }
-            if (coldWireSpeed != null) {
-                Timber.i("⚡ GemmaService: Cold-engine wire-speed app launch '${coldWireSpeed.appLabel}' (bypassing GPU warmup)")
+            if (wireSpeedApp != null) {
+                Timber.i("⚡ GemmaService: Wire-speed app launch '${wireSpeedApp.appLabel}' (<10ms fast-path)")
                 val echoResult = runEchoFallback(
                     if (isSuspendedDueToRam.get()) {
                         com.ghost.api.logic.EchoSpineEngine.EchoReason.RAM_VALVE_SUSPENDED
@@ -1727,9 +1726,6 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                         com.ghost.api.logic.EchoSpineEngine.EchoReason.INITIALIZING
                     }
                 )
-                if (!isSuspendedDueToRam.get()) {
-                    serviceScope.launch(Dispatchers.IO) { ensureEngineReady() }
-                }
                 return echoResult
             }
         }

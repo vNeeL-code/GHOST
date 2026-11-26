@@ -463,11 +463,8 @@ class GhostAgent(
             }
         } else emptyList()
 
-        // FAST-PATH: State-aware wire-speed dispatch — when Gemma is already warm in RAM,
-        // bare URLs still open immediately (<2ms), while app launches flow into the ReAct loop
-        // with IntentBagger's hint for sentient T-UI banter. (Cold/unloaded app launches are
-        // already handled wire-speed in GemmaService before GPU warmup.)
-        val wireSpeedIntent = baggedIntents.firstOrNull { it.isWireSpeedDirect && !it.browserUrl.isNullOrBlank() }
+        // FAST-PATH: Wire-speed direct dispatch for 100% confidence bare app launches and web links (<10ms)
+        val wireSpeedIntent = baggedIntents.firstOrNull { it.isWireSpeedDirect }
         if (wireSpeedIntent != null) {
             val appTarget = wireSpeedIntent.appLabel
             val urlTarget = wireSpeedIntent.browserUrl
