@@ -1706,9 +1706,11 @@ class GemmaService : Service(), AgentPlatformCallbacks {
             return runEchoFallback(com.ghost.api.logic.EchoSpineEngine.EchoReason.DOWNLOADING_WEIGHTS)
         }
 
-        // State-Aware Routing: If Gemma is cold/unloaded, never block a bare "open <app>" behind GPU warmup!
+        // State-Aware Routing: If Gemma is cold/unloaded OR her KV cache cooled down after >10 min idle
+        // (15-min idle KV flush triggers a ~5s prefill warmup), never block a bare "open <app>" behind warmup!
         // Execute wire-speed via EchoSpineEngine in <10ms and warm Gemma silently in the background.
-        val isEngineWarm = isGemmaLoaded() && ::ghostAgent.isInitialized && ghostAgent.isReady
+        val isKvWarm = (System.currentTimeMillis() - lastActivityTime) < 10 * 60 * 1000L
+        val isEngineWarm = isGemmaLoaded() && ::ghostAgent.isInitialized && ghostAgent.isReady && isKvWarm
         if (!isDream && !isEngineWarm) {
             val coldWireSpeed = try {
                 com.ghost.api.logic.IntentBagger.bagIntents(this, effectivePrompt)

@@ -61,6 +61,7 @@ object IntentBagger {
         "youtube music" to listOf("YouTube Music"),
         "ytm" to listOf("YouTube Music"),
         "music" to listOf("YouTube Music", "Music", "Spotify"),
+        "yt" to listOf("YouTube"),
         "youtube" to listOf("YouTube"),
         "camera" to listOf("Camera"),
         "clock" to listOf("Clock", "DeskClock"),
@@ -346,16 +347,23 @@ object IntentBagger {
         val isExplicitLaunch = matchedPrefix != null || words.size == 1
 
         if (!isConversational && isExplicitLaunch) {
-            // Check exact aliases
+            val compactCandidate = candidate.replace(" ", "")
+
+            // Check exact aliases (including space-split forms like "you tube", "whats app")
             for ((alias, candidates) in COMMON_APP_ALIASES) {
-                if (candidate.equals(alias, ignoreCase = true)) {
+                if (candidate.equals(alias, ignoreCase = true) ||
+                    (compactCandidate.length >= 4 && compactCandidate.equals(alias.replace(" ", ""), ignoreCase = true))
+                ) {
                     val app = candidates.firstOrNull() ?: alias.replaceFirstChar { it.uppercase() }
                     return AppMatch(app, isHighConfidence = true)
                 }
             }
 
-            // Check exact installed app name
-            val directMatch = apps.firstOrNull { it.equals(candidate, ignoreCase = true) }
+            // Check exact installed app name (including space-split forms like "linked in" -> "LinkedIn")
+            val directMatch = apps.firstOrNull {
+                it.equals(candidate, ignoreCase = true) ||
+                    (compactCandidate.length >= 4 && it.replace(" ", "").equals(compactCandidate, ignoreCase = true))
+            }
             if (directMatch != null) {
                 return AppMatch(directMatch, isHighConfidence = true)
             }
