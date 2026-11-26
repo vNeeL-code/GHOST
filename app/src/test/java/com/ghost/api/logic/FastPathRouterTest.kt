@@ -42,7 +42,7 @@ class FastPathRouterTest {
 
         // Entity must be cleanly extracted
         assertEquals("https://github.com/vNeeL-code/GHOST", ft.extractedEntities["url"])
-        assertTrue(ft.toolHints.contains("web_fetch"))
+        assertTrue(ft.toolHints.contains("fetch_webpage"))
 
         // cleanUserMessage must remain strictly unpolluted
         assertEquals(query, ft.cleanUserMessage)

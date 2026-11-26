@@ -296,7 +296,9 @@ class GhostForegroundNotificationController(
             .addAction(Notification.Action.Builder(null, "❌ DENY", denyPending).build())
 
         try {
-            context.getSystemService(NotificationManager::class.java)?.notify(notificationId, builder.build())
+            // Dedicated ID so the 2.5s foreground status animation loop never overwrites ALLOW/DENY buttons
+            val confirmNotificationId = notificationId + 100
+            context.getSystemService(NotificationManager::class.java)?.notify(confirmNotificationId, builder.build())
         } catch (e: Exception) {
             Timber.w(e, "Failed to post tool confirmation notification")
         }

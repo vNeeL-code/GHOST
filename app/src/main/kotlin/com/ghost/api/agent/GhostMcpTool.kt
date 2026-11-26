@@ -327,6 +327,13 @@ class GhostMcpTool(
         if (normalized in ghostMcpTools) {
             return executeMcpAction(normalized, parameters)
         }
+        if (ToolPolicy.isRisky("run_intent", mapOf("intent" to intent))) {
+            return mapOf(
+                "action" to intent,
+                "result" to "blocked",
+                "error" to "Requires operator confirmation before dispatching raw system intent '$intent'."
+            )
+        }
         val success = IntentHandler.handleAction(context, intent, parameters)
         return if (success) {
             mapOf("action" to intent, "result" to "succeeded")
@@ -436,7 +443,11 @@ class GhostMcpTool(
                     return recovered
                 }
             }
-        } else if (trimmed.contains("=") || trimmed.contains(":")) {
+        } else if ((trimmed.contains("=") || trimmed.contains(":")) &&
+            !trimmed.startsWith("http://", ignoreCase = true) &&
+            !trimmed.startsWith("https://", ignoreCase = true) &&
+            !Regex("""^\d{1,2}:\d{2}(?::\d{2})?(?:\s*[aApP][mM])?$""").matches(trimmed)
+        ) {
             val recovered = parseRawToolArgs(trimmed)
             if (recovered.isNotEmpty()) {
                 Timber.i("GhostMcpTool: Successfully parsed ${recovered.size} unbracketed parameters for $toolName")
@@ -484,7 +495,8 @@ class GhostMcpTool(
         val params = mutableMapOf<String, Any>()
         if (rawArgs.isBlank()) return params
 
-        val keyPattern = Regex("""([a-zA-Z0-9_]+)\s*[:=]\s*""")
+        // Anchor keys to start/delimiter and never split URL schemes (https://)
+        val keyPattern = Regex("""(?:^|[\s,{])([a-zA-Z0-9_]+)\s*[:=]\s*(?!//)""")
         val matches = keyPattern.findAll(rawArgs).toList()
 
         for (i in matches.indices) {

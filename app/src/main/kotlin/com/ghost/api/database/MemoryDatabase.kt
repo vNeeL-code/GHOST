@@ -182,8 +182,6 @@ abstract class MemoryDatabase : RoomDatabase() {
                 .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
                 // Apply migrations in order
                 .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
-                // Active development: wipe rather than crash on schema conflict
-                .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance
                 Timber.i("MemoryDatabase: Initialized (version 8, file=$dbName)")
@@ -191,22 +189,35 @@ abstract class MemoryDatabase : RoomDatabase() {
             }
         }
 
+        private val backupLock = Any()
+
         fun backupDatabaseToExternal(context: Context) {
-            try {
-                val dbName = "ghost_memory_database"
-                val dbFile = context.getDatabasePath(dbName)
-                if (dbFile.exists() && dbFile.length() > 0) {
-                    val backupDir = context.getExternalFilesDir("backup") ?: return
-                    backupDir.mkdirs()
-                    dbFile.copyTo(java.io.File(backupDir, "ghost_memory_database"), overwrite = true)
-                    val wal = java.io.File(dbFile.parentFile, "ghost_memory_database-wal")
-                    if (wal.exists()) wal.copyTo(java.io.File(backupDir, "ghost_memory_database-wal"), overwrite = true)
-                    val shm = java.io.File(dbFile.parentFile, "ghost_memory_database-shm")
-                    if (shm.exists()) shm.copyTo(java.io.File(backupDir, "ghost_memory_database-shm"), overwrite = true)
-                    Timber.d("MemoryDatabase: Backed up database to external storage ($backupDir)")
+            synchronized(backupLock) {
+                try {
+                    val dbName = "ghost_memory_database"
+                    val dbFile = context.getDatabasePath(dbName)
+                    if (dbFile.exists() && dbFile.length() > 0) {
+                        // Checkpoint WAL cleanly before copying so main DB file is self-contained (never copy -shm)
+                        try {
+                            INSTANCE?.openHelper?.writableDatabase?.query("PRAGMA wal_checkpoint(TRUNCATE)")?.close()
+                        } catch (e: Exception) {
+                            Timber.d(e, "MemoryDatabase: Non-fatal WAL checkpoint skip before backup")
+                        }
+                        val backupDir = context.getExternalFilesDir("backup") ?: return
+                        backupDir.mkdirs()
+                        val target = java.io.File(backupDir, "ghost_memory_database")
+                        val tmp = java.io.File(backupDir, "ghost_memory_database.tmp")
+                        dbFile.copyTo(tmp, overwrite = true)
+                        if (target.exists()) target.delete()
+                        tmp.renameTo(target)
+                        // Remove any stale sidecar files from older backups so restore never loads mismatched WAL/SHM
+                        java.io.File(backupDir, "ghost_memory_database-wal").delete()
+                        java.io.File(backupDir, "ghost_memory_database-shm").delete()
+                        Timber.d("MemoryDatabase: Backed up checkpointed database to external storage ($backupDir)")
+                    }
+                } catch (e: Exception) {
+                    Timber.w(e, "MemoryDatabase: External backup failed")
                 }
-            } catch (e: Exception) {
-                Timber.w(e, "MemoryDatabase: External backup failed")
             }
         }
     }

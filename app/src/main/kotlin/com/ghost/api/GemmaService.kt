@@ -1708,9 +1708,13 @@ class GemmaService : Service(), AgentPlatformCallbacks {
 
         // Wire-Speed Fragile-By-Design App Launch Fast-Path (<10ms):
         // Bare 2-word commands ("open reddit", "open yt", "open linkedin") ALWAYS fire instantaneously
-        // whether Gemma is cold, warm, or KV-flushed. Any typos, extra words, or conversational framing
-        // miss isWireSpeedDirect and route to Gemma 4's ReAct loop.
-        if (!isDream) {
+        // for trusted user-initiated inputs whether Gemma is cold, warm, or KV-flushed.
+        val isTrustedUserSource = inputSource in setOf(
+            com.ghost.api.logic.InputSource.USER_TYPED,
+            com.ghost.api.logic.InputSource.USER_VOICE,
+            com.ghost.api.logic.InputSource.OVERLAY
+        )
+        if (!isDream && isTrustedUserSource && ::systemToolSet.isInitialized) {
             val wireSpeedApp = try {
                 com.ghost.api.logic.IntentBagger.bagIntents(this, effectivePrompt)
                     .firstOrNull { it.isWireSpeedDirect && !it.appLabel.isNullOrBlank() }
@@ -1718,15 +1722,25 @@ class GemmaService : Service(), AgentPlatformCallbacks {
                 null
             }
             if (wireSpeedApp != null) {
-                Timber.i("⚡ GemmaService: Wire-speed app launch '${wireSpeedApp.appLabel}' (<10ms fast-path)")
-                val echoResult = runEchoFallback(
-                    if (isSuspendedDueToRam.get()) {
-                        com.ghost.api.logic.EchoSpineEngine.EchoReason.RAM_VALVE_SUSPENDED
-                    } else {
-                        com.ghost.api.logic.EchoSpineEngine.EchoReason.INITIALIZING
+                val appName = wireSpeedApp.appLabel!!
+                val appRes = systemToolSet.app(appName)
+                if (appRes["result"] == "success") {
+                    Timber.i("⚡ GemmaService: Wire-speed app launch '$appName' (<10ms fast-path)")
+                    markActivity()
+                    val userTitle = Constants.getUserTitle(this)
+                    val hudChip = com.ghost.api.logic.ActionFlavorTexts.appLaunchHud(appName, userTitle)
+                    val ttsPhrase = com.ghost.api.logic.ActionFlavorTexts.appLaunchTts(appName, userTitle)
+                    if (::ttsManager.isInitialized) {
+                        ttsManager.stop()
+                        ttsManager.speak(ttsPhrase)
                     }
-                )
-                return echoResult
+                    onMessageAdded(hudChip, isUser = false, isComplete = true)
+                    if (::ghostAgent.isInitialized) {
+                        ghostAgent.recordFastPathTurn(userPrompt, hudChip, ttsPhrase)
+                    }
+                    storeConversationTurn(userPrompt, hudChip, sessionId = "default")
+                    return hudChip
+                }
             }
         }
 
@@ -2160,16 +2174,19 @@ class GemmaService : Service(), AgentPlatformCallbacks {
     }
 
     override suspend fun unloadEngine() {
-        if (::ghostAgent.isInitialized) {
-            try {
-                ghostAgent.shutdown()
-            } catch (e: Exception) {
-                Timber.w(e, "Failed to shutdown GhostAgent on engine unload")
+        engineMutex.withLock {
+            if (::ghostAgent.isInitialized) {
+                try {
+                    ghostAgent.shutdown()
+                } catch (e: Exception) {
+                    Timber.w(e, "Failed to shutdown GhostAgent on engine unload")
+                }
             }
+            val oldEngine = engineRef.getAndSet(null)
+            oldEngine?.cleanup()
+            com.ghost.api.logic.LocalDocumentRag.clearCache()
+            System.gc()
         }
-        val oldEngine = engineRef.getAndSet(null)
-        oldEngine?.cleanup()
-        System.gc()
     }
 
     override suspend fun reloadEngine() {

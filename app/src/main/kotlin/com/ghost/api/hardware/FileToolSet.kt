@@ -168,7 +168,8 @@ class FileToolSet(private val context: Context) : ToolSet {
                 targetClean.contains("movie") || targetClean.contains("video") -> Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
                 targetClean.contains("pic") || targetClean.contains("photo") || targetClean.contains("image") -> Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
                 targetClean.isBlank() -> Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                else -> File(folder.trim())
+                else -> resolveSandboxedFile(folder.trim())
+                    ?: return mapOf("result" to "error", "message" to "Permission denied: Directory is outside allowed user storage.")
             }
 
             if (!dir.exists() || !dir.isDirectory) {

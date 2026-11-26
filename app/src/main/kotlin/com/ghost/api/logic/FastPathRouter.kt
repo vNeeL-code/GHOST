@@ -217,7 +217,7 @@ object FastPathRouter {
                 val isSkillOrQr = trimmed.contains("qr", ignoreCase = true) ||
                                   trimmed.contains("skill", ignoreCase = true) ||
                                   trimmed.contains("hash", ignoreCase = true)
-                val hints = if (isSkillOrQr) listOf("run_js", "web_fetch") else listOf("web_fetch", "web_search")
+                val hints = if (isSkillOrQr) listOf("run_js", "fetch_webpage") else listOf("fetch_webpage", "search")
                 val hintBlock = if (isSkillOrQr) {
                     "\n\n[Router Context: Detected URL: $foundUrl | Suggested tools: run_js, qr-code]"
                 } else {

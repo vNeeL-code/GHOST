@@ -175,6 +175,15 @@ class NetworkToolSet(private val context: Context) : ToolSet {
         com.ghost.api.GemmaService.instance?.showWorkSignal("FETCHING")
         try {
             val url = URL(urlString)
+            val proto = url.protocol.lowercase()
+            if (proto != "https" && proto != "http") {
+                return@runBlocking mapOf("result" to "error", "message" to "Blocked unsupported URL protocol '$proto'")
+            }
+            val host = url.host.orEmpty()
+            val resolved = java.net.InetAddress.getAllByName(host)
+            if (resolved.any { it.isLoopbackAddress || it.isSiteLocalAddress || it.isLinkLocalAddress || it.isAnyLocalAddress }) {
+                return@runBlocking mapOf("result" to "error", "message" to "Blocked private/loopback network target '$host'")
+            }
             val connection = url.openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
             connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) Gemma/1.0")

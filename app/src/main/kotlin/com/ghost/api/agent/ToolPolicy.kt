@@ -16,7 +16,7 @@ object ToolPolicy {
     fun isRisky(toolName: String, params: Map<String, Any?>): Boolean {
         return when (toolName.trim().lowercase()) {
             // Destructive or externally-visible actions requiring operator authorization
-            "delete_file", "move_file", "run_intent", "reply_notification" -> true
+            "delete_file", "move_file", "copy_file", "run_intent", "reply_notification" -> true
             // All other built-in GHOST MCP tools (consult_peer, hardware, media, memory, search, tasks) are operator-authorized
             else -> false
         }

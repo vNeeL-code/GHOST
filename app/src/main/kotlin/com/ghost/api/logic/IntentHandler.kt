@@ -61,7 +61,7 @@ object IntentHandler {
                 if (dataStr.isNotEmpty()) {
                     val uri = Uri.parse(dataStr)
                     val scheme = uri.scheme?.lowercase() ?: ""
-                    if (scheme.isNotEmpty() && scheme !in ALLOWED_DATA_SCHEMES) {
+                    if (scheme !in ALLOWED_DATA_SCHEMES) {
                         Log.w(TAG, "Blocked unsafe URI scheme '$scheme' in intent $action")
                         return false
                     }
@@ -128,8 +128,14 @@ object IntentHandler {
                     true
                 }
                 "open_url" -> {
-                    val url = json.optString("url")
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                    val url = json.optString("url").trim()
+                    val uri = Uri.parse(url)
+                    val scheme = uri.scheme?.lowercase() ?: ""
+                    if (scheme !in setOf("http", "https")) {
+                        Log.w(TAG, "Blocked unsafe open_url scheme '$scheme'")
+                        return false
+                    }
+                    val intent = Intent(Intent.ACTION_VIEW, uri).apply {
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     }
                     context.startActivity(intent)

@@ -482,9 +482,7 @@ object IntentBagger {
     private fun matchAlarm(clean: String, raw: String): Triple<Int, Int, String>? {
         if (!clean.contains("alarm") && !clean.contains("wake")) return null
         val parsed = TimePreprocessor.parseTime(raw) ?: TimePreprocessor.parseTime(clean) ?: return null
-        val label = if (clean.contains("labeled") || clean.contains("called")) {
-            raw.substringAfter("labeled", "").substringAfter("called", "").trim()
-        } else ""
+        val label = Regex("""(?i)\b(?:labeled|called)\s+(.+)$""").find(raw)?.groupValues?.get(1)?.trim() ?: ""
 
         return Triple(parsed.hour24, parsed.minute, label)
     }
@@ -493,7 +491,8 @@ object IntentBagger {
         if (!clean.contains("search file") && !clean.contains("find file") && !clean.contains("look for file") && !clean.contains("search for file")) {
             return null
         }
-        val query = raw.substringAfter("file", "").substringAfter("for", "").trim()
+        val query = Regex("""(?i)\bfiles?\s+(?:for\s+|named\s+|called\s+)?(.+)$""")
+            .find(raw)?.groupValues?.get(1)?.trim() ?: ""
         return query.takeIf { it.isNotBlank() }
     }
 
@@ -559,18 +558,20 @@ object IntentBagger {
 
         // 2. Calculate Hash (SHA-256) skill
         if (clean.contains("sha256") || clean.contains("sha 256") || clean.contains("calculate hash") || clean.contains("hash of")) {
-            val target = raw.substringAfterLast("of ", "").substringAfterLast("for ", "").trim().ifBlank { raw }
+            val target = Regex("""(?i)\b(?:hash\s+of|hash\s+for|sha\s*256\s+(?:of|for))\s+(.+)$""")
+                .find(raw)?.groupValues?.get(1)?.trim()?.ifBlank { null } ?: raw
             val escaped = target.replace("\"", "")
             return BaggedIntent(
                 tool = "run_js",
-                paramsJson = "{\"skillName\":\"calculate-hash\",\"scriptName\":\"index.html\",\"data\":{\"input\":\"$escaped\"}}",
-                hint = "Calculate SHA-256 hash using the calculate-hash skill"
+                paramsJson = "{\"skillName\":\"calculate-hash\",\"scriptName\":\"index.html\",\"data\":{\"text\":\"$escaped\"}}",
+                hint = "Calculate hash using the calculate-hash skill"
             )
         }
 
         // 3. Interactive Map skill
         if (clean.contains("interactive map") || clean.contains("show on map") || clean.contains("map of ")) {
-            val loc = raw.substringAfter("map of ", "").substringAfter("map for ", "").substringAfter("on map", "").trim().ifBlank { "London" }
+            val loc = Regex("""(?i)\b(?:map\s+of|map\s+for|on\s+map(?:\s+for)?)\s+(.+)$""")
+                .find(raw)?.groupValues?.get(1)?.trim()?.ifBlank { null } ?: "London"
             val escaped = loc.replace("\"", "")
             return BaggedIntent(
                 tool = "run_js",
@@ -583,17 +584,17 @@ object IntentBagger {
         if (clean.contains("mood tracker") || clean.contains("track my mood") || clean.contains("log my mood") || clean.contains("mood dashboard")) {
             return BaggedIntent(
                 tool = "run_js",
-                paramsJson = "{\"skillName\":\"mood-tracker\",\"scriptName\":\"index.html\",\"data\":{\"plotDays\":7}}",
+                paramsJson = "{\"skillName\":\"mood-tracker\",\"scriptName\":\"index.html\",\"data\":{\"action\":\"get_history\",\"days\":7,\"show_dashboard\":true}}",
                 hint = "Open interactive Mood Tracker dashboard"
             )
         }
 
-        // 5. Kitchen Adventure skill
+        // 5. Kitchen Adventure skill (prompt-only skill, no scripts/index.html)
         if (clean.contains("kitchen adventure")) {
             return BaggedIntent(
-                tool = "run_js",
-                paramsJson = "{\"skillName\":\"kitchen-adventure\",\"scriptName\":\"index.html\",\"data\":{}}",
-                hint = "Launch Kitchen Adventure interactive skill"
+                tool = "load_skill",
+                paramsJson = "{\"name\":\"kitchen-adventure\"}",
+                hint = "Load Kitchen Adventure skill instructions"
             )
         }
 
@@ -665,7 +666,8 @@ object IntentBagger {
                 }
                 "open_system_browser_bar" -> {
                     val url = c.browserUrl ?: ""
-                    "execute_command(\"open_system_browser_bar\", \"queryOrUrl=$url\")"
+                    val escaped = url.replace("\"", "\\\"")
+                    "execute_command(\"open_system_browser_bar\", \"{\\\"queryOrUrl\\\":\\\"$escaped\\\"}\")"
                 }
                 else -> {
                     val cleanParams = c.paramsJson.replace("\"", "\\\"")

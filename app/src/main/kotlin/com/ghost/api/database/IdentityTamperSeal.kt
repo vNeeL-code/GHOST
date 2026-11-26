@@ -54,7 +54,19 @@ object IdentityTamperSeal {
     fun sha256File(file: File): String {
         if (!file.exists() || !file.isFile) return "MISSING"
         return try {
-            sha256Hex(file.readBytes())
+            val md = MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { input ->
+                val buf = ByteArray(8 * 1024)
+                while (true) {
+                    val read = input.read(buf)
+                    if (read <= 0) break
+                    md.update(buf, 0, read)
+                }
+            }
+            val hash = md.digest()
+            val sb = StringBuilder(hash.size * 2)
+            for (b in hash) sb.append(String.format("%02x", b))
+            sb.toString()
         } catch (e: Exception) {
             Timber.w(e, "IdentityTamperSeal: Failed hashing ${file.name}")
             "ERROR"

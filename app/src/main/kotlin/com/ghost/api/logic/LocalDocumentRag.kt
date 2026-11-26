@@ -28,6 +28,7 @@ object LocalDocumentRag {
     private const val MAX_CHUNKS_PER_FILE = 400
     private const val MAX_CACHED_FILES = 12
     private const val MAX_WIKI_FILES = 40
+    private const val MAX_FILE_BYTES = 20L * 1024L * 1024L
     private const val MAX_PDF_PAGES_PER_WINDOW = 3
     private const val MAX_TEXT_LINES_PER_WINDOW = 100
 
@@ -126,6 +127,9 @@ object LocalDocumentRag {
         startOffset: Int = 1,
         maxUnits: Int? = null
     ): ReadWindowResult {
+        if (file.length() > MAX_FILE_BYTES) {
+            throw IllegalArgumentException("File exceeds ${MAX_FILE_BYTES / (1024 * 1024)} MB on-device safety cap (${file.name})")
+        }
         val safeStart = startOffset.coerceAtLeast(1)
         return if (file.extension.equals("pdf", ignoreCase = true)) {
             readPdfWindow(context, file, safeStart, (maxUnits ?: MAX_PDF_PAGES_PER_WINDOW).coerceIn(1, 5))
@@ -141,7 +145,7 @@ object LocalDocumentRag {
         maxPages: Int
     ): ReadWindowResult {
         ensurePdfBoxInitialized(context)
-        PDDocument.load(file).use { doc ->
+        PDDocument.load(file, com.tom_roush.pdfbox.io.MemoryUsageSetting.setupTempFileOnly()).use { doc ->
             val totalPages = doc.numberOfPages
             if (totalPages == 0 || startPage > totalPages) {
                 return ReadWindowResult(
@@ -314,6 +318,10 @@ object LocalDocumentRag {
         file: File,
         displayName: String
     ): List<DocumentChunk> {
+        if (file.length() > MAX_FILE_BYTES) {
+            Timber.w("LocalDocumentRag: Skipping ${file.name} (${file.length()} bytes > cap)")
+            return emptyList()
+        }
         val backend = EmbeddingSidecar.activeBackend
         val key = CacheKey(
             canonicalPath = try { file.canonicalPath } catch (_: Exception) { file.absolutePath },

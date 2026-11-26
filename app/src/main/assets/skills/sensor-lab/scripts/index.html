@@ -187,6 +187,10 @@
             rollDeg: Number(roll.toFixed(1)),
             peakG: Number(peakG.toFixed(2))
           }),
+          webview: {
+            url: window.location.href,
+            aspectRatio: 0.95
+          },
           error: null
         });
       } catch (err) {

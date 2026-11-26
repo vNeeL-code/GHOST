@@ -112,9 +112,12 @@ class GhostRamValveController(
 
     fun handleTrimMemory(level: Int) {
         Timber.i("onTrimMemory received: level=$level")
-        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ||
+        // TRIM_MEMORY_RUNNING_CRITICAL (15) < TRIM_MEMORY_UI_HIDDEN (20)!
+        // Using `>= 15` accidentally unloaded Gemma on EVERY app switch (UI_HIDDEN=20).
+        if (level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ||
             level >= ComponentCallbacks2.TRIM_MEMORY_COMPLETE
         ) {
+            com.ghost.api.logic.LocalDocumentRag.clearCache()
             if (!isInferencing() && !isSpeaking() && isGemmaLoaded()) {
                 if (isAppInForeground()) {
                     Timber.i("Ignoring onTrimMemory: GHOST is currently active in foreground")
@@ -128,6 +131,7 @@ class GhostRamValveController(
 
     fun handleLowMemory() {
         Timber.w("🚨 onLowMemory received from OS! Suspending engine weights immediately...")
+        com.ghost.api.logic.LocalDocumentRag.clearCache()
         if (!isInferencing() && !isSpeaking() && isGemmaLoaded()) {
             if (isAppInForeground()) {
                 Timber.i("Ignoring onLowMemory: GHOST is currently active in foreground")

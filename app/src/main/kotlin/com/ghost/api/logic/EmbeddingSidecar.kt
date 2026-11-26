@@ -390,7 +390,8 @@ object EmbeddingSidecar {
                     readTimeout = 45_000
                     instanceFollowRedirects = false
                     setRequestProperty("User-Agent", "GHOST-Android/4.40")
-                    if (!hfToken.isNullOrBlank() && currentUrl.host.endsWith("huggingface.co")) {
+                    val host = currentUrl.host.lowercase(Locale.ROOT)
+                    if (!hfToken.isNullOrBlank() && (host == "huggingface.co" || host.endsWith(".huggingface.co"))) {
                         setRequestProperty("Authorization", "Bearer $hfToken")
                     }
                 }
@@ -398,7 +399,11 @@ object EmbeddingSidecar {
                 if (code in setOf(301, 302, 303, 307, 308)) {
                     val loc = conn.getHeaderField("Location") ?: return "HTTP $code (missing Location)"
                     if (++redirects > 6) return "Too many redirects"
-                    currentUrl = java.net.URL(currentUrl, loc)
+                    val nextUrl = java.net.URL(currentUrl, loc)
+                    if (!nextUrl.protocol.equals("https", ignoreCase = true)) {
+                        return "Blocked non-HTTPS redirect"
+                    }
+                    currentUrl = nextUrl
                     continue
                 }
                 break
