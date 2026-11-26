@@ -46,6 +46,10 @@ class MCPServer(
         "app"             to ToolDefinition("app", "Launch an installed app by name", mapOf("name" to ParameterSpec("string", "App name"))),
         "media"           to ToolDefinition("media", "Control media playback", mapOf("action" to ParameterSpec("string", "PLAY, PAUSE, NEXT, or PREV"))),
         "music"           to ToolDefinition("music", "Control media playback transport or query currently playing tracks", mapOf("action" to ParameterSpec("string", "PLAY, PAUSE, NEXT, PREV, STOP, or STATUS", required = false))),
+        "play_media"      to ToolDefinition("play_media", "Search and play a specific song, artist, playlist, or video on YouTube Music, YouTube, or Spotify", mapOf(
+            "query"   to ParameterSpec("string", "Song, artist, playlist, or video name"),
+            "service" to ParameterSpec("string", "Target app: youtube_music (default), youtube, or spotify", required = false)
+        )),
         "volume"          to ToolDefinition("volume", "Control stream volume or ringer profiles (media, ring, alarm, notification)", mapOf(
             "stream" to ParameterSpec("string", "Stream type: media, ring, alarm, notification, system", required = false),
             "level" to ParameterSpec("integer", "Volume level percentage (0-100)", required = false),
@@ -191,6 +195,12 @@ class MCPServer(
                 }
                 "music" -> {
                     val res = tuiCommandEngine.music(params)
+                    ToolResult(res["result"] == "success", res["message"] ?: "")
+                }
+                "play_media" -> {
+                    val query = params["query"]?.toString() ?: ""
+                    val service = params["service"]?.toString() ?: "youtube_music"
+                    val res = systemTools.play_media(query, service)
                     ToolResult(res["result"] == "success", res["message"] ?: "")
                 }
                 "volume" -> {

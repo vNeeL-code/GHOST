@@ -7,30 +7,14 @@ description: Search and play songs, artists, albums, podcasts, or playlists on S
 
 ## Instructions
 
-### 1. Play or Search on Spotify
-Call `run_intent` with:
-- `intent`: `"android.media.action.MEDIA_PLAY_FROM_SEARCH"`
-- `parameters`: JSON string:
+### 1. Play a Specific Song, Artist, Podcast, or Playlist on Spotify
+Call `execute_command` with:
+- `command`: `"play_media"`
+- `args`: JSON string:
 ```json
-{
-  "component_package": "com.spotify.music",
-  "extras": {
-    "query": "<song, artist, podcast, or playlist name>",
-    "android.intent.extra.focus": "vnd.android.cursor.item/*"
-  }
-}
+{"query": "<song, artist, podcast, or playlist name>", "service": "spotify"}
 ```
+*(If Spotify is not installed on the device, report that honestly — do NOT open the Play Store unless the user asks to install it.)*
 
-### 2. Open Spotify Search Deep Link
-Call `run_intent` with:
-- `intent`: `"android.intent.action.VIEW"`
-- `parameters`: JSON string:
-```json
-{
-  "data": "spotify:search:<URL-encoded query>",
-  "component_package": "com.spotify.music"
-}
-```
-
-### 3. Transport Controls (Play / Pause / Next / Previous)
-Use `execute_command("music", "action=play|pause|next|previous")` or `run_intent("media", "{\"action\":\"NEXT\"}")`.
+### 2. Transport Controls (Play / Pause / Next / Previous)
+Use `execute_command("music", "action=play|pause|next|previous")`.

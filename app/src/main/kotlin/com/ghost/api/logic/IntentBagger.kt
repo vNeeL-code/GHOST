@@ -57,7 +57,10 @@ object IntentBagger {
         "chrome" to listOf("Chrome", "Browser", "Internet"),
         "browser" to listOf("Chrome", "Browser", "Internet"),
         "spotify" to listOf("Spotify", "Music", "YouTube Music"),
-        "music" to listOf("Spotify", "Music", "YouTube Music"),
+        "yt music" to listOf("YouTube Music"),
+        "youtube music" to listOf("YouTube Music"),
+        "ytm" to listOf("YouTube Music"),
+        "music" to listOf("YouTube Music", "Music", "Spotify"),
         "youtube" to listOf("YouTube"),
         "camera" to listOf("Camera"),
         "clock" to listOf("Clock", "DeskClock"),
@@ -122,8 +125,14 @@ object IntentBagger {
             }
         }
 
+        // 1B. Song / Video Play-By-Name Hint (Hint-only: prevents matchAppLaunch from hijacking "play <song> on yt music")
+        val playMediaIntent = matchPlayMedia(clean)
+        if (playMediaIntent != null) {
+            bagged.add(playMediaIntent)
+        }
+
         // 2. App Launch Intent (e.g. "open calendar", "can you please open spotify for me")
-        val appMatch = matchAppLaunch(context, clean, trimmed)
+        val appMatch = if (playMediaIntent == null) matchAppLaunch(context, clean, trimmed) else null
         if (appMatch != null) {
             val appIntent = BaggedIntent(
                 tool = "open_app",
@@ -140,7 +149,7 @@ object IntentBagger {
         }
 
         // 3. Media Transport Controls
-        val mediaAction = matchMedia(clean)
+        val mediaAction = if (playMediaIntent == null) matchMedia(clean) else null
         if (mediaAction != null) {
             bagged.add(BaggedIntent("music", "{\"action\":\"$mediaAction\"}", "Media $mediaAction"))
         }
@@ -252,9 +261,46 @@ object IntentBagger {
         "tried", "trying", "without", "need", "needed", "did", "does", "do"
     )
 
+    private fun matchPlayMedia(clean: String): BaggedIntent? {
+        // Explicit negation guard ("i don't want spotify", "don't play ...")
+        if (Regex("""\b(dont|don t|do not|never|stop)\s+(want|use|have|play|open)\b""").containsMatchIn(clean)) {
+            return null
+        }
+        val playRegex = Regex(
+            """\b(?:play|playing|put on|queue|stream|spin|listen to)\s+(.+?)\s+(?:on|in|via|using)\s+(yt music|youtube music|ytm|youtube|yt|spotify)\b"""
+        )
+        val match = playRegex.find(clean) ?: return null
+        val rawSong = match.groupValues[1]
+            .replace(Regex("""^(?:the\s+song|song|track|video|some|a|the)\s+"""), "")
+            .trim()
+        if (rawSong.length < 2) return null
+
+        val svcToken = match.groupValues[2].trim()
+        val (service, label) = when (svcToken) {
+            "spotify" -> "spotify" to "Spotify"
+            "youtube", "yt" -> "youtube" to "YouTube"
+            else -> "youtube_music" to "YouTube Music"
+        }
+        val params = org.json.JSONObject()
+            .put("query", rawSong)
+            .put("service", service)
+            .toString()
+        return BaggedIntent(
+            tool = "play_media",
+            paramsJson = params,
+            hint = "Play '$rawSong' on $label",
+            isWireSpeedDirect = false
+        )
+    }
+
     private fun matchAppLaunch(context: Context, clean: String, raw: String): AppMatch? {
         val trimmedClean = clean.trim()
         if (trimmedClean.isBlank()) return null
+
+        // Explicit negation guard: never suggest launching an app the user explicitly says they don't use/have/want
+        if (Regex("""\b(dont|don t|do not|never|not)\s+(use|have|want|need|open|launch|install|installed)\b|\bnot\s+installed\b""").containsMatchIn(trimmedClean)) {
+            return null
+        }
 
         // 1. Rigid Anchored Check: Did the input start with an explicit launch command?
         var matchedPrefix: String? = null

@@ -158,6 +158,69 @@ class SystemToolSet(private val context: Context) : ToolSet {
         return mapOf("result" to "success", "message" to "Media Action Sent: $action")
     }
 
+    @Tool(description = "Searches and plays a specific song, artist, album, playlist, or video on YouTube Music, YouTube, or Spotify.")
+    fun play_media(
+        @ToolParam(description = "Song title, artist, album, or video to play (e.g. 'Smooth Criminal Michael Jackson')") query: String,
+        @ToolParam(description = "Target app: 'youtube_music' (default), 'youtube', or 'spotify'") service: String = "youtube_music"
+    ): Map<String, String> {
+        val cleanQuery = query.trim()
+        if (cleanQuery.isBlank()) {
+            return mapOf("result" to "error", "message" to "No song or video query specified.")
+        }
+        val svcNorm = service.trim().lowercase(java.util.Locale.ROOT)
+        val (pkg, label, fallbackUrl) = when {
+            svcNorm.contains("spotify") -> Triple(
+                "com.spotify.music",
+                "Spotify",
+                "spotify:search:${android.net.Uri.encode(cleanQuery)}"
+            )
+            svcNorm == "youtube" || svcNorm == "yt" || (svcNorm.contains("youtube") && !svcNorm.contains("music")) -> Triple(
+                "com.google.android.youtube",
+                "YouTube",
+                "https://www.youtube.com/results?search_query=${android.net.Uri.encode(cleanQuery)}"
+            )
+            else -> Triple(
+                "com.google.android.apps.youtube.music",
+                "YouTube Music",
+                "https://music.youtube.com/search?q=${android.net.Uri.encode(cleanQuery)}"
+            )
+        }
+
+        val isInstalled = try {
+            context.packageManager.getPackageInfo(pkg, 0)
+            true
+        } catch (_: Exception) {
+            false
+        }
+        if (!isInstalled) {
+            return mapOf("result" to "error", "message" to "$label is not installed on this device.")
+        }
+
+        com.ghost.api.GemmaService.instance?.showWorkSignal("MEDIA", 1800)
+        return try {
+            val playIntent = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).apply {
+                setPackage(pkg)
+                putExtra(android.app.SearchManager.QUERY, cleanQuery)
+                putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            if (playIntent.resolveActivity(context.packageManager) != null) {
+                context.startActivity(playIntent)
+                return mapOf("result" to "success", "message" to "Playing '$cleanQuery' on $label.")
+            }
+
+            val viewIntent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(fallbackUrl)).apply {
+                setPackage(pkg)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(viewIntent)
+            mapOf("result" to "success", "message" to "Opened '$cleanQuery' on $label.")
+        } catch (e: Exception) {
+            Timber.e(e, "play_media failed for '$cleanQuery' on $label")
+            mapOf("result" to "error", "message" to "Failed to play '$cleanQuery' on $label: ${e.message}")
+        }
+    }
+
     private fun getInstalledApps(): List<AppInfo> {
         val now = System.currentTimeMillis()
         if (appListCache == null || (now - appListCacheTime) > 60_000L) {
