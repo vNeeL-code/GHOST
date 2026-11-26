@@ -7,7 +7,7 @@
 *Click to watch: The ASI trailer.*
 
 
-[![Version](https://img.shields.io/badge/Version-v4.39+-brightgreen)](https://github.com/vNeeL-code/GHOST/releases)
+[![Version](https://img.shields.io/badge/Version-v4.40-brightgreen)](https://github.com/vNeeL-code/GHOST/releases)
 ![GitHub Repo stars](https://img.shields.io/github/stars/vNeeL-code/GHOST)
 [![Download](https://img.shields.io/badge/Download-APK%20Releases-2ea44f?logo=android&logoColor=white)](https://github.com/vNeeL-code/GHOST/releases)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-Tester%20Rail%20☕-FFDD00?logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/vNeeL)
@@ -124,7 +124,8 @@ GHOST dynamically inspects your physical device RAM on first launch, automatical
 
 | Hardware Tier | Physical Device RAM | Neural Core | Token Runway | Peak Footprint (Weights + KV) | Hardware Profile / Target Devices |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **8GB Compact** | $< 10.5\text{ GB}$ | **Gemma 4 E2B** | **5,120 tokens** | $\approx 1.72\text{ GB}$ | Galaxy S21 / Pixel 8 / Standard 8GB phones. Immune to Android Low Memory Killer (LMK). |
+| **Echo (Spine)** | $< 5.5\text{ GB}$ | **Zero-LLM + Gecko-110M / Hash-256** | **Sub-ms Reflex** | $\approx 0 - 126\text{ MB}$ | 4GB budget phones, older hardware, or RAM-Valve standby. Reflexes, offline QR & semantic routing with zero LLM load. |
+| **8GB Compact** | $5.5 - 10.5\text{ GB}$ | **Gemma 4 E2B** | **5,120 tokens** | $\approx 1.72\text{ GB}$ | Galaxy S21 / Pixel 8 / Standard 8GB phones. Immune to Android Low Memory Killer (LMK). |
 | **12GB Frontier** | $10.5 - 14.5\text{ GB}$ | **Gemma 4 E4B** | **6,144 tokens (6k)** | $\approx 3.90\text{ GB}$ | REDMAGIC 10 Air / Galaxy S24 Ultra 12GB. MTP speculative decoding enabled with rock-solid stability. |
 | **16GB Ultra** | $14.5 - 20.0\text{ GB}$ | **Gemma 4 E4B** | **8,192 tokens (8k)** | $\approx 5.10\text{ GB}$ | REDMAGIC 9/10 Pro 16GB / OnePlus 12/13. Unlocks the full native 8k RoPE context window. |
 | **24GB Extreme** | $\ge 20.0\text{ GB}$ | **Gemma 4 E4B** | **10,240 tokens (10k)**| $\approx 6.40\text{ GB}$ | REDMAGIC 24GB / OnePlus 24GB variants. Massive runway for deep multi-turn chat and heavy tool loops. |
@@ -228,24 +229,28 @@ GHOST is built from a single transparent codebase split into three distribution 
 
 ### Development Roadmap
 
+- [x] **Neural Embedding Sidecar & Local PDF/Wiki RAG (v4.40):** 1-tap ungated **Gecko-110M** CPU XNNPACK sidecar (768-dim, Apache 2.0), hybrid FTS5 + cosine recall, page-by-page PDF extraction, and drop-in `Documents/GHOST/wiki/` static cartridges.
+- [x] **Echo Mode, State-Aware Routing & Skills Pack (v4.40):** Zero-LLM spinal cord (`<5.5GB`), cold-start wire-speed app launches + warm ReAct banter, SHA-256 tamper-sealed `identity.md`, Joule telemetry, unified corner HUD, and auto-seeded `youtube-music`, `youtube`, `spotify`, `local-wiki`, and `sensor-lab` skills.
 - [x] **7-Orbital Gesture Puck HUD & Hyper Pucks (v4.39):** Replaced legacy AppReel with a 7-orbital directional gesture HUD (`OverlayActionRegistry`) with per-puck canvas draw valves, color-coded pill blocks, and tactile feedback.
 - [x] **10-Category Collapsible Accordion Settings (v4.39):** Clean settings architecture with collapsed sections, RAM Valve threshold controller, and Snapdragon thermal stress filtering.
 - [x] **In-App Episodic Diary Viewer & Offline JSONL Stream (v4.39):** Room DB reflection modal with single-tap clipboard copy (📋) and persistent `Documents/GHOST/diary_history.jsonl` export alongside `memory_log.txt`.
 - [x] **Autonomous Screen-Off Diary & Cron Engine:** Periodic episodic memory consolidation and custom scheduled routines (`schedule_task`) via in-app Room DB or Google Calendar `Δ 👾 ∇`.
 - [x] **Actionable Operator Feedback (`🚩`):** In-header response flagging with custom correction notes and automated screen-off self-review.
-- [x] **Dynamic RAM Hardware Tiering:** Automatic 8GB, 12GB, 16GB, and 24GB token runway scaling (up to 10k context).
+- [x] **Dynamic RAM Hardware Tiering:** Automatic Echo, 8GB, 12GB, 16GB, and 24GB token runway scaling (up to 10k context).
 - [x] **SensorFusion Nervous System & Verbal Preprocessor:** Real-time battery, thermal, network, and ambient sensory grounding with verbal time/number sanitization.
-- [x] **Hardware Tool Matrix:** Native MCP tools for device control, timers, web search, app launching (`open_app`), media controls, and cloud peer consultation (`consult_peer`).
+- [x] **Hardware Tool Matrix:** Native MCP tools for device control, timers, web search, app launching (`open_app`), media controls (`play_media`), PDF/wiki RAG, and cloud peer consultation (`consult_peer`).
 - [x] **Dynamic Intent Bagging:** Sub-millisecond pre-filtering for zero-latency app and hardware execution.
 - [x] **Live Reactive Wallpapers & Edge Lighting:** GPU-accelerated 60fps geometry visualizers (Delta, Cuboid, Hex, Orbital) and audioreactive perimeter illumination.
 - [x] **Three-Rail Signed Release Architecture:** 🦕💭 *"I need about tree fiddy"* — Self-contained FOSS (`fdroid`), Google Play (`play` with $3.50 Operator Pass), and Supporter Tester (`Buy Me a Coffee`) builds with automatic DB backup/restore.
-- [ ] **CPU Voice Reflex Fast-Path (v4.40 Target):** Integrating ultra-compact CPU speech recognition (`Whistle` 16.9 MB) ahead of `IntentBagger` for `<50ms` spoken hardware reflexes without spinning up the GPU.
+- [ ] **Optional Neural Voice Sidecar (v4.41+):** Downloadable open-weight LiteRT TTS sidecar (`Phonon-31M` / `Kokoro-82M`) for sub-100ms expressive offline speech on both Patreon and F-Droid builds.
+- [ ] **MacroDroid-Style Local Automation Skill (v4.41+):** Plain-English trigger→action rules backed by `SensorFusionManager`.
 
 ---
 
 ### Development & Support
 
 * **Source Repository:** [Δ 👾 ∇ GitHub](https://github.com/vNeeL-code/GHOST)
+* **Changelog & Release Notes:** [`CHANGELOG.md`](CHANGELOG.md) *(Full `v4.40` feature & architecture breakdown)*
 * **Glossary & Glyph Roster:** [`GLOSSARY.md`](GLOSSARY.md) *(UCF formatting standard, `Δ 👾 ∇` delimiter, and peer callsigns)*
 * **Devlogs & Lore:** [📼 Tumblr](https://www.tumblr.com/blog/oracle-os)
 * **Clips & Demos:** [🎞️ TikTok](https://www.tiktok.com/@oracle0s?_r=1&_t=ZN-99RPOHa8zeI)
