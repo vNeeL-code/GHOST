@@ -50,6 +50,20 @@ class MCPServer(
             "query"   to ParameterSpec("string", "Song, artist, playlist, or video name"),
             "service" to ParameterSpec("string", "Target app: youtube_music (default), youtube, or spotify", required = false)
         )),
+        "dial"            to ToolDefinition("dial", "Open system dialer pre-filled with a phone number (user taps Call)", mapOf(
+            "phoneNumber" to ParameterSpec("string", "Phone number to pre-fill")
+        )),
+        "draft_sms"       to ToolDefinition("draft_sms", "Open default SMS app with a pre-filled recipient and draft text (user taps Send)", mapOf(
+            "phoneNumber" to ParameterSpec("string", "Recipient phone number"),
+            "message"     to ParameterSpec("string", "Draft SMS text", required = false)
+        )),
+        "clipboard"       to ToolDefinition("clipboard", "Read ('get') or copy ('set') device clipboard text", mapOf(
+            "action" to ParameterSpec("string", "get or set", required = false),
+            "text"   to ParameterSpec("string", "Text to copy when action is set", required = false)
+        )),
+        "calculate"       to ToolDefinition("calculate", "Deterministically evaluate arithmetic, percentages, and tips (e.g. '18% tip on $73.50')", mapOf(
+            "expression" to ParameterSpec("string", "Math expression to evaluate")
+        )),
         "volume"          to ToolDefinition("volume", "Control stream volume or ringer profiles (media, ring, alarm, notification)", mapOf(
             "stream" to ParameterSpec("string", "Stream type: media, ring, alarm, notification, system", required = false),
             "level" to ParameterSpec("integer", "Volume level percentage (0-100)", required = false),
@@ -201,6 +215,28 @@ class MCPServer(
                     val query = params["query"]?.toString() ?: ""
                     val service = params["service"]?.toString() ?: "youtube_music"
                     val res = systemTools.play_media(query, service)
+                    ToolResult(res["result"] == "success", res["message"] ?: "")
+                }
+                "dial" -> {
+                    val number = params["phoneNumber"]?.toString() ?: params["number"]?.toString() ?: ""
+                    val res = systemTools.dial(number)
+                    ToolResult(res["result"] == "success", res["message"] ?: "")
+                }
+                "draft_sms" -> {
+                    val number = params["phoneNumber"]?.toString() ?: params["number"]?.toString() ?: ""
+                    val msg = params["message"]?.toString() ?: params["body"]?.toString() ?: ""
+                    val res = systemTools.draft_sms(number, msg)
+                    ToolResult(res["result"] == "success", res["message"] ?: "")
+                }
+                "clipboard" -> {
+                    val action = params["action"]?.toString() ?: "get"
+                    val text = params["text"]?.toString() ?: ""
+                    val res = systemTools.clipboard(action, text)
+                    ToolResult(res["result"] == "success", res["content"] ?: res["message"] ?: "")
+                }
+                "calculate" -> {
+                    val expr = params["expression"]?.toString() ?: params["input"]?.toString() ?: ""
+                    val res = systemTools.calculate(expr)
                     ToolResult(res["result"] == "success", res["message"] ?: "")
                 }
                 "volume" -> {

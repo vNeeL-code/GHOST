@@ -97,9 +97,9 @@ class GhostMcpTool(
     }
 
     @JvmOverloads
-    @Tool(description = "Executes an on-device system, peer consultation, document/wiki RAG, or routine scheduling command (e.g. 'consult_peer', 'volume', 'status', 'notifications', 'music', 'play_media', 'calendar', 'timer', 'schedule_task', 'list_tasks', 'cancel_task', 'search_files', 'read_file_text', 'search_document', 'search_wiki', 'read_diary'). Arguments are passed as key-value pairs or JSON.")
+    @Tool(description = "Executes an on-device system, peer consultation, document/wiki RAG, or routine scheduling command (e.g. 'consult_peer', 'volume', 'status', 'notifications', 'music', 'play_media', 'dial', 'draft_sms', 'clipboard', 'calculate', 'calendar', 'timer', 'schedule_task', 'list_tasks', 'cancel_task', 'search_files', 'read_file_text', 'search_document', 'search_wiki', 'read_diary'). Arguments are passed as key-value pairs or JSON.")
     fun execute_command(
-        @ToolParam(description = "Command name (e.g. 'consult_peer', 'volume', 'status', 'notifications', 'music', 'play_media', 'calendar', 'timer', 'schedule_task', 'list_tasks', 'cancel_task', 'search_files', 'read_file_text', 'search_document', 'search_wiki', 'read_diary')") command: String,
+        @ToolParam(description = "Command name (e.g. 'consult_peer', 'volume', 'status', 'notifications', 'music', 'play_media', 'dial', 'draft_sms', 'clipboard', 'calculate', 'calendar', 'timer', 'schedule_task', 'list_tasks', 'cancel_task', 'search_files', 'read_file_text', 'search_document', 'search_wiki', 'read_diary')") command: String,
         @ToolParam(description = "Arguments string, e.g. 'peer=gemini prompt=explain this', 'stream=media level=50', 'action=next', 'seconds=3600', or 'delayMinutes=60 intervalMinutes=720 title=Audit prompt=...'") args: String = ""
     ): Map<String, String> {
         Timber.i("GhostMcpTool: execute_command invoked with command='$command', args='$args'")
@@ -457,6 +457,9 @@ class GhostMcpTool(
             "calendar" -> mapOf("title" to plain)
             "remember" -> mapOf("content" to plain)
             "recall", "search", "web_search", "google", "execute_background_search", "search_files", "search_wiki", "play_media" -> mapOf("query" to plain)
+            "dial" -> mapOf("phoneNumber" to plain)
+            "calculate" -> mapOf("expression" to plain)
+            "clipboard" -> if (plain.equals("get", ignoreCase = true) || plain.isBlank()) mapOf("action" to "get") else mapOf("action" to "set", "text" to plain)
             "fetch_webpage", "fetchwebpage" -> mapOf("url" to plain)
             "list_files" -> mapOf("folder" to plain)
             "read_calendar", "read_diary" -> mapOf("days" to (plain.toIntOrNull() ?: 7))

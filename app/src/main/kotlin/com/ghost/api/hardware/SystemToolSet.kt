@@ -221,6 +221,94 @@ class SystemToolSet(private val context: Context) : ToolSet {
         }
     }
 
+    @Tool(description = "Opens the Android Dialer pre-filled with a phone number (does NOT auto-place the call; the user taps Call).")
+    fun dial(
+        @ToolParam(description = "Phone number to pre-fill in the dialer (e.g. '+15551234567')") phoneNumber: String
+    ): Map<String, String> {
+        val cleaned = phoneNumber.trim().filter { it.isDigit() || it in setOf('+', '*', '#', '-') }
+        if (cleaned.isBlank()) {
+            return mapOf("result" to "error", "message" to "No valid phone number provided.")
+        }
+        return try {
+            val intent = Intent(Intent.ACTION_DIAL, android.net.Uri.parse("tel:$cleaned")).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+            mapOf("result" to "success", "message" to "Dialer opened with $cleaned ready to call.")
+        } catch (e: Exception) {
+            Timber.e(e, "dial failed")
+            mapOf("result" to "error", "message" to "Failed to open dialer: ${e.message}")
+        }
+    }
+
+    @Tool(description = "Opens the default SMS/Messages app with a pre-filled recipient and draft text (does NOT auto-send; the user taps Send).")
+    fun draft_sms(
+        @ToolParam(description = "Recipient phone number") phoneNumber: String,
+        @ToolParam(description = "Draft message text") message: String = ""
+    ): Map<String, String> {
+        val cleaned = phoneNumber.trim().filter { it.isDigit() || it in setOf('+', '-') }
+        if (cleaned.isBlank()) {
+            return mapOf("result" to "error", "message" to "No valid recipient phone number provided.")
+        }
+        return try {
+            val intent = Intent(Intent.ACTION_SENDTO, android.net.Uri.parse("smsto:$cleaned")).apply {
+                if (message.isNotBlank()) putExtra("sms_body", message.trim())
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+            mapOf("result" to "success", "message" to "SMS draft opened for $cleaned.")
+        } catch (e: Exception) {
+            Timber.e(e, "draft_sms failed")
+            mapOf("result" to "error", "message" to "Failed to open SMS draft: ${e.message}")
+        }
+    }
+
+    @Tool(description = "Reads the current device clipboard text ('get') or copies text to the clipboard ('set').")
+    fun clipboard(
+        @ToolParam(description = "Action: 'get' (read clipboard) or 'set' (copy text to clipboard)") action: String = "get",
+        @ToolParam(description = "Text to copy when action is 'set'") text: String = ""
+    ): Map<String, String> {
+        return try {
+            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            if (action.equals("set", ignoreCase = true) || action.equals("copy", ignoreCase = true)) {
+                if (text.isBlank()) {
+                    return mapOf("result" to "error", "message" to "No text provided to copy.")
+                }
+                val clip = android.content.ClipData.newPlainText("GHOST", text)
+                cm.setPrimaryClip(clip)
+                mapOf("result" to "success", "message" to "Copied to clipboard (${text.length} chars).")
+            } else {
+                val clip = cm.primaryClip
+                val clipText = if (clip != null && clip.itemCount > 0) {
+                    clip.getItemAt(0).coerceToText(context)?.toString()?.trim().orEmpty()
+                } else ""
+                if (clipText.isBlank()) {
+                    mapOf("result" to "success", "content" to "", "message" to "Clipboard is empty (or blocked while app is in background).")
+                } else {
+                    mapOf("result" to "success", "content" to clipText.take(2000), "message" to clipText.take(2000))
+                }
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "clipboard failed")
+            mapOf("result" to "error", "message" to "Clipboard access failed: ${e.message}")
+        }
+    }
+
+    @Tool(description = "Evaluates arithmetic expressions, percentages, and tips deterministically (e.g. '18% tip on $73.50', '347 * 28', '(120 + 45) / 3').")
+    fun calculate(
+        @ToolParam(description = "Math expression to evaluate") expression: String
+    ): Map<String, String> {
+        val result = com.ghost.api.logic.MathEvaluator.evaluate(expression)
+        return result.fold(
+            onSuccess = { value ->
+                mapOf("result" to "success", "expression" to expression, "value" to value, "message" to "$expression = $value")
+            },
+            onFailure = { err ->
+                mapOf("result" to "error", "message" to "Could not evaluate '$expression': ${err.message}")
+            }
+        )
+    }
+
     private fun getInstalledApps(): List<AppInfo> {
         val now = System.currentTimeMillis()
         if (appListCache == null || (now - appListCacheTime) > 60_000L) {
