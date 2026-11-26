@@ -420,9 +420,10 @@ class FileToolSet(private val context: Context) : ToolSet {
         }
     }
 
-    @Tool(description = "Reads and returns the text content of a local text or markdown file")
+    @Tool(description = "Reads a paginated window of a local text, markdown, code, or PDF file. For PDFs, startOffset is the 1-indexed page number (reads 3 pages). For text files, startOffset is the 1-indexed line number (reads 100 lines).")
     fun read_file_text(
-        @ToolParam(description = "Absolute path of the text or code file to read") filePath: String
+        @ToolParam(description = "Absolute path of the text, markdown, code, or PDF file to read") filePath: String,
+        @ToolParam(description = "Optional 1-indexed start page (for PDF) or start line (for text). Defaults to 1.") startOffset: Int = 1
     ): Map<String, String> {
         com.ghost.api.GemmaService.instance?.showWorkSignal("FILES", 1500)
         return try {
@@ -435,20 +436,104 @@ class FileToolSet(private val context: Context) : ToolSet {
                 return mapOf("result" to "error", "message" to "Permission denied: Cannot read protected AI model weights.")
             }
 
-            val lines = file.bufferedReader().useLines { linesSeq ->
-                linesSeq.take(100).toList()
+            val window = com.ghost.api.logic.LocalDocumentRag.readFileWindow(
+                context = context,
+                file = file,
+                startOffset = startOffset
+            )
+            val footer = if (window.hasMore) {
+                "\n\n[Showing ${window.unitsRead} ${window.unitLabel} starting at ${window.startOffset} of ${window.totalUnits}. Use search_document(filePath, query) to jump straight to relevant passages, or call read_file_text with startOffset=${window.startOffset + window.unitsRead}.]"
+            } else {
+                ""
             }
-
-            val content = lines.joinToString("\n")
             mapOf(
                 "result" to "success",
                 "filePath" to file.absolutePath,
-                "linesRead" to lines.size.toString(),
-                "content" to content
+                "startOffset" to window.startOffset.toString(),
+                "unitsRead" to window.unitsRead.toString(),
+                "totalUnits" to window.totalUnits.toString(),
+                "unitLabel" to window.unitLabel,
+                "hasMore" to window.hasMore.toString(),
+                "content" to (window.content + footer)
             )
         } catch (e: Exception) {
             Timber.e(e, "read_file_text failed")
             mapOf("result" to "error", "message" to "Failed to read file: ${e.message}")
+        }
+    }
+
+    @Tool(description = "Searches inside a long PDF, markdown, log, or text file using the on-device neural embedding sidecar (Gecko-110M) and returns only the most relevant passages with page or line citations.")
+    fun search_document(
+        @ToolParam(description = "Absolute path of the PDF or text file to search") filePath: String,
+        @ToolParam(description = "Question or keywords to find inside the document") query: String
+    ): Map<String, String> {
+        com.ghost.api.GemmaService.instance?.showWorkSignal("RAG", 2200)
+        return try {
+            val file = resolveSandboxedFile(filePath)
+                ?: return mapOf("result" to "error", "message" to "Permission denied: Path is outside allowed user storage.")
+            if (!file.exists() || !file.isFile) {
+                return mapOf("result" to "error", "message" to "File does not exist: $filePath")
+            }
+            if (isProtectedModelFile(file)) {
+                return mapOf("result" to "error", "message" to "Permission denied: Cannot read protected AI model weights.")
+            }
+
+            val hits = com.ghost.api.logic.LocalDocumentRag.searchDocument(
+                context = context,
+                file = file,
+                query = query,
+                topK = 5
+            )
+            if (hits.isEmpty()) {
+                return mapOf("result" to "success", "count" to "0", "content" to "No readable passages found in '${file.name}' matching '$query'.")
+            }
+            val formatted = hits.joinToString("\n\n") { hit ->
+                "${hit.citation} (relevance ${(hit.score * 100).toInt()}%)\n${hit.text}"
+            }
+            mapOf(
+                "result" to "success",
+                "filePath" to file.absolutePath,
+                "count" to hits.size.toString(),
+                "sidecar" to com.ghost.api.logic.EmbeddingSidecar.activeSidecarLabel(),
+                "content" to formatted
+            )
+        } catch (e: Exception) {
+            Timber.e(e, "search_document failed")
+            mapOf("result" to "error", "message" to "Document search failed: ${e.message}")
+        }
+    }
+
+    @Tool(description = "Searches GHOST's local offline wiki & static cartridge folder (Documents/GHOST/wiki/) across all .md, .txt, and .pdf files using the on-device neural embedding sidecar.")
+    fun search_wiki(
+        @ToolParam(description = "Question, topic, or keywords to look up in the local wiki") query: String
+    ): Map<String, String> {
+        com.ghost.api.GemmaService.instance?.showWorkSignal("WIKI", 2200)
+        return try {
+            val hits = com.ghost.api.logic.LocalDocumentRag.searchWiki(
+                context = context,
+                query = query,
+                topK = 5
+            )
+            if (hits.isEmpty()) {
+                val wikiDir = com.ghost.api.logic.LocalDocumentRag.getWikiDir(context)
+                return mapOf(
+                    "result" to "success",
+                    "count" to "0",
+                    "content" to "No matching notes found in local wiki (${wikiDir.absolutePath}). Drop .md, .txt, or .pdf files there to build your offline knowledge base."
+                )
+            }
+            val formatted = hits.joinToString("\n\n") { hit ->
+                "${hit.citation} (relevance ${(hit.score * 100).toInt()}%)\n${hit.text}"
+            }
+            mapOf(
+                "result" to "success",
+                "count" to hits.size.toString(),
+                "sidecar" to com.ghost.api.logic.EmbeddingSidecar.activeSidecarLabel(),
+                "content" to formatted
+            )
+        } catch (e: Exception) {
+            Timber.e(e, "search_wiki failed")
+            mapOf("result" to "error", "message" to "Local wiki search failed: ${e.message}")
         }
     }
 }

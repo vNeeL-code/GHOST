@@ -40,7 +40,7 @@ object IntentHandler {
             val json = JSONObject(parameters)
             
             // 1. Generic Android Intents (Strict Allowlist — prevents prompt-injection privilege escalation)
-            if (action.startsWith("android.intent.action.") || action.startsWith("com.")) {
+            if (action.startsWith("android.intent.action.") || action.startsWith("android.media.action.") || action.startsWith("com.")) {
                 if (action !in ALLOWED_GENERIC_ACTIONS) {
                     Log.w(TAG, "Blocked non-allowlisted intent action: $action")
                     return false

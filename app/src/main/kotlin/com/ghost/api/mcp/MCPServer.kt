@@ -129,8 +129,16 @@ class MCPServer(
             "filePath" to ParameterSpec("string", "Absolute path of file to open"),
             "appName"  to ParameterSpec("string", "Optional app name (e.g. VLC)", required = false)
         )),
-        "read_file_text"  to ToolDefinition("read_file_text", "Read text content of a file", mapOf(
-            "filePath" to ParameterSpec("string", "Absolute path of text file")
+        "read_file_text"  to ToolDefinition("read_file_text", "Read paginated text or PDF content of a file (startOffset = page for PDF or line for text)", mapOf(
+            "filePath"    to ParameterSpec("string", "Absolute path of text, markdown, code, or PDF file"),
+            "startOffset" to ParameterSpec("integer", "Optional 1-indexed start page (PDF) or start line (text)", required = false)
+        )),
+        "search_document" to ToolDefinition("search_document", "Semantic + keyword search inside a long PDF or text file using on-device Gecko-110M RAG", mapOf(
+            "filePath" to ParameterSpec("string", "Absolute path of PDF or text file"),
+            "query"    to ParameterSpec("string", "Question or keywords to find inside the file")
+        )),
+        "search_wiki"     to ToolDefinition("search_wiki", "Search GHOST local offline wiki & static cartridges in Documents/GHOST/wiki/", mapOf(
+            "query" to ParameterSpec("string", "Question, topic, or keywords to look up in local wiki")
         )),
         // AI Phonebook (Extend Your Mind)
         "consult_peer"    to ToolDefinition("consult_peer", "Consult a peer AI from Gemma's phonebook", mapOf(
@@ -370,7 +378,20 @@ class MCPServer(
                 }
                 "read_file_text" -> {
                     val path = params["filePath"]?.toString() ?: ""
-                    val res = fileTools.read_file_text(path)
+                    val offset = (params["startOffset"] ?: params["page"] ?: params["startLine"])
+                        ?.toString()?.toIntOrNull() ?: 1
+                    val res = fileTools.read_file_text(path, offset)
+                    ToolResult(res["result"] == "success", res["content"] ?: res["message"] ?: "")
+                }
+                "search_document" -> {
+                    val path = params["filePath"]?.toString() ?: ""
+                    val query = params["query"]?.toString() ?: ""
+                    val res = fileTools.search_document(path, query)
+                    ToolResult(res["result"] == "success", res["content"] ?: res["message"] ?: "")
+                }
+                "search_wiki" -> {
+                    val query = params["query"]?.toString() ?: ""
+                    val res = fileTools.search_wiki(query)
                     ToolResult(res["result"] == "success", res["content"] ?: res["message"] ?: "")
                 }
                 // AI Phonebook (Extend Your Mind)

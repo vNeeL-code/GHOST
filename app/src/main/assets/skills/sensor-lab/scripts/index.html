@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GHOST Sensor Lab</title>
+  <style>
+    :root {
+      --bg: #0b0d12;
+      --panel: #131823;
+      --border: #243047;
+      --accent: #38bdf8;
+      --good: #34d399;
+      --warn: #f59e0b;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      padding: 12px;
+      user-select: none;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      color: var(--accent);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+    }
+    .label { font-size: 10px; color: var(--muted); text-transform: uppercase; margin-bottom: 6px; }
+    .val { font-size: 18px; font-weight: 700; color: var(--text); }
+    .sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+    canvas { width: 100%; display: block; border-radius: 8px; background: #090c11; }
+    .tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+    .tab {
+      flex: 1; padding: 6px; font-size: 11px; text-align: center;
+      background: var(--panel); border: 1px solid var(--border);
+      color: var(--muted); border-radius: 6px; cursor: pointer;
+    }
+    .tab.active { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <span>✧ GHOST SENSOR LAB</span>
+    <span id="hz">LIVE</span>
+  </div>
+  <div class="tabs">
+    <div class="tab active" data-mode="all">ALL</div>
+    <div class="tab" data-mode="level">LEVEL</div>
+    <div class="tab" data-mode="accel">SEISMO</div>
+    <div class="tab" data-mode="compass">COMPASS</div>
+  </div>
+
+  <div id="sec-level" class="grid">
+    <div class="card">
+      <div class="label">Spirit Level</div>
+      <canvas id="levelCanvas" width="160" height="120"></canvas>
+      <div class="sub" id="tiltText">Pitch 0.0° · Roll 0.0°</div>
+    </div>
+    <div class="card" id="sec-compass">
+      <div class="label">Heading & G-Force</div>
+      <div class="val" id="headingVal">---°</div>
+      <div class="sub" id="cardinalVal">N · Waiting sensor</div>
+      <div class="label" style="margin-top:10px;">|A| Total G</div>
+      <div class="val" id="gVal">1.00 g</div>
+      <div class="sub" id="peakVal">Peak: 1.00 g</div>
+    </div>
+  </div>
+
+  <div id="sec-accel" class="card">
+    <div class="label">3-Axis Accelerometer Oscilloscope (m/s²)</div>
+    <canvas id="scopeCanvas" width="340" height="110"></canvas>
+    <div class="sub" id="xyzText">X: 0.00 · Y: 0.00 · Z: 9.81</div>
+  </div>
+
+  <script>
+    let mode = "all";
+    let pitch = 0, roll = 0, heading = null;
+    let ax = 0, ay = 0, az = 9.81, peakG = 1.0;
+    const history = [];
+    const MAX_SAMPLES = 90;
+
+    function setMode(m) {
+      mode = (m || "all").toLowerCase();
+      document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.mode === mode));
+      document.getElementById("sec-level").style.display = (mode === "accel") ? "none" : "grid";
+      document.getElementById("sec-accel").style.display = (mode === "level" || mode === "compass") ? "none" : "block";
+    }
+    document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => setMode(t.dataset.mode)));
+
+    window.addEventListener("deviceorientation", (e) => {
+      if (typeof e.beta === "number") pitch = e.beta;
+      if (typeof e.gamma === "number") roll = e.gamma;
+      if (typeof e.alpha === "number") heading = (360 - e.alpha) % 360;
+    });
+
+    window.addEventListener("devicemotion", (e) => {
+      const a = e.accelerationIncludingGravity || e.acceleration;
+      if (!a) return;
+      ax = a.x || 0; ay = a.y || 0; az = a.z || 0;
+      const mag = Math.sqrt(ax*ax + ay*ay + az*az) / 9.80665;
+      if (mag > peakG) peakG = mag;
+      history.push({ x: ax, y: ay, z: az });
+      if (history.length > MAX_SAMPLES) history.shift();
+      document.getElementById("gVal").textContent = mag.toFixed(2) + " g";
+      document.getElementById("peakVal").textContent = "Peak: " + peakG.toFixed(2) + " g";
+      document.getElementById("xyzText").textContent = `X: ${ax.toFixed(2)} · Y: ${ay.toFixed(2)} · Z: ${az.toFixed(2)}`;
+    });
+
+    function cardinal(deg) {
+      const dirs = ["N","NE","E","SE","S","SW","W","NW"];
+      return dirs[Math.round(deg / 45) % 8];
+    }
+
+    function draw() {
+      // 1. Spirit level
+      const lc = document.getElementById("levelCanvas");
+      const lctx = lc.getContext("2d");
+      const cx = lc.width / 2, cy = lc.height / 2, r = 46;
+      lctx.clearRect(0, 0, lc.width, lc.height);
+      lctx.strokeStyle = "#243047"; lctx.lineWidth = 1.5;
+      lctx.beginPath(); lctx.arc(cx, cy, r, 0, Math.PI * 2); lctx.stroke();
+      lctx.beginPath(); lctx.arc(cx, cy, 12, 0, Math.PI * 2); lctx.stroke();
+      lctx.beginPath(); lctx.moveTo(cx - r, cy); lctx.lineTo(cx + r, cy); lctx.moveTo(cx, cy - r); lctx.lineTo(cx, cy + r); lctx.stroke();
+
+      const dx = Math.max(-r + 8, Math.min(r - 8, (roll / 45) * (r - 8)));
+      const dy = Math.max(-r + 8, Math.min(r - 8, (pitch / 45) * (r - 8)));
+      const isFlat = Math.abs(roll) < 1.5 && Math.abs(pitch) < 1.5;
+      lctx.fillStyle = isFlat ? "#34d399" : "#38bdf8";
+      lctx.beginPath(); lctx.arc(cx + dx, cy + dy, 8, 0, Math.PI * 2); lctx.fill();
+      document.getElementById("tiltText").textContent = `Pitch ${pitch.toFixed(1)}° · Roll ${roll.toFixed(1)}°`;
+
+      if (heading !== null) {
+        document.getElementById("headingVal").textContent = Math.round(heading) + "°";
+        document.getElementById("cardinalVal").textContent = cardinal(heading) + " · Magnetic/Fusion";
+      }
+
+      // 2. Oscilloscope
+      const sc = document.getElementById("scopeCanvas");
+      const sctx = sc.getContext("2d");
+      sctx.clearRect(0, 0, sc.width, sc.height);
+      sctx.strokeStyle = "#1e293b";
+      sctx.beginPath(); sctx.moveTo(0, sc.height / 2); sctx.lineTo(sc.width, sc.height / 2); sctx.stroke();
+      const colors = { x: "#f43f5e", y: "#34d399", z: "#38bdf8" };
+      ["x", "y", "z"].forEach(axis => {
+        sctx.strokeStyle = colors[axis];
+        sctx.lineWidth = 1.5;
+        sctx.beginPath();
+        history.forEach((pt, i) => {
+          const px = (i / Math.max(1, MAX_SAMPLES - 1)) * sc.width;
+          const py = (sc.height / 2) - (pt[axis] / 20) * (sc.height / 2);
+          if (i === 0) sctx.moveTo(px, py); else sctx.lineTo(px, py);
+        });
+        sctx.stroke();
+      });
+      requestAnimationFrame(draw);
+    }
+    requestAnimationFrame(draw);
+
+    window['ai_edge_gallery_get_result'] = async function(data) {
+      try {
+        const params = JSON.parse(data || "{}");
+        if (params.mode) setMode(params.mode);
+        return JSON.stringify({
+          result: JSON.stringify({
+            status: "success",
+            mode: mode,
+            pitchDeg: Number(pitch.toFixed(1)),
+            rollDeg: Number(roll.toFixed(1)),
+            peakG: Number(peakG.toFixed(2))
+          }),
+          error: null
+        });
+      } catch (err) {
+        return JSON.stringify({ result: null, error: err.message });
+      }
+    };
+  </script>
+</body>
+</html>

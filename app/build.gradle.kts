@@ -143,6 +143,7 @@ ksp {
 dependencies {
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.18.1")
     implementation("com.google.ai.edge.localagents:localagents-rag:0.3.0")
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     "playImplementation"("com.android.billingclient:billing-ktx:7.1.1")
 
 
